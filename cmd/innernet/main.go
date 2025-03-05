@@ -9,18 +9,16 @@ import (
 
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
-
 	"github.com/vishvananda/netlink"
 )
 
 func main() {
 
-	// what does program app do
+	// what does (client) program do
 	//
-	// * create/delete peers
-	// * create/delete cidrs
-	// * create/delete associations
-	// * connect wireguard peers via stun
+	// * start and stop wireguard interfaces
+	// * talks to server to generate wireguard configs
+	// * "gossip" peer endpoints with server
 	//
 
 	args := os.Args[1:]
@@ -35,7 +33,7 @@ func main() {
 	case "init":
 		createInterface("wg0")
 
-	case "del":
+	case "uninstall":
 		deleteInterface("wg0")
 
 	case "list":
@@ -44,11 +42,17 @@ func main() {
 	case "peer":
 		args := os.Args[1:]
 		if len(args) < 1 {
-			fmt.Printf("peer help")
+			fmt.Printf("peer help\n")
 		} else {
 			switch args[1] {
-			case "new":
-				fmt.Printf("new peer")
+			case "add":
+				fmt.Printf("new peer\n")
+			case "rename":
+				fmt.Printf("rename peer\n")
+			case "disable":
+				fmt.Printf("disable peer\n")
+			case "enable":
+				fmt.Printf("enable peer\n")
 			default:
 				fmt.Printf("unhandled peer command %s\n", args[1])
 			}
