@@ -19,7 +19,6 @@ func main() {
 	// * start and stop wireguard interfaces
 	// * talks to server to generate wireguard configs
 	// * "gossip" peer endpoints with server
-	//
 
 	args := os.Args[1:]
 
