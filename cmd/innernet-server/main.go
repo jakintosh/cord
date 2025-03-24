@@ -35,6 +35,8 @@ var root = &command.Command{
 		renamePeer,
 		enablePeer,
 		disablePeer,
+		addAssociation,
+		deleteAssociation,
 	},
 	Operands: []command.Operand{},
 	Options: []command.Option{
@@ -92,19 +94,24 @@ var serve = &command.Command{
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 		noRouting := i.GetFlag("no-routing")
 		mtu := i.GetIntParameterOr("mtu", 1280)
-		backend := i.GetParameterOr("backend", "auto")
+		backendValue := i.GetParameterOr("backend", "kernel")
+
+		backend, err := parseBackend(backendValue)
+		if err != nil {
+			return err
+		}
 
 		// operands
 		network := i.GetOperand("network")
 
-		fmt.Printf("network: %s\n", network)
-		fmt.Printf("configDir: %s\n", configDir)
-		fmt.Printf("dataDir: %s\n", dataDir)
-		fmt.Printf("noRouting: %t\n", noRouting)
-		fmt.Printf("mtu: %d\n", mtu)
-		fmt.Printf("backend: %s\n", backend)
-
-		return nil
+		return app.ServeNetwork(
+			configDir,
+			dataDir,
+			network,
+			noRouting,
+			mtu,
+			backend,
+		)
 	},
 }
 
@@ -141,21 +148,27 @@ var addNetwork = &command.Command{
 
 		// operands
 		network := i.GetOperand("network")
-		if err := app.ValidateNetworkName(network); err != nil {
-			return err
-		}
+		cidrValue := i.GetOperand("cidr")
+		ipValue := i.GetOperand("external-ip")
+		portValue := i.GetOperand("external-port")
 
-		cidr, err := parseCidr(i, "cidr")
+		// validate
+		err := app.ValidateNetworkName(network)
 		if err != nil {
 			return err
 		}
 
-		ip, err := parseIp(i, "external-ip")
+		cidr, err := parseCidr(cidrValue)
 		if err != nil {
 			return err
 		}
 
-		port, err := parsePort(i, "external-port")
+		ip, err := parseIp(ipValue)
+		if err != nil {
+			return err
+		}
+
+		port, err := parsePort(portValue)
 		if err != nil {
 			return err
 		}
@@ -193,11 +206,11 @@ var deleteNetwork = &command.Command{
 		// operands
 		network := i.GetOperand("network")
 
-		fmt.Printf("configDir: %s\n", configDir)
-		fmt.Printf("dataDir: %s\n", dataDir)
-		fmt.Printf("network: %s\n", network)
-
-		return nil
+		return app.DeleteNetwork(
+			configDir,
+			dataDir,
+			network,
+		)
 	},
 }
 
@@ -235,17 +248,23 @@ var addCidr = &command.Command{
 		// operands
 		network := i.GetOperand("network")
 		name := i.GetOperand("name")
-		cidr := i.GetOperand("cidr")
+		cidrValue := i.GetOperand("cidr")
 		parent := i.GetOperand("parent")
 
-		fmt.Printf("configDir: %s\n", configDir)
-		fmt.Printf("dataDir: %s\n", dataDir)
-		fmt.Printf("network: %s\n", network)
-		fmt.Printf("name: %s\n", name)
-		fmt.Printf("cidr: %s\n", cidr)
-		fmt.Printf("parent: %s\n", parent)
+		// validate
+		cidr, err := parseCidr(cidrValue)
+		if err != nil {
+			return err
+		}
 
-		return nil
+		return app.AddCidr(
+			configDir,
+			dataDir,
+			network,
+			name,
+			cidr,
+			parent,
+		)
 	},
 }
 
@@ -281,13 +300,13 @@ var renameCidr = &command.Command{
 		cidr := i.GetOperand("cidr")
 		newName := i.GetOperand("new-name")
 
-		fmt.Printf("configDir: %s\n", configDir)
-		fmt.Printf("dataDir: %s\n", dataDir)
-		fmt.Printf("network: %s\n", network)
-		fmt.Printf("cidr: %s\n", cidr)
-		fmt.Printf("new-name: %s\n", newName)
-
-		return nil
+		return app.RenameCidr(
+			configDir,
+			dataDir,
+			network,
+			cidr,
+			newName,
+		)
 	},
 }
 
@@ -318,12 +337,12 @@ var deleteCidr = &command.Command{
 		network := i.GetOperand("network")
 		cidr := i.GetOperand("cidr")
 
-		fmt.Printf("configDir: %s\n", configDir)
-		fmt.Printf("dataDir: %s\n", dataDir)
-		fmt.Printf("network: %s\n", network)
-		fmt.Printf("cidr: %s\n", cidr)
-
-		return nil
+		return app.DeleteCidr(
+			configDir,
+			dataDir,
+			network,
+			cidr,
+		)
 	},
 }
 
@@ -346,14 +365,12 @@ var addPeer = &command.Command{
 			Name: "cidr",
 			Help: "parent CIDR of the peer",
 		},
+		{
+			Name: "ip",
+			Help: "IP of peer (within parent CIDR)",
+		},
 	},
 	Options: []command.Option{
-		{
-			Short: 'i',
-			Long:  "ip",
-			Type:  command.OptionTypeParameter,
-			Help:  "IP of peer (within parent CIDR)",
-		},
 		{
 			Short: 'a',
 			Long:  "admin",
@@ -375,31 +392,40 @@ var addPeer = &command.Command{
 	},
 	Handler: func(i *command.Input) error {
 
+		// options
+		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		admin := i.GetFlag("admin")
+		savePath := i.GetParameterOr("save-invite", getPwd())
+		inviteValue := i.GetParameterOr("invite-expires", "7d")
+
 		// operands
 		network := i.GetOperand("network")
 		name := i.GetOperand("name")
 		cidr := i.GetOperand("cidr")
+		ipValue := i.GetOperand("ip")
 
-		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
-		ip := i.GetParameter("ip")
-		admin := i.GetFlag("admin")
-		savePath := i.GetParameterOr("save-invite", getPwd())
-		inviteExpires := i.GetParameterOr("invite-expires", "7d")
-		// TODO: write a parser for this time format
+		// validate
+		ip, err := parseIp(ipValue)
+		if err != nil {
+			return nil
+		}
+		inviteExpires, err := parseExpiration(inviteValue)
+		if err != nil {
+			return err
+		}
 
-		fmt.Printf("configDir: %s\n", configDir)
-		fmt.Printf("dataDir: %s\n", dataDir)
-		fmt.Printf("network: %s\n", network)
-		fmt.Printf("name: %s\n", name)
-		fmt.Printf("cidr: %s\n", cidr)
-		fmt.Printf("ip: %v\n", ip)
-		fmt.Printf("admin: %t\n", admin)
-		fmt.Printf("save-path: %s\n", savePath)
-		fmt.Printf("invite-expires: %s\n", inviteExpires)
-
-		return nil
+		return app.AddPeer(
+			configDir,
+			dataDir,
+			network,
+			name,
+			cidr,
+			ip,
+			admin,
+			savePath,
+			inviteExpires,
+		)
 	},
 }
 
@@ -435,13 +461,13 @@ var renamePeer = &command.Command{
 		peer := i.GetOperand("peer")
 		newName := i.GetOperand("new-name")
 
-		fmt.Printf("configDir: %s\n", configDir)
-		fmt.Printf("dataDir: %s\n", dataDir)
-		fmt.Printf("network: %s\n", network)
-		fmt.Printf("peer: %s\n", peer)
-		fmt.Printf("new-name: %s\n", newName)
-
-		return nil
+		return app.RenamePeer(
+			configDir,
+			dataDir,
+			network,
+			peer,
+			newName,
+		)
 	},
 }
 
@@ -472,12 +498,12 @@ var enablePeer = &command.Command{
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
-		fmt.Printf("configDir: %s\n", configDir)
-		fmt.Printf("dataDir: %s\n", dataDir)
-		fmt.Printf("network: %s\n", network)
-		fmt.Printf("peer: %s\n", peer)
-
-		return nil
+		return app.EnablePeer(
+			configDir,
+			dataDir,
+			network,
+			peer,
+		)
 	},
 }
 
@@ -508,12 +534,96 @@ var disablePeer = &command.Command{
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
-		fmt.Printf("configDir: %s\n", configDir)
-		fmt.Printf("dataDir: %s\n", dataDir)
-		fmt.Printf("network: %s\n", network)
-		fmt.Printf("peer: %s\n", peer)
+		return app.DisablePeer(
+			configDir,
+			dataDir,
+			network,
+			peer,
+		)
+	},
+}
 
-		return nil
+var addAssociation = &command.Command{
+	Name:        "add-association",
+	Author:      AUTHOR,
+	Version:     VERSION,
+	Help:        "create an association between two CIDRs",
+	Subcommands: []*command.Command{},
+	Operands: []command.Operand{
+		{
+			Name: "network",
+			Help: "network to add an association to",
+		},
+		{
+			Name: "cidr1",
+			Help: "name of the first CIDR",
+		},
+		{
+			Name: "cidr2",
+			Help: "name of the second CIDR",
+		},
+	},
+	Options: []command.Option{},
+	Handler: func(i *command.Input) error {
+
+		// options
+		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+
+		// operands
+		network := i.GetOperand("network")
+		cidr1 := i.GetOperand("cidr1")
+		cidr2 := i.GetOperand("cidr2")
+
+		return app.AddAssociation(
+			configDir,
+			dataDir,
+			network,
+			cidr1,
+			cidr2,
+		)
+	},
+}
+
+var deleteAssociation = &command.Command{
+	Name:        "delete-association",
+	Author:      AUTHOR,
+	Version:     VERSION,
+	Help:        "delete an association between two CIDRs",
+	Subcommands: []*command.Command{},
+	Operands: []command.Operand{
+		{
+			Name: "network",
+			Help: "network to delete an association from",
+		},
+		{
+			Name: "cidr1",
+			Help: "name of the first CIDR",
+		},
+		{
+			Name: "cidr2",
+			Help: "name of the second CIDR",
+		},
+	},
+	Options: []command.Option{},
+	Handler: func(i *command.Input) error {
+
+		// options
+		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+
+		// operands
+		network := i.GetOperand("network")
+		cidr1 := i.GetOperand("cidr1")
+		cidr2 := i.GetOperand("cidr2")
+
+		return app.DeleteAssociation(
+			configDir,
+			dataDir,
+			network,
+			cidr1,
+			cidr2,
+		)
 	},
 }
 
@@ -627,17 +737,15 @@ func main() {
 //   => /admin/cidrs
 //   => /admin/peers
 
-func parseCidr(input *command.Input, field string) (*net.IPNet, error) {
-	value := input.GetOperand(field)
+func parseCidr(value string) (*net.IPNet, error) {
 	_, cidr, err := net.ParseCIDR(value)
 	if err != nil {
-		err = fmt.Errorf("failed to parse cidr from operand '%s': %v", field, err)
+		err = fmt.Errorf("failed to parse cidr from operand '%s': %v", value, err)
 	}
 	return cidr, err
 }
 
-func parseIp(input *command.Input, field string) (net.IP, error) {
-	value := input.GetOperand(field)
+func parseIp(value string) (net.IP, error) {
 	ip := net.ParseIP(value)
 	if ip == nil {
 		return nil, fmt.Errorf("failed to parse ip from '%s'", value)
@@ -645,13 +753,48 @@ func parseIp(input *command.Input, field string) (net.IP, error) {
 	return ip, nil
 }
 
-func parsePort(input *command.Input, field string) (uint16, error) {
-	value := input.GetOperand(field)
+func parsePort(value string) (uint16, error) {
 	port, err := strconv.ParseUint(value, 10, 16)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse port from '%s': %v", value, err)
 	}
 	return uint16(port), nil
+}
+
+func parseBackend(value string) (app.BackendType, error) {
+	switch value {
+	case "kernel":
+		return app.KernelBackend, nil
+	case "userspace":
+		return app.UserspaceBackend, nil
+	default:
+		return app.UndefinedBackend, fmt.Errorf("unexpected backend value: %s", value)
+	}
+}
+
+func parseExpiration(value string) (int64, error) {
+	last := len(value) - 1
+	number, err := strconv.ParseInt(value[0:last], 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	var multiplier int64
+	suffix := value[last]
+	switch suffix {
+	case 's':
+		multiplier = 1
+	case 'm':
+		multiplier = 60
+	case 'h':
+		multiplier = 60 * 60
+	case 'd':
+		multiplier = 60 * 60 * 24
+	case 'w':
+		multiplier = 60 * 60 * 24 * 7
+	}
+
+	return number * multiplier, nil
 }
 
 func readEnvVar(name string) string {

@@ -1,6 +1,10 @@
 package app
 
-import "fmt"
+import (
+	"fmt"
+	"net"
+	"slices"
+)
 
 func ValidateNetworkName(name string) error {
 	for _, c := range name {
@@ -12,4 +16,19 @@ func ValidateNetworkName(name string) error {
 		}
 	}
 	return nil
+}
+
+func firstAssignableIp(cidr *net.IPNet) net.IP {
+	ip := cidr.IP
+	ip[len(ip)-1] += 1
+	return ip
+}
+
+func rangeFromCidr(cidr *net.IPNet) (net.IP, net.IP) {
+	start := slices.Clone(cidr.IP)
+	end := slices.Clone(cidr.Mask)
+	for i, octet := range end {
+		end[i] = start[i] + ^octet
+	}
+	return start, net.IP(end)
 }
