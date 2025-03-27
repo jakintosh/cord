@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	_ "modernc.org/sqlite"
 )
 
@@ -16,50 +17,7 @@ const (
 	UserspaceBackend
 )
 
-func Init(configPath string) {
-
-}
-
-func CreateNetwork(
-	configDir string,
-	dataDir string,
-	name string,
-	cidr *net.IPNet,
-	address net.IP,
-	port uint16,
-) error {
-
-	fmt.Println("Create Network")
-	fmt.Printf("configDir: %s\n", configDir)
-	fmt.Printf("dataDir: %s\n", dataDir)
-	fmt.Printf("name: %s\n", name)
-	fmt.Printf("cidr: %v\n", cidr)
-	fmt.Printf("ip: %v\n", address)
-	fmt.Printf("port: %d\n", port)
-
-	// create a database
-	db, err := initDatabase(name, dataDir)
-	if err != nil {
-		return fmt.Errorf("failed to init database: %w", err)
-	}
-
-	// root cidr
-	addCidr(db, name, cidr, true)
-
-	// server cidr
-	ip := firstAssignableIp(cidr)
-	l := len(ip) * 8
-	serverCidr := &net.IPNet{
-		IP:   ip,
-		Mask: net.CIDRMask(l, l),
-	}
-	addCidr(db, "innernet-server", serverCidr, false)
-
-	// create a server peer
-	fmt.Printf("creating peer 'innernet-server'\n")
-
-	return nil
-}
+func Init(configPath string) {}
 
 func ServeNetwork(
 	configDir string,
@@ -81,6 +39,40 @@ func ServeNetwork(
 	return nil
 }
 
+func CreateNetwork(
+	configDir string,
+	dataDir string,
+	name string,
+	cidr *net.IPNet,
+	address net.IP,
+	port uint16,
+) error {
+
+	fmt.Println("Create Network")
+
+	// create a database
+	db, err := initDatabase(name, dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to init database: %w", err)
+	}
+
+	// create root cidr
+	err = addRootCidr(db, name, cidr)
+	if err != nil {
+		return err
+	}
+
+	// add server cidr peer
+	serverIp := firstAssignableIp(cidr)
+	serverCidr := peerCidr(serverIp)
+	err = addCidr(db, "innernet-server", serverCidr)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func DeleteNetwork(
 	configDir string,
 	dataDir string,
@@ -88,46 +80,8 @@ func DeleteNetwork(
 ) error {
 
 	fmt.Println("Delete Network")
-	fmt.Printf("configDir: %s\n", configDir)
-	fmt.Printf("dataDir: %s\n", dataDir)
-	fmt.Printf("network: %s\n", network)
 
-	return nil
-}
-
-func addCidr(
-	db *sql.DB,
-	name string,
-	cidr *net.IPNet,
-	root bool,
-) error {
-
-	prefix, length := cidr.Mask.Size()
-	base, last := rangeFromCidr(cidr)
-
-	var err error
-	if root {
-		_, err = db.Exec(`
-			INSERT INTO cidr (id, name, cidr, length, prefix, base, last)
-			VALUES (1, ?, ?, ?, ?, ?, ?);`,
-			name, cidr.String(), length, prefix, base, last,
-		)
-	} else {
-		_, err = db.Exec(`
-			INSERT INTO cidr (name, cidr, length, prefix, base, last)
-			SELECT ?1, ?2, ?3, ?4, ?5, ?6
-			FROM cidr c
-			WHERE c.id = 1
-			AND c.base <= ?5
-			AND ?5 <= c.last;`,
-			name, cidr.String(), length, prefix, base, last,
-		)
-	}
-	if err != nil {
-		return fmt.Errorf("failed to insert into cidr: %w", err)
-	}
-
-	return nil
+	return deleteDatabase(network, dataDir)
 }
 
 func AddCidr(
@@ -140,19 +94,13 @@ func AddCidr(
 ) error {
 
 	fmt.Println("Add Cidr")
-	fmt.Printf("configDir: %s\n", configDir)
-	fmt.Printf("dataDir: %s\n", dataDir)
-	fmt.Printf("network: %s\n", network)
-	fmt.Printf("name: %s\n", name)
-	fmt.Printf("cidr: %s\n", cidr)
-	fmt.Printf("parent: %s\n", parent)
 
 	db, err := openDatabase(network, dataDir)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 
-	return addCidr(db, name, cidr, false)
+	return addCidr(db, name, cidr)
 }
 
 func RenameCidr(
@@ -164,13 +112,13 @@ func RenameCidr(
 ) error {
 
 	fmt.Println("Rename Cidr")
-	fmt.Printf("configDir: %s\n", configDir)
-	fmt.Printf("dataDir: %s\n", dataDir)
-	fmt.Printf("network: %s\n", network)
-	fmt.Printf("cidr: %s\n", cidr)
-	fmt.Printf("new-name: %s\n", newName)
 
-	return nil
+	db, err := openDatabase(network, dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+
+	return renameCidr(db, cidr, newName)
 }
 
 func DeleteCidr(
@@ -181,12 +129,13 @@ func DeleteCidr(
 ) error {
 
 	fmt.Println("Delete Cidr")
-	fmt.Printf("configDir: %s\n", configDir)
-	fmt.Printf("dataDir: %s\n", dataDir)
-	fmt.Printf("network: %s\n", network)
-	fmt.Printf("cidr: %s\n", cidr)
 
-	return nil
+	db, err := openDatabase(network, dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+
+	return deleteCidr(db, cidr)
 }
 
 func AddPeer(
@@ -194,7 +143,6 @@ func AddPeer(
 	dataDir string,
 	network string,
 	name string,
-	cidr string,
 	ip net.IP,
 	admin bool,
 	savePath string,
@@ -202,17 +150,29 @@ func AddPeer(
 ) error {
 
 	fmt.Println("Add Peer")
-	fmt.Printf("configDir: %s\n", configDir)
-	fmt.Printf("dataDir: %s\n", dataDir)
-	fmt.Printf("network: %s\n", network)
-	fmt.Printf("name: %s\n", name)
-	fmt.Printf("cidr: %s\n", cidr)
-	fmt.Printf("ip: %v\n", ip)
-	fmt.Printf("admin: %t\n", admin)
-	fmt.Printf("save-path: %s\n", savePath)
-	fmt.Printf("invite-expires: %d\n", inviteExpires)
 
-	return nil
+	db, err := openDatabase(network, dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+
+	pub, priv, err := generateKeypair()
+	if err != nil {
+		return err
+	}
+
+	cidr := peerCidr(ip)
+	err = addCidr(db, name, cidr)
+	if err != nil {
+		return err
+	}
+
+	err = addPeer(db, name, pub, admin, inviteExpires)
+	if err != nil {
+		return err
+	}
+
+	return writeInvite(savePath, name, ip, priv)
 }
 
 func RenamePeer(
@@ -224,13 +184,13 @@ func RenamePeer(
 ) error {
 
 	fmt.Println("Rename Peer")
-	fmt.Printf("configDir: %s\n", configDir)
-	fmt.Printf("dataDir: %s\n", dataDir)
-	fmt.Printf("network: %s\n", network)
-	fmt.Printf("peer: %s\n", peer)
-	fmt.Printf("new-name: %s\n", newName)
 
-	return nil
+	db, err := openDatabase(network, dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+
+	return renameCidr(db, peer, newName)
 }
 
 func EnablePeer(
@@ -241,12 +201,13 @@ func EnablePeer(
 ) error {
 
 	fmt.Println("Enable Peer")
-	fmt.Printf("configDir: %s\n", configDir)
-	fmt.Printf("dataDir: %s\n", dataDir)
-	fmt.Printf("network: %s\n", network)
-	fmt.Printf("peer: %s\n", peer)
 
-	return nil
+	db, err := openDatabase(network, dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+
+	return setPeerEnabled(db, peer, true)
 }
 
 func DisablePeer(
@@ -257,12 +218,13 @@ func DisablePeer(
 ) error {
 
 	fmt.Println("Disable Peer")
-	fmt.Printf("configDir: %s\n", configDir)
-	fmt.Printf("dataDir: %s\n", dataDir)
-	fmt.Printf("network: %s\n", network)
-	fmt.Printf("peer: %s\n", peer)
 
-	return nil
+	db, err := openDatabase(network, dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+
+	return setPeerEnabled(db, peer, false)
 }
 
 func AddAssociation(
@@ -274,13 +236,13 @@ func AddAssociation(
 ) error {
 
 	fmt.Println("Add Association")
-	fmt.Printf("configDir: %s\n", configDir)
-	fmt.Printf("dataDir: %s\n", dataDir)
-	fmt.Printf("network: %s\n", network)
-	fmt.Printf("cidr1: %s\n", cidr1)
-	fmt.Printf("cidr2: %s\n", cidr2)
 
-	return nil
+	db, err := openDatabase(network, dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+
+	return addAssociation(db, cidr1, cidr2)
 }
 
 func DeleteAssociation(
@@ -292,11 +254,176 @@ func DeleteAssociation(
 ) error {
 
 	fmt.Println("Delete Association")
-	fmt.Printf("configDir: %s\n", configDir)
-	fmt.Printf("dataDir: %s\n", dataDir)
-	fmt.Printf("network: %s\n", network)
-	fmt.Printf("cidr1: %s\n", cidr1)
-	fmt.Printf("cidr2: %s\n", cidr2)
 
+	db, err := openDatabase(network, dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+
+	return deleteAssociation(db, cidr1, cidr2)
+}
+
+func addRootCidr(
+	db *sql.DB,
+	name string,
+	cidr *net.IPNet,
+) error {
+	prefix, length := cidr.Mask.Size()
+	base, last := rangeFromCidr(cidr)
+
+	_, err := db.Exec(`
+		INSERT INTO cidr (id, name, cidr, length, prefix, base, last)
+		VALUES (1, ?, ?, ?, ?, ?, ?);
+		`,
+		name, cidr.String(), length, prefix, base, last,
+	)
+
+	return checkSqliteErr(err)
+}
+
+func addCidr(
+	db *sql.DB,
+	name string,
+	cidr *net.IPNet,
+) error {
+
+	prefix, length := cidr.Mask.Size()
+	base, last := rangeFromCidr(cidr)
+
+	result, err := db.Exec(`
+		INSERT INTO cidr (name, cidr, length, prefix, base, last)
+		SELECT ?1, ?2, ?3, ?4, ?5, ?6
+		FROM cidr c
+		WHERE c.id = 1
+		AND c.base <= ?5
+		AND ?5 <= c.last;
+		`,
+		name, cidr.String(), length, prefix, base, last,
+	)
+	if err := checkSqliteErr(err); err != nil {
+		return err
+	}
+
+	if resultsEmpty(result) {
+		return fmt.Errorf("Invalid CIDR")
+	}
+
+	return nil
+}
+
+func renameCidr(
+	db *sql.DB,
+	name string,
+	newName string,
+) error {
+
+	_, err := db.Exec(`
+		UPDATE cidr
+		SET name=?2
+		WHERE name=?1;
+		`,
+		name,
+		newName)
+	return checkSqliteErr(err)
+}
+
+func deleteCidr(
+	db *sql.DB,
+	name string,
+) error {
+
+	_, err := db.Exec(`
+		DELETE FROM cidr
+		WHERE name = ?;
+		`,
+		name,
+	)
+	return checkSqliteErr(err)
+}
+
+func addPeer(
+	db *sql.DB,
+	name string,
+	pubkey wgtypes.Key,
+	admin bool,
+	inviteExpires int64,
+) error {
+
+	_, err := db.Exec(`
+		INSERT INTO peer (cidr, public_key, admin, invite_expires)
+		SELECT c.id, ?2, ?3, ?4
+		FROM cidr c
+		WHERE c.name=?1;
+		`,
+		name, pubkey.String(), admin, inviteExpires,
+	)
+	return checkSqliteErr(err)
+}
+
+func setPeerEnabled(
+	db *sql.DB,
+	peer string,
+	enabled bool,
+) error {
+	_, err := db.Exec(`
+		UPDATE peer
+		SET disabled=?2
+		WHERE name=?1;
+		`,
+		peer,
+		!enabled,
+	)
+	return checkSqliteErr(err)
+}
+
+func addAssociation(
+	db *sql.DB,
+	a string,
+	b string,
+) error {
+	_, err := db.Exec(`
+		INSERT INTO association (cidr1, cidr2)
+		SELECT c1.id, c2.id
+		FROM cidr c1, cidr c2
+		WHERE c1.name=? AND c2.name=?;
+		`,
+		a,
+		b,
+	)
+	return checkSqliteErr(err)
+}
+
+func deleteAssociation(
+	db *sql.DB,
+	a string,
+	b string,
+) error {
+	_, err := db.Exec(`
+		DELETE FROM association
+		WHERE id in (
+			SELECT a.id
+			FROM association a
+			JOIN cidr c1 ON c1.id=a.cidr1
+			JOIN cidr c2 ON c2.id=a.cidr2
+			WHERE (c1.name=?1 AND c2.name=?2)
+			OR (c1.name=?2 AND c2.name=?1)
+		);
+		`,
+		a,
+		b,
+	)
+	return checkSqliteErr(err)
+}
+
+func writeInvite(
+	path string,
+	name string,
+	ip net.IP,
+	privKey wgtypes.Key,
+) error {
+	fmt.Printf(
+		"Writing to: %s\n\n[Peer]\nname=%s\nip=%s\nprivateKey=%s",
+		path, name, ip.String(), privKey.String(),
+	)
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"time"
 
 	"git.sr.ht/~jakintosh/command-go"
 	"git.sr.ht/~jakintosh/innernet-go/internal/app"
@@ -402,7 +403,7 @@ var addPeer = &command.Command{
 		// operands
 		network := i.GetOperand("network")
 		name := i.GetOperand("name")
-		cidr := i.GetOperand("cidr")
+		// cidr := i.GetOperand("cidr")
 		ipValue := i.GetOperand("ip")
 
 		// validate
@@ -420,7 +421,6 @@ var addPeer = &command.Command{
 			dataDir,
 			network,
 			name,
-			cidr,
 			ip,
 			admin,
 			savePath,
@@ -750,7 +750,12 @@ func parseIp(value string) (net.IP, error) {
 	if ip == nil {
 		return nil, fmt.Errorf("failed to parse ip from '%s'", value)
 	}
-	return ip, nil
+
+	if ip4 := ip.To4(); ip4 != nil {
+		return ip4, nil
+	} else {
+		return ip, nil
+	}
 }
 
 func parsePort(value string) (uint16, error) {
@@ -794,7 +799,7 @@ func parseExpiration(value string) (int64, error) {
 		multiplier = 60 * 60 * 24 * 7
 	}
 
-	return number * multiplier, nil
+	return time.Now().Unix() + (number * multiplier), nil
 }
 
 func readEnvVar(name string) string {

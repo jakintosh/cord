@@ -9,10 +9,14 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func getDbPath(name string, dataPath string) string {
+	dbName := name + ".db"
+	return path.Join(dataPath, dbName)
+}
+
 func openDatabase(name string, dataPath string) (*sql.DB, error) {
 
-	dbName := name + ".db"
-	dbPath := path.Join(dataPath, dbName)
+	dbPath := getDbPath(name, dataPath)
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open to database: %w\n", err)
@@ -70,13 +74,14 @@ func initDatabase(name string, dataPath string) (*sql.DB, error) {
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS peer (
 			id					INTEGER PRIMARY KEY,
-			name				TEXT NOT NULL UNIQUE,
-			ip					BLOB NOT NULL UNIQUE,
+			cidr				INTEGER NOT NULL,
 			public_key			TEXT NOT NULL UNIQUE,
-			is_admin			INTEGER DEFAULT 0 NOT NULL,
-			is_disabled			INTEGER DEFAULT 0 NOT NULL,
-			is_redeemed			INTEGER DEFAULT 0 NOT NULL,
-			invite_expires 		INTEGER
+			admin				INTEGER DEFAULT 0 NOT NULL,
+			disabled			INTEGER DEFAULT 0 NOT NULL,
+			redeemed			INTEGER DEFAULT 0 NOT NULL,
+			invite_expires 		INTEGER,
+			FOREIGN KEY (cidr)
+				REFERENCES cidr (id)
 		);
 	`)
 	if err != nil {
@@ -97,6 +102,12 @@ func initDatabase(name string, dataPath string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+func deleteDatabase(name string, dataPath string) error {
+
+	dbPath := getDbPath(name, dataPath)
+	return os.Remove(dbPath)
 }
 
 func resultsEmpty(result sql.Result) bool {
