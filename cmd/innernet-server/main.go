@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path"
 	"strconv"
 	"time"
 
-	"git.sr.ht/~jakintosh/command-go"
+	cmd "git.sr.ht/~jakintosh/command-go"
 	"git.sr.ht/~jakintosh/innernet-go/internal/server"
 )
 
@@ -19,12 +20,16 @@ const (
 	DEFAULT_DATA = "/var/lib/" + BIN_NAME
 )
 
-var root = &command.Command{
+func main() {
+	root.Parse()
+}
+
+var root = &cmd.Command{
 	Name:    BIN_NAME,
 	Author:  AUTHOR,
 	Version: VERSION,
 	Help:    "manage innernets",
-	Subcommands: []*command.Command{
+	Subcommands: []*cmd.Command{
 		serve,
 		addNetwork,
 		deleteNetwork,
@@ -39,30 +44,30 @@ var root = &command.Command{
 		addAssociation,
 		deleteAssociation,
 	},
-	Operands: []command.Operand{},
-	Options: []command.Option{
+	Operands: []cmd.Operand{},
+	Options: []cmd.Option{
 		{
 			Short: 0,
 			Long:  "config-dir",
-			Type:  command.OptionTypeParameter,
+			Type:  cmd.OptionTypeParameter,
 			Help:  "directory for config files",
 		},
 		{
 			Short: 0,
 			Long:  "data-dir",
-			Type:  command.OptionTypeParameter,
+			Type:  cmd.OptionTypeParameter,
 			Help:  "directory for program data",
 		},
 	},
 }
 
-var getPeers = &command.Command{
+var getPeers = &cmd.Command{
 	Name:        "get-peers",
 	Author:      AUTHOR,
 	Version:     VERSION,
 	Help:        "get peer list for a given peer",
-	Subcommands: []*command.Command{},
-	Operands: []command.Operand{
+	Subcommands: []*cmd.Command{},
+	Operands: []cmd.Operand{
 		{
 			Name: "network",
 			Help: "name of the innernet network the server coordinates",
@@ -72,8 +77,8 @@ var getPeers = &command.Command{
 			Help: "the name of the requesting peer",
 		},
 	},
-	Options: []command.Option{},
-	Handler: func(i *command.Input) error {
+	Options: []cmd.Option{},
+	Handler: func(i *cmd.Input) error {
 
 		//operands
 		network := i.GetOperand("network")
@@ -86,12 +91,12 @@ var getPeers = &command.Command{
 		// create app context
 		ctx, err := server.NewContext(network, configDir, dataDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create context: %w", err)
 		}
 
 		peers, err := ctx.GetPeersofPeerNamed(peerName)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to get peers for '%s': %w", peerName, err)
 		}
 
 		for i, peer := range peers {
@@ -102,39 +107,39 @@ var getPeers = &command.Command{
 	},
 }
 
-var serve = &command.Command{
+var serve = &cmd.Command{
 	Name:        "serve",
 	Author:      AUTHOR,
 	Version:     VERSION,
 	Help:        "serve an innernet coordination server",
-	Subcommands: []*command.Command{},
-	Operands: []command.Operand{
+	Subcommands: []*cmd.Command{},
+	Operands: []cmd.Operand{
 		{
 			Name: "network",
 			Help: "name of the innernet network the server coordinates",
 		},
 	},
-	Options: []command.Option{
+	Options: []cmd.Option{
 		{
 			Short: 0,
 			Long:  "no-routing",
-			Type:  command.OptionTypeFlag,
+			Type:  cmd.OptionTypeFlag,
 			Help:  "tell Innernet not to handle routing",
 		},
 		{
 			Short: 0,
 			Long:  "mtu",
-			Type:  command.OptionTypeParameter,
+			Type:  cmd.OptionTypeParameter,
 			Help:  "MTU for the WireGuard interface",
 		},
 		{
 			Short: 0,
 			Long:  "backend",
-			Type:  command.OptionTypeParameter,
+			Type:  cmd.OptionTypeParameter,
 			Help:  "WireGuard backend to use ('kernel' or 'userspace')",
 		},
 	},
-	Handler: func(i *command.Input) error {
+	Handler: func(i *cmd.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -149,26 +154,31 @@ var serve = &command.Command{
 		// parse
 		backend, err := parseBackend(backendValue)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to parse backend: %w", err)
 		}
 
 		// create app context
 		ctx, err := server.NewContext(network, configDir, dataDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		return ctx.Serve(noRouting, mtu, backend)
+		err = ctx.Serve(noRouting, mtu, backend)
+		if err != nil {
+			return fmt.Errorf("failed to serve network '%s': %w", network, err)
+		}
+
+		return nil
 	},
 }
 
-var addNetwork = &command.Command{
+var addNetwork = &cmd.Command{
 	Name:        "add-network",
 	Author:      AUTHOR,
 	Version:     VERSION,
 	Help:        "create a new innernet",
-	Subcommands: []*command.Command{},
-	Operands: []command.Operand{
+	Subcommands: []*cmd.Command{},
+	Operands: []cmd.Operand{
 		{
 			Name: "network",
 			Help: "name for the new network",
@@ -186,8 +196,8 @@ var addNetwork = &command.Command{
 			Help: "external port the coordination server listens on",
 		},
 	},
-	Options: []command.Option{},
-	Handler: func(i *command.Input) error {
+	Options: []cmd.Option{},
+	Handler: func(i *cmd.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -202,43 +212,48 @@ var addNetwork = &command.Command{
 		// parse
 		cidr, err := parseCidr(cidrValue)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to parse cidr: %w", err)
 		}
 
 		ip, err := parseIp(ipValue)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to parse ip: %w", err)
 		}
 
 		port, err := parsePort(portValue)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to parse port: %w", err)
 		}
 
 		// create app context
 		ctx, err := server.NewContext(network, configDir, dataDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		return ctx.CreateNetwork(cidr, ip, port)
+		err = ctx.CreateNetwork(cidr, ip, port)
+		if err != nil {
+			return fmt.Errorf("failed to create network: %w", err)
+		}
+
+		return nil
 	},
 }
 
-var deleteNetwork = &command.Command{
+var deleteNetwork = &cmd.Command{
 	Name:        "delete-network",
 	Author:      AUTHOR,
 	Version:     VERSION,
 	Help:        "delete an existing innernet",
-	Subcommands: []*command.Command{},
-	Operands: []command.Operand{
+	Subcommands: []*cmd.Command{},
+	Operands: []cmd.Operand{
 		{
 			Name: "network",
 			Help: "name of the network to delete",
 		},
 	},
-	Options: []command.Option{},
-	Handler: func(i *command.Input) error {
+	Options: []cmd.Option{},
+	Handler: func(i *cmd.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -250,20 +265,25 @@ var deleteNetwork = &command.Command{
 		// create app context
 		ctx, err := server.NewContext(network, configDir, dataDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		return ctx.DeleteNetwork()
+		err = ctx.DeleteNetwork()
+		if err != nil {
+			return fmt.Errorf("failed to delete network: %w", err)
+		}
+
+		return nil
 	},
 }
 
-var addCidr = &command.Command{
+var addCidr = &cmd.Command{
 	Name:        "add-cidr",
 	Author:      AUTHOR,
 	Version:     VERSION,
 	Help:        "add a child CIDR to a network",
-	Subcommands: []*command.Command{},
-	Operands: []command.Operand{
+	Subcommands: []*cmd.Command{},
+	Operands: []cmd.Operand{
 		{
 			Name: "network",
 			Help: "network to add a CIDR to",
@@ -277,8 +297,8 @@ var addCidr = &command.Command{
 			Help: "address range in CIDR notation (i.e. 10.0.0.0/8)",
 		},
 	},
-	Options: []command.Option{},
-	Handler: func(i *command.Input) error {
+	Options: []cmd.Option{},
+	Handler: func(i *cmd.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -292,26 +312,31 @@ var addCidr = &command.Command{
 		// parse
 		cidr, err := parseCidr(cidrValue)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to parse cidr: %w", err)
 		}
 
 		// create app context
 		ctx, err := server.NewContext(network, configDir, dataDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		return ctx.CreateCidr(name, cidr)
+		err = ctx.CreateCidr(name, cidr)
+		if err != nil {
+			return fmt.Errorf("failed to create cidr: %w", err)
+		}
+
+		return nil
 	},
 }
 
-var renameCidr = &command.Command{
+var renameCidr = &cmd.Command{
 	Name:        "rename-cidr",
 	Author:      AUTHOR,
 	Version:     VERSION,
 	Help:        "rename an existing CIDR from a network",
-	Subcommands: []*command.Command{},
-	Operands: []command.Operand{
+	Subcommands: []*cmd.Command{},
+	Operands: []cmd.Operand{
 		{
 			Name: "network",
 			Help: "network to be modified",
@@ -325,8 +350,8 @@ var renameCidr = &command.Command{
 			Help: "new name for CIDR",
 		},
 	},
-	Options: []command.Option{},
-	Handler: func(i *command.Input) error {
+	Options: []cmd.Option{},
+	Handler: func(i *cmd.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -340,20 +365,25 @@ var renameCidr = &command.Command{
 		// create app context
 		ctx, err := server.NewContext(network, configDir, dataDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		return ctx.RenameCidr(cidr, newName)
+		err = ctx.RenameCidr(cidr, newName)
+		if err != nil {
+			return fmt.Errorf("failed to rename cidr: %w", err)
+		}
+
+		return nil
 	},
 }
 
-var deleteCidr = &command.Command{
+var deleteCidr = &cmd.Command{
 	Name:        "delete-cidr",
 	Author:      AUTHOR,
 	Version:     VERSION,
 	Help:        "delete an existing CIDR from a network",
-	Subcommands: []*command.Command{},
-	Operands: []command.Operand{
+	Subcommands: []*cmd.Command{},
+	Operands: []cmd.Operand{
 		{
 			Name: "network",
 			Help: "network to be modified",
@@ -363,8 +393,8 @@ var deleteCidr = &command.Command{
 			Help: "CIDR to delete",
 		},
 	},
-	Options: []command.Option{},
-	Handler: func(i *command.Input) error {
+	Options: []cmd.Option{},
+	Handler: func(i *cmd.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -377,20 +407,25 @@ var deleteCidr = &command.Command{
 		// create app context
 		ctx, err := server.NewContext(network, configDir, dataDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		return ctx.DeleteCidr(cidr)
+		err = ctx.DeleteCidr(cidr)
+		if err != nil {
+			return fmt.Errorf("failed to delete cidr: %w", err)
+		}
+
+		return nil
 	},
 }
 
-var addPeer = &command.Command{
+var addPeer = &cmd.Command{
 	Name:        "add-peer",
 	Author:      AUTHOR,
 	Version:     VERSION,
 	Help:        "create a new peer invite",
-	Subcommands: []*command.Command{},
-	Operands: []command.Operand{
+	Subcommands: []*cmd.Command{},
+	Operands: []cmd.Operand{
 		{
 			Name: "network",
 			Help: "network to add peer to",
@@ -404,27 +439,27 @@ var addPeer = &command.Command{
 			Help: "IP of peer (immutable once created)",
 		},
 	},
-	Options: []command.Option{
+	Options: []cmd.Option{
 		{
 			Short: 'a',
 			Long:  "admin",
-			Type:  command.OptionTypeFlag,
+			Type:  cmd.OptionTypeFlag,
 			Help:  "make new peer an admin?",
 		},
 		{
 			Short: 0,
 			Long:  "save-invite",
-			Type:  command.OptionTypeParameter,
+			Type:  cmd.OptionTypeParameter,
 			Help:  "path to write the invite to",
 		},
 		{
 			Short: 0,
 			Long:  "invite-expires",
-			Type:  command.OptionTypeParameter,
+			Type:  cmd.OptionTypeParameter,
 			Help:  "invite expiration period (eg. '30d', '7w', '2h', '1000s')",
 		},
 	},
-	Handler: func(i *command.Input) error {
+	Handler: func(i *cmd.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -441,17 +476,27 @@ var addPeer = &command.Command{
 		// parse
 		ip, err := parseIp(ipValue)
 		if err != nil {
-			return nil
-		}
-		inviteExpires, err := parseExpiration(inviteValue)
-		if err != nil {
-			return err
+			return fmt.Errorf("failed to parse ip: %w", err)
 		}
 
-		// create app context
+		inviteExpires, err := parseExpiration(inviteValue)
+		if err != nil {
+			return fmt.Errorf("failed to parse expiration: %w", err)
+		}
+
+		// command logic
+
+		// make sure we have file handle before db logic
+		fileName := name + ".toml"
+		savePath = path.Join(savePath, fileName)
+		inviteFile, err := os.Create(savePath)
+		if err != nil {
+			return fmt.Errorf("failed to open file '%s': %w", savePath, err)
+		}
+
 		ctx, err := server.NewContext(network, configDir, dataDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create context: %w", err)
 		}
 
 		_, peerConfig, err := ctx.CreatePeer(
@@ -461,20 +506,25 @@ var addPeer = &command.Command{
 			inviteExpires,
 		)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create peer: %w", err)
 		}
 
-		return peerConfig.WriteInvite(savePath)
+		err = peerConfig.Write(inviteFile)
+		if err != nil {
+			return fmt.Errorf("failed to write invite: %w", err)
+		}
+
+		return nil
 	},
 }
 
-var renamePeer = &command.Command{
+var renamePeer = &cmd.Command{
 	Name:        "rename-peer",
 	Author:      AUTHOR,
 	Version:     VERSION,
 	Help:        "rename an existing peer",
-	Subcommands: []*command.Command{},
-	Operands: []command.Operand{
+	Subcommands: []*cmd.Command{},
+	Operands: []cmd.Operand{
 		{
 			Name: "network",
 			Help: "network to be modified",
@@ -488,8 +538,8 @@ var renamePeer = &command.Command{
 			Help: "new name for peer",
 		},
 	},
-	Options: []command.Option{},
-	Handler: func(i *command.Input) error {
+	Options: []cmd.Option{},
+	Handler: func(i *cmd.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -503,20 +553,25 @@ var renamePeer = &command.Command{
 		// create app context
 		ctx, err := server.NewContext(network, configDir, dataDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		return ctx.RenamePeer(peer, newName)
+		err = ctx.RenamePeer(peer, newName)
+		if err != nil {
+			return fmt.Errorf("failed to rename peer: %w", err)
+		}
+
+		return nil
 	},
 }
 
-var enablePeer = &command.Command{
+var enablePeer = &cmd.Command{
 	Name:        "enable-peer",
 	Author:      AUTHOR,
 	Version:     VERSION,
 	Help:        "enable an existing peer",
-	Subcommands: []*command.Command{},
-	Operands: []command.Operand{
+	Subcommands: []*cmd.Command{},
+	Operands: []cmd.Operand{
 		{
 			Name: "network",
 			Help: "network to be modified",
@@ -526,8 +581,8 @@ var enablePeer = &command.Command{
 			Help: "peer to rename",
 		},
 	},
-	Options: []command.Option{},
-	Handler: func(i *command.Input) error {
+	Options: []cmd.Option{},
+	Handler: func(i *cmd.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -540,20 +595,25 @@ var enablePeer = &command.Command{
 		// create app context
 		ctx, err := server.NewContext(network, configDir, dataDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		return ctx.SetPeerEnabled(peer, true)
+		err = ctx.SetPeerEnabled(peer, true)
+		if err != nil {
+			return fmt.Errorf("failed to enable peer: %w", err)
+		}
+
+		return nil
 	},
 }
 
-var disablePeer = &command.Command{
+var disablePeer = &cmd.Command{
 	Name:        "disable-peer",
 	Author:      AUTHOR,
 	Version:     VERSION,
 	Help:        "disable an existing peer",
-	Subcommands: []*command.Command{},
-	Operands: []command.Operand{
+	Subcommands: []*cmd.Command{},
+	Operands: []cmd.Operand{
 		{
 			Name: "network",
 			Help: "network to be modified",
@@ -563,8 +623,8 @@ var disablePeer = &command.Command{
 			Help: "peer to rename",
 		},
 	},
-	Options: []command.Option{},
-	Handler: func(i *command.Input) error {
+	Options: []cmd.Option{},
+	Handler: func(i *cmd.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -577,20 +637,25 @@ var disablePeer = &command.Command{
 		// create app context
 		ctx, err := server.NewContext(network, configDir, dataDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		return ctx.SetPeerEnabled(peer, false)
+		err = ctx.SetPeerEnabled(peer, false)
+		if err != nil {
+			return fmt.Errorf("failed to disable peer: %w", err)
+		}
+
+		return nil
 	},
 }
 
-var addAssociation = &command.Command{
+var addAssociation = &cmd.Command{
 	Name:        "add-association",
 	Author:      AUTHOR,
 	Version:     VERSION,
 	Help:        "create an association between two CIDRs",
-	Subcommands: []*command.Command{},
-	Operands: []command.Operand{
+	Subcommands: []*cmd.Command{},
+	Operands: []cmd.Operand{
 		{
 			Name: "network",
 			Help: "network to add an association to",
@@ -604,8 +669,8 @@ var addAssociation = &command.Command{
 			Help: "name of the second CIDR",
 		},
 	},
-	Options: []command.Option{},
-	Handler: func(i *command.Input) error {
+	Options: []cmd.Option{},
+	Handler: func(i *cmd.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -619,20 +684,25 @@ var addAssociation = &command.Command{
 		// create app context
 		ctx, err := server.NewContext(network, configDir, dataDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		return ctx.CreateAssociation(cidr1, cidr2)
+		err = ctx.CreateAssociation(cidr1, cidr2)
+		if err != nil {
+			return fmt.Errorf("failed to create association: %w", err)
+		}
+
+		return nil
 	},
 }
 
-var deleteAssociation = &command.Command{
+var deleteAssociation = &cmd.Command{
 	Name:        "delete-association",
 	Author:      AUTHOR,
 	Version:     VERSION,
 	Help:        "delete an association between two CIDRs",
-	Subcommands: []*command.Command{},
-	Operands: []command.Operand{
+	Subcommands: []*cmd.Command{},
+	Operands: []cmd.Operand{
 		{
 			Name: "network",
 			Help: "network to delete an association from",
@@ -646,8 +716,8 @@ var deleteAssociation = &command.Command{
 			Help: "name of the second CIDR",
 		},
 	},
-	Options: []command.Option{},
-	Handler: func(i *command.Input) error {
+	Options: []cmd.Option{},
+	Handler: func(i *cmd.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -661,15 +731,16 @@ var deleteAssociation = &command.Command{
 		// create app context
 		ctx, err := server.NewContext(network, configDir, dataDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		return ctx.DeleteAssociation(cidr1, cidr2)
-	},
-}
+		err = ctx.DeleteAssociation(cidr1, cidr2)
+		if err != nil {
+			return fmt.Errorf("failed to delete association: %w", err)
+		}
 
-func main() {
-	root.Parse()
+		return nil
+	},
 }
 
 // // init program directories

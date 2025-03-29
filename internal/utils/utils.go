@@ -6,7 +6,7 @@ import (
 	"slices"
 )
 
-func ValidateNetworkName(name string) error {
+func ValidateHostName(name string) error {
 	for _, c := range name {
 		if !((c >= 0x30 && c <= 0x39) || // numbers
 			(c >= 0x41 && c <= 0x5A) || // uppercase letters

@@ -40,6 +40,10 @@ func (ctx *Context) CreatePeer(
 	error,
 ) {
 
+	if err := utils.ValidateHostName(name); err != nil {
+		return nil, nil, fmt.Errorf("failed to validate peer name: %w", err)
+	}
+
 	privKey, pubKey, err := wg.GenerateKeypair()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate keypair: %v", err)

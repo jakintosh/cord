@@ -3,6 +3,7 @@ package wireguard
 import (
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 
@@ -15,14 +16,14 @@ type PeerConfig struct {
 	PrivateKey PrivateKey
 }
 
-func (c *PeerConfig) WriteInvite(
-	path string,
+func (c *PeerConfig) Write(
+	w io.Writer,
 ) error {
-	fmt.Printf(
-		"Writing to: %s\n\n[Peer]\nname=%s\nip=%s\nprivateKey=%s",
-		path, c.Name, c.Ip.String(), c.PrivateKey.String(),
+	_, err := fmt.Fprintf(w,
+		"[Peer]\nname=%s\nip=%s\nprivateKey=%s",
+		c.Name, c.Ip.String(), c.PrivateKey.String(),
 	)
-	return nil
+	return err
 }
 
 func PrintPeer(peer *wgtypes.Peer, indent int) {

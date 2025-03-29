@@ -14,7 +14,7 @@ func (ctx *Context) CreateNetwork(
 	port uint16,
 ) error {
 
-	if err := utils.ValidateNetworkName(ctx.Name); err != nil {
+	if err := utils.ValidateHostName(ctx.Name); err != nil {
 		return fmt.Errorf("failed to validate network name: %w", err)
 	}
 
