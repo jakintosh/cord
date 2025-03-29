@@ -1,31 +1,15 @@
-package app
+package wireguard
 
 import (
-	"encoding/base64"
 	"fmt"
 	"net"
-	"strings"
 
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-func printDevice(device *wgtypes.Device) {
-	fmt.Printf("%s (:%d)\n", device.Name, device.ListenPort)
-	for _, peer := range device.Peers {
-		printPeer(&peer, 1)
-	}
-}
-
-func printPeer(peer *wgtypes.Peer, indent int) {
-	indents := strings.Repeat(" ", indent)
-	ip := peer.AllowedIPs[0].IP
-	pubKey := base64.RawStdEncoding.EncodeToString(peer.PublicKey[:])[:6]
-	fmt.Printf("%s%s (%s...)\n", indents, ip, pubKey)
-}
-
-func listInterfaces() {
+func listDevices() {
 	client, err := wgctrl.New()
 	if err != nil {
 		fmt.Printf("failed to load wg client: %v\n", err)
@@ -47,22 +31,25 @@ func listInterfaces() {
 	}
 }
 
-func generateKeypair() (private wgtypes.Key, public wgtypes.Key, err error) {
-	private, err = wgtypes.GeneratePrivateKey()
-	if err != nil {
-		err = fmt.Errorf("failed to generate wg keys: %w", err)
-		return
-	}
-	public = private.PublicKey()
-	return
-}
-
-func createInterface(ifname string) {
+func createDevice(ifname string, ip string) {
 	fmt.Printf("new network\n")
 	attr := netlink.NewLinkAttrs()
 	attr.Name = ifname
 	wg := &netlink.Wireguard{LinkAttrs: attr}
-	err := netlink.LinkAdd(wg)
+
+	addr, err := netlink.ParseAddr(ip)
+	if err != nil {
+		fmt.Printf("failed to parse ip '%s'\n", ip)
+		return
+	}
+
+	err = netlink.AddrAdd(wg, addr)
+	if err != nil {
+		fmt.Printf("failed to add ip '%s' to %s\n", ip, ifname)
+		return
+	}
+
+	err = netlink.LinkAdd(wg)
 	if err != nil {
 		fmt.Printf("failed to add wg link: %v\n", err)
 		return
@@ -104,7 +91,11 @@ func createInterface(ifname string) {
 	fmt.Printf("WireGuard device %s created and configured successfully.\n", ifname)
 }
 
-func deleteInterface(ifname string) {
+func updateDevice(ifname string) {
+
+}
+
+func deleteDevice(ifname string) {
 	attr := netlink.NewLinkAttrs()
 	attr.Name = ifname
 	wg := &netlink.Wireguard{LinkAttrs: attr}
@@ -112,5 +103,12 @@ func deleteInterface(ifname string) {
 	if err != nil {
 		fmt.Printf("failed to delete device: %v\n", err)
 		return
+	}
+}
+
+func printDevice(device *wgtypes.Device) {
+	fmt.Printf("%s (:%d)\n", device.Name, device.ListenPort)
+	for _, peer := range device.Peers {
+		PrintPeer(&peer, 1)
 	}
 }

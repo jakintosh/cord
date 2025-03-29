@@ -1,4 +1,4 @@
-package app
+package utils
 
 import (
 	"net"
@@ -13,7 +13,7 @@ func TestCIDRRange(t *testing.T) {
 	}
 
 	expectedStart := net.ParseIP("10.0.0.0")
-	start, end := rangeFromCidr(cidr)
+	start, end := GetIpRangeFromCidr(cidr)
 	if !start.Equal(expectedStart) {
 		t.Fatalf("invalid start: %v, expected %v", start, expectedStart)
 	}

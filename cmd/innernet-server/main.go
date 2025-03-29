@@ -2,14 +2,13 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"strconv"
 	"time"
 
 	"git.sr.ht/~jakintosh/command-go"
-	"git.sr.ht/~jakintosh/innernet-go/internal/app"
+	"git.sr.ht/~jakintosh/innernet-go/internal/server"
 )
 
 const (
@@ -36,6 +35,7 @@ var root = &command.Command{
 		renamePeer,
 		enablePeer,
 		disablePeer,
+		getPeers,
 		addAssociation,
 		deleteAssociation,
 	},
@@ -53,6 +53,52 @@ var root = &command.Command{
 			Type:  command.OptionTypeParameter,
 			Help:  "directory for program data",
 		},
+	},
+}
+
+var getPeers = &command.Command{
+	Name:        "get-peers",
+	Author:      AUTHOR,
+	Version:     VERSION,
+	Help:        "get peer list for a given peer",
+	Subcommands: []*command.Command{},
+	Operands: []command.Operand{
+		{
+			Name: "network",
+			Help: "name of the innernet network the server coordinates",
+		},
+		{
+			Name: "peer",
+			Help: "the name of the requesting peer",
+		},
+	},
+	Options: []command.Option{},
+	Handler: func(i *command.Input) error {
+
+		//operands
+		network := i.GetOperand("network")
+		peerName := i.GetOperand("peer")
+
+		// options
+		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+
+		// create app context
+		ctx, err := server.NewContext(network, configDir, dataDir)
+		if err != nil {
+			return err
+		}
+
+		peers, err := ctx.GetPeersofPeerNamed(peerName)
+		if err != nil {
+			return err
+		}
+
+		for i, peer := range peers {
+			fmt.Printf("%d: %s\n", i, peer.String())
+		}
+
+		return nil
 	},
 }
 
@@ -90,6 +136,9 @@ var serve = &command.Command{
 	},
 	Handler: func(i *command.Input) error {
 
+		// operands
+		network := i.GetOperand("network")
+
 		// options
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
@@ -97,22 +146,19 @@ var serve = &command.Command{
 		mtu := i.GetIntParameterOr("mtu", 1280)
 		backendValue := i.GetParameterOr("backend", "kernel")
 
+		// parse
 		backend, err := parseBackend(backendValue)
 		if err != nil {
 			return err
 		}
 
-		// operands
-		network := i.GetOperand("network")
+		// create app context
+		ctx, err := server.NewContext(network, configDir, dataDir)
+		if err != nil {
+			return err
+		}
 
-		return app.ServeNetwork(
-			configDir,
-			dataDir,
-			network,
-			noRouting,
-			mtu,
-			backend,
-		)
+		return ctx.Serve(noRouting, mtu, backend)
 	},
 }
 
@@ -143,22 +189,17 @@ var addNetwork = &command.Command{
 	Options: []command.Option{},
 	Handler: func(i *command.Input) error {
 
-		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
-
 		// operands
 		network := i.GetOperand("network")
 		cidrValue := i.GetOperand("cidr")
 		ipValue := i.GetOperand("external-ip")
 		portValue := i.GetOperand("external-port")
 
-		// validate
-		err := app.ValidateNetworkName(network)
-		if err != nil {
-			return err
-		}
+		// options
+		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
+		// parse
 		cidr, err := parseCidr(cidrValue)
 		if err != nil {
 			return err
@@ -174,14 +215,13 @@ var addNetwork = &command.Command{
 			return err
 		}
 
-		return app.CreateNetwork(
-			configDir,
-			dataDir,
-			network,
-			cidr,
-			ip,
-			port,
-		)
+		// create app context
+		ctx, err := server.NewContext(network, configDir, dataDir)
+		if err != nil {
+			return err
+		}
+
+		return ctx.CreateNetwork(cidr, ip, port)
 	},
 }
 
@@ -200,18 +240,20 @@ var deleteNetwork = &command.Command{
 	Options: []command.Option{},
 	Handler: func(i *command.Input) error {
 
+		// operands
+		network := i.GetOperand("network")
+
 		// options
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
-		// operands
-		network := i.GetOperand("network")
+		// create app context
+		ctx, err := server.NewContext(network, configDir, dataDir)
+		if err != nil {
+			return err
+		}
 
-		return app.DeleteNetwork(
-			configDir,
-			dataDir,
-			network,
-		)
+		return ctx.DeleteNetwork()
 	},
 }
 
@@ -234,38 +276,32 @@ var addCidr = &command.Command{
 			Name: "cidr",
 			Help: "address range in CIDR notation (i.e. 10.0.0.0/8)",
 		},
-		{
-			Name: "parent",
-			Help: "name of the parent CIDR",
-		},
 	},
 	Options: []command.Option{},
 	Handler: func(i *command.Input) error {
-
-		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
 		// operands
 		network := i.GetOperand("network")
 		name := i.GetOperand("name")
 		cidrValue := i.GetOperand("cidr")
-		parent := i.GetOperand("parent")
 
-		// validate
+		// options
+		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+
+		// parse
 		cidr, err := parseCidr(cidrValue)
 		if err != nil {
 			return err
 		}
 
-		return app.AddCidr(
-			configDir,
-			dataDir,
-			network,
-			name,
-			cidr,
-			parent,
-		)
+		// create app context
+		ctx, err := server.NewContext(network, configDir, dataDir)
+		if err != nil {
+			return err
+		}
+
+		return ctx.CreateCidr(name, cidr)
 	},
 }
 
@@ -292,22 +328,22 @@ var renameCidr = &command.Command{
 	Options: []command.Option{},
 	Handler: func(i *command.Input) error {
 
-		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
-
 		// operands
 		network := i.GetOperand("network")
 		cidr := i.GetOperand("cidr")
 		newName := i.GetOperand("new-name")
 
-		return app.RenameCidr(
-			configDir,
-			dataDir,
-			network,
-			cidr,
-			newName,
-		)
+		// options
+		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+
+		// create app context
+		ctx, err := server.NewContext(network, configDir, dataDir)
+		if err != nil {
+			return err
+		}
+
+		return ctx.RenameCidr(cidr, newName)
 	},
 }
 
@@ -330,20 +366,21 @@ var deleteCidr = &command.Command{
 	Options: []command.Option{},
 	Handler: func(i *command.Input) error {
 
-		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
-
 		// operands
 		network := i.GetOperand("network")
 		cidr := i.GetOperand("cidr")
 
-		return app.DeleteCidr(
-			configDir,
-			dataDir,
-			network,
-			cidr,
-		)
+		// options
+		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+
+		// create app context
+		ctx, err := server.NewContext(network, configDir, dataDir)
+		if err != nil {
+			return err
+		}
+
+		return ctx.DeleteCidr(cidr)
 	},
 }
 
@@ -363,12 +400,8 @@ var addPeer = &command.Command{
 			Help: "name of the peer",
 		},
 		{
-			Name: "cidr",
-			Help: "parent CIDR of the peer",
-		},
-		{
 			Name: "ip",
-			Help: "IP of peer (within parent CIDR)",
+			Help: "IP of peer (immutable once created)",
 		},
 	},
 	Options: []command.Option{
@@ -393,6 +426,11 @@ var addPeer = &command.Command{
 	},
 	Handler: func(i *command.Input) error {
 
+		// operands
+		network := i.GetOperand("network")
+		name := i.GetOperand("name")
+		ipValue := i.GetOperand("ip")
+
 		// options
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
@@ -400,13 +438,7 @@ var addPeer = &command.Command{
 		savePath := i.GetParameterOr("save-invite", getPwd())
 		inviteValue := i.GetParameterOr("invite-expires", "7d")
 
-		// operands
-		network := i.GetOperand("network")
-		name := i.GetOperand("name")
-		// cidr := i.GetOperand("cidr")
-		ipValue := i.GetOperand("ip")
-
-		// validate
+		// parse
 		ip, err := parseIp(ipValue)
 		if err != nil {
 			return nil
@@ -416,16 +448,23 @@ var addPeer = &command.Command{
 			return err
 		}
 
-		return app.AddPeer(
-			configDir,
-			dataDir,
-			network,
+		// create app context
+		ctx, err := server.NewContext(network, configDir, dataDir)
+		if err != nil {
+			return err
+		}
+
+		_, peerConfig, err := ctx.CreatePeer(
 			name,
 			ip,
 			admin,
-			savePath,
 			inviteExpires,
 		)
+		if err != nil {
+			return err
+		}
+
+		return peerConfig.WriteInvite(savePath)
 	},
 }
 
@@ -452,22 +491,22 @@ var renamePeer = &command.Command{
 	Options: []command.Option{},
 	Handler: func(i *command.Input) error {
 
-		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
-
 		// operands
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 		newName := i.GetOperand("new-name")
 
-		return app.RenamePeer(
-			configDir,
-			dataDir,
-			network,
-			peer,
-			newName,
-		)
+		// options
+		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+
+		// create app context
+		ctx, err := server.NewContext(network, configDir, dataDir)
+		if err != nil {
+			return err
+		}
+
+		return ctx.RenamePeer(peer, newName)
 	},
 }
 
@@ -490,20 +529,21 @@ var enablePeer = &command.Command{
 	Options: []command.Option{},
 	Handler: func(i *command.Input) error {
 
-		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
-
 		// operands
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
-		return app.EnablePeer(
-			configDir,
-			dataDir,
-			network,
-			peer,
-		)
+		// options
+		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+
+		// create app context
+		ctx, err := server.NewContext(network, configDir, dataDir)
+		if err != nil {
+			return err
+		}
+
+		return ctx.SetPeerEnabled(peer, true)
 	},
 }
 
@@ -526,20 +566,21 @@ var disablePeer = &command.Command{
 	Options: []command.Option{},
 	Handler: func(i *command.Input) error {
 
-		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
-
 		// operands
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
-		return app.DisablePeer(
-			configDir,
-			dataDir,
-			network,
-			peer,
-		)
+		// options
+		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+
+		// create app context
+		ctx, err := server.NewContext(network, configDir, dataDir)
+		if err != nil {
+			return err
+		}
+
+		return ctx.SetPeerEnabled(peer, false)
 	},
 }
 
@@ -566,22 +607,22 @@ var addAssociation = &command.Command{
 	Options: []command.Option{},
 	Handler: func(i *command.Input) error {
 
-		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
-
 		// operands
 		network := i.GetOperand("network")
 		cidr1 := i.GetOperand("cidr1")
 		cidr2 := i.GetOperand("cidr2")
 
-		return app.AddAssociation(
-			configDir,
-			dataDir,
-			network,
-			cidr1,
-			cidr2,
-		)
+		// options
+		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+
+		// create app context
+		ctx, err := server.NewContext(network, configDir, dataDir)
+		if err != nil {
+			return err
+		}
+
+		return ctx.CreateAssociation(cidr1, cidr2)
 	},
 }
 
@@ -608,22 +649,22 @@ var deleteAssociation = &command.Command{
 	Options: []command.Option{},
 	Handler: func(i *command.Input) error {
 
-		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
-
 		// operands
 		network := i.GetOperand("network")
 		cidr1 := i.GetOperand("cidr1")
 		cidr2 := i.GetOperand("cidr2")
 
-		return app.DeleteAssociation(
-			configDir,
-			dataDir,
-			network,
-			cidr1,
-			cidr2,
-		)
+		// options
+		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+
+		// create app context
+		ctx, err := server.NewContext(network, configDir, dataDir)
+		if err != nil {
+			return err
+		}
+
+		return ctx.DeleteAssociation(cidr1, cidr2)
 	},
 }
 
@@ -631,31 +672,10 @@ func main() {
 	root.Parse()
 }
 
-// Subcommands
-//  => serve				<iname>								no-routing?, mtu?, backend?
-//  => add-network			<iname>, <cidr>, <external-ip>, <external-port>
-//  => delete-network		<iname>
-//  => add-cidr				<iname>, <name>, <cidr>				parent?
-//  => rename-cidr			<iname>, <name>, <new-name>
-//  => delete-cidr			<iname>, <name>
-//  => add-peer				<iname>, <name>, <cidr>, <admin>	ip?, configPath?
-//  => rename-peer			<iname>, <name>, <new-name>
-//  => enable-peer			<iname>, <name>
-//  => disable-peer			<iname>, <name>
-
 // // init program directories
 // os.MkdirAll(*configPath, 0755)
 // os.MkdirAll(*dataPath, 0755)
-
-// // init modules
-// initDatabase(*configPath)
-
-// config routing
-
-// serve
-// addr := fmt.Sprintf(":%d", port)
-// log.Fatal(http.ListenAndServe(addr, nil))
-
+//
 // what does (server) program do
 //
 // * create/delete cidrs
@@ -687,7 +707,7 @@ func main() {
 // and is ready to handle a /redeem request. when a client goes to redeem
 // an invite, they'll use the invite to create a temporary network and add
 // the server as their only peer, then contact the server over its internal
-// address. the server validates the redemption, an registers the peer.
+// address. the server validates the redemption, and registers the peer.
 // to register the peer, the server already has the IP and other metadata,
 // but needs the peer to provide it's self generated public key. once it
 // finishes, the newly added peer can use the /state endpoint to get a new
@@ -766,14 +786,14 @@ func parsePort(value string) (uint16, error) {
 	return uint16(port), nil
 }
 
-func parseBackend(value string) (app.BackendType, error) {
+func parseBackend(value string) (server.BackendType, error) {
 	switch value {
 	case "kernel":
-		return app.KernelBackend, nil
+		return server.KernelBackend, nil
 	case "userspace":
-		return app.UserspaceBackend, nil
+		return server.UserspaceBackend, nil
 	default:
-		return app.UndefinedBackend, fmt.Errorf("unexpected backend value: %s", value)
+		return server.UndefinedBackend, fmt.Errorf("unexpected backend value: %s", value)
 	}
 }
 
@@ -800,15 +820,6 @@ func parseExpiration(value string) (int64, error) {
 	}
 
 	return time.Now().Unix() + (number * multiplier), nil
-}
-
-func readEnvVar(name string) string {
-	var present bool
-	str, present := os.LookupEnv(name)
-	if !present {
-		log.Fatalf("missing required env var '%s'\n", name)
-	}
-	return str
 }
 
 func getPwd() string {
