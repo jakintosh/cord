@@ -3,6 +3,7 @@ package server
 import (
 	"database/sql"
 	"fmt"
+	"os"
 
 	db "git.sr.ht/~jakintosh/innernet-go/internal/database"
 	_ "modernc.org/sqlite"
@@ -28,6 +29,9 @@ func NewContext(
 	configDir string,
 	dataDir string,
 ) (*Context, error) {
+
+	os.MkdirAll(configDir, 0755)
+	os.MkdirAll(dataDir, 0755)
 
 	database, err := db.Open(network, dataDir)
 	if err != nil {

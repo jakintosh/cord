@@ -10,21 +10,21 @@ import (
 )
 
 type Peer struct {
-	PeerId    int64
-	CidrId    int64
-	Name      string
-	PublicKey wg.PublicKey
-	Cidr      *net.IPNet
-	Admin     bool
-	Redeemed  bool
-	Enabled   bool
+	PeerId    int64  `json:"peerId"`
+	CidrId    int64  `json:"cidrId"`
+	Name      string `json:"name"`
+	PublicKey string `json:"publicKey"`
+	Cidr      string `json:"cidr"`
+	Admin     bool   `json:"admin"`
+	Redeemed  bool   `json:"redeemed"`
+	Disabled  bool   `json:"disabled"`
 }
 
 func (p *Peer) String() string {
 	return fmt.Sprintf(
 		"%s | %s | %s",
-		p.PublicKey.String(),
-		p.Cidr.String(),
+		p.PublicKey,
+		p.Cidr,
 		p.Name,
 	)
 }
@@ -69,7 +69,7 @@ func (ctx *Context) CreatePeer(
 
 	peerConfig := &wg.PeerConfig{
 		Name:       name,
-		Ip:         ip,
+		Cidr:       cidr,
 		PrivateKey: privKey,
 	}
 
@@ -181,7 +181,7 @@ func (ctx *Context) GetChildPeersForCidrId(
 	[]Peer,
 	error,
 ) {
-	// find all child peers for given cidr id
+	// find all (redeemed) child peers for given cidr id
 	rows, err := ctx.Db.Query(`
 		SELECT p.id, c.id, c.name, p.public_key, c.cidr, p.admin, p.redeemed, p.disabled
 		FROM cidr c
@@ -191,7 +191,9 @@ func (ctx *Context) GetChildPeersForCidrId(
 			WHERE c.id=?
 		) AS parent
 		JOIN peer p ON p.cidr=c.id
-		WHERE c.length=parent.length
+		WHERE p.redeemed=1
+			AND p.disabled=0
+			AND c.length=parent.length
 			AND c.length=c.prefix
 			AND c.prefix>parent.prefix
 			AND c.base>=parent.base
@@ -208,36 +210,18 @@ func (ctx *Context) GetChildPeersForCidrId(
 	var peers []Peer
 	for rows.Next() {
 		var peer Peer
-		var pubKeyString string
-		var cidrString string
 		err := rows.Scan(
 			&peer.PeerId,
 			&peer.CidrId,
 			&peer.Name,
-			&pubKeyString,
-			&cidrString,
+			&peer.PublicKey,
+			&peer.Cidr,
 			&peer.Admin,
 			&peer.Redeemed,
-			&peer.Enabled,
+			&peer.Disabled,
 		)
 		if err != nil {
 			return nil, db.CheckSqliteErr("scanning peer info", err)
-		}
-
-		_, peer.Cidr, err = net.ParseCIDR(cidrString)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"failed to parse cidr (%s) for peer '%s': %w",
-				cidrString, peer.Name, err,
-			)
-		}
-
-		peer.PublicKey, err = wg.ParsePubKey(pubKeyString)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"failed to parse pubkey (%s) for peer '%s': %w",
-				pubKeyString, peer.Name, err,
-			)
 		}
 
 		peers = append(peers, peer)

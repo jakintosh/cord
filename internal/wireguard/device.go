@@ -2,12 +2,51 @@ package wireguard
 
 import (
 	"fmt"
+	"io"
 	"net"
 
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
+
+type DeviceConfig struct {
+	PrivateKey PrivateKey
+	Cidr       *net.IPNet
+	ListenPort uint16
+}
+
+func NewDeviceConfig(
+	privateKey PrivateKey,
+	networkCidr *net.IPNet,
+	address net.IP,
+	port uint16,
+) (*DeviceConfig, error) {
+	if !networkCidr.Contains(address) {
+		return nil, fmt.Errorf(
+			"address '%s' is not within cidr '%s'",
+			address.String(), networkCidr.String(),
+		)
+	}
+	return &DeviceConfig{
+		PrivateKey: privateKey,
+		Cidr: &net.IPNet{
+			IP:   address,
+			Mask: networkCidr.Mask,
+		},
+		ListenPort: port,
+	}, nil
+}
+
+func (c *DeviceConfig) Write(
+	w io.Writer,
+) error {
+	_, err := fmt.Fprintf(w,
+		"private-key=%s\ncidr=%s\nlisten-port=%d\n",
+		c.PrivateKey, c.Cidr, c.ListenPort,
+	)
+	return err
+}
 
 func listDevices() {
 	client, err := wgctrl.New()
@@ -74,12 +113,7 @@ func createDevice(ifname string, ip string) {
 	cfg := wgtypes.Config{
 		PrivateKey: &key,
 		ListenPort: &port,
-		Peers: []wgtypes.PeerConfig{
-			{
-				PublicKey:  key.PublicKey(), // Replace with actual public key
-				AllowedIPs: []net.IPNet{{IP: net.IPv4(0, 0, 0, 0), Mask: net.CIDRMask(0, 32)}},
-			},
-		},
+		Peers:      []wgtypes.PeerConfig{},
 	}
 
 	err = client.ConfigureDevice(ifname, cfg)

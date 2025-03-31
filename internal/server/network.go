@@ -3,6 +3,8 @@ package server
 import (
 	"fmt"
 	"net"
+	"os"
+	"path"
 
 	db "git.sr.ht/~jakintosh/innernet-go/internal/database"
 	"git.sr.ht/~jakintosh/innernet-go/internal/utils"
@@ -18,6 +20,14 @@ func (ctx *Context) CreateNetwork(
 		return fmt.Errorf("failed to validate network name: %w", err)
 	}
 
+	// make sure we get file handle before we do all the db work
+	fileName := ctx.Name + ".toml"
+	savePath := path.Join(ctx.ConfigDir, fileName)
+	cfgFile, err := os.Create(savePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file '%s': %w", savePath, err)
+	}
+
 	if err := initServerDb(ctx.Db); err != nil {
 		return fmt.Errorf("failed to init database: %w", err)
 	}
@@ -27,7 +37,7 @@ func (ctx *Context) CreateNetwork(
 	}
 
 	serverIp := utils.GetFirstAssignableIpFromCidr(cidr)
-	pubKey, peerConfig, err := ctx.CreatePeer("innernet-server", serverIp, true, 0)
+	pubKey, peerCfg, err := ctx.CreatePeer("innernet-server", serverIp, true, 0)
 	if err != nil {
 		return fmt.Errorf("failed to add server peer: %w", err)
 	}
@@ -36,7 +46,12 @@ func (ctx *Context) CreateNetwork(
 		return fmt.Errorf("failed to redeem server peer: %w", err)
 	}
 
-	fmt.Printf("install %+v\n", peerConfig)
+	// TODO: also write out the server config file here
+
+	err = peerCfg.WriteConfig(cfgFile)
+	if err != nil {
+		return fmt.Errorf("failed to write config: %w", err)
+	}
 
 	return nil
 }

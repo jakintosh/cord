@@ -12,16 +12,16 @@ import (
 
 type PeerConfig struct {
 	Name       string
-	Ip         net.IP
+	Cidr       *net.IPNet
 	PrivateKey PrivateKey
 }
 
-func (c *PeerConfig) Write(
+func (c *PeerConfig) WriteConfig(
 	w io.Writer,
 ) error {
 	_, err := fmt.Fprintf(w,
-		"[Peer]\nname=%s\nip=%s\nprivateKey=%s",
-		c.Name, c.Ip.String(), c.PrivateKey.String(),
+		"[interface]\nnetwork-name=%s\naddress=%s\nprivate-key=%s\n\n[server]\npublic-key=%s\nexternal-endpoint=%s\ninternal-endpoint=%s",
+		c.Name, c.Cidr.String(), c.PrivateKey.String(), "pubkey", "ext-end", "int-end",
 	)
 	return err
 }

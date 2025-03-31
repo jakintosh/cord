@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -99,9 +100,12 @@ var getPeers = &cmd.Command{
 			return fmt.Errorf("failed to get peers for '%s': %w", peerName, err)
 		}
 
-		for i, peer := range peers {
-			fmt.Printf("%d: %s\n", i, peer.String())
+		jsonBytes, err := json.Marshal(peers)
+		if err != nil {
+			return fmt.Errorf("failed to marshal []server.Peer to json: %w", err)
 		}
+
+		fmt.Println(string(jsonBytes))
 
 		return nil
 	},
@@ -509,7 +513,7 @@ var addPeer = &cmd.Command{
 			return fmt.Errorf("failed to create peer: %w", err)
 		}
 
-		err = peerConfig.Write(inviteFile)
+		err = peerConfig.WriteConfig(inviteFile)
 		if err != nil {
 			return fmt.Errorf("failed to write invite: %w", err)
 		}
@@ -827,6 +831,66 @@ var deleteAssociation = &cmd.Command{
 //   => /admin/associations
 //   => /admin/cidrs
 //   => /admin/peers
+//
+// The server maintains a sqlite database of "network rules", but at the
+// end of the day these just get turned into a list of wireguard peers
+// that each client can add to their wg interface. That means that the
+// server should really not be concerned with wireguard interfaces at
+// all. The only networking role it has is to serve the HTTP API on an
+// internal address, and to initialize the server's "peer" address and
+// listening port.
+//
+// On network init, the server initializes its "peer" info, which is
+// its external endpoint and internal endpoint. OG innernet treats the
+// server as almost a "static peer", in that it doesn't follow the
+// convention of a normal peer, and is basically "shipped" with the
+// network. Do I want to keep this? Actually, yes, until I reconsider a
+// p2p version. So server needs to share public key, allowed ip, and
+// endpoint. There's the wireguard endpoint, which is public ip and
+// public UDP listening port. This is for other peers to join wg network.
+// The internal endpoint is for peers to talk to the API once on the
+// innernet. The server also needs information for creating the wg
+// interface, which is net name, peer CIDR, and private key. So in total,
+// the server gets created, chooses a name, a stable external endpoint,
+// a stable internal endpoint, and generates a public and private key.
+//
+// Client
+//
+// The client, on the other hand, has a different job. It just polls the
+// server for peer information, updates its list of valid peers, and
+// updates its wireguard interface to match. It also phones home to the
+// server to report the external endpoint it sees for peers. Perhaps for
+// peers that are not connected, the client will poll somewhat more
+// frequently just for that peer's endpoint.
+//
+// So I think the client should maintain its own sqlite db for peer info,
+// and then be able to generate a full wg interface from that db. It
+// should have a .conf file that describes the client peer and server
+// peer, and then generates the rest of the network peers via the sqlite
+// db. /etc/innernet/{interface}.conf and /var/lib/innernet/{interface}.db
+// are what the client binary manages.
+//
+// There's also the server as a unique case for the "client" to manage.
+// Should the server binary handle wg manipulation itself, or expect the
+// user to just run the normal client binary for network manipulation?
+// It would be great, logically, to keep those separate. But why might
+// that be a bad idea? Are there special things that the server peer
+// shouldn't be able to do that the client binary would let other peers
+// do? Things like setting a specific endpoint? I don't really see any
+// issues off hand. So, the server binary should also be responsible for
+// creating the /etc/innernet/{interface}.conf file in lieu of the client
+// managing the "install" of that peer? Perhaps it can call into the
+// client.Install() function, we'll see. Maybe the client binary can have
+// come kind of server-aware set up?
+//
+//
+// Wireguard
+//
+// A wireguard interface consists of a "device" definition, which is the
+// local machine's private key, listening port, and "internal" ip/netmask.
+//
+// A wireguard peer consists of the peer's public key, external endpoint,
+// and "allowed ips" (cidr).
 
 func parseCidr(value string) (*net.IPNet, error) {
 	_, cidr, err := net.ParseCIDR(value)
