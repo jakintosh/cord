@@ -11,7 +11,7 @@ func ValidateHostName(name string) error {
 		if !((c >= 0x30 && c <= 0x39) || // numbers
 			(c >= 0x41 && c <= 0x5A) || // uppercase letters
 			(c >= 0x61 && c <= 0x7A) || // lowercase letters
-			c == 0x2D) { // hyphen
+			c == 0x2D || c == 0x2E) { // hyphen, period
 			return fmt.Errorf("invalid network name: must only contain alphanumeric or hyphen characters")
 		}
 	}
