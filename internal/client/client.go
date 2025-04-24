@@ -95,6 +95,87 @@ func ShowAll(configDir string, dataDir string) error {
 // have a connection right now. Probably if we have any current
 // state that the server does not have, we should send that back
 // to the server.
+//
+// Bigger question, how can we keep a very large peer list in
+// sync? What's the smallest way I can send state? The current
+// state of a peer is its id and endpoint. If we compress, this
+// can be a u64 and a u256, for a total of 40B. Maybe I can
+// keep a canonical set of changes, which is like a "log" of
+// all the events that have occurred, and then peers can fetch
+// all events past their most recent event and then play them
+// back to get to the latest state?
+//
+// This means you could fetch a full state, which would be the
+// current state of the network plus the current revision, and
+// then to update you'd say "send me changes since this rev"
+// and then apply them and update your local revision. This
+// seems kind of cool. Only the server holds the revision list,
+// and the client just applies them. Maybe there's also a
+// version id and if there's a new version that's when you
+// could pull an entirely fresh state.
+//
+// This also means that the server can collapse the event log
+// to a simpler state if relevant, like multiple reports of
+// the same new endpoint.
+//
+// What are the other state events that exist? From the
+// perspective of a peer, basically nothing? We only care
+// about peers having seen endpoints, or being deleted. From a
+// security perspective, we actually don't really want each
+// peer to fully construct the event log, because a malicious
+// peer could get way more info than it needs.
+//
+// *Really*, the best case scenario would be one where a peer
+// is able to say here's my reference point, tell me the
+// minimal changes to update my state". A legal peer will
+// follow state change instructions, and a malicious peer will
+// get the bare minimum information to misuse. The question
+// becomes: how can the server efficiently process the delta
+// between two network states for any given peer? The key info
+// is that both CIDRs and Associations can change, so the
+// valid peers at one snapshot can change significantly over
+// time. What if CIDRs and Associations (oh, and peer enable?)
+// had an "effective" index, which was an int of the state
+// where it went into effect, and then we grab "highest index
+// for given resource under limit"?
+//
+// Okay what would this look like: I'm a peer with a network
+// state index of 100. I query the server for my new state by
+// sending along that index. The server looks in the database
+// using that index to find the peer and parent cidrs for the
+// peer. What's important here is that we can't just "delete"
+// things from the database now, we'd need to have a physical
+// entry in the CIDR table that says whether that CIDR is still
+// real, because otherwise we'll pick up old state from when it
+// was valid. So the state database would now be growing
+// forever, when cidr/assoc/peer are added or changed. Sure.
+// So, we use this index to filter the last valid states at
+// that point in time, and can construct a state table from
+// that. Then we can do the same for the very latest state, and
+// calculate a delta between the two tables.
+//
+// What can I do to make this easier? It would be great to be
+// able to do all of the work inside SQL as easily as possible,
+// so if there's anything I can do to make "deltas" easier to
+// calculate that would be optimal. Again, all I *really* care
+// about is which peers are valid for me. I just need to know
+// if I should forget a peer I used to know, or learn about a
+// new peer entirely. Given the index, I should get back a list
+// of "added, deleted" peers. So when doing all the SQL, I
+// don't actually care about figuring out deltas of anything
+// but peers. The delta would be a FULL JOIN on the pre/post
+// state table, ONLY B means added, if A + B exist we grab
+// anything where state has changed which would be 'disabled'
+// and 'name'. In that case, we just send over the B value.
+//
+// Okay so where did we end up? A new model for making network
+// changes using a 'state_index' value that allows me to grab
+// the last state for a resource at a certain point in time.
+// Then I use that index to resolve a peer list at the index
+// and now, and figure out the delta of those peer lists. The
+// possible things that can happen is a totally new peer is
+// now existing, an existing peer had a state change, or an
+// existing peer is deleted.
 func (ctx *Context) Fetch() error {
 
 	fmt.Printf(
@@ -127,23 +208,38 @@ func (ctx *Context) Down() error {
 	return nil
 }
 
-// what's missing?
-//
-// how is the client scheduling its own local work? it needs to
-// be able to take a look at its wireguard config periodically
-// to detect if peers have new endpoints, and then send that to
-// the server if found. it might also want to be periodically
-// fetching updates from the server. maybe these should both
-// just be some kind of "sync" function? maybe not though,
-// because sending an endpoint has a much smaller expectation
-// for the server, but always asking for a full state dump from
-// the server. I should figure out some kind of way to sync
-// state between the clients and server without sending tons of
-// json, especially if there might be *large* networks. i'm
-// worried that now I'm thinking of adding more functionality,
-// like marking certain machines as static and transient....
-// maybe later.....
-//
-// anyway, maybe a Scan() function that checks the wg config
-// for new endpoints, and then a Sync() function that sends
-// that data to the server?
+// Begin a long running task that scans the wireguard interface
+// at some interval
+func (ctx *Context) Watch() error {
+
+	fmt.Printf(
+		"Down\nNetwork: %s\nConfig: %s\nData: %s\n",
+		ctx.Name, ctx.ConfigDir, ctx.DataDir,
+	)
+	return nil
+}
+
+// Scan the wireguard interface to detect any changes to peer
+// endpoints. Needs to keep track of the local state to compare
+// against.
+func (ctx *Context) Scan() error {
+
+	fmt.Printf(
+		"Down\nNetwork: %s\nConfig: %s\nData: %s\n",
+		ctx.Name, ctx.ConfigDir, ctx.DataDir,
+	)
+	return nil
+}
+
+// Send any locally known peer endpoint changes to the server.
+// Send a timestamp, and then get changes seen since the
+// timestamp? Some kind of way to not repeatedly get back
+// "renewed" sightings of stable endpoints.
+func (ctx *Context) Sync() error {
+
+	fmt.Printf(
+		"Down\nNetwork: %s\nConfig: %s\nData: %s\n",
+		ctx.Name, ctx.ConfigDir, ctx.DataDir,
+	)
+	return nil
+}

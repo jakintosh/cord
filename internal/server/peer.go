@@ -9,6 +9,13 @@ import (
 	wg "git.sr.ht/~jakintosh/innernet-go/internal/wireguard"
 )
 
+type PeerDesc struct {
+	Name    string
+	Ip      net.IP
+	Admin   bool
+	Expires int64
+}
+
 type Peer struct {
 	PeerId    int64  `json:"peerId"`
 	CidrId    int64  `json:"cidrId"`
@@ -120,7 +127,9 @@ func (ctx *Context) SetPeerEnabled(
 	_, err := ctx.Db.Exec(`
 		UPDATE peer
 		SET disabled=?2
-		WHERE name=?1;
+		FROM peer p
+		JOIN cidr c ON p.cidr=c.id
+		WHERE c.name=?1;
 		`,
 		peer,
 		!enabled,
@@ -128,27 +137,97 @@ func (ctx *Context) SetPeerEnabled(
 	return db.CheckSqliteErr("setting peer dis/enabled", err)
 }
 
-func (ctx *Context) GetPeersofPeerNamed(
+func (ctx *Context) CheckPeerExists(
+	peerName string,
+) bool {
+	row := ctx.Db.QueryRow(`
+			SELECT COUNT(*)
+			FROM peer p
+			JOIN cidr c ON p.cidr=c.id
+			WHERE c.name=?;
+			`,
+		peerName,
+	)
+
+	var count int64
+	if err := row.Scan(&count); err != nil {
+		return false
+	}
+
+	return count > 0
+}
+
+func (ctx *Context) GetParentCidrIdForPeerNamed(
+	peerName string,
+) (
+	int64,
+	error,
+) {
+	// query the parent cidr id given the peer name
+	row := ctx.Db.QueryRow(`
+		SELECT parent.id
+		FROM cidr parent
+		INNER JOIN (
+			SELECT c.id, c.length, c.prefix, c.base
+			FROM peer p
+			JOIN cidr c
+			ON c.id=p.cidr
+			WHERE c.name=?
+		) as client
+		WHERE parent.length=client.length
+			AND parent.base<=client.base
+			AND client.base<parent.last
+			AND parent.prefix<client.prefix
+			ORDER BY parent.prefix DESC
+		LIMIT 1;
+		`,
+		peerName,
+	)
+
+	// scan the parent cidr id
+	var parentCidrId int64
+	if err := row.Scan(&parentCidrId); err != nil {
+		return -1, db.CheckSqliteErr("getting parent cidrs", err)
+	}
+	return parentCidrId, nil
+}
+
+func (ctx *Context) GetAssociatedCidrIdsOfPeerNamed(
+	peerName string,
+) (
+	[]int64,
+	error,
+) {
+	parentCidrId, err := ctx.GetParentCidrIdForPeerNamed(peerName)
+	if err != nil {
+		return nil, err
+	}
+
+	associatedCidrIds, err := ctx.GetAssociatedCidrIdsForCidrId(parentCidrId)
+	if err != nil {
+		return nil, err
+	}
+
+	// build list of all associated cidr ids
+	cidrs := []int64{parentCidrId}
+	cidrs = append(cidrs, associatedCidrIds...)
+
+	return cidrs, nil
+}
+
+func (ctx *Context) GetPeersOfPeerNamed(
 	peerName string,
 ) (
 	[]Peer,
 	error,
 ) {
-
-	peerCidrId, parentCidrId, err := ctx.getPeerAndParentCidrIdsForPeerNamed(peerName)
+	// get associated cidrs
+	cidrs, err := ctx.GetAssociatedCidrIdsOfPeerNamed(peerName)
 	if err != nil {
 		return nil, err
 	}
 
-	associatedCidrIds, err := ctx.getAssociatedCidrIdsForCidrId(parentCidrId)
-	if err != nil {
-		return nil, err
-	}
-
-	cidrs := []int64{parentCidrId}
-	cidrs = append(cidrs, associatedCidrIds...)
-
-	// get all peers for each "parent" cidr
+	// get all peers for each associated cidr
 	peerMap := make(map[Peer]struct{})
 	for _, cidrId := range cidrs {
 
@@ -158,9 +237,10 @@ func (ctx *Context) GetPeersofPeerNamed(
 		}
 
 		for _, peer := range cidrPeers {
-			if peer.CidrId != peerCidrId {
-				peerMap[peer] = struct{}{}
+			if peer.Name == peerName {
+				continue // do not include the original peer
 			}
+			peerMap[peer] = struct{}{}
 		}
 	}
 

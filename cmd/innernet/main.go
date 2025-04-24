@@ -249,6 +249,7 @@ var server = &cmd.Command{
 	Subcommands: []*cmd.Command{
 		peer,
 		cidr,
+		association,
 	},
 	Operands: []cmd.Operand{},
 	Options:  []cmd.Option{},
@@ -384,6 +385,49 @@ var deleteCidr = &cmd.Command{
 	Handler: func(*cmd.Input) error {
 
 		fmt.Printf("DELETE http://innernet-server:port/api/v1/admin/cidr\n")
+		return nil
+	},
+}
+
+var association = &cmd.Command{
+	Name:    "association",
+	Author:  AUTHOR,
+	Version: VERSION,
+	Help:    "manage associations",
+	Subcommands: []*cmd.Command{
+		addAssociation,
+		deleteAssociation,
+	},
+	Operands: []cmd.Operand{},
+	Options:  []cmd.Option{},
+}
+
+var addAssociation = &cmd.Command{
+	Name:        "add",
+	Author:      AUTHOR,
+	Version:     VERSION,
+	Help:        "create a association",
+	Subcommands: []*cmd.Command{},
+	Operands:    []cmd.Operand{},
+	Options:     []cmd.Option{},
+	Handler: func(*cmd.Input) error {
+
+		fmt.Printf("POST http://innernet-server:port/api/v1/admin/association\n")
+		return nil
+	},
+}
+
+var deleteAssociation = &cmd.Command{
+	Name:        "delete",
+	Author:      AUTHOR,
+	Version:     VERSION,
+	Help:        "delete a association",
+	Subcommands: []*cmd.Command{},
+	Operands:    []cmd.Operand{},
+	Options:     []cmd.Option{},
+	Handler: func(*cmd.Input) error {
+
+		fmt.Printf("DELETE http://innernet-server:port/api/v1/admin/association\n")
 		return nil
 	},
 }

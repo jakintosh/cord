@@ -1,7 +1,10 @@
-build-client:
+all: client server
+
+client:
 	go build -o ./bin/innernet ./cmd/innernet
 
-build-server:
+server:
 	go build -o ./bin/innernet-server ./cmd/innernet-server
 
-all: build-client build-server
+test:
+	go test ./...

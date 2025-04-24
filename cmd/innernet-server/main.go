@@ -90,12 +90,12 @@ var getPeers = &cmd.Command{
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
 		// create app context
-		ctx, err := server.NewContext(network, configDir, dataDir)
+		ctx, err := server.NewFsContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		peers, err := ctx.GetPeersofPeerNamed(peerName)
+		peers, err := ctx.GetPeersOfPeerNamed(peerName)
 		if err != nil {
 			return fmt.Errorf("failed to get peers for '%s': %w", peerName, err)
 		}
@@ -162,7 +162,7 @@ var serve = &cmd.Command{
 		}
 
 		// create app context
-		ctx, err := server.NewContext(network, configDir, dataDir)
+		ctx, err := server.NewFsContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -230,7 +230,7 @@ var addNetwork = &cmd.Command{
 		}
 
 		// create app context
-		ctx, err := server.NewContext(network, configDir, dataDir)
+		ctx, err := server.NewFsContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -267,7 +267,7 @@ var deleteNetwork = &cmd.Command{
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
 		// create app context
-		ctx, err := server.NewContext(network, configDir, dataDir)
+		ctx, err := server.NewFsContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -320,7 +320,7 @@ var addCidr = &cmd.Command{
 		}
 
 		// create app context
-		ctx, err := server.NewContext(network, configDir, dataDir)
+		ctx, err := server.NewFsContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -367,7 +367,7 @@ var renameCidr = &cmd.Command{
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
 		// create app context
-		ctx, err := server.NewContext(network, configDir, dataDir)
+		ctx, err := server.NewFsContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -409,7 +409,7 @@ var deleteCidr = &cmd.Command{
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
 		// create app context
-		ctx, err := server.NewContext(network, configDir, dataDir)
+		ctx, err := server.NewFsContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -498,7 +498,7 @@ var addPeer = &cmd.Command{
 			return fmt.Errorf("failed to open file '%s': %w", savePath, err)
 		}
 
-		ctx, err := server.NewContext(network, configDir, dataDir)
+		ctx, err := server.NewFsContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -555,7 +555,7 @@ var renamePeer = &cmd.Command{
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
 		// create app context
-		ctx, err := server.NewContext(network, configDir, dataDir)
+		ctx, err := server.NewFsContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -597,7 +597,7 @@ var enablePeer = &cmd.Command{
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
 		// create app context
-		ctx, err := server.NewContext(network, configDir, dataDir)
+		ctx, err := server.NewFsContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -639,7 +639,7 @@ var disablePeer = &cmd.Command{
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
 		// create app context
-		ctx, err := server.NewContext(network, configDir, dataDir)
+		ctx, err := server.NewFsContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -686,7 +686,7 @@ var addAssociation = &cmd.Command{
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
 		// create app context
-		ctx, err := server.NewContext(network, configDir, dataDir)
+		ctx, err := server.NewFsContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -733,7 +733,7 @@ var deleteAssociation = &cmd.Command{
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
 		// create app context
-		ctx, err := server.NewContext(network, configDir, dataDir)
+		ctx, err := server.NewFsContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}

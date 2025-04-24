@@ -13,10 +13,19 @@ import (
 func Open(
 	name string,
 	dataPath string,
-) (*sql.DB, error) {
+) (
+	*sql.DB,
+	error,
+) {
 
-	os.MkdirAll(dataPath, os.ModePerm)
-	dbPath := GetPath(name, dataPath)
+	var dbPath string
+	if dataPath == ":memory:" {
+		dbPath = ":memory:"
+	} else {
+		os.MkdirAll(dataPath, os.ModePerm)
+		dbPath = GetPath(name, dataPath)
+	}
+
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open to database: %w\n", err)
@@ -79,7 +88,7 @@ func ResultsEmpty(
 }
 
 func CheckSqliteErr(
-	action string,
+	context string,
 	err error,
 ) error {
 
@@ -89,14 +98,14 @@ func CheckSqliteErr(
 
 	if sqliteErr, ok := err.(*sqlite.Error); ok {
 		if sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return fmt.Errorf("Unique constraint violation while %s", action)
+			return fmt.Errorf("Unique constraint violation while %s", context)
 		} else {
 			return fmt.Errorf(
 				"SQLite error (%d) while %s: %s",
-				sqliteErr.Code(), action, sqliteErr.Error(),
+				sqliteErr.Code(), context, sqliteErr.Error(),
 			)
 		}
 	} else {
-		return fmt.Errorf("other database error while %s: %w", action, err)
+		return fmt.Errorf("other database error while %s: %w", context, err)
 	}
 }

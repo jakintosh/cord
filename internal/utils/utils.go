@@ -49,10 +49,15 @@ func GetIpRangeFromCidr(cidr *net.IPNet) (net.IP, net.IP) {
 // a 'peer CIDR' is just a fully masked CIDR that represents one IP
 // address, but in CIDR notation. in practice: x.x.x.x/32 or xxxx::/128
 func GetPeerCidrFromIp(ip net.IP) *net.IPNet {
-	ipBits := len(ip) * 8
-	fullMask := net.CIDRMask(ipBits, ipBits)
-	return &net.IPNet{
-		IP:   ip,
-		Mask: fullMask,
+	if v4 := ip.To4(); v4 != nil {
+		return &net.IPNet{
+			IP:   v4,
+			Mask: net.CIDRMask(32, 32),
+		}
+	} else {
+		return &net.IPNet{
+			IP:   ip,
+			Mask: net.CIDRMask(256, 256),
+		}
 	}
 }

@@ -41,7 +41,7 @@ func (ctx *Context) DeleteAssociation(
 	return db.CheckSqliteErr("deleting association", err)
 }
 
-func (ctx *Context) getAssociatedCidrIdsForCidrId(
+func (ctx *Context) GetAssociatedCidrIdsForCidrId(
 	baseCidrId int64,
 ) (
 	[]int64,

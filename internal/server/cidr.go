@@ -8,6 +8,11 @@ import (
 	"git.sr.ht/~jakintosh/innernet-go/internal/utils"
 )
 
+type CidrDesc struct {
+	Name string
+	Cidr string
+}
+
 func (ctx *Context) CreateCidr(
 	name string,
 	cidr *net.IPNet,
@@ -60,6 +65,9 @@ func (ctx *Context) RenameCidr(
 ) error {
 
 	// TODO: what if you call rename CIDR on a Peer cidr?
+	// 		 probably need to check, because that is prob not intended
+	// 		 however, right now, RenamePeer points to this func, so more
+	// 			work is needed before changing
 
 	_, err := ctx.Db.Exec(`
 		UPDATE cidr
@@ -82,41 +90,4 @@ func (ctx *Context) DeleteCidr(
 		cidr,
 	)
 	return db.CheckSqliteErr("deleting cidr", err)
-}
-
-func (ctx *Context) getPeerAndParentCidrIdsForPeerNamed(
-	peerName string,
-) (
-	int64,
-	int64,
-	error,
-) {
-	// query the peer and parent cidr ids given the peer name
-	row := ctx.Db.QueryRow(`
-		SELECT client.id as client, parent.id as parent
-		FROM cidr parent
-		INNER JOIN (
-			SELECT c.id, c.length, c.prefix, c.base 
-			FROM peer p
-			JOIN cidr c
-			ON c.id=p.cidr
-			WHERE c.name=?
-		) as client
-		WHERE parent.length=client.length
-			AND parent.base<=client.base
-			AND client.base<parent.last
-			AND parent.prefix<client.prefix
-			ORDER BY parent.prefix DESC
-		LIMIT 1;
-		`,
-		peerName,
-	)
-
-	// scan the peer and parent cidr ids
-	var peerCidrId int64
-	var parentCidrId int64
-	if err := row.Scan(&peerCidrId, &parentCidrId); err != nil {
-		return -1, -1, db.CheckSqliteErr("getting peer and parent cidrs", err)
-	}
-	return peerCidrId, parentCidrId, nil
 }
