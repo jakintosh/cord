@@ -33,12 +33,7 @@ var root = &cmd.Command{
 		down,
 		server,
 	},
-	Operands: []cmd.Operand{
-		{
-			Name: "network",
-			Help: "name of innernet",
-		},
-	},
+	Operands: []cmd.Operand{},
 	Options: []cmd.Option{
 		{
 			Short: 0,
@@ -61,24 +56,29 @@ var install = &cmd.Command{
 	Version:     VERSION,
 	Help:        "redeem and install an innernet peer invite",
 	Subcommands: []*cmd.Command{},
-	Operands:    []cmd.Operand{},
-	Options:     []cmd.Option{},
+	Operands: []cmd.Operand{
+		{
+			Name: "invite",
+			Help: "the invite file for an innernet network",
+		},
+	},
+	Options: []cmd.Option{},
 	Handler: func(i *cmd.Input) error {
 
 		//operands
-		network := i.GetOperand("network")
+		invite := i.GetOperand("invite")
 
 		// options
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
 		// create app context
-		ctx, err := client.NewContext(network, configDir, dataDir)
+		ctx, err := client.NewContext("", configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		if err := ctx.Install(); err != nil {
+		if err := ctx.Install(invite); err != nil {
 			return fmt.Errorf("failed to install: %w", err)
 		}
 
@@ -92,8 +92,13 @@ var uninstall = &cmd.Command{
 	Version:     VERSION,
 	Help:        "uninstall an innernet network",
 	Subcommands: []*cmd.Command{},
-	Operands:    []cmd.Operand{},
-	Options:     []cmd.Option{},
+	Operands: []cmd.Operand{
+		{
+			Name: "network",
+			Help: "name of innernet",
+		},
+	},
+	Options: []cmd.Option{},
 	Handler: func(i *cmd.Input) error {
 
 		// operands
@@ -124,15 +129,20 @@ var show = &cmd.Command{
 	Help:        "show information for innernet networks",
 	Subcommands: []*cmd.Command{},
 	Operands:    []cmd.Operand{},
-	Options:     []cmd.Option{},
+	Options: []cmd.Option{
+		{
+			Short: 'n',
+			Long:  "network",
+			Type:  cmd.OptionTypeParameter,
+			Help:  "the network to show information for",
+		},
+	},
 	Handler: func(i *cmd.Input) error {
-
-		// operands
-		network := i.GetOperand("network")
 
 		// options
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		network := i.GetParameterOr("network", "")
 
 		// create app context
 		ctx, err := client.NewContext(network, configDir, dataDir)
@@ -154,8 +164,13 @@ var fetch = &cmd.Command{
 	Version:     VERSION,
 	Help:        "update innernet state from the server",
 	Subcommands: []*cmd.Command{},
-	Operands:    []cmd.Operand{},
-	Options:     []cmd.Option{},
+	Operands: []cmd.Operand{
+		{
+			Name: "network",
+			Help: "name of innernet",
+		},
+	},
+	Options: []cmd.Option{},
 	Handler: func(i *cmd.Input) error {
 
 		// operands
@@ -185,8 +200,13 @@ var up = &cmd.Command{
 	Version:     VERSION,
 	Help:        "enable the wireguard interface for an innernet",
 	Subcommands: []*cmd.Command{},
-	Operands:    []cmd.Operand{},
-	Options:     []cmd.Option{},
+	Operands: []cmd.Operand{
+		{
+			Name: "network",
+			Help: "name of innernet",
+		},
+	},
+	Options: []cmd.Option{},
 	Handler: func(i *cmd.Input) error {
 
 		// operands
@@ -216,8 +236,13 @@ var down = &cmd.Command{
 	Version:     VERSION,
 	Help:        "disable the wireguard interface for an innernet",
 	Subcommands: []*cmd.Command{},
-	Operands:    []cmd.Operand{},
-	Options:     []cmd.Option{},
+	Operands: []cmd.Operand{
+		{
+			Name: "network",
+			Help: "name of innernet",
+		},
+	},
+	Options: []cmd.Option{},
 	Handler: func(i *cmd.Input) error {
 
 		// operands
@@ -251,8 +276,13 @@ var server = &cmd.Command{
 		cidr,
 		association,
 	},
-	Operands: []cmd.Operand{},
-	Options:  []cmd.Option{},
+	Operands: []cmd.Operand{
+		{
+			Name: "network",
+			Help: "name of innernet",
+		},
+	},
+	Options: []cmd.Option{},
 }
 
 var peer = &cmd.Command{

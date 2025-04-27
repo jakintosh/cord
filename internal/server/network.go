@@ -42,18 +42,20 @@ func (ctx *Context) CreateNetwork(
 	}
 
 	serverIp := utils.GetFirstAssignableIpFromCidr(cidr)
-	pubKey, peerCfg, err := ctx.CreatePeer("innernet-server", serverIp, true, 0)
+	deviceCfg, peerCfg, err := ctx.CreatePeer("innernet-server", serverIp, true, 0)
 	if err != nil {
 		return fmt.Errorf("failed to add server peer: %w", err)
 	}
 
-	if err := ctx.RedeemPeer(pubKey.String(), pubKey.String()); err != nil {
+	pubKey := peerCfg.PublicKey.String()
+	if err := ctx.RedeemPeer(pubKey, pubKey); err != nil {
 		return fmt.Errorf("failed to redeem server peer: %w", err)
 	}
 
 	// TODO: also write out the server config file here
 
-	err = peerCfg.WriteConfig(cfgFile)
+	// TODO: what is this supposed to be doing here?
+	err = peerCfg.WriteInvite(cfgFile, deviceCfg)
 	if err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}

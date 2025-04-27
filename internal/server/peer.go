@@ -42,7 +42,7 @@ func (ctx *Context) CreatePeer(
 	admin bool,
 	inviteExpires int64,
 ) (
-	*wg.PublicKey,
+	*wg.DeviceConfig,
 	*wg.PeerConfig,
 	error,
 ) {
@@ -74,13 +74,19 @@ func (ctx *Context) CreatePeer(
 		return nil, nil, db.CheckSqliteErr("adding peer", err)
 	}
 
-	peerConfig := &wg.PeerConfig{
-		Name:       name,
-		Cidr:       cidr,
+	deviceConfig := &wg.DeviceConfig{
 		PrivateKey: privKey,
+		Cidr:       cidr,
+		ListenPort: 0,
 	}
 
-	return &pubKey, peerConfig, nil
+	peerConfig := &wg.PeerConfig{
+		Name:      name,
+		Cidr:      cidr,
+		PublicKey: pubKey,
+	}
+
+	return deviceConfig, peerConfig, nil
 }
 
 func (ctx *Context) RedeemPeer(

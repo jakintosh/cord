@@ -41,11 +41,13 @@ func NewContext(
 // server-peer. Installing effectively creates a new network overview
 // database with a single server peer in it. From there, this node
 // can "fetch" the rest of the state via that server-peer node.
-func (ctx *Context) Install() error {
+func (ctx *Context) Install(
+	invitePath string,
+) error {
 
 	fmt.Printf(
-		"Install\nNetwork: %s\nConfig: %s\nData: %s\n",
-		ctx.Name, ctx.ConfigDir, ctx.DataDir,
+		"Install\nInvite: %s\nNetwork: %s\nConfig: %s\nData: %s\n",
+		invitePath, ctx.Name, ctx.ConfigDir, ctx.DataDir,
 	)
 	return nil
 }
@@ -241,5 +243,42 @@ func (ctx *Context) Sync() error {
 		"Down\nNetwork: %s\nConfig: %s\nData: %s\n",
 		ctx.Name, ctx.ConfigDir, ctx.DataDir,
 	)
+	return nil
+}
+
+func initNetworkDb(d *sql.DB) error {
+
+	if err := db.EnableForeignKeys(d); err != nil {
+		return err
+	}
+
+	if err := db.InitTable(d, "peer", `
+		CREATE TABLE IF NOT EXISTS peer (
+			id					INTEGER PRIMARY KEY,
+			cidr				INTEGER NOT NULL,
+			public_key			TEXT NOT NULL UNIQUE,
+			admin				INTEGER DEFAULT 0 NOT NULL,
+			disabled			INTEGER DEFAULT 0 NOT NULL,
+			redeemed			INTEGER DEFAULT 0 NOT NULL,
+			invite_expires 		INTEGER,
+			FOREIGN KEY (cidr)
+				REFERENCES cidr (id)
+		);
+	`); err != nil {
+		return err
+	}
+
+	if err := db.InitTable(d, "endpoint", `
+		CREATE TABLE IF NOT EXISTS endpoint (
+			id					INTEGER PRIMARY KEY,
+			peer_ip				BLOB NOT NULL,
+			peer_key			TEXT NOT NULL,
+			endpoint			TEXT NOT NULL,
+			time				INTEGER NOT NULL
+		);
+	`); err != nil {
+		return err
+	}
+
 	return nil
 }

@@ -11,9 +11,9 @@ import (
 )
 
 type DeviceConfig struct {
-	PrivateKey PrivateKey
-	Cidr       *net.IPNet
-	ListenPort uint16
+	PrivateKey PrivateKey // wg private key
+	Cidr       *net.IPNet // internal ip / network mask
+	ListenPort uint16     // external listening port
 }
 
 func NewDeviceConfig(
@@ -21,7 +21,10 @@ func NewDeviceConfig(
 	networkCidr *net.IPNet,
 	address net.IP,
 	port uint16,
-) (*DeviceConfig, error) {
+) (
+	*DeviceConfig,
+	error,
+) {
 	if !networkCidr.Contains(address) {
 		return nil, fmt.Errorf(
 			"address '%s' is not within cidr '%s'",

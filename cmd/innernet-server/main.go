@@ -503,7 +503,7 @@ var addPeer = &cmd.Command{
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		_, peerConfig, err := ctx.CreatePeer(
+		deviceConfig, peerConfig, err := ctx.CreatePeer(
 			name,
 			ip,
 			admin,
@@ -513,7 +513,7 @@ var addPeer = &cmd.Command{
 			return fmt.Errorf("failed to create peer: %w", err)
 		}
 
-		err = peerConfig.WriteConfig(inviteFile)
+		err = peerConfig.WriteInvite(inviteFile, deviceConfig)
 		if err != nil {
 			return fmt.Errorf("failed to write invite: %w", err)
 		}
@@ -890,7 +890,7 @@ var deleteAssociation = &cmd.Command{
 // local machine's private key, listening port, and "internal" ip/netmask.
 //
 // A wireguard peer consists of the peer's public key, external endpoint,
-// and "allowed ips" (cidr).
+// and "allowed ips" (cidrs).
 
 func parseCidr(value string) (*net.IPNet, error) {
 	_, cidr, err := net.ParseCIDR(value)
