@@ -45,6 +45,22 @@ func (ctx *Context) Install(
 	invitePath string,
 ) error {
 
+	// create a database
+
+	// insert the basic wg interface information
+
+	// insert the server's peer information
+
+	// generate a new key pair
+
+	// redeem invite with server using new public key
+
+	// update interface with new public key
+
+	// 1. create a temporary interface with info in the invite
+	// 2. generate new key pair and redeem it on temp iface
+	// 3. then create permanent interface and fetch state
+
 	fmt.Printf(
 		"Install\nInvite: %s\nNetwork: %s\nConfig: %s\nData: %s\n",
 		invitePath, ctx.Name, ctx.ConfigDir, ctx.DataDir,
@@ -90,13 +106,13 @@ func ShowAll(configDir string, dataDir string) error {
 	return nil
 }
 
-// Polls the server for peer state, and updates the local view of
-// the network. This is really just fetching a list of peers which
-// each have a list of recently seen endpoints, so that we can add
-// (or remove) peers, and then try to contact them if we don't
-// have a connection right now. Probably if we have any current
-// state that the server does not have, we should send that back
-// to the server.
+// Polls the server for peer state, and updates the local view
+// of the network. This is really just fetching a list of peers
+// which each have a list of recently seen endpoints, so that
+// we can add (or remove) peers, and then try to contact them
+// if we don't have a connection right now. Probably if we have
+// any current state that the server does not have, we should
+// send that back to the server.
 //
 // Bigger question, how can we keep a very large peer list in
 // sync? What's the smallest way I can send state? The current
@@ -246,6 +262,9 @@ func (ctx *Context) Sync() error {
 	return nil
 }
 
+// When we install a new innernetwork, we need a database to
+// keep track of our locally known peer state, which is a log
+// of the peers we know about and the endpoints we've seen
 func initNetworkDb(d *sql.DB) error {
 
 	if err := db.EnableForeignKeys(d); err != nil {
