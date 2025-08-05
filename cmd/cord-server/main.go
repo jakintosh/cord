@@ -10,11 +10,11 @@ import (
 	"time"
 
 	cmd "git.sr.ht/~jakintosh/command-go"
-	"git.sr.ht/~jakintosh/innernet-go/internal/server"
+	"git.sr.ht/~jakintosh/cord/internal/server"
 )
 
 const (
-	BIN_NAME     = "innernet-server"
+	BIN_NAME     = "cord-server"
 	AUTHOR       = "jakintosh"
 	VERSION      = "0.1"
 	DEFAULT_CFG  = "/etc/" + BIN_NAME
@@ -29,7 +29,7 @@ var root = &cmd.Command{
 	Name:    BIN_NAME,
 	Author:  AUTHOR,
 	Version: VERSION,
-	Help:    "manage innernets",
+	Help:    "manage cords",
 	Subcommands: []*cmd.Command{
 		serve,
 		addNetwork,
@@ -71,7 +71,7 @@ var getPeers = &cmd.Command{
 	Operands: []cmd.Operand{
 		{
 			Name: "network",
-			Help: "name of the innernet network the server coordinates",
+			Help: "name of the cord network the server coordinates",
 		},
 		{
 			Name: "peer",
@@ -115,12 +115,12 @@ var serve = &cmd.Command{
 	Name:        "serve",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "serve an innernet coordination server",
+	Help:        "serve an cord coordination server",
 	Subcommands: []*cmd.Command{},
 	Operands: []cmd.Operand{
 		{
 			Name: "network",
-			Help: "name of the innernet network the server coordinates",
+			Help: "name of the cord network the server coordinates",
 		},
 	},
 	Options: []cmd.Option{
@@ -180,7 +180,7 @@ var addNetwork = &cmd.Command{
 	Name:        "add-network",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "create a new innernet",
+	Help:        "create a new cord",
 	Subcommands: []*cmd.Command{},
 	Operands: []cmd.Operand{
 		{
@@ -248,7 +248,7 @@ var deleteNetwork = &cmd.Command{
 	Name:        "delete-network",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "delete an existing innernet",
+	Help:        "delete an existing cord",
 	Subcommands: []*cmd.Command{},
 	Operands: []cmd.Operand{
 		{
@@ -776,7 +776,7 @@ var deleteAssociation = &cmd.Command{
 // in order for this network to actually exist, this data model of a server
 // needs to be translated into a wireguard configuration. the server needs
 // to be able to return all relevant network/peer information for a given
-// peer. from this, innernet can generate and stand up a wg interface.
+// peer. from this, cord can generate and stand up a wg interface.
 //
 // next, the admin creates an invite, which places a hold on an IP address
 // and is ready to handle a /redeem request. when a client goes to redeem
@@ -841,7 +841,7 @@ var deleteAssociation = &cmd.Command{
 // listening port.
 //
 // On network init, the server initializes its "peer" info, which is
-// its external endpoint and internal endpoint. OG innernet treats the
+// its external endpoint and internal endpoint. OG cord treats the
 // server as almost a "static peer", in that it doesn't follow the
 // convention of a normal peer, and is basically "shipped" with the
 // network. Do I want to keep this? Actually, yes, until I reconsider a
@@ -849,7 +849,7 @@ var deleteAssociation = &cmd.Command{
 // endpoint. There's the wireguard endpoint, which is public ip and
 // public UDP listening port. This is for other peers to join wg network.
 // The internal endpoint is for peers to talk to the API once on the
-// innernet. The server also needs information for creating the wg
+// cord. The server also needs information for creating the wg
 // interface, which is net name, peer CIDR, and private key. So in total,
 // the server gets created, chooses a name, a stable external endpoint,
 // a stable internal endpoint, and generates a public and private key.
@@ -867,7 +867,7 @@ var deleteAssociation = &cmd.Command{
 // and then be able to generate a full wg interface from that db. It
 // should have a .conf file that describes the client peer and server
 // peer, and then generates the rest of the network peers via the sqlite
-// db. /etc/innernet/{interface}.conf and /var/lib/innernet/{interface}.db
+// db. /etc/cord/{interface}.conf and /var/lib/cord/{interface}.db
 // are what the client binary manages.
 //
 // There's also the server as a unique case for the "client" to manage.
@@ -878,7 +878,7 @@ var deleteAssociation = &cmd.Command{
 // shouldn't be able to do that the client binary would let other peers
 // do? Things like setting a specific endpoint? I don't really see any
 // issues off hand. So, the server binary should also be responsible for
-// creating the /etc/innernet/{interface}.conf file in lieu of the client
+// creating the /etc/cord/{interface}.conf file in lieu of the client
 // managing the "install" of that peer? Perhaps it can call into the
 // client.Install() function, we'll see. Maybe the client binary can have
 // come kind of server-aware set up?

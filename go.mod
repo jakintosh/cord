@@ -1,4 +1,4 @@
-module git.sr.ht/~jakintosh/innernet-go
+module git.sr.ht/~jakintosh/cord
 
 go 1.24.1
 

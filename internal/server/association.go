@@ -1,7 +1,7 @@
 package server
 
 import (
-	db "git.sr.ht/~jakintosh/innernet-go/internal/database"
+	db "git.sr.ht/~jakintosh/cord/internal/database"
 )
 
 func (ctx *Context) CreateAssociation(

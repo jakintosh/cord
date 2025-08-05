@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"net"
 
-	db "git.sr.ht/~jakintosh/innernet-go/internal/database"
-	"git.sr.ht/~jakintosh/innernet-go/internal/utils"
-	wg "git.sr.ht/~jakintosh/innernet-go/internal/wireguard"
+	db "git.sr.ht/~jakintosh/cord/internal/database"
+	"git.sr.ht/~jakintosh/cord/internal/utils"
+	wg "git.sr.ht/~jakintosh/cord/internal/wireguard"
 )
 
 type PeerDesc struct {

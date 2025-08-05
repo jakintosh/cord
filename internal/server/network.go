@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net"
 
-	db "git.sr.ht/~jakintosh/innernet-go/internal/database"
-	"git.sr.ht/~jakintosh/innernet-go/internal/utils"
+	db "git.sr.ht/~jakintosh/cord/internal/database"
+	"git.sr.ht/~jakintosh/cord/internal/utils"
 )
 
 type NetworkDesc struct {
@@ -42,7 +42,7 @@ func (ctx *Context) CreateNetwork(
 	}
 
 	serverIp := utils.GetFirstAssignableIpFromCidr(cidr)
-	deviceCfg, peerCfg, err := ctx.CreatePeer("innernet-server", serverIp, true, 0)
+	deviceCfg, peerCfg, err := ctx.CreatePeer("cord-server", serverIp, true, 0)
 	if err != nil {
 		return fmt.Errorf("failed to add server peer: %w", err)
 	}
