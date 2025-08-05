@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	db "git.sr.ht/~jakintosh/innernet-go/internal/database"
+	db "git.sr.ht/~jakintosh/cord/internal/database"
 )
 
 type Data interface {

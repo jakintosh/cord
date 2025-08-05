@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net"
 
-	db "git.sr.ht/~jakintosh/innernet-go/internal/database"
-	"git.sr.ht/~jakintosh/innernet-go/internal/utils"
+	db "git.sr.ht/~jakintosh/cord/internal/database"
+	"git.sr.ht/~jakintosh/cord/internal/utils"
 )
 
 type CidrDesc struct {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	db "git.sr.ht/~jakintosh/innernet-go/internal/database"
+	db "git.sr.ht/~jakintosh/cord/internal/database"
 )
 
 type Context struct {
@@ -35,9 +35,9 @@ func NewContext(
 	}, nil
 }
 
-// Install consumes an invite and "creates" a new innernet on this
+// Install consumes an invite and "creates" a new cord on this
 // machine. The invite tells this machine the basic info for the
-// innernet definition, and also provides the peer info for the
+// cord definition, and also provides the peer info for the
 // server-peer. Installing effectively creates a new network overview
 // database with a single server peer in it. From there, this node
 // can "fetch" the rest of the state via that server-peer node.
@@ -81,10 +81,10 @@ func (ctx *Context) Uninstall() error {
 	return nil
 }
 
-// Show gives a report of the given innernet, or of all innernets
+// Show gives a report of the given cord, or of all cords
 // if no network is given. This means that maybe it can't take
 // a default context? This is not always an operation on a single
-// innernet. How to handle? Maybe a ShowAll from the command itself
+// cord. How to handle? Maybe a ShowAll from the command itself
 func (ctx *Context) Show() error {
 
 	fmt.Printf(
@@ -96,7 +96,7 @@ func (ctx *Context) Show() error {
 
 // After writing the last one, I decided that this needs to exist
 // as its own distinct function. It will probably call Show() in
-// a loop itself for all innernets.
+// a loop itself for all cords.
 func ShowAll(configDir string, dataDir string) error {
 
 	fmt.Printf(
@@ -204,7 +204,7 @@ func (ctx *Context) Fetch() error {
 }
 
 // Generate a wireguard interface based on the local state stored
-// for that innernet and then enable it. Should also try to fetch
+// for that cord and then enable it. Should also try to fetch
 // updated state from the server at the beginning, but should
 // probably continue pretty quickly if the server is down.
 func (ctx *Context) Up() error {
@@ -262,9 +262,9 @@ func (ctx *Context) Sync() error {
 	return nil
 }
 
-// When we install a new innernetwork, we need a database to
-// keep track of our locally known peer state, which is a log
-// of the peers we know about and the endpoints we've seen
+// When we install a new cord, we need a database to keep track
+// of our locally known peer state, which is a log of the peers
+// we know about and the endpoints we've seen
 func initNetworkDb(d *sql.DB) error {
 
 	if err := db.EnableForeignKeys(d); err != nil {

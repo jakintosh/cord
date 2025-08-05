@@ -22,8 +22,8 @@ var fleetCidr = CidrDesc{
 	Cidr: "10.0.128.0/17",
 }
 
-var innernetServerPeer = PeerDesc{
-	Name: "innernet-server",
+var cordServerPeer = PeerDesc{
+	Name: "cord-server",
 	Ip:   net.IPv4(10, 0, 0, 1),
 }
 var testServer = PeerDesc{
@@ -63,7 +63,7 @@ func TestPeerRedeem(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := expectPeerCount(ctx, innernetServerPeer, 0); err != nil {
+	if err := expectPeerCount(ctx, cordServerPeer, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -71,7 +71,7 @@ func TestPeerRedeem(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := expectPeerCount(ctx, innernetServerPeer, 1); err != nil {
+	if err := expectPeerCount(ctx, cordServerPeer, 1); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -87,7 +87,7 @@ func TestPeerEnable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := expectPeerCount(ctx, innernetServerPeer, 1); err != nil {
+	if err := expectPeerCount(ctx, cordServerPeer, 1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -95,7 +95,7 @@ func TestPeerEnable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := expectPeerCount(ctx, innernetServerPeer, 0); err != nil {
+	if err := expectPeerCount(ctx, cordServerPeer, 0); err != nil {
 		t.Fatal(err)
 	}
 }

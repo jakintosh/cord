@@ -4,11 +4,11 @@ import (
 	"fmt"
 
 	cmd "git.sr.ht/~jakintosh/command-go"
-	"git.sr.ht/~jakintosh/innernet-go/internal/client"
+	"git.sr.ht/~jakintosh/cord/internal/client"
 )
 
 const (
-	BIN_NAME     = "innernet"
+	BIN_NAME     = "cord"
 	AUTHOR       = "jakintosh"
 	VERSION      = "0.1"
 	DEFAULT_CFG  = "/etc/" + BIN_NAME
@@ -23,7 +23,7 @@ var root = &cmd.Command{
 	Name:    BIN_NAME,
 	Author:  AUTHOR,
 	Version: VERSION,
-	Help:    "map innernets to wireguard interfaces",
+	Help:    "map cords to wireguard interfaces",
 	Subcommands: []*cmd.Command{
 		install,
 		uninstall,
@@ -54,12 +54,12 @@ var install = &cmd.Command{
 	Name:        "install",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "redeem and install an innernet peer invite",
+	Help:        "redeem and install a cord peer invite",
 	Subcommands: []*cmd.Command{},
 	Operands: []cmd.Operand{
 		{
 			Name: "invite",
-			Help: "the invite file for an innernet network",
+			Help: "the invite file for a cord network",
 		},
 	},
 	Options: []cmd.Option{},
@@ -90,12 +90,12 @@ var uninstall = &cmd.Command{
 	Name:        "uninstall",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "uninstall an innernet network",
+	Help:        "uninstall a cord network",
 	Subcommands: []*cmd.Command{},
 	Operands: []cmd.Operand{
 		{
 			Name: "network",
-			Help: "name of innernet",
+			Help: "name of cord",
 		},
 	},
 	Options: []cmd.Option{},
@@ -126,7 +126,7 @@ var show = &cmd.Command{
 	Name:        "show",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "show information for innernet networks",
+	Help:        "show information for cord networks",
 	Subcommands: []*cmd.Command{},
 	Operands:    []cmd.Operand{},
 	Options: []cmd.Option{
@@ -162,12 +162,12 @@ var fetch = &cmd.Command{
 	Name:        "fetch",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "update innernet state from the server",
+	Help:        "update cord state from the server",
 	Subcommands: []*cmd.Command{},
 	Operands: []cmd.Operand{
 		{
 			Name: "network",
-			Help: "name of innernet",
+			Help: "name of cord",
 		},
 	},
 	Options: []cmd.Option{},
@@ -198,12 +198,12 @@ var up = &cmd.Command{
 	Name:        "up",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "enable the wireguard interface for an innernet",
+	Help:        "enable the wireguard interface for a cord",
 	Subcommands: []*cmd.Command{},
 	Operands: []cmd.Operand{
 		{
 			Name: "network",
-			Help: "name of innernet",
+			Help: "name of cord",
 		},
 	},
 	Options: []cmd.Option{},
@@ -234,12 +234,12 @@ var down = &cmd.Command{
 	Name:        "down",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "disable the wireguard interface for an innernet",
+	Help:        "disable the wireguard interface for a cord",
 	Subcommands: []*cmd.Command{},
 	Operands: []cmd.Operand{
 		{
 			Name: "network",
-			Help: "name of innernet",
+			Help: "name of cord",
 		},
 	},
 	Options: []cmd.Option{},
@@ -270,7 +270,7 @@ var server = &cmd.Command{
 	Name:    "server",
 	Author:  AUTHOR,
 	Version: VERSION,
-	Help:    "manage an innernet server over its HTTP API",
+	Help:    "manage a cord server over its HTTP API",
 	Subcommands: []*cmd.Command{
 		peer,
 		cidr,
@@ -279,7 +279,7 @@ var server = &cmd.Command{
 	Operands: []cmd.Operand{
 		{
 			Name: "network",
-			Help: "name of innernet",
+			Help: "name of cord",
 		},
 	},
 	Options: []cmd.Option{},
@@ -304,13 +304,13 @@ var addPeer = &cmd.Command{
 	Name:        "add",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "create a peer invite for an innernet",
+	Help:        "create a peer invite for a cord",
 	Subcommands: []*cmd.Command{},
 	Operands:    []cmd.Operand{},
 	Options:     []cmd.Option{},
 	Handler: func(*cmd.Input) error {
 
-		fmt.Printf("POST http://innernet-server:port/api/v1/admin/peer\n")
+		fmt.Printf("POST http://cord-server:port/api/v1/admin/peer\n")
 		return nil
 	},
 }
@@ -325,7 +325,7 @@ var renamePeer = &cmd.Command{
 	Options:     []cmd.Option{},
 	Handler: func(*cmd.Input) error {
 
-		fmt.Printf("PUT http://innernet-server:port/api/v1/admin/peer\n")
+		fmt.Printf("PUT http://cord-server:port/api/v1/admin/peer\n")
 		return nil
 	},
 }
@@ -340,7 +340,7 @@ var enablePeer = &cmd.Command{
 	Options:     []cmd.Option{},
 	Handler: func(*cmd.Input) error {
 
-		fmt.Printf("PUT http://innernet-server:port/api/v1/admin/peer\n")
+		fmt.Printf("PUT http://cord-server:port/api/v1/admin/peer\n")
 		return nil
 	},
 }
@@ -355,7 +355,7 @@ var disablePeer = &cmd.Command{
 	Options:     []cmd.Option{},
 	Handler: func(*cmd.Input) error {
 
-		fmt.Printf("PUT http://innernet-server:port/api/v1/admin/peer\n")
+		fmt.Printf("PUT http://cord-server:port/api/v1/admin/peer\n")
 		return nil
 	},
 }
@@ -384,7 +384,7 @@ var addCidr = &cmd.Command{
 	Options:     []cmd.Option{},
 	Handler: func(*cmd.Input) error {
 
-		fmt.Printf("POST http://innernet-server:port/api/v1/admin/cidr\n")
+		fmt.Printf("POST http://cord-server:port/api/v1/admin/cidr\n")
 		return nil
 	},
 }
@@ -399,7 +399,7 @@ var renameCidr = &cmd.Command{
 	Options:     []cmd.Option{},
 	Handler: func(*cmd.Input) error {
 
-		fmt.Printf("PUT http://innernet-server:port/api/v1/admin/cidr\n")
+		fmt.Printf("PUT http://cord-server:port/api/v1/admin/cidr\n")
 		return nil
 	},
 }
@@ -414,7 +414,7 @@ var deleteCidr = &cmd.Command{
 	Options:     []cmd.Option{},
 	Handler: func(*cmd.Input) error {
 
-		fmt.Printf("DELETE http://innernet-server:port/api/v1/admin/cidr\n")
+		fmt.Printf("DELETE http://cord-server:port/api/v1/admin/cidr\n")
 		return nil
 	},
 }
@@ -442,7 +442,7 @@ var addAssociation = &cmd.Command{
 	Options:     []cmd.Option{},
 	Handler: func(*cmd.Input) error {
 
-		fmt.Printf("POST http://innernet-server:port/api/v1/admin/association\n")
+		fmt.Printf("POST http://cord-server:port/api/v1/admin/association\n")
 		return nil
 	},
 }
@@ -457,7 +457,7 @@ var deleteAssociation = &cmd.Command{
 	Options:     []cmd.Option{},
 	Handler: func(*cmd.Input) error {
 
-		fmt.Printf("DELETE http://innernet-server:port/api/v1/admin/association\n")
+		fmt.Printf("DELETE http://cord-server:port/api/v1/admin/association\n")
 		return nil
 	},
 }
