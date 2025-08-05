@@ -115,7 +115,7 @@ var serve = &cmd.Command{
 	Name:        "serve",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "serve an cord coordination server",
+	Help:        "serve a cord coordination server",
 	Subcommands: []*cmd.Command{},
 	Operands: []cmd.Operand{
 		{
@@ -128,7 +128,7 @@ var serve = &cmd.Command{
 			Short: 0,
 			Long:  "no-routing",
 			Type:  cmd.OptionTypeFlag,
-			Help:  "tell Innernet not to handle routing",
+			Help:  "tell cord not to handle routing",
 		},
 		{
 			Short: 0,

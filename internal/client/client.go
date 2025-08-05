@@ -262,9 +262,9 @@ func (ctx *Context) Sync() error {
 	return nil
 }
 
-// When we install a new cordwork, we need a database to
-// keep track of our locally known peer state, which is a log
-// of the peers we know about and the endpoints we've seen
+// When we install a new cord, we need a database to keep track
+// of our locally known peer state, which is a log of the peers
+// we know about and the endpoints we've seen
 func initNetworkDb(d *sql.DB) error {
 
 	if err := db.EnableForeignKeys(d); err != nil {

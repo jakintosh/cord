@@ -3,7 +3,7 @@ module git.sr.ht/~jakintosh/cord
 go 1.24.1
 
 require (
-	git.sr.ht/~jakintosh/command-go v0.0.1
+	git.sr.ht/~jakintosh/command-go v0.0.4
 	github.com/vishvananda/netlink v1.3.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	modernc.org/sqlite v1.36.0

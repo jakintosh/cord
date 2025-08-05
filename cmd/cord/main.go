@@ -54,12 +54,12 @@ var install = &cmd.Command{
 	Name:        "install",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "redeem and install an cord peer invite",
+	Help:        "redeem and install a cord peer invite",
 	Subcommands: []*cmd.Command{},
 	Operands: []cmd.Operand{
 		{
 			Name: "invite",
-			Help: "the invite file for an cord network",
+			Help: "the invite file for a cord network",
 		},
 	},
 	Options: []cmd.Option{},
@@ -90,7 +90,7 @@ var uninstall = &cmd.Command{
 	Name:        "uninstall",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "uninstall an cord network",
+	Help:        "uninstall a cord network",
 	Subcommands: []*cmd.Command{},
 	Operands: []cmd.Operand{
 		{
@@ -198,7 +198,7 @@ var up = &cmd.Command{
 	Name:        "up",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "enable the wireguard interface for an cord",
+	Help:        "enable the wireguard interface for a cord",
 	Subcommands: []*cmd.Command{},
 	Operands: []cmd.Operand{
 		{
@@ -234,7 +234,7 @@ var down = &cmd.Command{
 	Name:        "down",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "disable the wireguard interface for an cord",
+	Help:        "disable the wireguard interface for a cord",
 	Subcommands: []*cmd.Command{},
 	Operands: []cmd.Operand{
 		{
@@ -270,7 +270,7 @@ var server = &cmd.Command{
 	Name:    "server",
 	Author:  AUTHOR,
 	Version: VERSION,
-	Help:    "manage an cord server over its HTTP API",
+	Help:    "manage a cord server over its HTTP API",
 	Subcommands: []*cmd.Command{
 		peer,
 		cidr,
@@ -304,7 +304,7 @@ var addPeer = &cmd.Command{
 	Name:        "add",
 	Author:      AUTHOR,
 	Version:     VERSION,
-	Help:        "create a peer invite for an cord",
+	Help:        "create a peer invite for a cord",
 	Subcommands: []*cmd.Command{},
 	Operands:    []cmd.Operand{},
 	Options:     []cmd.Option{},
