@@ -92,8 +92,3 @@ The code includes many TODOs and design notes outlining future work. Highlights 
 * Flesh out the client-side workflow for redeeming invites, polling state, managing WireGuard interfaces, and syncing endpoint sightings.
 * Add an HTTP API for server operations so the `cord` client can manage networks remotely.
 * Develop a state log and endpoint gossip mechanism for tracking peer endpoints and sharing updates efficiently.
-
-## Contributing
-
-This repository is in an exploratory state. Contributions that fill in missing functionality, improve documentation, or expand test coverage are welcome. Please run the tests before submitting patches and keep code portable and dependency-light.
-
