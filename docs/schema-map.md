@@ -20,24 +20,20 @@ CREATE TABLE IF NOT EXISTS association (
     cidr2               INTEGER NOT NULL,
     FOREIGN KEY (cidr1)
         REFERENCES cidr (id)
-        ON UPDATE RESTRICT,
+            ON UPDATE RESTRICT,
     FOREIGN KEY (cidr2)
         REFERENCES cidr (id)
-        ON UPDATE RESTRICT
+            ON UPDATE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS invite (
     id                  INTEGER PRIMARY KEY,
-    temporary_cidr      INTEGER NOT NULL,
-    permanent_cidr      INTEGER NOT NULL,
-    public_key          TEXT UNIQUE,                  /* SQLite only; only non-nulls unique */
-    expiration          INTEGER DEFAULT 0 NOT NULL,
+    token               TEXT NOT NULL UNIQUE,
+    peer_name           TEXT NOT NULL,
+    cidr                TEXT NOT NULL,
     admin               INTEGER DEFAULT 0 NOT NULL,
-    redeemed            INTEGER DEFAULT 0 NOT NULL,
-    FOREIGN KEY (permanent_cidr)
-        REFERENCES cidr (id),
-    FOREIGN KEY (temporary_ip)
-        REFERENCES invite_ip (ip)
+    expiration          INTEGER NOT NULL,
+    redeemed            INTEGER DEFAULT 0 NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS peer (
@@ -46,7 +42,6 @@ CREATE TABLE IF NOT EXISTS peer (
     public_key          TEXT NOT NULL UNIQUE,
     admin               INTEGER DEFAULT 0 NOT NULL,
     disabled            INTEGER DEFAULT 0 NOT NULL,
-    confirmed           INTEGER DEFAULT 0 NOT NULL,
     FOREIGN KEY (cidr)
         REFERENCES cidr (id)
 );
@@ -57,8 +52,7 @@ CREATE TABLE IF NOT EXISTS endpoint (
     peer_key            TEXT NOT NULL,
     endpoint            TEXT NOT NULL,
     time                INTEGER NOT NULL
-);
-```
+);```
 
 ## Client Schema
 

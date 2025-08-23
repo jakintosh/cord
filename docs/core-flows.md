@@ -59,51 +59,52 @@
 
 ## Peer Redemption Flow
 
-1. Client reads invite file containing temporary private key, temporary IP, permanent IP, server endpoint, and server public key
-2. Client configures WireGuard interface with temporary credentials and temporary IP from invite CIDR
-3. Client connects to server using temporary IP and generates permanent WireGuard keypair
-4. Client calls `POST /peer/redeem` via temporary IP connection, sending permanent public key in request body
-5. Server queries `invite` table matching temporary public key and source IP and `redeemed=0`
-6. Server validates redemption request against `expiration` timestamp in invite record
-7. Server begins database transaction
-  - Server sets `redeemed=1` on invite record
-  - Server creates new peer record with permanent public key, permanent IP from invite, copying `admin` flag, setting `confirmed=0`
-  - Server adds permanent peer to WireGuard configuration with permanent IP alongside temporary peer
-8. Server commits database transaction and returns `200 OK` to client
-9. Client receives `200 OK` and updates local WireGuard interface to use permanent keypair and permanent IP
-10. Client calls `POST /peer/confirm` via permanent IP connection, including public key in request body
-11. Server validates public key matches expected permanent key for source permanent IP in `peer` table
-12. Server begins transaction: sets `confirmed=1` on peer record, clears `invite_id` from `invite_ip` record
-13. Server deletes invite record and removes temporary peer from WireGuard configuration
-14. Server commits transaction and returns `200 OK` to client
-15. Client removes temporary credentials and temporary IP configuration from local storage
-16. Peer now appears in results for `GetPeersOfPeerNamed()` queries (filters on `confirmed=1, disabled=0`)
-17. Temporary IP becomes available for reuse in future invites
+1. Admin creates invite via `cord-server add-peer`, generating cryptographically secure token
+2. Server inserts invite record with token, peer_name, assigned CIDR, admin flag, and expiration
+3. Server writes invite file containing only: `https://server/api/v1/public/redeem?token=<token>`
+4. Admin delivers invite URL to client through out-of-band channel
+5. Client generates permanent WireGuard keypair locally
+6. Client calls `POST https://server/api/v1/public/redeem?token=<token>` with permanent public key in body
+7. Server validates token exists with `redeemed=0` and expiration not exceeded
+8. Server begins database transaction
+9. Server checks if peer already exists for this invite:
+   - If peer exists with same public key: return existing configuration (idempotent)
+   - If peer exists with different public key: return error and abort
+   - If no peer exists: continue to step 10
+10. Server creates peer record with permanent public key, copying CIDR and admin flag from invite, setting `confirmed=0`
+11. Server sets `redeemed=1` on invite record
+12. Server adds new peer to WireGuard interface configuration
+13. Server commits transaction and returns complete WireGuard configuration:
+    - Client's assigned IP address and netmask
+    - Server's WireGuard endpoint and public key
+    - Allowed IPs and routing rules
+    - Listen port and MTU settings
+14. Client configures local WireGuard interface with received configuration
+15. Client brings up WireGuard interface and establishes connection
+16. Client calls `POST /api/v1/peer/confirm` via WireGuard network, including public key in body
+17. Server validates public key matches peer record for source IP with `confirmed=0`
+18. Server begins transaction: sets `confirmed=1` on peer record, deletes invite record
+19. Server commits transaction and returns `200 OK`
+20. Client receives confirmation and marks setup complete
+21. Peer now appears in results for `GetPeersOfPeerNamed()` queries (filters on `confirmed=1, disabled=0`)
 
 **Key States:**
-- Invite exists with `redeemed=0`: Unused invite with temporary IP allocated
-- Invite with `redeemed=1`, peer with `confirmed=0`: Mid-transition, both IPs active in WireGuard
-- Peer with `confirmed=1`, invite deleted: Fully transitioned on permanent IP, temporary IP freed
-
-**IP Management:**
-- Temporary IPs allocated from dedicated invite CIDR on invite creation
-- Permanent IPs allocated from target CIDR on invite creation
-- Both IPs reserved until confirmation or expiration
-- Temporary IP freed and returned to pool after confirmation
+- Invite with `redeemed=0`: Unused token, no peer created
+- Invite with `redeemed=1`, peer with `confirmed=0`: Peer created but not yet verified on network
+- Peer with `confirmed=1`, invite deleted: Fully operational peer
 
 **Idempotency:**
-- `/peer/redeem`: Returns success if peer already exists with matching permanent key
-- `/peer/confirm`: Returns success if peer already confirmed (no-op on subsequent calls)
+- `/redeem` with same public key: Returns identical configuration
+- `/redeem` with different public key: Returns error (prevent key replacement attacks)
+- `/confirm`: Returns success if already confirmed
 
 **Failure Recovery:**
-- If `/peer/redeem` response lost: Client retries with same permanent key, server returns success
-- If `/peer/confirm` fails: Client retries until success or explicit rejection
-- Network partition during transition: Client remains on permanent IP, retries confirmation
+- If `/redeem` response lost: Client retries with same key, receives same configuration
+- If `/confirm` fails: Client retries until success
+- Network partition after redemption: Client has full config, retries confirmation when connected
 
 **Rollback Conditions:**
-- Expired invite timestamp
-- Invalid or missing invite record
-- Mismatched temporary IP
-- Duplicate permanent public key
+- Invalid or expired token
+- Attempted public key change on redeemed invite
 - Database transaction failure
 - WireGuard configuration update failure (rollback database changes)
