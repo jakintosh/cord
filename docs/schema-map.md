@@ -32,8 +32,8 @@ CREATE TABLE IF NOT EXISTS invite (
     peer_name           TEXT NOT NULL,
     cidr                TEXT NOT NULL,
     admin               INTEGER DEFAULT 0 NOT NULL,
-    expiration          INTEGER NOT NULL,
     redeemed            INTEGER DEFAULT 0 NOT NULL
+    expiration          INTEGER NOT NULL,
 );
 
 CREATE TABLE IF NOT EXISTS peer (
@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS peer (
     cidr                INTEGER NOT NULL,
     public_key          TEXT NOT NULL UNIQUE,
     admin               INTEGER DEFAULT 0 NOT NULL,
+    confirmed           INTEGER DEFAULT 0 NOT NULL,
     disabled            INTEGER DEFAULT 0 NOT NULL,
     FOREIGN KEY (cidr)
         REFERENCES cidr (id)
@@ -52,15 +53,17 @@ CREATE TABLE IF NOT EXISTS endpoint (
     peer_key            TEXT NOT NULL,
     endpoint            TEXT NOT NULL,
     time                INTEGER NOT NULL
-);```
+);
+```
 
 ## Client Schema
 
 ```sql
 CREATE TABLE IF NOT EXISTS peer (
     id                  INTEGER PRIMARY KEY,
-    peer_ip             INTEGER NOT NULL,
     public_key          TEXT NOT NULL UNIQUE,
+    name                TEXT NOT NULL UNIQUE,
+    ip                  INTEGER NOT NULL UNIQUE,
 );
 
 CREATE TABLE IF NOT EXISTS endpoint (

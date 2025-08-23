@@ -27,11 +27,12 @@ Server operations run through a `Context` that bundles the network name, databas
 
 ### Database schema
 
-The coordination server stores state in SQLite. `initNetworkDb` creates four primary tables:
+The coordination server stores state in SQLite. `initNetworkDb` creates five primary tables:
 
 * **`cidr`** – Named CIDR blocks belonging to the network. Each row stores the textual CIDR, prefix/length, and the numeric range.
 * **`association`** – Pairs of CIDR IDs that are allowed to communicate. Associations are symmetric.
-* **`peer`** – Peers tied to a single CIDR with flags for admin, disabled and redeemed status and an optional invite expiry.
+* **`invite`** – Pending peer invitations containing a unique token, peer name, assigned CIDR, admin flag, expiration timestamp, and redemption status. Invites are temporary records deleted after successful peer confirmation.
+* **`peer`** – Peers tied to a single CIDR with their public key and flags for admin, confirmed, and disabled status.
 * **`endpoint`** – Historical peer endpoint sightings with timestamps. Used for future endpoint gossip and detection of peer changes.
 
 ### CIDR management
@@ -40,7 +41,13 @@ Networks start with a *root CIDR* (row `id=1` in the `cidr` table). Sub-CIDRs ma
 
 ### Peer lifecycle
 
-Peers are created by reserving an IP within a CIDR. `CreatePeer` generates a key pair, stores the peer in the database, and returns a `DeviceConfig`/`PeerConfig` pair for building an invite. A peer must call `RedeemPeer` to mark the invite as redeemed and optionally update its public key. Peers can be renamed (through CIDR renaming) or enabled/disabled. The server can compute the list of other peers visible to a given peer by resolving associated CIDR ranges and collecting all redeemed, enabled peers within them.
+Peers join the network through a token-based invitation system. `CreatePeer` generates a cryptographically secure token and creates an invite record with the peer's assigned IP, name, and permissions. The invite URL (`https://server/api/v1/public/redeem?token=<token>`) is delivered out-of-band to the client.
+
+The client generates their own WireGuard keypair locally and redeems the invite by POSTing their public key to the redemption endpoint. Upon successful redemption, the server creates a peer record (marked as unconfirmed), returns the complete WireGuard configuration, and marks the invite as redeemed. 
+
+The client then configures their WireGuard interface and establishes a connection to confirm their presence on the network via the `/api/v1/peer/confirm` endpoint. Only after this confirmation step is the peer marked as operational and the invite record deleted.
+
+Peers can be renamed (through CIDR renaming) or enabled/disabled. The server computes peer visibility by resolving associated CIDR ranges and collecting all confirmed (`confirmed=1`) and enabled (`disabled=0`) peers within them.
 
 ### WireGuard configuration
 
