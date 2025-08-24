@@ -31,9 +31,9 @@ The coordination server stores state in SQLite. `initNetworkDb` creates five pri
 
 * **`cidr`** – Named CIDR blocks belonging to the network. Each row stores the textual CIDR, prefix/length, and the numeric range.
 * **`association`** – Pairs of CIDR IDs that are allowed to communicate. Associations are symmetric.
-* **`invite`** – Pending peer invitations containing a unique token, peer name, assigned CIDR, admin flag, expiration timestamp, and redemption status. Invites are temporary records deleted after successful peer confirmation.
+* **`invite`** – Pending peer invitations containing a temporary public key, temporary (invite network) cidr, assigned permanent cidr, peer name, admin flag, redemption status, and expiration timestampe. Invites are temporary records deleted after successful peer confirmation.
 * **`peer`** – Peers tied to a single CIDR with their public key and flags for admin, confirmed, and disabled status.
-* **`endpoint`** – Historical peer endpoint sightings with timestamps. Used for future endpoint gossip and detection of peer changes.
+* **`endpoint`** – Historical peer endpoint sightings with timestamps and witness. Used for future endpoint gossip and detection of peer changes.
 
 ### CIDR management
 
@@ -41,11 +41,11 @@ Networks start with a *root CIDR* (row `id=1` in the `cidr` table). Sub-CIDRs ma
 
 ### Peer lifecycle
 
-Peers join the network through a token-based invitation system. `CreatePeer` generates a cryptographically secure token and creates an invite record with the peer's assigned IP, name, and permissions. The invite URL (`https://server/api/v1/public/redeem?token=<token>`) is delivered out-of-band to the client.
+Peers join the network through a temporary wireguard interface. `CreatePeer` generates a an invite record with the peer's assigned temporary and permanent IP, name, and permissions. It is also given a temporary wireguard key pair. The invite data as packaged into a file and delivered out-of-band to the client.
 
-The client generates their own WireGuard keypair locally and redeems the invite by POSTing their public key to the redemption endpoint. Upon successful redemption, the server creates a peer record (marked as unconfirmed), returns the complete WireGuard configuration, and marks the invite as redeemed. 
+The client begins the redemption process using the invite file to connect to the server's "invite" wireguard network, then generates their own WireGuard keypair locally and redeems the invite by POSTing their public key to the redemption endpoint. Upon successful redemption, the server creates a peer record (marked as unconfirmed), returns the complete WireGuard configuration, and marks the invite as redeemed. 
 
-The client then configures their WireGuard interface and establishes a connection to confirm their presence on the network via the `/api/v1/peer/confirm` endpoint. Only after this confirmation step is the peer marked as operational and the invite record deleted.
+The client then configures their permanent WireGuard interface and establishes a connection to confirm their presence on the network via the `/api/v1/peer/confirm` endpoint. Only after this confirmation step is the peer marked as operational and the invite record deleted.
 
 Peers can be renamed (through CIDR renaming) or enabled/disabled. The server computes peer visibility by resolving associated CIDR ranges and collecting all confirmed (`confirmed=1`) and enabled (`disabled=0`) peers within them.
 

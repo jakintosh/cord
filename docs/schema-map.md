@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS invite (
 
 CREATE TABLE IF NOT EXISTS peer (
     id                  INTEGER PRIMARY KEY,
-    cidr                INTEGER NOT NULL,
+    cidr                INTEGER NOT NULL UNIQUE,
     public_key          TEXT NOT NULL UNIQUE,
     admin               INTEGER DEFAULT 0 NOT NULL,
     disabled            INTEGER DEFAULT 0 NOT NULL,
