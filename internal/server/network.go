@@ -109,15 +109,33 @@ func initNetworkDb(d *sql.DB) error {
 		return err
 	}
 
+	// Invites used during peer redemption
+	if err := db.InitTable(d, "invite", `
+		CREATE TABLE IF NOT EXISTS invite (
+			id					INTEGER PRIMARY KEY,
+			public_key			TEXT NOT NULL UNIQUE,
+			temp_cidr			TEXT NOT NULL UNIQUE,
+			final_cidr			INTEGER NOT NULL UNIQUE,
+			name				TEXT NOT NULL,
+			admin				INTEGER DEFAULT 0 NOT NULL,
+			redeemed			INTEGER DEFAULT 0 NOT NULL,
+			expiration			INTEGER NOT NULL,
+			FOREIGN KEY (final_cidr)
+				REFERENCES cidr (id)
+		);
+	`); err != nil {
+		return err
+	}
+
+	// Active peers on the main network
 	if err := db.InitTable(d, "peer", `
 		CREATE TABLE IF NOT EXISTS peer (
 			id					INTEGER PRIMARY KEY,
-			cidr				INTEGER NOT NULL,
+			cidr				INTEGER NOT NULL UNIQUE,
 			public_key			TEXT NOT NULL UNIQUE,
 			admin				INTEGER DEFAULT 0 NOT NULL,
 			disabled			INTEGER DEFAULT 0 NOT NULL,
-			redeemed			INTEGER DEFAULT 0 NOT NULL,
-			invite_expires 		INTEGER,
+			confirmed			INTEGER DEFAULT 0 NOT NULL,
 			FOREIGN KEY (cidr)
 				REFERENCES cidr (id)
 		);
@@ -125,13 +143,18 @@ func initNetworkDb(d *sql.DB) error {
 		return err
 	}
 
+	// Endpoint sightings recorded by peers
 	if err := db.InitTable(d, "endpoint", `
 		CREATE TABLE IF NOT EXISTS endpoint (
 			id					INTEGER PRIMARY KEY,
-			peer_ip				BLOB NOT NULL,
-			peer_key			TEXT NOT NULL,
+			witness				INTEGER NOT NULL,
+			peer				INTEGER NOT NULL,
 			endpoint			TEXT NOT NULL,
-			time				INTEGER NOT NULL
+			time				INTEGER NOT NULL,
+			FOREIGN KEY (peer)
+				REFERENCES peer (id),
+			FOREIGN KEY (witness)
+				REFERENCES peer (id)
 		);
 	`); err != nil {
 		return err

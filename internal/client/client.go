@@ -274,14 +274,9 @@ func initNetworkDb(d *sql.DB) error {
 	if err := db.InitTable(d, "peer", `
 		CREATE TABLE IF NOT EXISTS peer (
 			id					INTEGER PRIMARY KEY,
-			cidr				INTEGER NOT NULL,
 			public_key			TEXT NOT NULL UNIQUE,
-			admin				INTEGER DEFAULT 0 NOT NULL,
-			disabled			INTEGER DEFAULT 0 NOT NULL,
-			redeemed			INTEGER DEFAULT 0 NOT NULL,
-			invite_expires 		INTEGER,
-			FOREIGN KEY (cidr)
-				REFERENCES cidr (id)
+			name				TEXT NOT NULL UNIQUE,
+			ip					INTEGER NOT NULL UNIQUE
 		);
 	`); err != nil {
 		return err
@@ -290,8 +285,8 @@ func initNetworkDb(d *sql.DB) error {
 	if err := db.InitTable(d, "endpoint", `
 		CREATE TABLE IF NOT EXISTS endpoint (
 			id					INTEGER PRIMARY KEY,
-			peer_ip				BLOB NOT NULL,
-			peer_key			TEXT NOT NULL,
+			peer_key			TEXT NOT NULL UNIQUE,
+			peer_ip				BLOB NOT NULL UNIQUE,
 			endpoint			TEXT NOT NULL,
 			time				INTEGER NOT NULL
 		);

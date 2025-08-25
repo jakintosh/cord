@@ -23,7 +23,7 @@ type Peer struct {
 	PublicKey string `json:"publicKey"`
 	Cidr      string `json:"cidr"`
 	Admin     bool   `json:"admin"`
-	Redeemed  bool   `json:"redeemed"`
+	Confirmed bool   `json:"confirmed"`
 	Disabled  bool   `json:"disabled"`
 }
 
@@ -62,16 +62,21 @@ func (ctx *Context) CreatePeer(
 		return nil, nil, err
 	}
 
+	// Store as an invite until redeemed
 	_, err = ctx.Db.Exec(`
-		INSERT INTO peer (cidr, public_key, admin, invite_expires)
-		SELECT c.id, ?2, ?3, ?4
+		INSERT INTO invite (public_key, temp_cidr, final_cidr, name, admin, redeemed, expiration)
+		SELECT ?2, ?3, c.id, ?1, ?4, 0, ?5
 		FROM cidr c
 		WHERE c.name=?1;
 		`,
-		name, pubKey.String(), admin, inviteExpires,
+		name,                                 // 1: name lookup and insert value
+		pubKey.String(),                      // 2: temporary public key
+		utils.GetPeerCidrFromIp(ip).String(), // 3: temp_cidr (placeholder)
+		admin,                                // 4: admin flag
+		inviteExpires,                        // 5: expiration
 	)
 	if err != nil {
-		return nil, nil, db.CheckSqliteErr("adding peer", err)
+		return nil, nil, db.CheckSqliteErr("adding invite", err)
 	}
 
 	deviceConfig := &wg.DeviceConfig{
@@ -94,26 +99,45 @@ func (ctx *Context) RedeemPeer(
 	newKey string,
 ) error {
 
-	result, err := ctx.Db.Exec(`
-		UPDATE peer
-		SET   redeemed=1,
-			  public_key=?2
-		WHERE redeemed=0
-		AND   public_key=?1
+	// Create a peer from an unredeemed invite and mark invite redeemed.
+	tx, err := ctx.Db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin redeem tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Insert into peer using details from invite
+	res, err := tx.Exec(`
+		INSERT INTO peer (cidr, public_key, admin, disabled, confirmed)
+		SELECT i.final_cidr, ?2, i.admin, 0, 1
+		FROM invite i
+		WHERE i.redeemed=0 AND i.public_key=?1;
 		`,
 		pubKey[:],
 		newKey[:],
 	)
-
 	if err != nil {
-		return fmt.Errorf("failed to redeem peer: %w", err)
+		return fmt.Errorf("failed to create peer from invite: %w", err)
+	}
+	if db.ResultsEmpty(res) {
+		return fmt.Errorf("failed to redeem peer: no redeemable invites")
 	}
 
-	if db.ResultsEmpty(result) {
-		return fmt.Errorf("failed to redeem peer: no redeemable peers")
+	// Mark invite as redeemed
+	if _, err := tx.Exec(`
+		UPDATE invite
+		SET redeemed=1
+		WHERE redeemed=0
+		AND public_key=?1;
+		`,
+		pubKey[:],
+	); err != nil {
+		return fmt.Errorf("failed to mark invite redeemed: %w", err)
 	}
 
-	// TODO: alert other peers?
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit redeem tx: %w", err)
+	}
 
 	return nil
 }
@@ -267,9 +291,9 @@ func (ctx *Context) GetChildPeersForCidrId(
 	[]Peer,
 	error,
 ) {
-	// find all (redeemed) child peers for given cidr id
+	// find all (confirmed) child peers for given cidr id
 	rows, err := ctx.Db.Query(`
-		SELECT p.id, c.id, c.name, p.public_key, c.cidr, p.admin, p.redeemed, p.disabled
+		SELECT p.id, c.id, c.name, p.public_key, c.cidr, p.admin, p.confirmed, p.disabled
 		FROM cidr c
 		INNER JOIN (
 			SELECT c.name, c.length, c.prefix, c.base, c.last
@@ -277,7 +301,7 @@ func (ctx *Context) GetChildPeersForCidrId(
 			WHERE c.id=?
 		) AS parent
 		JOIN peer p ON p.cidr=c.id
-		WHERE p.redeemed=1
+		WHERE p.confirmed=1
 			AND p.disabled=0
 			AND c.length=parent.length
 			AND c.length=c.prefix
@@ -303,7 +327,7 @@ func (ctx *Context) GetChildPeersForCidrId(
 			&peer.PublicKey,
 			&peer.Cidr,
 			&peer.Admin,
-			&peer.Redeemed,
+			&peer.Confirmed,
 			&peer.Disabled,
 		)
 		if err != nil {
