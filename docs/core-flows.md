@@ -147,17 +147,42 @@
 
 ## Network Installation Flow
 
-1. **Receive invite.** A prospective peer obtains an invite file from an administrator, which includes a network name and an invite redemption URL (e.g., `https://server/api/v1/public/redeem/{token}`).
-2. **Invoke install command.** The user runs `cord install` with the invite URL. The client creates a `Context` pointing at the desired configuration and data directories.
-3. **Initialize local state.** The client creates a new local SQLite database and configuration directory for the network using the network name. If a network with the same name exists, the installation fails.
-4. **Generate permanent keypair.** The client generates a permanent WireGuard keypair on the local machine and stores it in the network's configuration directory. This keypair will identify the peer within the network. The private key is never shared, and the public key is shared with the server, but never sent in plaintext.
-5. **Redeem the invite.** Using the redemption URL, the client sends an HTTP `POST` request containing the permanent public key. The server validates the token and returns two chunks of information: the WireGuard connection details for the "server peer"—the server endpoint and allowed CIDRs—and the peer details for client itself—including its name and IP. This step is idempotent; resending the same public key yields the same configuration. (Sending a different public key is an error.)
-6. **Configure network interface.** The client uses the new server peer information to create a WireGuard interface using the server configuration returned from the server, in addition to its locally generated private key.
-7. **Confirm with server.** The client then sends a `POST /api/v1/peer/confirm` request over the WireGuard tunnel with the client's public key in the payload. The server matches the public key to the peer record, sets `confirmed=1` and deletes the invite. This confirmation ensures that only reachable peers become operational.
-8. **Initial state fetch.** Once confirmed, the client performs an initial fetch of the peer list (see State Synchronization Flow) to populate its local database with other peers in the network.
-9. **Handle failures.** If any step fails—invalid token, network unreachable or configuration write error—the client tears down the temporary interface, deletes the partial database and invites the user to retry. TODO: deleting the network config during a partial failure after creating the key pair and calling the redeem endpoint will make that invite impossible to retry: the server will not accept a second set of keys. Is this an acceptable design?
+1. **Receive invite file.** A prospective peer obtains an invite file from an administrator containing: invite network endpoint, temporary private key, assigned invite network IP, and server's invite network public key.
+2. **Invoke install command.** The user runs `cord install <invite-file>`. The client creates a `Context` pointing at the desired configuration and data directories.
+3. **Parse invite file.** The client reads the TOML invite file to extract the temporary WireGuard credentials and network name. If the file is malformed or missing required fields, installation fails.
+4. **Generate permanent keypair.** The client generates a permanent WireGuard keypair and immediately persists the private key to a configuration file in the network's directory. This ensures idempotency if redemption needs to be retried due to network issues.
+5. **Configure invite network interface.** The client creates a temporary WireGuard interface (e.g., `networkname-invite`) using the temporary private key from the invite, the assigned invite network IP, and the server as the only peer.
+6. **Connect to invite network.** The client brings up the invite interface and establishes connection to the server's invite network endpoint. If connection fails, the client retries with backoff.
+7. **Redeem invite.** Once connected to the invite network, the client calls `POST /peer/redeem` on the server's internal invite network endpoint, sending the permanent public key. The server validates that the request comes from the expected invite IP and the invite hasn't expired.
+8. **Receive main network configuration.** The server returns the main network configuration including: server's main network endpoint (external-ip:port), server's main network public key, and the peer's final IP on the main network.
+9. **Configure main network interface.** The client creates the permanent WireGuard interface (e.g., `networkname`) using the permanent private key, final IP from server response, and server peer configuration for the main network.
+10. **Connect to main network.** The client brings up the main network interface and establishes connection to the server's main network endpoint.
+11. **Confirm redemption.** The client calls `POST /peer/confirm` on the server's internal main network endpoint with the permanent public key in the request body. This proves the peer successfully transitioned to the main network.
+12. **Tear down invite interface.** Upon receiving `200 OK` from confirmation, the client dismantles the temporary invite network interface and removes any temporary configuration.
+13. **Initialize local database.** The client creates the SQLite database for the network and stores the server peer information.
+14. **Initial state fetch.** The client performs an initial fetch of the peer list to populate its local database with other peers in the network.
+15. **Handle failures.** Different failure modes require different cleanup:
+    - If invite is expired or invalid: Remove any partial configuration and report error
+    - If network issues during redemption (after permanent key generated): Preserve permanent keypair and configuration for retry
+    - If confirmation fails after successful redemption: Keep trying confirmation with backoff, as the peer exists on the main network but isn't operational yet
 
-**Key Outputs:** Successful installation yields a local database containing the network definition, a WireGuard configuration file for the new peer and a running interface ready to exchange traffic.
+**Key Outputs:** Successful installation yields:
+- Local database with network topology
+- Permanent WireGuard configuration file with server peer
+- Active main network interface ready for traffic
+- Removed invite network interface and temporary credentials
+
+**Idempotency Considerations:**
+- Permanent keypair generation happens once and is persisted immediately
+- `/peer/redeem` can be called multiple times with the same public key
+- `/peer/confirm` can be called multiple times until successful
+- Invite network interface can be safely recreated if needed for retry
+
+**Network Transition States:**
+- Initial: No interfaces, only invite file
+- Redeeming: Invite network interface active
+- Transitioning: Both invite and main network interfaces active
+- Operational: Only main network interface active
 
 ## State Synchronization Flow
 
