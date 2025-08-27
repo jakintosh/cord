@@ -58,9 +58,9 @@ func createBaseNetwork() (
 	*server.Context,
 	error,
 ) {
-	ctx, err := server.NewMemContext(testNetwork.Name)
+	ctx, err := server.NewContext(testNetwork.Name, server.NewMemConfig(), server.NewMemData())
 	if err != nil {
-		return nil, fmt.Errorf("failed to create test context: %v", err)
+		return nil, fmt.Errorf("failed to init test server: %v", err)
 	}
 
 	if err := addNetwork(ctx, testNetwork); err != nil {

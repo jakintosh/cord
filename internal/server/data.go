@@ -20,6 +20,10 @@ type FsData struct {
 	Directory string
 }
 
+func NewFsData(dir string) *FsData {
+	return &FsData{dir}
+}
+
 func (d *FsData) OpenDatabase(name string) (*sql.DB, error) {
 
 	os.MkdirAll(d.Directory, 0755)
@@ -42,6 +46,10 @@ func (d *FsData) DeleteDatabase(name string) error {
 // Uses memory to manage the data
 
 type MemData struct{}
+
+func NewMemData() *MemData {
+	return &MemData{}
+}
 
 func (d *MemData) OpenDatabase(name string) (*sql.DB, error) {
 

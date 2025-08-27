@@ -72,7 +72,7 @@ var install = &cmd.Command{
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
-		// create app context
+		// create client context
 		ctx, err := client.NewContext("", configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
@@ -108,7 +108,7 @@ var uninstall = &cmd.Command{
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
-		// create app context
+		// create client context
 		ctx, err := client.NewContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
@@ -144,7 +144,7 @@ var show = &cmd.Command{
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 		network := i.GetParameterOr("network", "")
 
-		// create app context
+		// create client context
 		ctx, err := client.NewContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
@@ -180,7 +180,7 @@ var fetch = &cmd.Command{
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
-		// create app context
+		// create client context
 		ctx, err := client.NewContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
@@ -216,7 +216,7 @@ var up = &cmd.Command{
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
-		// create app context
+		// create client context
 		ctx, err := client.NewContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
@@ -252,7 +252,7 @@ var down = &cmd.Command{
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
 
-		// create app context
+		// create client context
 		ctx, err := client.NewContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"database/sql"
 	"fmt"
 
 	_ "modernc.org/sqlite"
@@ -13,6 +14,34 @@ const (
 	KernelBackend
 	UserspaceBackend
 )
+
+type Context struct {
+	Name   string
+	Db     *sql.DB
+	Config Config
+	Data   Data
+}
+
+func NewContext(
+	network string,
+	config Config,
+	data Data,
+) (*Context, error) {
+
+	database, err := data.OpenDatabase(network)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	ctx := &Context{
+		Name:   network,
+		Db:     database,
+		Config: config,
+		Data:   data,
+	}
+
+	return ctx, nil
+}
 
 func (ctx *Context) Serve(
 	noRouting bool,

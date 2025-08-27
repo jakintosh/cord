@@ -18,20 +18,20 @@ type Context struct {
 // NewContext prepares a client context for a network. It ensures
 // paths exist and opens the network-scoped SQLite database.
 func NewContext(
-	network string,
+	networkName string,
 	configDir string,
 	dataDir string,
 ) (*Context, error) {
 
 	os.MkdirAll(configDir, 0755)
-	database, err := db.Open(network, dataDir)
+	database, err := db.Open(networkName, dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	return &Context{
 		Db:        database,
-		Name:      network,
+		Name:      networkName,
 		ConfigDir: configDir,
 		DataDir:   dataDir,
 	}, nil
@@ -126,23 +126,6 @@ func (ctx *Context) Show() error {
 	fmt.Printf(
 		"Show\nNetwork: %s\nConfig: %s\nData: %s\n",
 		ctx.Name, ctx.ConfigDir, ctx.DataDir,
-	)
-	return nil
-}
-
-// ShowAll reports local state for all installed networks. It enumerates
-// data/config directories, opens each network context, and prints the
-// same information as Show() per network.
-func ShowAll(configDir string, dataDir string) error {
-
-	// 1. Enumerate networks from dataDir/configDir
-	// 2. For each network, open a lightweight context
-	// 3. Reuse Show() logic to collect local details
-	// 4. Print aggregated results in a readable order
-
-	fmt.Printf(
-		"Show All\nData: %s\n",
-		dataDir,
 	)
 	return nil
 }

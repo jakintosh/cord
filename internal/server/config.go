@@ -19,6 +19,10 @@ type FsConfig struct {
 	Directory string
 }
 
+func NewFsConfig(dir string) *FsConfig {
+	return &FsConfig{dir}
+}
+
 func (c *FsConfig) GetConfigWriter(name string) (io.Writer, error) {
 
 	filepath := path.Join(c.Directory, name)
@@ -34,6 +38,12 @@ func (c *FsConfig) GetConfigWriter(name string) (io.Writer, error) {
 
 type MemConfig struct {
 	Buffers map[string]*bytes.Buffer
+}
+
+func NewMemConfig() *MemConfig {
+	return &MemConfig{
+		Buffers: map[string]*bytes.Buffer{},
+	}
 }
 
 func (c *MemConfig) GetConfigWriter(name string) (io.Writer, error) {
