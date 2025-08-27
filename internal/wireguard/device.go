@@ -45,8 +45,8 @@ func (c *DeviceConfig) Write(
 	w io.Writer,
 ) error {
 	_, err := fmt.Fprintf(w,
-		"private-key=%s\ncidr=%s\nlisten-port=%d\n",
-		c.PrivateKey, c.Cidr, c.ListenPort,
+		"private-key = \"%s\"\ncidr = \"%s\"\nlisten-port = %d\n",
+		c.PrivateKey.String(), c.Cidr, c.ListenPort,
 	)
 	return err
 }

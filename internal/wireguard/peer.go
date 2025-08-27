@@ -11,21 +11,25 @@ import (
 )
 
 type Invite struct {
-	Interface DeviceConfig
-	Server    PeerConfig
+	// peer information
+	PeerInterface *DeviceConfig
+
+	// server information
+	ServerKey        PublicKey
+	InternalEndpoint *net.IPNet
+	ExternalEndpoint *net.IPNet
 }
 
+// PeerConfig wraps public "cord" info about a peer
 type PeerConfig struct {
 	Name      string
 	Cidr      *net.IPNet
 	PublicKey PublicKey
 }
 
-func (c *PeerConfig) WriteInvite(
+func (i *Invite) Write(
 	w io.Writer,
-	device *DeviceConfig,
 ) error {
-
 	// TODO: write out the invite
 	return nil
 }

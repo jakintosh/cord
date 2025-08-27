@@ -11,6 +11,7 @@ import (
 
 	cmd "git.sr.ht/~jakintosh/command-go"
 	"git.sr.ht/~jakintosh/cord/internal/server"
+	"git.sr.ht/~jakintosh/cord/internal/wireguard"
 )
 
 const (
@@ -503,7 +504,7 @@ var addPeer = &cmd.Command{
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		deviceConfig, peerConfig, err := ctx.CreatePeer(
+		peerInterface, _, err := ctx.CreateInvite(
 			name,
 			ip,
 			admin,
@@ -513,7 +514,10 @@ var addPeer = &cmd.Command{
 			return fmt.Errorf("failed to create peer: %w", err)
 		}
 
-		err = peerConfig.WriteInvite(inviteFile, deviceConfig)
+		invite := wireguard.Invite{
+			PeerInterface: peerInterface,
+		}
+		err = invite.Write(inviteFile)
 		if err != nil {
 			return fmt.Errorf("failed to write invite: %w", err)
 		}

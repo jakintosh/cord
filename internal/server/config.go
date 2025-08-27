@@ -20,12 +20,14 @@ type FsConfig struct {
 }
 
 func NewFsConfig(dir string) *FsConfig {
+
 	return &FsConfig{dir}
 }
 
-func (c *FsConfig) GetConfigWriter(name string) (io.Writer, error) {
+func (cfg *FsConfig) GetConfigWriter(name string) (io.Writer, error) {
 
-	filepath := path.Join(c.Directory, name)
+	os.MkdirAll(cfg.Directory, 0755)
+	filepath := path.Join(cfg.Directory, name)
 	w, err := os.Create(filepath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file '%s': %w", filepath, err)
@@ -46,12 +48,12 @@ func NewMemConfig() *MemConfig {
 	}
 }
 
-func (c *MemConfig) GetConfigWriter(name string) (io.Writer, error) {
+func (cfg *MemConfig) GetConfigWriter(name string) (io.Writer, error) {
 
-	if buf, ok := c.Buffers[name]; ok {
+	if buf, ok := cfg.Buffers[name]; ok {
 		return buf, nil
 	} else {
-		c.Buffers[name] = &bytes.Buffer{}
-		return c.Buffers[name], nil
+		cfg.Buffers[name] = &bytes.Buffer{}
+		return cfg.Buffers[name], nil
 	}
 }

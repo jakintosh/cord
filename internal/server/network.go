@@ -1,7 +1,6 @@
 package server
 
 import (
-	"database/sql"
 	"fmt"
 	"net"
 
@@ -33,7 +32,7 @@ func (ctx *Context) CreateNetwork(
 		return fmt.Errorf("failed to create config writer: %w", err)
 	}
 
-	if err := initNetworkDb(ctx.Db); err != nil {
+	if err := ctx.initNetworkDb(); err != nil {
 		return fmt.Errorf("failed to init database: %w", err)
 	}
 
@@ -42,22 +41,21 @@ func (ctx *Context) CreateNetwork(
 	}
 
 	serverIp := utils.GetFirstAssignableIpFromCidr(cidr)
-	deviceCfg, peerCfg, err := ctx.CreatePeer("cord-server", serverIp, true, 0)
+
+	deviceCfg, peerCfg, err := ctx.CreateInvite("cord-server", serverIp, true, 0)
 	if err != nil {
 		return fmt.Errorf("failed to add server peer: %w", err)
 	}
 
+	deviceCfg.ListenPort = port
+
 	pubKey := peerCfg.PublicKey.String()
-	if err := ctx.RedeemPeer(pubKey, pubKey); err != nil {
+	if err := ctx.RedeemInvite(pubKey, pubKey); err != nil {
 		return fmt.Errorf("failed to redeem server peer: %w", err)
 	}
 
-	// TODO: also write out the server config file here
-
-	// TODO: what is this supposed to be doing here?
-	err = peerCfg.WriteInvite(cfgFile, deviceCfg)
-	if err != nil {
-		return fmt.Errorf("failed to write config: %w", err)
+	if err := deviceCfg.Write(cfgFile); err != nil {
+		return fmt.Errorf("failed to write device config file")
 	}
 
 	return nil
@@ -72,13 +70,13 @@ func (ctx *Context) DeleteNetwork() error {
 	return nil
 }
 
-func initNetworkDb(d *sql.DB) error {
+func (ctx *Context) initNetworkDb() error {
 
-	if err := db.EnableForeignKeys(d); err != nil {
+	if err := db.EnableForeignKeys(ctx.Db); err != nil {
 		return err
 	}
 
-	if err := db.InitTable(d, "cidr", `
+	if err := db.InitTable(ctx.Db, "cidr", `
 		CREATE TABLE IF NOT EXISTS cidr (
 			id					INTEGER PRIMARY KEY,
 			name				TEXT NOT NULL UNIQUE,
@@ -93,7 +91,7 @@ func initNetworkDb(d *sql.DB) error {
 		return err
 	}
 
-	if err := db.InitTable(d, "association", `
+	if err := db.InitTable(ctx.Db, "association", `
 		CREATE TABLE IF NOT EXISTS association (
 			id					INTEGER PRIMARY KEY,
 			cidr1				INTEGER NOT NULL,
@@ -110,25 +108,23 @@ func initNetworkDb(d *sql.DB) error {
 	}
 
 	// Invites used during peer redemption
-	if err := db.InitTable(d, "invite", `
+	if err := db.InitTable(ctx.Db, "invite", `
 		CREATE TABLE IF NOT EXISTS invite (
 			id					INTEGER PRIMARY KEY,
 			public_key			TEXT NOT NULL UNIQUE,
 			temp_cidr			TEXT NOT NULL UNIQUE,
-			final_cidr			INTEGER NOT NULL UNIQUE,
-			name				TEXT NOT NULL,
+			final_cidr			TEXT NOT NULL UNIQUE,
+			name				TEXT NOT NULL UNIQUE,
 			admin				INTEGER DEFAULT 0 NOT NULL,
 			redeemed			INTEGER DEFAULT 0 NOT NULL,
-			expiration			INTEGER NOT NULL,
-			FOREIGN KEY (final_cidr)
-				REFERENCES cidr (id)
+			expiration			INTEGER NOT NULL
 		);
 	`); err != nil {
 		return err
 	}
 
 	// Active peers on the main network
-	if err := db.InitTable(d, "peer", `
+	if err := db.InitTable(ctx.Db, "peer", `
 		CREATE TABLE IF NOT EXISTS peer (
 			id					INTEGER PRIMARY KEY,
 			cidr				INTEGER NOT NULL UNIQUE,
@@ -144,7 +140,7 @@ func initNetworkDb(d *sql.DB) error {
 	}
 
 	// Endpoint sightings recorded by peers
-	if err := db.InitTable(d, "endpoint", `
+	if err := db.InitTable(ctx.Db, "endpoint", `
 		CREATE TABLE IF NOT EXISTS endpoint (
 			id					INTEGER PRIMARY KEY,
 			witness				INTEGER NOT NULL,

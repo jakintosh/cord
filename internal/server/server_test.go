@@ -107,7 +107,7 @@ func addPeer(
 	c *server.Context,
 	desc server.PeerDesc,
 ) (string, error) {
-	_, cfg, err := c.CreatePeer(desc.Name, desc.Ip, desc.Admin, desc.Expires)
+	_, cfg, err := c.CreateInvite(desc.Name, desc.Ip, desc.Admin, desc.Expires)
 	if err != nil {
 		return "", fmt.Errorf("failed to create peer '%s': %v", desc.Name, err)
 	}
@@ -118,7 +118,7 @@ func redeemPeer(
 	c *server.Context,
 	key string,
 ) error {
-	if err := c.RedeemPeer(key, key); err != nil {
+	if err := c.RedeemInvite(key, key); err != nil {
 		return fmt.Errorf("failed to redeem peer for key '%s': %v", key, err)
 	}
 	return nil
@@ -128,12 +128,12 @@ func addAndRedeemPeer(
 	c *server.Context,
 	desc server.PeerDesc,
 ) error {
-	_, cfg, err := c.CreatePeer(desc.Name, desc.Ip, desc.Admin, desc.Expires)
+	_, cfg, err := c.CreateInvite(desc.Name, desc.Ip, desc.Admin, desc.Expires)
 	if err != nil {
 		return fmt.Errorf("failed to create peer '%s': %v", desc.Name, err)
 	}
 	pubKey := cfg.PublicKey.String()
-	if err := c.RedeemPeer(pubKey, pubKey); err != nil {
+	if err := c.RedeemInvite(pubKey, pubKey); err != nil {
 		return fmt.Errorf("failed to redeem peer for key '%s': %v", pubKey, err)
 	}
 	return nil

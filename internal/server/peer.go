@@ -36,7 +36,7 @@ func (p *Peer) String() string {
 	)
 }
 
-func (ctx *Context) CreatePeer(
+func (ctx *Context) CreateInvite(
 	name string,
 	ip net.IP,
 	admin bool,
@@ -79,22 +79,22 @@ func (ctx *Context) CreatePeer(
 		return nil, nil, db.CheckSqliteErr("adding invite", err)
 	}
 
-	deviceConfig := &wg.DeviceConfig{
+	peerInterface := &wg.DeviceConfig{
 		PrivateKey: privKey,
 		Cidr:       cidr,
 		ListenPort: 0,
 	}
 
-	peerConfig := &wg.PeerConfig{
+	peerInfo := &wg.PeerConfig{
 		Name:      name,
 		Cidr:      cidr,
 		PublicKey: pubKey,
 	}
 
-	return deviceConfig, peerConfig, nil
+	return peerInterface, peerInfo, nil
 }
 
-func (ctx *Context) RedeemPeer(
+func (ctx *Context) RedeemInvite(
 	pubKey string,
 	newKey string,
 ) error {
@@ -171,11 +171,11 @@ func (ctx *Context) CheckPeerExists(
 	peerName string,
 ) bool {
 	row := ctx.Db.QueryRow(`
-			SELECT COUNT(*)
-			FROM peer p
-			JOIN cidr c ON p.cidr=c.id
-			WHERE c.name=?;
-			`,
+		SELECT COUNT(*)
+		FROM peer p
+		JOIN cidr c ON p.cidr=c.id
+		WHERE c.name=?;
+		`,
 		peerName,
 	)
 
