@@ -37,6 +37,34 @@ func NewContext(
 	}, nil
 }
 
+// WIREGUARD INTERFACE
+// DEPENDENCY: `internal/wireguard` function to create and configure
+// a WireGuard device, applying config via wgctrl/netlink and bringing
+// the interface up idempotently.
+// DEPENDENCY: add a `wireguard` function to set link down and clear WG
+// device state where appropriate.
+// DEPENDENCY: expose a wireguard function to reliably remove interfaces
+// and clean routes idempotently.
+// DEPENDENCY: need a wireguard function which configures the interface
+// and peers via wgctrl/netlink and ensures the desired state is applied
+// idempotently.
+// DEPENDENCY: add a `wireguard` status helper to query device presence,
+// listen port, and peer count via wgctrl; return structured info.
+// DEPENDENCY: add a `wireguard` status helper to query structured peer info
+// for a given interface.
+
+// API CLIENT INTERFACE
+// DEPENDENCY: server API endpoint for `POST /redeem`
+// DEPENDENCY: server API endpoint for `POST /confirm`
+// DEPENDENCY: server API endpoint for `GET /state`
+// DEPENDENCY: server API endpoint for `POST /report`
+
+// CONFIG INTERFACE
+// DEPENDENCY: data/config helper that list installed networks by
+// scanning for expected DB or config files.
+// DEPENDENCY: implement key/config storage to read permanent keys, assigned
+// IP, network CIDR, and client listen port from disk/DB.
+
 // Install consumes an invite to join a network. It follows the
 // Peer Redemption flow: configure a temporary invite interface, make
 // a permanent keypair, redeem, configure the main interface, fetch
@@ -53,7 +81,7 @@ func (ctx *Context) Install(
 	// 5. POST /peer/redeem with permanent public key over invite net
 	// 6. Persist returned main-network config and server pubkey
 	// 7. Configure main WireGuard interface with permanent key/IP
-	// 8. POST /peer/confirm over main network
+	// 8. POST /confirm over main network
 	// 9. (On 200 OK) Tear down temporary invite interface
 	// 10. Call `Fetch()` for initial network snapshot
 
@@ -169,10 +197,9 @@ func (ctx *Context) Up(fetch bool) error {
 func (ctx *Context) Down() error {
 
 	// 1. Locate the WireGuard interface for this network
-	// 2. Remove routing rules associated with the interface
-	// 3. Bring the interface down using OS APIs
-	// 4. Optionally delete transient configuration artifacts
-	// 5. Exit cleanly if the interface does not exist
+	// 2. Bring the interface down using OS APIs
+	// 3. Optionally delete transient configuration artifacts
+	// 4. Exit cleanly if the interface does not exist
 
 	fmt.Printf(
 		"Down\nNetwork: %s\nConfig: %s\nData: %s\n",
@@ -226,7 +253,6 @@ func (ctx *Context) Sync() error {
 	// 2. Build request payload of peer keys, endpoints, timestamps
 	// 3. POST to server endpoint sighting API over main network
 	// 4. On success, mark records as reported with time
-	// 5. Optionally fetch refreshed endpoint set and upsert
 
 	fmt.Printf(
 		"Down\nNetwork: %s\nConfig: %s\nData: %s\n",

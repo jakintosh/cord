@@ -222,7 +222,7 @@ var up = &cmd.Command{
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		if err := ctx.Up(); err != nil {
+		if err := ctx.Up(false); err != nil {
 			return fmt.Errorf("failed to install: %w", err)
 		}
 
