@@ -2,20 +2,25 @@
 
 ## 1) Endpoint List
 
-| METHOD | PATH                      | PURPOSE                    | AUTH         | IDEMPOTENT |
-|--------|---------------------------|----------------------------|--------------|------------|
-| GET    | /api/v1/peers             | List visible peers         | main_net     | yes        |
-| POST   | /api/v1/report            | Report endpoint sightings  | main_net     | no         |
-| POST   | /api/v1/confirm/{key}     | Confirm peer presence      | main_net     | yes        |
-| POST   | /api/v1/redeem/{key}      | Redeem invite              | invite_net   | yes        |
-| POST   | /api/v1/admin/peer        | Create peer invite         | admin        | no         |
-| PUT    | /api/v1/admin/peer/{name} | Rename/enable/disable peer | admin        | yes        |
-| DELETE | /api/v1/admin/peer/{name} | Delete peer                | admin        | yes        |
-| POST   | /api/v1/admin/cidr        | Create CIDR                | admin        | no         |
-| PUT    | /api/v1/admin/cidr/{name} | Rename CIDR                | admin        | yes        |
-| DELETE | /api/v1/admin/cidr/{name} | Delete CIDR                | admin        | yes        |
-| POST   | /api/v1/admin/association | Create association         | admin        | yes        |
-| DELETE | /api/v1/admin/association | Delete association         | admin        | yes        |
+| METHOD | PATH                       | PURPOSE                    | AUTH         | IDEMPOTENT |
+|--------|----------------------------|----------------------------|--------------|------------|
+| GET    | /api/v1/peers              | List visible peers         | main_net     | yes        |
+| POST   | /api/v1/report             | Report endpoint sightings  | main_net     | no         |
+| POST   | /api/v1/confirm/{key}      | Confirm peer presence      | main_net     | yes        |
+| POST   | /api/v1/redeem/{key}       | Redeem invite              | invite_net   | yes        |
+| POST   | /api/v1/admin/peer         | Create peer invite         | admin        | no         |
+| GET    | /api/v1/admin/peers        | List peers                 | admin        | yes        |
+| GET    | /api/v1/admin/peer/{name}  | Get peer                   | admin        | yes        |
+| PUT    | /api/v1/admin/peer/{name}  | Rename/enable/disable peer | admin        | yes        |
+| DELETE | /api/v1/admin/peer/{name}  | Delete peer                | admin        | yes        |
+| POST   | /api/v1/admin/cidr         | Create CIDR                | admin        | no         |
+| GET    | /api/v1/admin/cidrs        | List CIDRs                 | admin        | yes        |
+| GET    | /api/v1/admin/cidr/{name}  | Get CIDR                   | admin        | yes        |
+| PUT    | /api/v1/admin/cidr/{name}  | Rename CIDR                | admin        | yes        |
+| DELETE | /api/v1/admin/cidr/{name}  | Delete CIDR                | admin        | yes        |
+| POST   | /api/v1/admin/association  | Create association         | admin        | yes        |
+| GET    | /api/v1/admin/associations | List associations          | admin        | yes        |
+| DELETE | /api/v1/admin/association  | Delete association         | admin        | yes        |
 
 
 ## 2) Conventions
@@ -178,6 +183,55 @@ Status:
 | 401  | Request not from admin peer                                   |
 | 409  | Peer name already exists                                      |
 
+### GET /api/v1/admin/peers
+
+Description: List all peers on the network. Includes admin/disabled/confirmed flags.
+
+Request: `null`
+
+Response: `[AdminPeer]`
+```json
+{
+  "name": "string",
+  "cidr": "string",
+  "publicKey": "string",
+  "admin": "boolean",
+  "disabled": "boolean",
+  "confirmed": "boolean"
+}
+```
+
+Status:
+| CODE | NOTE                          |
+|------|-------------------------------|
+| 200  | OK                            |
+| 401  | Request not from admin peer   |
+
+### GET /api/v1/admin/peer/{name}
+
+Description: Get details for a single peer by name.
+
+Request: `null`
+
+Response: `AdminPeer`
+```json
+{
+  "name": "string",
+  "cidr": "string",
+  "publicKey": "string",
+  "admin": "boolean",
+  "disabled": "boolean",
+  "confirmed": "boolean"
+}
+```
+
+Status:
+| CODE | NOTE                          |
+|------|-------------------------------|
+| 200  | OK                            |
+| 401  | Request not from admin peer   |
+| 404  | Peer not found                |
+
 ### PUT /api/v1/admin/peer/{name}
 
 Description: Update peer properties including renaming, enabling, or disabling.
@@ -257,6 +311,51 @@ Status:
 | 401  | Request not from admin peer                                   |
 | 409  | CIDR name or range already exists                             |
 
+### GET /api/v1/admin/cidrs
+
+Description: List all CIDRs configured on the network.
+
+Request: `null`
+
+Response: `[Cidr]`
+```json
+{
+  "name": "string",
+  "cidr": "string",
+  "length": "integer",
+  "prefix": "integer"
+}
+```
+
+Status:
+| CODE | NOTE                          |
+|------|-------------------------------|
+| 200  | OK                            |
+| 401  | Request not from admin peer   |
+
+### GET /api/v1/admin/cidr/{name}
+
+Description: Get details for a single CIDR by name.
+
+Request: `null`
+
+Response: `Cidr`
+```json
+{
+  "name": "string",
+  "cidr": "string",
+  "length": "integer",
+  "prefix": "integer"
+}
+```
+
+Status:
+| CODE | NOTE                          |
+|------|-------------------------------|
+| 200  | OK                            |
+| 401  | Request not from admin peer   |
+| 404  | CIDR not found                |
+
 ### PUT /api/v1/admin/cidr/{name}
 
 Description: Rename existing CIDR.
@@ -330,6 +429,26 @@ Status:
 | 400  | Malformed request, identical CIDRs, or CIDRs don't exist      |
 | 401  | Request not from admin peer                                   |
 | 409  | Association already exists                                    |
+
+### GET /api/v1/admin/associations
+
+Description: List all CIDR associations.
+
+Request: `null`
+
+Response: `[Association]`
+```json
+{
+  "cidr1": "string",
+  "cidr2": "string"
+}
+```
+
+Status:
+| CODE | NOTE                          |
+|------|-------------------------------|
+| 200  | OK                            |
+| 401  | Request not from admin peer   |
 
 ### DELETE /api/v1/admin/association
 
