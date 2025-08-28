@@ -5,7 +5,6 @@ import (
 	"net/http"
 )
 
-// POST /api/v1/confirm/{key}
 func (a *API) handlePostConfirm(
 	w http.ResponseWriter,
 	r *http.Request,

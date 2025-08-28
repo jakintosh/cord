@@ -18,7 +18,6 @@ type RedeemResponse struct {
 	} `json:"server"`
 }
 
-// POST /api/v1/redeem/{key}
 func (a *API) handlePostRedeem(
 	w http.ResponseWriter,
 	r *http.Request,

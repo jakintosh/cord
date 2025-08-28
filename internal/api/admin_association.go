@@ -47,7 +47,6 @@ func (a *API) handleDeleteAssociation(
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// GET /api/v1/admin/associations
 func (a *API) handleGetAssociations(
 	w http.ResponseWriter,
 	r *http.Request,

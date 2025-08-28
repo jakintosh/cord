@@ -42,7 +42,6 @@ func (a *API) handlePostAdminPeer(
 	writeData(w, http.StatusCreated, AdminPeer{})
 }
 
-// GET /api/v1/admin/peers
 func (a *API) handleGetAdminPeers(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -51,7 +50,6 @@ func (a *API) handleGetAdminPeers(
 	writeData(w, http.StatusOK, []AdminPeer{})
 }
 
-// GET /api/v1/admin/peer/{name}
 func (a *API) handleGetAdminPeer(
 	w http.ResponseWriter,
 	r *http.Request,

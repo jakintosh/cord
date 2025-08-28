@@ -4,18 +4,15 @@ import (
 	"net/http"
 )
 
-// PublicPeer mirrors the spec shape for GET /peers
 type PublicPeer struct {
-	Name      string              `json:"name"`
-	Cidr      string              `json:"cidr"`
-	PublicKey string              `json:"publicKey"`
-	Endpoints map[string]Endpoint `json:"endpoints"`
-}
-
-type Endpoint struct {
-	WitnessKey string `json:"witnessKey"`
-	Endpoint   string `json:"endpoint"`
-	Timestamp  int64  `json:"timestamp"`
+	Name      string `json:"name"`
+	Cidr      string `json:"cidr"`
+	PublicKey string `json:"publicKey"`
+	Endpoints map[string]struct {
+		WitnessKey string `json:"witnessKey"`
+		Endpoint   string `json:"endpoint"`
+		Timestamp  int64  `json:"timestamp"`
+	} `json:"endpoints"`
 }
 
 func (a *API) handleGetPeers(

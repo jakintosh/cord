@@ -37,7 +37,6 @@ func (a *API) handlePostAdminCidr(
 	writeData(w, http.StatusCreated, CidrResponse{})
 }
 
-// GET /api/v1/admin/cidrs
 func (a *API) handleGetAdminCidrs(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -46,7 +45,6 @@ func (a *API) handleGetAdminCidrs(
 	writeData(w, http.StatusOK, []CidrResponse{})
 }
 
-// GET /api/v1/admin/cidr/{name}
 func (a *API) handleGetAdminCidr(
 	w http.ResponseWriter,
 	r *http.Request,
