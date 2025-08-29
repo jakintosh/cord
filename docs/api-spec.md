@@ -288,8 +288,8 @@ Description: Create child CIDR within network. Must fall within root CIDR range.
 Request: `CreateCidrRequest`
 ```json
 {
-  "name": "string, optional",
-  "cidr": "string, optional"
+  "name": "string",
+  "cidr": "string"
 }
 ```
 
