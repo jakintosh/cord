@@ -36,4 +36,3 @@ func TestPeerAssociations(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
