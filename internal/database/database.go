@@ -3,12 +3,77 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path"
 
 	sqlite "modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 )
+
+type Scanner interface {
+	Scan(dest ...any) error
+}
+
+type SQLiteStore struct {
+	path    string
+	walMode bool
+	db      *sql.DB
+}
+
+func Init(
+	name string,
+	path string,
+	walMode bool,
+) (
+	*SQLiteStore,
+	error,
+) {
+
+	// create the store
+	store := &SQLiteStore{
+		path:    path,
+		walMode: walMode,
+		db:      nil,
+	}
+
+	// open database connection
+	var err error
+	store.db, err = Open(name, store.path)
+	if err != nil {
+		log.Fatalf("failed to open database: %v", err)
+	}
+
+	// optional WAL config
+	if store.walMode {
+
+		// enable write ahead logging mode
+		_, err = store.db.Exec("PRAGMA journal_mode = WAL;")
+		if err != nil {
+			log.Fatalf("could not enable WAL mode: %v", err)
+		}
+
+		// disallow multiple connections for serial writes
+		store.db.SetMaxOpenConns(1)
+
+		// increase timeout so waiting writes can finish
+		_, err = store.db.Exec("PRAGMA busy_timeout = 5000;")
+		if err != nil {
+			log.Fatalf("could not set busy timeout: %v", err)
+		}
+	}
+
+	if _, err := store.db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
+		log.Fatalf("couldn't enable foreign keys: %v\n", err)
+	}
+
+	// run all migrations
+	if err := migrate(store.db); err != nil {
+		log.Fatalf("could not migrate database: %v", err)
+	}
+
+	return store, nil
+}
 
 func Open(
 	name string,
@@ -28,7 +93,7 @@ func Open(
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open to database: %w\n", err)
+		return nil, fmt.Errorf("sqlite error: %w\n", err)
 	}
 	return db, nil
 }
