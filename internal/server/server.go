@@ -1,9 +1,7 @@
 package server
 
 import (
-	"database/sql"
 	"fmt"
-
 	_ "modernc.org/sqlite"
 )
 
@@ -17,27 +15,20 @@ const (
 
 type Context struct {
 	Name   string
-	Db     *sql.DB
 	Config Config
-	Data   Data
+	Store  NetworkStore
 }
 
 func NewContext(
 	network string,
 	config Config,
-	data Data,
+	store NetworkStore,
 ) (*Context, error) {
-
-	database, err := data.OpenDatabase(network)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
 
 	ctx := &Context{
 		Name:   network,
-		Db:     database,
 		Config: config,
-		Data:   data,
+		Store:  store,
 	}
 
 	return ctx, nil
@@ -52,7 +43,6 @@ func (ctx *Context) Serve(
 	fmt.Println("Serve Network")
 	fmt.Printf("network: %s\n", ctx.Name)
 	fmt.Printf("configDir: %s\n", ctx.Config)
-	fmt.Printf("dataDir: %s\n", ctx.Data)
 	fmt.Printf("noRouting: %t\n", noRouting)
 	fmt.Printf("mtu: %d\n", mtu)
 	fmt.Printf("backend: %v\n", backend)

@@ -3,8 +3,10 @@ package server_test
 import (
 	"fmt"
 	"net"
+
+	"git.sr.ht/~jakintosh/cord/internal/database"
+	"git.sr.ht/~jakintosh/cord/internal/server"
 )
-import "git.sr.ht/~jakintosh/cord/internal/server"
 
 var testNetwork = server.NetworkDesc{
 	Name: "test-network",
@@ -58,7 +60,11 @@ func createBaseNetwork() (
 	*server.Context,
 	error,
 ) {
-	ctx, err := server.NewContext(testNetwork.Name, server.NewMemConfig(), server.NewMemData())
+	store, err := database.Init(testNetwork.Name, ":memory:", false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init databse: %w", err)
+	}
+	ctx, err := server.NewContext(testNetwork.Name, server.NewMemConfig(), store)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init test server: %v", err)
 	}

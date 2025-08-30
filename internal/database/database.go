@@ -38,9 +38,7 @@ func Init(
 	}
 
 	// open database connection
-	var err error
-	store.db, err = Open(name, store.path)
-	if err != nil {
+	if err := store.Open(name); err != nil {
 		log.Fatalf("failed to open database: %v", err)
 	}
 
@@ -48,7 +46,7 @@ func Init(
 	if store.walMode {
 
 		// enable write ahead logging mode
-		_, err = store.db.Exec("PRAGMA journal_mode = WAL;")
+		_, err := store.db.Exec("PRAGMA journal_mode = WAL;")
 		if err != nil {
 			log.Fatalf("could not enable WAL mode: %v", err)
 		}
@@ -75,20 +73,55 @@ func Init(
 	return store, nil
 }
 
+func (s *SQLiteStore) Open(
+	name string,
+) error {
+
+	var dbPath string
+	if s.path == ":memory:" {
+		dbPath = ":memory:"
+	} else {
+		os.MkdirAll(s.path, os.ModePerm)
+		dbPath = GetPath(name, s.path)
+	}
+
+	var err error
+	s.db, err = sql.Open("sqlite", dbPath)
+	if err != nil {
+		return fmt.Errorf("sqlite error: %w\n", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) Delete(
+	name string,
+) error {
+
+	if s.path == ":memory:" {
+		return nil
+	}
+
+	dbPath := GetPath(name, s.path)
+	if err := os.Remove(dbPath); err != nil {
+		return fmt.Errorf("failed to delete database: %w", err)
+	}
+	return nil
+}
+
 func Open(
 	name string,
-	dataPath string,
+	path string,
 ) (
 	*sql.DB,
 	error,
 ) {
 
 	var dbPath string
-	if dataPath == ":memory:" {
+	if path == ":memory:" {
 		dbPath = ":memory:"
 	} else {
-		os.MkdirAll(dataPath, os.ModePerm)
-		dbPath = GetPath(name, dataPath)
+		os.MkdirAll(path, os.ModePerm)
+		dbPath = GetPath(name, path)
 	}
 
 	db, err := sql.Open("sqlite", dbPath)
@@ -97,19 +130,6 @@ func Open(
 	}
 	return db, nil
 }
-
-func Delete(
-	name string,
-	dataPath string,
-) error {
-
-	dbPath := GetPath(name, dataPath)
-	if err := os.Remove(dbPath); err != nil {
-		return fmt.Errorf("failed to delete database: %w", err)
-	}
-	return nil
-}
-
 func InitTable(
 	db *sql.DB,
 	name string,

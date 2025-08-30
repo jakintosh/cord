@@ -10,6 +10,7 @@ import (
 	"time"
 
 	cmd "git.sr.ht/~jakintosh/command-go"
+	"git.sr.ht/~jakintosh/cord/internal/database"
 	"git.sr.ht/~jakintosh/cord/internal/server"
 	"git.sr.ht/~jakintosh/cord/internal/wireguard"
 )
@@ -896,13 +897,25 @@ var deleteAssociation = &cmd.Command{
 // A wireguard peer consists of the peer's public key, external endpoint,
 // and "allowed ips" (cidrs).
 
-func initContext(network string, configDir string, dataDir string) (*server.Context, error) {
+func initContext(
+	network string,
+	configDir string,
+	dataDir string,
+) (*server.Context, error) {
 	config := server.NewFsConfig(configDir)
-	data := server.NewFsData(dataDir)
-	return server.NewContext(network, config, data)
+	store, err := database.Init(network, dataDir, true)
+	if err != nil {
+		return nil, err
+	}
+	return server.NewContext(network, config, store)
 }
 
-func parseCidr(value string) (*net.IPNet, error) {
+func parseCidr(
+	value string,
+) (
+	*net.IPNet,
+	error,
+) {
 	_, cidr, err := net.ParseCIDR(value)
 	if err != nil {
 		err = fmt.Errorf("failed to parse cidr from operand '%s': %v", value, err)
@@ -910,7 +923,12 @@ func parseCidr(value string) (*net.IPNet, error) {
 	return cidr, err
 }
 
-func parseIp(value string) (net.IP, error) {
+func parseIp(
+	value string,
+) (
+	net.IP,
+	error,
+) {
 	ip := net.ParseIP(value)
 	if ip == nil {
 		return nil, fmt.Errorf("failed to parse ip from '%s'", value)
@@ -923,7 +941,12 @@ func parseIp(value string) (net.IP, error) {
 	}
 }
 
-func parsePort(value string) (uint16, error) {
+func parsePort(
+	value string,
+) (
+	uint16,
+	error,
+) {
 	port, err := strconv.ParseUint(value, 10, 16)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse port from '%s': %v", value, err)
@@ -931,7 +954,12 @@ func parsePort(value string) (uint16, error) {
 	return uint16(port), nil
 }
 
-func parseBackend(value string) (server.BackendType, error) {
+func parseBackend(
+	value string,
+) (
+	server.BackendType,
+	error,
+) {
 	switch value {
 	case "kernel":
 		return server.KernelBackend, nil
@@ -942,7 +970,12 @@ func parseBackend(value string) (server.BackendType, error) {
 	}
 }
 
-func parseExpiration(value string) (int64, error) {
+func parseExpiration(
+	value string,
+) (
+	int64,
+	error,
+) {
 	last := len(value) - 1
 	number, err := strconv.ParseInt(value[0:last], 10, 64)
 	if err != nil {
