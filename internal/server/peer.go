@@ -60,3 +60,7 @@ func (ctx *Context) GetPeersOfPeerNamed(
 ) {
 	return ctx.Store.PeerListPeers(peerName)
 }
+
+func (ctx *Context) PeerGet(ip string) (string, error) {
+	return "peer", nil
+}

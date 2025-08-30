@@ -1,15 +1,20 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net"
 	"net/http"
 	"strings"
+
+	"git.sr.ht/~jakintosh/cord/internal/server"
 )
 
 // API will eventually hold api state and service interfaces
-type API struct{}
+type API struct {
+	server server.Context
+}
 
 // APIResponse is the standard envelope for all responses
 type APIResponse struct {
@@ -23,11 +28,28 @@ type APIError struct {
 	Message string `json:"message"`
 }
 
-func NewAPI() *API { return &API{} }
+func NewAPI(server server.Context) *API {
+	return &API{server}
+}
 
 // Auth middlewares are placeholders; they pass-through for now.
 func (a *API) withMainAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) { next(w, r) }
+	return func(w http.ResponseWriter, r *http.Request) {
+		ip := clientIP(r)
+		if ip == nil {
+			writeError(w, http.StatusBadRequest, "unable to determine client IP")
+			return
+		}
+
+		peerName, err := a.server.PeerGet(ip.String())
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), "peerName", peerName)
+		next(w, r.WithContext(ctx))
+	}
 }
 func (a *API) withInviteAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { next(w, r) }
