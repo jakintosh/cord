@@ -12,7 +12,7 @@ type EndpointReport struct {
 	Timestamp  int64  `json:"timestamp"`
 }
 
-func (a *API) handlePostReport(
+func (a *API) handlePostEndpoint(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {

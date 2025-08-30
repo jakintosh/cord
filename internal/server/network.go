@@ -7,28 +7,6 @@ import (
 	"git.sr.ht/~jakintosh/cord/internal/utils"
 )
 
-type NetworkStore interface {
-	Delete(name string) error
-
-	AssociationCreate(a string, b string) error
-	AssociationListAssociatedCidrIds(id int64) ([]int64, error)
-	AssociationDelete(a string, b string) error
-
-	CidrCreateRoot(name string, cidr *net.IPNet) error
-	CidrCreate(name string, cidr *net.IPNet) error
-	CidrRename(name string, newName string) error
-	CidrDelete(name string) error
-
-	InviteCreate(name string, pubKey string, cidr string, admin bool, inviteExpires int64) error
-	InviteRedeem(pubKey string, newKey string) error
-
-	PeerExists(name string) bool
-	PeerRename(name string, newName string) error
-	PeerSetAdmin(name string, admin bool) error
-	PeerSetEnabled(name string, enabled bool) error
-	PeerListPeers(name string) ([]Peer, error)
-}
-
 type NetworkDesc struct {
 	Name string
 	Cidr string

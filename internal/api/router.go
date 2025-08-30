@@ -10,11 +10,12 @@ func BuildRouter(r *mux.Router, api *API) {
 
 	// main network endpoints
 	v1.HandleFunc("/peers", api.withMainAuth(api.handleGetPeers)).Methods("GET")
-	v1.HandleFunc("/report", api.withMainAuth(api.handlePostReport)).Methods("POST")
-	v1.HandleFunc("/confirm/{key}", api.withMainAuth(api.handlePostConfirm)).Methods("POST")
+	v1.HandleFunc("/endpoint", api.withMainAuth(api.handlePostEndpoint)).Methods("POST")
 
-	// invite network endpoint
-	v1.HandleFunc("/redeem/{key}", api.withInviteAuth(api.handlePostRedeem)).Methods("POST")
+	// invite network endpoints
+	invite := v1.PathPrefix("/invite").Subrouter()
+	invite.HandleFunc("/confirm/{key}", api.withMainAuth(api.handlePostInviteConfirm)).Methods("POST")
+	invite.HandleFunc("/redeem/{key}", api.withInviteAuth(api.handlePostInviteRedeem)).Methods("POST")
 
 	// admin endpoints
 	admin := v1.PathPrefix("/admin").Subrouter()

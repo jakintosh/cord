@@ -172,9 +172,9 @@ type Association struct {
 ## Handler-to-Domain Mapping
 
 - GET `/api/v1/peers` → `PublicDomain.GetPeers(ctx)` returns `[]PublicPeer`
-- POST `/api/v1/report` → `PublicDomain.ReportEndpoints(ctx, []EndpointSighting)`
-- POST `/api/v1/confirm/{key}` → `PublicDomain.ConfirmPeer(ctx, key)`
-- POST `/api/v1/redeem/{key}` → `PublicDomain.RedeemInvite(ctx, key)` returns `Invite`
+- POST `/api/v1/endpoint` → `PublicDomain.ReportEndpoints(ctx, []EndpointSighting)`
+- POST `/api/v1/invite/confirm/{key}` → `PublicDomain.ConfirmPeer(ctx, key)`
+- POST `/api/v1/invite/redeem/{key}` → `PublicDomain.RedeemInvite(ctx, key)` returns `Invite`
 - POST `/api/v1/admin/peer` → `AdminDomain.CreatePeer(ctx, CreatePeerRequest)` returns `AdminPeer`
 - GET `/api/v1/admin/peers` → `AdminDomain.ListPeers(ctx)` returns `[]AdminPeer`
 - GET `/api/v1/admin/peer/{name}` → `AdminDomain.GetPeer(ctx, name)` returns `AdminPeer`

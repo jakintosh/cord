@@ -5,9 +5,9 @@
 | METHOD | PATH                       | PURPOSE                    | AUTH         | IDEMPOTENT |
 |--------|----------------------------|----------------------------|--------------|------------|
 | GET    | /api/v1/peers              | List visible peers         | main_net     | yes        |
-| POST   | /api/v1/report             | Report endpoint sightings  | main_net     | no         |
-| POST   | /api/v1/confirm/{key}      | Confirm peer presence      | main_net     | yes        |
-| POST   | /api/v1/redeem/{key}       | Redeem invite              | invite_net   | yes        |
+| POST   | /api/v1/endpoint           | Report endpoint sightings  | main_net     | no         |
+| POST   | /api/v1/invite/confirm/{key} | Confirm peer presence      | main_net     | yes        |
+| POST   | /api/v1/invite/redeem/{key}  | Redeem invite              | invite_net   | yes        |
 | POST   | /api/v1/admin/peer         | Create peer invite         | admin        | no         |
 | GET    | /api/v1/admin/peers        | List peers                 | admin        | yes        |
 | GET    | /api/v1/admin/peer/{name}  | Get peer                   | admin        | yes        |
@@ -80,7 +80,7 @@ Status:
 | 200  | OK                                                            |
 | 401  | Request not from confirmed peer on main network               |
 
-### POST /api/v1/report
+### POST /api/v1/endpoint
 
 Description: Report endpoint sightings observed by peer. Used for endpoint gossip protocol.
 
@@ -103,7 +103,7 @@ Status:
 | 400  | Malformed request                                             |
 | 401  | Request not from confirmed peer on main network               |
 
-### POST /api/v1/confirm/{key}
+### POST /api/v1/invite/confirm/{key}
 
 Description: Confirm peer presence on main network using public {key}. Finalizes redemption process and marks peer as operational.
 
@@ -119,7 +119,7 @@ Status:
 | 401  | Request not from valid main network IP                        |
 | 404  | No peer found for public key                                  |
 
-### POST /api/v1/redeem/{key}
+### POST /api/v1/invite/redeem/{key}
 
 Description: Redeem invite with permanent public {key}. Called over invite network during peer redemption flow. Returns main network configuration for transition.
 
@@ -475,7 +475,7 @@ Status:
 ## 5) Authentication & Network Architecture
 
 - **Dual Network Design:** The server operates two WireGuard interfaces:
-  - **Invite Network** (e.g. 172.16.0.0/16:51821): Only exposes `/api/v1/redeem`
+  - **Invite Network** (e.g. 172.16.0.0/16:51821): Only exposes `/api/v1/invite/redeem`
   - **Main Network** (e.g. 10.0.0.0/8:51820): Exposes full API including admin endpoints
 - **Authentication:** IP-based via WireGuard cryptographic identity
   - Server validates requesting peer exists in `peer` table for sender IP
@@ -487,9 +487,9 @@ Status:
 
 ## 6) Key Flows
 
-- **Redemption:** `/api/v1/redeem` (invite net) → `/api/v1/confirm` (main net)
+- **Redemption:** `/api/v1/invite/redeem` (invite net) → `/api/v1/invite/confirm` (main net)
 - **State Sync:** Periodic `/api/v1/peers` calls with WireGuard config updates
-- **Endpoint Gossip:** `/api/v1/report` submissions with peer endpoint observations
+- **Endpoint Gossip:** `/api/v1/endpoint` submissions with peer endpoint observations
 - **Administration:** Admin peers use `/api/v1/admin/*` endpoints for network management
 
 
