@@ -51,3 +51,10 @@ SQLite tables managed by server:
 - Server operations override paths with `--config-dir` and `--data-dir`
 - Tests use in-memory storage, production uses filesystem
 - **Security**: Never commit WireGuard keys, invite payloads, or real endpoints
+
+## Test Design Philosophy
+
+- **Readable, focused tests**: Each test function should test exactly one behavior/scenario with a clear name that immediately indicates what failed
+- **Reusable building blocks**: Common test setup, assertion helpers, and test data should be extracted to shared functions (see `database_test.go` pattern)
+- **Single assertions per test**: Avoid sub-tests with anonymous structs testing multiple cases - create separate test functions instead
+- **Helper functions**: Mark setup/assertion functions with `t.Helper()` for better error reporting

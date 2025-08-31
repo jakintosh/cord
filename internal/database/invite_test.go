@@ -1,350 +1,234 @@
 package database_test
 
 import (
-	"net"
 	"testing"
 	"time"
-
-	"git.sr.ht/~jakintosh/cord/internal/database"
 )
 
-func setupInviteTestDB(t *testing.T) *database.SQLiteStore {
-	store, err := database.Init("test-network", ":memory:", false)
-	if err != nil {
-		t.Fatalf("failed to init test database: %v", err)
-	}
-	return store
+// TestInviteCreateValid tests creating a valid invite
+func TestInviteCreateValid(t *testing.T) {
+	store := setupTestDB(t)
+
+	// create valid test user invite
+	err := createInvite(t, store, TestUser1)
+	expectNoError(t, err, "creating valid invite")
+	assertInviteExists(t, store, TestUser1)
 }
 
-func TestInviteCreate(t *testing.T) {
-	store := setupInviteTestDB(t)
+// TestInviteCreateAdmin tests creating an admin invite
+func TestInviteCreateAdmin(t *testing.T) {
+	store := setupTestDB(t)
 
-	tests := []struct {
-		name       string
-		inviteName string
-		pubKey     string
-		tempIP     net.IP
-		finalIP    net.IP
-		admin      bool
-		expiration int64
-		wantErr    bool
-	}{
-		{
-			name:       "create valid invite",
-			inviteName: "test-user",
-			pubKey:     "abc123key",
-			tempIP:     net.IPv4(10, 0, 64, 1),
-			finalIP:    net.IPv4(10, 0, 128, 1),
-			admin:      false,
-			expiration: time.Now().Add(24 * time.Hour).Unix(),
-			wantErr:    false,
-		},
-		{
-			name:       "create admin invite",
-			inviteName: "admin-user",
-			pubKey:     "xyz789key",
-			tempIP:     net.IPv4(10, 0, 64, 2),
-			finalIP:    net.IPv4(10, 0, 128, 2),
-			admin:      true,
-			expiration: time.Now().Add(48 * time.Hour).Unix(),
-			wantErr:    false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := store.InviteCreate(
-				tt.inviteName,
-				tt.pubKey,
-				tt.tempIP,
-				tt.finalIP,
-				tt.admin,
-				tt.expiration,
-			)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("InviteCreate() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-
-	// Test duplicate name constraint
-	t.Run("duplicate name should fail", func(t *testing.T) {
-		err := store.InviteCreate(
-			"test-user", // same as first test case
-			"different-key",
-			net.IPv4(10, 0, 64, 3),
-			net.IPv4(10, 0, 128, 3),
-			false,
-			time.Now().Add(24*time.Hour).Unix(),
-		)
-		if err == nil {
-			t.Error("InviteCreate() should fail with duplicate name")
-		}
-	})
-
-	// Test duplicate public key constraint
-	t.Run("duplicate public key should fail", func(t *testing.T) {
-		err := store.InviteCreate(
-			"different-user",
-			"abc123key", // same as first test case
-			net.IPv4(10, 0, 64, 4),
-			net.IPv4(10, 0, 128, 4),
-			false,
-			time.Now().Add(24*time.Hour).Unix(),
-		)
-		if err == nil {
-			t.Error("InviteCreate() should fail with duplicate public key")
-		}
-	})
+	// create valid admin user invite
+	err := createInvite(t, store, TestAdmin)
+	expectNoError(t, err, "creating admin invite")
+	assertInviteExists(t, store, TestAdmin)
 }
 
-func TestInviteGet(t *testing.T) {
-	store := setupInviteTestDB(t)
+// TestInviteCreateDuplicateName tests that duplicate names are rejected
+func TestInviteCreateDuplicateName(t *testing.T) {
+	store := setupTestDB(t)
 
-	// Create test invite
-	testName := "test-user"
-	testPubKey := "abc123key"
-	testTempIP := net.IPv4(10, 0, 64, 1)
-	testFinalIP := net.IPv4(10, 0, 128, 1)
-	testAdmin := true
-	testExpiration := time.Now().Add(24 * time.Hour).Unix()
+	// create valid invite
+	err := createInvite(t, store, TestUser1)
+	expectNoError(t, err, "creating valid invite")
 
-	err := store.InviteCreate(testName, testPubKey, testTempIP, testFinalIP, testAdmin, testExpiration)
-	if err != nil {
-		t.Fatalf("failed to create test invite: %v", err)
+	// create duplicate invite, but with uniqe key
+	duplicateInvite := TestUser1
+	duplicateInvite.PubKey = "different-key"
+	err = createInvite(t, store, duplicateInvite)
+	expectError(t, err, "creating invite with duplicate name")
+}
+
+// TestInviteCreateDuplicatePublicKey tests that duplicate public keys are rejected
+func TestInviteCreateDuplicatePublicKey(t *testing.T) {
+	store := setupTestDB(t)
+
+	// create valid invite
+	err := createInvite(t, store, TestUser1)
+	expectNoError(t, err, "creating valid invite")
+
+	// create duplicate invite, but with different name
+	duplicateInvite := TestUser1
+	duplicateInvite.Name = "different-user"
+	err = createInvite(t, store, duplicateInvite)
+	expectError(t, err, "creating invite with duplicate public key")
+}
+
+// TestInviteGetExisting tests retrieving an existing invite
+func TestInviteGetExisting(t *testing.T) {
+	store := setupTestDB(t)
+
+	err := createInvite(t, store, TestAdmin)
+	expectNoError(t, err, "creating valid invite")
+
+	invite, err := store.InviteGet(TestAdmin.Name)
+
+	expectNoError(t, err, "getting existing invite")
+
+	if invite.Name != TestAdmin.Name {
+		t.Errorf("invite name = %v, want %v", invite.Name, TestAdmin.Name)
+	}
+	if invite.PublicKey != TestAdmin.PubKey {
+		t.Errorf("invite public key = %v, want %v", invite.PublicKey, TestAdmin.PubKey)
+	}
+	if invite.Admin != TestAdmin.Admin {
+		t.Errorf("invite admin = %v, want %v", invite.Admin, TestAdmin.Admin)
+	}
+	if invite.Redeemed {
+		t.Errorf("invite redeemed = %v, want false", invite.Redeemed)
+	}
+	if invite.Expiration.Unix() != TestAdmin.Expiration {
+		t.Errorf("invite expiration = %v, want %v", invite.Expiration.Unix(), TestAdmin.Expiration)
 	}
 
-	t.Run("get existing invite", func(t *testing.T) {
-		invite, err := store.InviteGet(testName)
-		if err != nil {
-			t.Fatalf("InviteGet() error = %v", err)
-		}
+	// Verify CIDR strings are properly formatted
+	if invite.InviteCidr == "" {
+		t.Error("invite CIDR is empty")
+	}
+	if invite.NetworkCidr == "" {
+		t.Error("network CIDR is empty")
+	}
+}
 
-		if invite.Name != testName {
-			t.Errorf("InviteGet() name = %v, want %v", invite.Name, testName)
-		}
-		if invite.PublicKey != testPubKey {
-			t.Errorf("InviteGet() public key = %v, want %v", invite.PublicKey, testPubKey)
-		}
-		if !invite.Admin {
-			t.Errorf("InviteGet() admin = %v, want %v", invite.Admin, testAdmin)
-		}
-		if invite.Redeemed {
-			t.Errorf("InviteGet() redeemed = %v, want false", invite.Redeemed)
-		}
-		if invite.Expiration.Unix() != testExpiration {
-			t.Errorf("InviteGet() expiration = %v, want %v", invite.Expiration.Unix(), testExpiration)
-		}
+// TestInviteGetNonExistent tests retrieving a non-existent invite
+func TestInviteGetNonExistent(t *testing.T) {
+	store := setupTestDB(t)
 
-		// Verify CIDR strings are properly formatted
+	_, err := store.InviteGet("non-existent")
+
+	expectError(t, err, "getting non-existent invite")
+}
+
+// TestInviteListMultiple tests listing multiple invites
+func TestInviteListMultiple(t *testing.T) {
+	store := setupTestDB(t)
+	invites := []TestInviteDesc{TestUser1, TestAdmin, TestUser2}
+	createInvites(t, store, invites)
+
+	result, err := store.InviteList()
+
+	expectNoError(t, err, "listing invites")
+
+	if len(result) != len(invites) {
+		t.Errorf("returned %d invites, want %d", len(result), len(invites))
+	}
+
+	// Check that results are ordered by expiration DESC (as specified in SQL)
+	for i := 1; i < len(result); i++ {
+		if result[i-1].Expiration.Before(result[i].Expiration) {
+			t.Errorf("results not ordered by expiration DESC: %v < %v",
+				result[i-1].Expiration, result[i].Expiration)
+		}
+	}
+
+	// Verify each invite has required fields populated
+	for _, invite := range result {
+		if invite.Name == "" {
+			t.Error("invite has empty name")
+		}
+		if invite.PublicKey == "" {
+			t.Error("invite has empty public key")
+		}
 		if invite.InviteCidr == "" {
-			t.Error("InviteGet() invite CIDR is empty")
+			t.Error("invite has empty invite CIDR")
 		}
 		if invite.NetworkCidr == "" {
-			t.Error("InviteGet() network CIDR is empty")
-		}
-	})
-
-	t.Run("get non-existent invite", func(t *testing.T) {
-		_, err := store.InviteGet("non-existent")
-		if err == nil {
-			t.Error("InviteGet() should fail for non-existent invite")
-		}
-	})
-}
-
-func TestInviteList(t *testing.T) {
-	store := setupInviteTestDB(t)
-
-	// Create multiple test invites
-	invites := []struct {
-		name       string
-		pubKey     string
-		tempIP     net.IP
-		finalIP    net.IP
-		admin      bool
-		expiration int64
-	}{
-		{
-			name:       "user1",
-			pubKey:     "key1",
-			tempIP:     net.IPv4(10, 0, 64, 1),
-			finalIP:    net.IPv4(10, 0, 128, 1),
-			admin:      false,
-			expiration: time.Now().Add(24 * time.Hour).Unix(),
-		},
-		{
-			name:       "admin1",
-			pubKey:     "key2",
-			tempIP:     net.IPv4(10, 0, 64, 2),
-			finalIP:    net.IPv4(10, 0, 128, 2),
-			admin:      true,
-			expiration: time.Now().Add(48 * time.Hour).Unix(),
-		},
-		{
-			name:       "user2",
-			pubKey:     "key3",
-			tempIP:     net.IPv4(10, 0, 64, 3),
-			finalIP:    net.IPv4(10, 0, 128, 3),
-			admin:      false,
-			expiration: time.Now().Add(72 * time.Hour).Unix(),
-		},
-	}
-
-	for _, invite := range invites {
-		err := store.InviteCreate(
-			invite.name,
-			invite.pubKey,
-			invite.tempIP,
-			invite.finalIP,
-			invite.admin,
-			invite.expiration,
-		)
-		if err != nil {
-			t.Fatalf("failed to create test invite %s: %v", invite.name, err)
+			t.Error("invite has empty network CIDR")
 		}
 	}
-
-	t.Run("list all invites", func(t *testing.T) {
-		result, err := store.InviteList()
-		if err != nil {
-			t.Fatalf("InviteList() error = %v", err)
-		}
-
-		if len(result) != len(invites) {
-			t.Errorf("InviteList() returned %d invites, want %d", len(result), len(invites))
-		}
-
-		// Check that results are ordered by name (as specified in SQL)
-		for i := 1; i < len(result); i++ {
-			if result[i-1].Name > result[i].Name {
-				t.Errorf("InviteList() results not ordered by name: %s > %s", result[i-1].Name, result[i].Name)
-			}
-		}
-
-		// Verify each invite has required fields populated
-		for _, invite := range result {
-			if invite.Name == "" {
-				t.Error("InviteList() invite has empty name")
-			}
-			if invite.PublicKey == "" {
-				t.Error("InviteList() invite has empty public key")
-			}
-			if invite.InviteCidr == "" {
-				t.Error("InviteList() invite has empty invite CIDR")
-			}
-			if invite.NetworkCidr == "" {
-				t.Error("InviteList() invite has empty network CIDR")
-			}
-		}
-	})
-
-	t.Run("list empty invites", func(t *testing.T) {
-		emptyStore := setupInviteTestDB(t)
-		result, err := emptyStore.InviteList()
-		if err != nil {
-			t.Fatalf("InviteList() error = %v", err)
-		}
-
-		if len(result) != 0 {
-			t.Errorf("InviteList() on empty db returned %d invites, want 0", len(result))
-		}
-	})
 }
 
-func TestInviteRedeem(t *testing.T) {
-	store := setupInviteTestDB(t)
+// TestInviteListEmpty tests listing when no invites exist
+func TestInviteListEmpty(t *testing.T) {
+	store := setupTestDB(t)
 
-	// Create test invite
-	testName := "test-user"
-	testPubKey := "original-key"
+	result, err := store.InviteList()
+
+	expectNoError(t, err, "listing empty invites")
+	assertInviteCount(t, store, 0)
+
+	if len(result) != 0 {
+		t.Errorf("empty db returned %d invites, want 0", len(result))
+	}
+}
+
+// TestInviteRedeemValid tests redeeming a valid invite
+func TestInviteRedeemValid(t *testing.T) {
+	store := setupTestDB(t)
+	createInvite(t, store, TestUser1)
+
 	newPubKey := "new-peer-key"
-	testTempIP := net.IPv4(10, 0, 64, 1)
-	testFinalIP := net.IPv4(10, 0, 128, 1)
-	testAdmin := false
-	testExpiration := time.Now().Add(24 * time.Hour).Unix()
+	err := store.InviteRedeem(TestUser1.PubKey, newPubKey)
 
-	err := store.InviteCreate(testName, testPubKey, testTempIP, testFinalIP, testAdmin, testExpiration)
-	if err != nil {
-		t.Fatalf("failed to create test invite: %v", err)
+	expectNoError(t, err, "redeeming valid invite")
+
+	// Verify invite is marked as redeemed
+	assertInviteRedeemed(t, store, TestUser1.Name)
+
+	// Verify peer was created
+	assertPeerExists(t, store, TestUser1.Name, newPubKey, TestUser1.Admin)
+}
+
+// TestInviteRedeemAlreadyRedeemed tests redeeming an already redeemed invite
+func TestInviteRedeemAlreadyRedeemed(t *testing.T) {
+	store := setupTestDB(t)
+	createInvite(t, store, TestUser1)
+
+	// Redeem the invite first
+	firstKey := "first-new-key"
+	err := store.InviteRedeem(TestUser1.PubKey, firstKey)
+	expectNoError(t, err, "initial redeem")
+
+	// Try to redeem again
+	secondKey := "second-new-key"
+	err = store.InviteRedeem(TestUser1.PubKey, secondKey)
+
+	expectError(t, err, "redeeming already redeemed invite")
+}
+
+// TestInviteRedeemNonExistent tests redeeming a non-existent invite
+func TestInviteRedeemNonExistent(t *testing.T) {
+	store := setupTestDB(t)
+
+	err := store.InviteRedeem("non-existent-key", "some-new-key")
+
+	expectError(t, err, "redeeming non-existent invite")
+}
+
+// TestInviteRedeemAdmin tests redeeming an invite with admin privileges
+func TestInviteRedeemAdmin(t *testing.T) {
+	store := setupTestDB(t)
+	createInvite(t, store, TestAdmin)
+
+	adminNewKey := "admin-new-key"
+	err := store.InviteRedeem(TestAdmin.PubKey, adminNewKey)
+
+	expectNoError(t, err, "redeeming admin invite")
+
+	// Verify admin peer was created with admin privileges
+	assertPeerExists(t, store, TestAdmin.Name, adminNewKey, true)
+}
+
+// TestInviteRedeemExpired tests behavior with expired invites (if applicable)
+func TestInviteRedeemExpired(t *testing.T) {
+	store := setupTestDB(t)
+
+	// Create an invite that's already expired
+	expiredInvite := TestInviteDesc{
+		Name:       "expired-user",
+		PubKey:     "expired-key",
+		TempIP:     TestUser1.TempIP,
+		FinalIP:    TestUser1.FinalIP,
+		Admin:      false,
+		Expiration: time.Now().Add(-1 * time.Hour).Unix(), // 1 hour ago
 	}
+	createInvite(t, store, expiredInvite)
 
-	t.Run("redeem valid invite", func(t *testing.T) {
-		err := store.InviteRedeem(testPubKey, newPubKey)
-		if err != nil {
-			t.Fatalf("InviteRedeem() error = %v", err)
-		}
+	newKey := "new-key-for-expired"
+	err := store.InviteRedeem(expiredInvite.PubKey, newKey)
 
-		// Verify invite is now marked as redeemed
-		invite, err := store.InviteGet(testName)
-		if err != nil {
-			t.Fatalf("failed to get invite after redemption: %v", err)
-		}
-		if !invite.Redeemed {
-			t.Error("InviteRedeem() invite should be marked as redeemed")
-		}
-
-		// Verify peer was created
-		peer, err := store.PeerGet(testName)
-		if err != nil {
-			t.Fatalf("InviteRedeem() should create peer, but got error: %v", err)
-		}
-		if peer.Name != testName {
-			t.Errorf("InviteRedeem() created peer name = %v, want %v", peer.Name, testName)
-		}
-		if peer.PublicKey != newPubKey {
-			t.Errorf("InviteRedeem() created peer key = %v, want %v", peer.PublicKey, newPubKey)
-		}
-		if peer.Admin != testAdmin {
-			t.Errorf("InviteRedeem() created peer admin = %v, want %v", peer.Admin, testAdmin)
-		}
-		if !peer.Enabled {
-			t.Error("InviteRedeem() created peer should be enabled")
-		}
-		if !peer.Confirmed {
-			t.Error("InviteRedeem() created peer should be confirmed")
-		}
-	})
-
-	t.Run("redeem already redeemed invite", func(t *testing.T) {
-		err := store.InviteRedeem(testPubKey, "another-new-key")
-		if err == nil {
-			t.Error("InviteRedeem() should fail when invite already redeemed")
-		}
-	})
-
-	t.Run("redeem non-existent invite", func(t *testing.T) {
-		err := store.InviteRedeem("non-existent-key", "some-new-key")
-		if err == nil {
-			t.Error("InviteRedeem() should fail for non-existent invite")
-		}
-	})
-
-	t.Run("redeem with admin privileges", func(t *testing.T) {
-		// Create another invite with admin privileges
-		adminName := "admin-user"
-		adminPubKey := "admin-original-key"
-		adminNewKey := "admin-new-key"
-		adminTempIP := net.IPv4(10, 0, 64, 5) // Different IPs to avoid unique constraint
-		adminFinalIP := net.IPv4(10, 0, 128, 5)
-
-		err := store.InviteCreate(adminName, adminPubKey, adminTempIP, adminFinalIP, true, testExpiration)
-		if err != nil {
-			t.Fatalf("failed to create admin test invite: %v", err)
-		}
-
-		err = store.InviteRedeem(adminPubKey, adminNewKey)
-		if err != nil {
-			t.Fatalf("InviteRedeem() admin error = %v", err)
-		}
-
-		// Verify admin peer was created with admin privileges
-		peer, err := store.PeerGet(adminName)
-		if err != nil {
-			t.Fatalf("failed to get admin peer after redemption: %v", err)
-		}
-		if !peer.Admin {
-			t.Error("InviteRedeem() admin peer should have admin privileges")
-		}
-	})
+	// Note: The current implementation doesn't check expiration during redemption
+	// If expiration checking is added later, this test should expect an error
+	expectNoError(t, err, "redeeming expired invite")
 }
