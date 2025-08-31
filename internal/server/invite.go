@@ -1,12 +1,51 @@
 package server
 
 import (
-	"fmt"
 	"net"
+	"time"
 
-	"git.sr.ht/~jakintosh/cord/internal/utils"
 	wg "git.sr.ht/~jakintosh/cord/internal/wireguard"
 )
+
+type PeerInvite struct {
+	Interface struct {
+		NetworkName  string `json:"networkName"`
+		PrivateKey   string `json:"privateKey"`
+		AssignedCidr string `json:"assignedCidr"`
+	} `json:"interface"`
+	Server struct {
+		PublicKey        string `json:"publicKey"`
+		ExternalEndpoint string `json:"externalEndpoint"`
+		InternalEndpoint string `json:"internalEndpoint"`
+	} `json:"server"`
+}
+
+type ServerInvite struct {
+	PublicKey   string
+	InviteCidr  string
+	NetworkCidr string
+	Name        string
+	Admin       bool
+	Redeemed    bool
+	Expiration  time.Time
+}
+
+func (ctx *Context) GetInviteByIP(
+	ip net.IP,
+) (
+	*ServerInvite,
+	error,
+) {
+	return &ServerInvite{
+		PublicKey:   "abc123",
+		InviteCidr:  "10.0.64.1/32",
+		NetworkCidr: "10.0.0.1/32",
+		Name:        "example",
+		Admin:       true,
+		Redeemed:    false,
+		Expiration:  time.Now(),
+	}, nil
+}
 
 func (ctx *Context) CreateInvite(
 	name string,
@@ -18,45 +57,27 @@ func (ctx *Context) CreateInvite(
 	*wg.PeerConfig,
 	error,
 ) {
-
-	if err := utils.ValidateHostName(name); err != nil {
-		return nil, nil, fmt.Errorf("failed to validate peer name: %w", err)
-	}
-
-	privKey, pubKey, err := wg.GenerateKeypair()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate keypair: %v", err)
-	}
-
-	cidr := utils.GetPeerCidrFromIp(ip)
-	err = ctx.CreateCidr(name, cidr)
+	_, pubKey, err := wg.GenerateKeypair()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if err := ctx.Store.InviteCreate(
+	tempIP := net.IP{}
+
+	ctx.Store.InviteCreate(
 		name,
 		pubKey.String(),
-		utils.GetPeerCidrFromIp(ip).String(),
+		tempIP,
+		ip,
 		admin,
 		inviteExpires,
-	); err != nil {
-		return nil, nil, err
-	}
+	)
 
-	peerInterface := &wg.DeviceConfig{
-		PrivateKey: privKey,
-		Cidr:       cidr,
-		ListenPort: 0,
-	}
-
-	peerInfo := &wg.PeerConfig{
+	return &wg.DeviceConfig{}, &wg.PeerConfig{
 		Name:      name,
-		Cidr:      cidr,
+		Cidr:      &net.IPNet{},
 		PublicKey: pubKey,
-	}
-
-	return peerInterface, peerInfo, nil
+	}, nil
 }
 
 func (ctx *Context) RedeemInvite(

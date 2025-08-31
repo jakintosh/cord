@@ -170,7 +170,7 @@ Response: `AdminPeer`
   "cidr": "string",
   "publicKey": "string",
   "admin": "boolean",
-  "disabled": "boolean",
+  "enabled": "boolean",
   "confirmed": "boolean"
 }
 ```
@@ -185,7 +185,7 @@ Status:
 
 ### GET /api/v1/admin/peers
 
-Description: List all peers on the network. Includes admin/disabled/confirmed flags.
+Description: List all peers on the network. Includes admin/enabled/confirmed flags.
 
 Request: `null`
 
@@ -196,7 +196,7 @@ Response: `[AdminPeer]`
   "cidr": "string",
   "publicKey": "string",
   "admin": "boolean",
-  "disabled": "boolean",
+  "enabled": "boolean",
   "confirmed": "boolean"
 }
 ```
@@ -220,7 +220,7 @@ Response: `AdminPeer`
   "cidr": "string",
   "publicKey": "string",
   "admin": "boolean",
-  "disabled": "boolean",
+  "enabled": "boolean",
   "confirmed": "boolean"
 }
 ```
@@ -252,7 +252,7 @@ Response: `AdminPeer`
   "cidr": "string",
   "publicKey": "string",
   "admin": "boolean",
-  "disabled": "boolean",
+  "enabled": "boolean",
   "confirmed": "boolean"
 }
 ```

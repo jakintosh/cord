@@ -4,6 +4,7 @@ go 1.24.1
 
 require (
 	git.sr.ht/~jakintosh/command-go v0.0.4
+	github.com/gorilla/mux v1.8.1
 	github.com/vishvananda/netlink v1.3.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	modernc.org/sqlite v1.36.0
@@ -13,7 +14,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/josharian/native v1.1.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mdlayher/genetlink v1.3.2 // indirect

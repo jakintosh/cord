@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS peer (
     cidr                INTEGER NOT NULL UNIQUE,
     public_key          TEXT NOT NULL UNIQUE,
     admin               INTEGER DEFAULT 0 NOT NULL,
-    disabled            INTEGER DEFAULT 0 NOT NULL,
+    enabled             INTEGER DEFAULT 0 NOT NULL,
     confirmed           INTEGER DEFAULT 0 NOT NULL,
     FOREIGN KEY (cidr)
         REFERENCES cidr (id)

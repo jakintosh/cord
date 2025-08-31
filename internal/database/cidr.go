@@ -4,14 +4,30 @@ import (
 	"fmt"
 	"net"
 
+	"git.sr.ht/~jakintosh/cord/internal/server"
 	"git.sr.ht/~jakintosh/cord/internal/utils"
 )
+
+func (store *SQLiteStore) CidrList() (
+	[]server.Cidr,
+	error,
+) {
+	panic("unimplemented")
+}
+
+func (store *SQLiteStore) CidrGet(
+	name string,
+) (
+	*server.Cidr,
+	error,
+) {
+	panic("unimplemented")
+}
 
 func (s *SQLiteStore) CidrCreate(
 	name string,
 	cidr *net.IPNet,
 ) error {
-
 	prefix, length := cidr.Mask.Size()
 	base, last := utils.GetIpRangeFromCidr(cidr)
 	result, err := s.db.Exec(`

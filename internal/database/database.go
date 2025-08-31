@@ -145,7 +145,6 @@ func InitTable(
 func EnableForeignKeys(
 	db *sql.DB,
 ) error {
-
 	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
 		return fmt.Errorf("couldn't enable foreign keys: %w\n", err)
 	}
@@ -156,7 +155,6 @@ func GetPath(
 	name string,
 	dataPath string,
 ) string {
-
 	dbName := name + ".db"
 	return path.Join(dataPath, dbName)
 }
@@ -164,7 +162,6 @@ func GetPath(
 func ResultsEmpty(
 	result sql.Result,
 ) bool {
-
 	count, err := result.RowsAffected()
 	if err != nil {
 		return false
@@ -176,7 +173,6 @@ func CheckSqliteErr(
 	context string,
 	err error,
 ) error {
-
 	if err == nil {
 		return nil
 	}

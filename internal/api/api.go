@@ -28,34 +28,80 @@ type APIError struct {
 	Message string `json:"message"`
 }
 
-func NewAPI(server server.Context) *API {
+func Init(server server.Context) *API {
 	return &API{server}
 }
 
-// Auth middlewares are placeholders; they pass-through for now.
-func (a *API) withMainAuth(next http.HandlerFunc) http.HandlerFunc {
+func (api *API) withMainAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// get client IP
 		ip := clientIP(r)
 		if ip == nil {
 			writeError(w, http.StatusBadRequest, "unable to determine client IP")
 			return
 		}
 
-		peerName, err := a.server.PeerGet(ip.String())
+		// get peer name from ip
+		peer, err := api.server.PeerGetByIP(ip)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), "peerName", peerName)
+		// put peer name into context
+		ctx := context.WithValue(r.Context(), "peerName", peer.Name)
 		next(w, r.WithContext(ctx))
 	}
 }
-func (a *API) withInviteAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) { next(w, r) }
+
+func (api *API) withInviteAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// get client IP
+		ip := clientIP(r)
+		if ip == nil {
+			writeError(w, http.StatusBadRequest, "unable to determine client IP")
+			return
+		}
+
+		// get invite from ip
+		invite, err := api.server.GetInviteByIP(ip)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+
+		// put peer name into context
+		ctx := context.WithValue(r.Context(), "inviteKey", invite.PublicKey)
+		next(w, r.WithContext(ctx))
+	}
 }
-func (a *API) withAdminAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) { next(w, r) }
+
+func (api *API) withAdminAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// get client IP
+		ip := clientIP(r)
+		if ip == nil {
+			writeError(w, http.StatusBadRequest, "unable to determine client IP")
+			return
+		}
+
+		// get peer name from ip
+		peer, err := api.server.PeerGetByIP(ip)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+
+		// make sure caller has admin privileges
+		if !peer.Admin {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+
+		// put peer name into context
+		ctx := context.WithValue(r.Context(), "peerName", peer)
+		next(w, r.WithContext(ctx))
+	}
 }
 
 // clientIP helper retained in case future logic needs it

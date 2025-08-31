@@ -92,6 +92,27 @@ type PublicPeer struct {
 	Endpoints []EndpointWitness  `json:"endpoints"`
 }
 
+type AdminPeer struct {
+	Name      string `json:"name"`
+	Cidr      string `json:"cidr"`
+	PublicKey string `json:"publicKey"`
+	Admin     bool   `json:"admin"`
+	Enabled  bool    `json:"enabled"`
+	Confirmed bool   `json:"confirmed"`
+}
+
+type CreatePeerRequest struct {
+	Name  string `json:"name"`
+	Cidr  string `json:"cidr"`
+	Admin bool   `json:"admin"`
+}
+
+type UpdatePeerRequest struct {
+	Name    *string `json:"name,omitempty"`
+	Admin   *bool   `json:"admin,omitempty"`
+	Enabled *bool   `json:"enabled,omitempty"`
+}
+
 type EndpointWitness struct {
 	WitnessKey string `json:"witnessKey"`
 	Endpoint   string `json:"endpoint"`
@@ -118,27 +139,6 @@ type Invite struct {
 	} `json:"server"`
 }
 
-type AdminPeer struct {
-	Name      string `json:"name"`
-	Cidr      string `json:"cidr"`
-	PublicKey string `json:"publicKey"`
-	Admin     bool   `json:"admin"`
-	Disabled  bool   `json:"disabled"`
-	Confirmed bool   `json:"confirmed"`
-}
-
-type CreatePeerRequest struct {
-	Name  string `json:"name"`
-	Cidr  string `json:"cidr"`
-	Admin bool   `json:"admin"`
-}
-
-type UpdatePeerRequest struct {
-	Name    *string `json:"name,omitempty"`
-	Admin   *bool   `json:"admin,omitempty"`
-	Enabled *bool   `json:"enabled,omitempty"`
-}
-
 type Cidr struct {
 	Name   string `json:"name"`
 	Cidr   string `json:"cidr"`
@@ -149,6 +149,10 @@ type Cidr struct {
 type CreateCidrRequest struct {
 	Name string `json:"name"`
 	Cidr string `json:"cidr"`
+}
+
+type UpdateCidrRequest struct {
+	Name string `json:"name"`
 }
 
 type Association struct {

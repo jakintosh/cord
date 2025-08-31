@@ -48,23 +48,23 @@ var migrations = []migration{
 			);
 			CREATE TABLE IF NOT EXISTS invite (
 				id                  INTEGER PRIMARY KEY,
-				public_key          TEXT NOT NULL UNIQUE,
-				temp_cidr           TEXT NOT NULL UNIQUE,
-				final_cidr          TEXT NOT NULL UNIQUE,
 				name                TEXT NOT NULL UNIQUE,
+				public_key          TEXT NOT NULL UNIQUE,
+				temp_ip             BLOB NOT NULL UNIQUE,
+				final_ip            BLOB NOT NULL UNIQUE,
 				admin               INTEGER DEFAULT 0 NOT NULL,
 				redeemed            INTEGER DEFAULT 0 NOT NULL,
 				expiration          INTEGER NOT NULL
 			);
 			CREATE TABLE IF NOT EXISTS peer (
 				id                  INTEGER PRIMARY KEY,
-				cidr                INTEGER NOT NULL UNIQUE,
+				name                TEXT NOT NULL UNIQUE,
+				ip                  BLOB NOT NULL UNIQUE,
+				prefix              INTEGER NOT NULL,
 				public_key          TEXT NOT NULL UNIQUE,
 				admin               INTEGER DEFAULT 0 NOT NULL,
-				disabled            INTEGER DEFAULT 0 NOT NULL,
-				confirmed           INTEGER DEFAULT 0 NOT NULL,
-				FOREIGN KEY (cidr)
-					REFERENCES cidr (id)
+				enabled             INTEGER DEFAULT 0 NOT NULL,
+				confirmed           INTEGER DEFAULT 0 NOT NULL
 			);
 		`,
 	},

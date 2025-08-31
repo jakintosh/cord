@@ -18,7 +18,7 @@ type RedeemResponse struct {
 	} `json:"server"`
 }
 
-func (a *API) handlePostInviteRedeem(
+func (api *API) handlePostInviteRedeem(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -32,7 +32,7 @@ func (a *API) handlePostInviteRedeem(
 	writeData(w, http.StatusOK, RedeemResponse{})
 }
 
-func (a *API) handlePostInviteConfirm(
+func (api *API) handlePostInviteConfirm(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {

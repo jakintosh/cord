@@ -47,7 +47,7 @@ The server maintains network topology in SQLite with TOML config files for WireG
 | Table | Primary Key | Unique Constraints | Key Indexes |
 |-------|-------------|-------------------|-------------|
 | cidr | id (root=1) | name, cidr, (base,prefix) | prefix, base, last |
-| peer | id | cidr, public_key | confirmed, disabled |
+| peer | id | cidr, public_key | confirmed, enabled |
 | invite | id | public_key, temp_cidr, final_cidr | redeemed, expiration |
 | association | id | - | cidr1, cidr2 |
 | endpoint | id | - | peer, witness, time |

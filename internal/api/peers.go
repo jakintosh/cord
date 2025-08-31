@@ -15,10 +15,19 @@ type PublicPeer struct {
 	} `json:"endpoints"`
 }
 
-func (a *API) handleGetPeers(
+func (api *API) handleGetPeers(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	// Placeholder: return an empty list per spec shape
-	writeData(w, http.StatusOK, []PublicPeer{})
+	peerName, ok := r.Context().Value("peerName").(string)
+	if !ok {
+		// auth failed
+	}
+
+	peers, err := api.server.GetPeersOfPeerNamed(peerName)
+	if err != nil {
+		// service failed
+	}
+
+	writeData(w, http.StatusOK, peers)
 }

@@ -1,5 +1,14 @@
 package database
 
+import "git.sr.ht/~jakintosh/cord/internal/server"
+
+func (store *SQLiteStore) AssociationList() (
+	[]server.Association,
+	error,
+) {
+	panic("unimplemented")
+}
+
 func (store *SQLiteStore) AssociationCreate(
 	a string,
 	b string,

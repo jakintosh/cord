@@ -41,7 +41,7 @@ SQLite tables managed by server:
 - `cidr` - named CIDR blocks with numeric ranges
 - `association` - symmetric communication permissions between CIDRs
 - `invite` - temporary peer invitations with temp keys, assignments, expiration
-- `peer` - confirmed peers with public keys, admin/disabled flags
+- `peer` - confirmed peers with public keys, admin/enabled flags
 - `endpoint` - historical peer endpoint sightings for gossip
 
 ## Development Notes

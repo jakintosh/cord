@@ -1,6 +1,10 @@
 package server_test
 
-import "testing"
+import (
+	"testing"
+
+	"git.sr.ht/~jakintosh/cord/internal/server"
+)
 
 func TestPeerRedeem(t *testing.T) {
 	ctx, err := createBaseNetwork()
@@ -40,7 +44,8 @@ func TestPeerEnable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ctx.SetPeerEnabled(testServer.Name, false); err != nil {
+	req := server.UpdatePeerRequest{Enabled: boolPtr(false)}
+	if _, err := ctx.UpdatePeer(testServer.Name, req); err != nil {
 		t.Fatal(err)
 	}
 
@@ -62,7 +67,8 @@ func TestRenameAndCheckPeerExists(t *testing.T) {
 		t.Fatalf("expected peer to exist")
 	}
 
-	if err := ctx.RenamePeer(testServer.Name, "renamed-server"); err != nil {
+	req := server.UpdatePeerRequest{Name: stringPtr("renamed-server")}
+	if _, err := ctx.UpdatePeer(testServer.Name, req); err != nil {
 		t.Fatalf("failed to rename peer: %v", err)
 	}
 	if ctx.CheckPeerExists(testServer.Name) {

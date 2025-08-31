@@ -309,17 +309,11 @@ var addCidr = &cmd.Command{
 		// operands
 		network := i.GetOperand("network")
 		name := i.GetOperand("name")
-		cidrValue := i.GetOperand("cidr")
+		cidr := i.GetOperand("cidr")
 
 		// options
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
-
-		// parse
-		cidr, err := parseCidr(cidrValue)
-		if err != nil {
-			return fmt.Errorf("failed to parse cidr: %w", err)
-		}
 
 		// create app context
 		ctx, err := initContext(network, configDir, dataDir)
@@ -327,7 +321,14 @@ var addCidr = &cmd.Command{
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		err = ctx.CreateCidr(name, cidr)
+		// create request
+		req := server.CreateCidrRequest{
+			Name: name,
+			Cidr: cidr,
+		}
+
+		// execute command
+		err = ctx.CreateCidr(req)
 		if err != nil {
 			return fmt.Errorf("failed to create cidr: %w", err)
 		}
@@ -374,7 +375,13 @@ var renameCidr = &cmd.Command{
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		err = ctx.RenameCidr(cidr, newName)
+		// create request
+		req := server.UpdateCidrRequest{
+			Name: newName,
+		}
+
+		// execute command
+		err = ctx.RenameCidr(cidr, req)
 		if err != nil {
 			return fmt.Errorf("failed to rename cidr: %w", err)
 		}
@@ -552,7 +559,7 @@ var renamePeer = &cmd.Command{
 
 		// operands
 		network := i.GetOperand("network")
-		peer := i.GetOperand("peer")
+		oldName := i.GetOperand("peer")
 		newName := i.GetOperand("new-name")
 
 		// options
@@ -565,7 +572,10 @@ var renamePeer = &cmd.Command{
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		err = ctx.RenamePeer(peer, newName)
+		req := server.UpdatePeerRequest{
+			Name: &newName,
+		}
+		_, err = ctx.UpdatePeer(oldName, req)
 		if err != nil {
 			return fmt.Errorf("failed to rename peer: %w", err)
 		}
@@ -587,7 +597,7 @@ var enablePeer = &cmd.Command{
 		},
 		{
 			Name: "peer",
-			Help: "peer to rename",
+			Help: "peer to enable",
 		},
 	},
 	Options: []cmd.Option{},
@@ -595,7 +605,7 @@ var enablePeer = &cmd.Command{
 
 		// operands
 		network := i.GetOperand("network")
-		peer := i.GetOperand("peer")
+		peerName := i.GetOperand("peer")
 
 		// options
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
@@ -607,7 +617,10 @@ var enablePeer = &cmd.Command{
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		err = ctx.SetPeerEnabled(peer, true)
+		req := server.UpdatePeerRequest{
+			Enabled: boolPtr(true),
+		}
+		_, err = ctx.UpdatePeer(peerName, req)
 		if err != nil {
 			return fmt.Errorf("failed to enable peer: %w", err)
 		}
@@ -637,7 +650,7 @@ var disablePeer = &cmd.Command{
 
 		// operands
 		network := i.GetOperand("network")
-		peer := i.GetOperand("peer")
+		peerName := i.GetOperand("peer")
 
 		// options
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
@@ -649,9 +662,12 @@ var disablePeer = &cmd.Command{
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		err = ctx.SetPeerEnabled(peer, false)
+		req := server.UpdatePeerRequest{
+			Enabled: boolPtr(false),
+		}
+		_, err = ctx.UpdatePeer(peerName, req)
 		if err != nil {
-			return fmt.Errorf("failed to disable peer: %w", err)
+			return fmt.Errorf("failed to enable peer: %w", err)
 		}
 
 		return nil
@@ -1008,3 +1024,5 @@ func getPwd() string {
 	}
 	return dir
 }
+
+func boolPtr(b bool) *bool { return &b }

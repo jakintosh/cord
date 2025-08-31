@@ -121,11 +121,11 @@
 1. **Peer requests state.** A peer (or administrator) calls `cord-server get-peers` or sends an HTTP request like `GET /api/v1/peers`.
 2. **Server looks up requester.** The server opens a context for the network and verifies that the requesting peer exists. (If API, uses IP address. If CLI, implicitly assumes server admin.) It determines whether the peer is confirmed and enabled; if not, the request is rejected.
 3. **Resolve parent and associated CIDRs.** The server finds the peer’s own CIDR and any parent CIDR. It then calls `GetAssociatedCidrIdsForCidrId()` to fetch all CIDRs associated with that parent. The requesting peer may see peers in its own CIDR, parent CIDR and any associated CIDRs.
-4. **Select eligible peers.** The server queries the `peer` table for all rows where `confirmed=1` and `disabled=0` within the resolved CIDR set. The requesting peer itself is excluded from the results. Each returned record includes the peer ID, name, public key, CIDR.
+4. **Select eligible peers.** The server queries the `peer` table for all rows where `confirmed=1` and `enabled=0` within the resolved CIDR set. The requesting peer itself is excluded from the results. Each returned record includes the peer ID, name, public key, CIDR.
 5. **Return peer list.** The server serializes the list as JSON and returns it to the requester. The flow is idempotent: repeated queries return identical results unless the network state (peers, associations or CIDRs) has changed.
 6. **Client updates local state.** Clients use this list to determine which peers to add to or remove from their WireGuard configuration. Disabled peers disappear from the list immediately.
 
-**Key Points:** Peer state queries are read‑only operations and can be served concurrently. They hide unconfirmed (`confirmed=0`) or disabled (`disabled=1`) peers and only reveal those peers that the requester is allowed to communicate with according to CIDR associations and the admin’s configuration.
+**Key Points:** Peer state queries are read‑only operations and can be served concurrently. They hide unconfirmed (`confirmed=0`) or disabled (`enabled=0`) peers and only reveal those peers that the requester is allowed to communicate with according to CIDR associations and the admin’s configuration.
 
 ## Peer Administration Flow
 
@@ -135,7 +135,7 @@
 
    **Rename:** Since the `peer` table doesn't track names, it is the peer's underlying CIDR that is actually being renamed.
 
-   **Enable/Disable:** The server flips the `disabled` column for the peer. Setting `disabled=1` immediately removes the peer from other peers’ allowed lists; setting it back to `0` makes it visible again.
+   **Enable/Disable:** The server flips the `enabled` column for the peer. Setting `enabled=0` immediately removes the peer from other peers’ allowed lists; setting it back to `0` makes it visible again.
 
 6. **Commit changes and propagate.** The server commits the update. Future state queries and client fetches will reflect the new name or enabled status.
 7. **Return result.** A success message is returned. If an error occurs (e.g., peer does not exist, name conflict), the server returns an error and no changes take effect.

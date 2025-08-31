@@ -7,13 +7,6 @@ import (
 	"git.sr.ht/~jakintosh/cord/internal/utils"
 )
 
-type NetworkDesc struct {
-	Name string
-	Cidr string
-	Ip   net.IP
-	Port uint16
-}
-
 func (ctx *Context) CreateNetwork(
 	cidr *net.IPNet,
 	address net.IP,

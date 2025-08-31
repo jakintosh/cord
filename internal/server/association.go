@@ -1,5 +1,10 @@
 package server
 
+type Association struct {
+	Cidr1 string `json:"cidr1"`
+	Cidr2 string `json:"cidr2"`
+}
+
 func (ctx *Context) CreateAssociation(
 	cidr1 string,
 	cidr2 string,

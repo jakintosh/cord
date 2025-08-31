@@ -2,29 +2,48 @@ package database
 
 import (
 	"fmt"
+	"net"
+
+	"git.sr.ht/~jakintosh/cord/internal/server"
 )
 
-func (s *SQLiteStore) InviteCreate(name string,
+func (store *SQLiteStore) InviteList() (
+	[]server.ServerInvite,
+	error,
+) {
+	panic("unimplemented")
+}
+
+func (store *SQLiteStore) InviteGet(
+	name string,
+) (
+	*server.ServerInvite,
+	error,
+) {
+	panic("unimplemented")
+}
+
+func (s *SQLiteStore) InviteCreate(
+	name string,
 	pubKey string,
-	cidr string,
+	tempIP net.IP,
+	finalIP net.IP,
 	admin bool,
-	inviteExpires int64,
+	expiration int64,
 ) error {
 	_, err := s.db.Exec(`
-		INSERT INTO invite (public_key, temp_cidr, final_cidr, name, admin, redeemed, expiration)
-		SELECT ?2, ?3, c.id, ?1, ?4, 0, ?5
-		FROM cidr c
-		WHERE c.name=?1;
+		INSERT INTO invite (name, public_key, temp_ip, final_ip, admin, redeemed, expiration)
+		VALUES (?, ?, ?, ?, ?, 0, ?);
 		`,
 		name,
 		pubKey,
-		cidr,
+		tempIP,
+		finalIP,
 		admin,
-		inviteExpires,
+		expiration,
 	)
 	return CheckSqliteErr("adding invite", err)
 }
-
 func (s *SQLiteStore) InviteRedeem(
 	pubKey string,
 	newKey string,
@@ -39,8 +58,18 @@ func (s *SQLiteStore) InviteRedeem(
 
 	// Insert into peer using details from invite
 	res, err := tx.Exec(`
-		INSERT INTO peer (cidr, public_key, admin, disabled, confirmed)
-		SELECT i.final_cidr, ?2, i.admin, 0, 1
+		INSERT INTO peer (name, ip, prefix, public_key, admin, enabled, confirmed)
+		SELECT
+			i.name,
+			i.final_ip,
+			CASE
+				WHEN LENGTH(i.final_ip) = 4 THEN 32
+				ELSE 128
+			END,
+			?2,
+			i.admin,
+			1,
+			1
 		FROM invite i
 		WHERE i.redeemed=0 AND i.public_key=?1;
 		`,

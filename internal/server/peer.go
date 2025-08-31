@@ -5,22 +5,32 @@ import (
 	"net"
 )
 
-type PeerDesc struct {
-	Name    string
-	Ip      net.IP
-	Admin   bool
-	Expires int64
+type PublicPeer struct {
+	Name      string            `json:"name"`
+	Cidr      string            `json:"cidr"`
+	PublicKey string            `json:"publicKey"`
+	Endpoints []EndpointWitness `json:"endpoints"`
 }
 
 type Peer struct {
-	PeerId    int64  `json:"peerId"`
-	CidrId    int64  `json:"cidrId"`
 	Name      string `json:"name"`
-	PublicKey string `json:"publicKey"`
 	Cidr      string `json:"cidr"`
+	PublicKey string `json:"publicKey"`
 	Admin     bool   `json:"admin"`
+	Enabled   bool   `json:"enabled"`
 	Confirmed bool   `json:"confirmed"`
-	Disabled  bool   `json:"disabled"`
+}
+
+type CreatePeerRequest struct {
+	Name  string `json:"name"`
+	Cidr  string `json:"cidr"`
+	Admin bool   `json:"admin"`
+}
+
+type UpdatePeerRequest struct {
+	Name    *string `json:"name,omitempty"`
+	Admin   *bool   `json:"admin,omitempty"`
+	Enabled *bool   `json:"enabled,omitempty"`
 }
 
 func (p *Peer) String() string {
@@ -32,18 +42,30 @@ func (p *Peer) String() string {
 	)
 }
 
-func (ctx *Context) RenamePeer(
-	peer string,
-	newName string,
-) error {
-	return ctx.RenameCidr(peer, newName)
+func (ctx *Context) PeerGetByIP(
+	ip net.IP,
+) (
+	*Peer,
+	error,
+) {
+	return &Peer{
+		Name:      "peer",
+		PublicKey: "abc123",
+		Cidr:      "10.0.0.1/32",
+		Admin:     true,
+		Confirmed: true,
+		Enabled:   false,
+	}, nil
 }
 
-func (ctx *Context) SetPeerEnabled(
+func (ctx *Context) UpdatePeer(
 	peer string,
-	enabled bool,
-) error {
-	return ctx.Store.PeerSetEnabled(peer, enabled)
+	req UpdatePeerRequest,
+) (
+	*Peer,
+	error,
+) {
+	return nil, nil
 }
 
 func (ctx *Context) CheckPeerExists(
@@ -59,8 +81,4 @@ func (ctx *Context) GetPeersOfPeerNamed(
 	error,
 ) {
 	return ctx.Store.PeerListPeers(peerName)
-}
-
-func (ctx *Context) PeerGet(ip string) (string, error) {
-	return "peer", nil
 }
