@@ -3,6 +3,18 @@
 # Schema Map
 
 ```sql
+CREATE TABLE IF NOT EXISTS association (
+    id                  INTEGER PRIMARY KEY,
+    cidr1               INTEGER NOT NULL,
+    cidr2               INTEGER NOT NULL,
+    CHECK (cidr1 < cidr2),
+    UNIQUE (cidr1, cidr2),
+    FOREIGN KEY (cidr1)
+        REFERENCES cidr (id),
+    FOREIGN KEY (cidr2)
+        REFERENCES cidr (id)
+);
+
 CREATE TABLE IF NOT EXISTS cidr (
     id                  INTEGER PRIMARY KEY,
     name                TEXT NOT NULL UNIQUE,
@@ -12,42 +24,6 @@ CREATE TABLE IF NOT EXISTS cidr (
     base                BLOB NOT NULL,
     last                BLOB NOT NULL,
     UNIQUE (base, prefix)
-);
-
-CREATE TABLE IF NOT EXISTS association (
-    id                  INTEGER PRIMARY KEY,
-    cidr1               INTEGER NOT NULL,
-    cidr2               INTEGER NOT NULL,
-    FOREIGN KEY (cidr1)
-        REFERENCES cidr (id)
-        ON UPDATE RESTRICT,
-    FOREIGN KEY (cidr2)
-        REFERENCES cidr (id)
-        ON UPDATE RESTRICT
-);
-
-CREATE TABLE IF NOT EXISTS invite (
-    id                  INTEGER PRIMARY KEY,
-    public_key          TEXT NOT NULL UNIQUE,    -- temporary public key
-    temp_cidr           TEXT NOT NULL UNIQUE,    -- CIDR on invite network
-    final_cidr          INTEGER NOT NULL UNIQUE, -- CIDR for main network
-    name                TEXT NOT NULL,           -- future peer name
-    admin               INTEGER DEFAULT 0 NOT NULL,
-    redeemed            INTEGER DEFAULT 0 NOT NULL,
-    expiration          INTEGER NOT NULL,
-    FOREIGN KEY (final_cidr)
-        REFERENCES cidr (id)
-);
-
-CREATE TABLE IF NOT EXISTS peer (
-    id                  INTEGER PRIMARY KEY,
-    cidr                INTEGER NOT NULL UNIQUE,
-    public_key          TEXT NOT NULL UNIQUE,
-    admin               INTEGER DEFAULT 0 NOT NULL,
-    enabled             INTEGER DEFAULT 0 NOT NULL,
-    confirmed           INTEGER DEFAULT 0 NOT NULL,
-    FOREIGN KEY (cidr)
-        REFERENCES cidr (id)
 );
 
 CREATE TABLE IF NOT EXISTS endpoint (
@@ -60,6 +36,28 @@ CREATE TABLE IF NOT EXISTS endpoint (
         REFERENCES peer (id),
     FOREIGN KEY (witness)
         REFERENCES peer (id)
+);
+
+CREATE TABLE IF NOT EXISTS invite (
+    id                  INTEGER PRIMARY KEY,
+    name                TEXT NOT NULL UNIQUE,
+    public_key          TEXT NOT NULL UNIQUE,
+    temp_ip             BLOB NOT NULL UNIQUE,
+    final_ip            BLOB NOT NULL UNIQUE,
+    admin               INTEGER DEFAULT 0 NOT NULL,
+    redeemed            INTEGER DEFAULT 0 NOT NULL,
+    expiration          INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS peer (
+    id                  INTEGER PRIMARY KEY,
+    name                TEXT NOT NULL UNIQUE,
+    ip                  BLOB NOT NULL UNIQUE,
+    prefix              INTEGER NOT NULL,
+    public_key          TEXT NOT NULL UNIQUE,
+    admin               INTEGER DEFAULT 0 NOT NULL,
+    enabled             INTEGER DEFAULT 0 NOT NULL,
+    confirmed           INTEGER DEFAULT 0 NOT NULL
 );
 ```
 
