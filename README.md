@@ -1,5 +1,7 @@
 # Cord
 
+Note: `cord` is a rewrite and evolution of [tonarino/innernet](https://github.com/tonarino/innernet), written in go. It started as a direct go translation, but evolved significantly enough to warrant a name change. At the moment, much of the original design remains.
+
 Cord is a wireguard configuration manager and virtual network orchestrator. It aims to provide a small coordination server and complementary CLI for managing WireGuard networks built around the concept of "cords". A cord describes a network's address ranges, the peers that may join, and how those peers may communicate.
 
 ## Project status
