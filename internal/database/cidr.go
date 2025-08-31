@@ -12,7 +12,26 @@ func (store *SQLiteStore) CidrList() (
 	[]*server.Cidr,
 	error,
 ) {
-	panic("unimplemented")
+	rows, err := store.db.Query(`
+		SELECT name, cidr, length, prefix
+		FROM cidr
+		ORDER BY name ASC;`,
+	)
+	if err != nil {
+		return nil, CheckSqliteErr("querying cidrs", err)
+	}
+	defer rows.Close()
+
+	var cidrs []*server.Cidr
+	for rows.Next() {
+		cidr, err := scanCidr(rows)
+		if err != nil {
+			return nil, err
+		}
+		cidrs = append(cidrs, cidr)
+	}
+
+	return cidrs, nil
 }
 
 func (store *SQLiteStore) CidrGet(
@@ -21,7 +40,14 @@ func (store *SQLiteStore) CidrGet(
 	*server.Cidr,
 	error,
 ) {
-	panic("unimplemented")
+	row := store.db.QueryRow(`
+		SELECT name, cidr, length, prefix
+		FROM cidr
+		WHERE name = ?1;`,
+		name,
+	)
+
+	return scanCidr(row)
 }
 
 func (s *SQLiteStore) CidrCreate(
@@ -36,8 +62,7 @@ func (s *SQLiteStore) CidrCreate(
 		FROM cidr c
 		WHERE c.id = 1
 			AND c.base <= ?5
-			AND ?5 <= c.last;
-		`,
+			AND ?5 <= c.last;`,
 		name,
 		cidr.String(),
 		length,
@@ -65,8 +90,7 @@ func (s *SQLiteStore) CidrCreateRoot(
 	base, last := utils.GetIpRangeFromCidr(cidr)
 	_, err := s.db.Exec(`
 		INSERT INTO cidr (id, name, cidr, length, prefix, base, last)
-		VALUES (1, ?, ?, ?, ?, ?, ?);
-		`,
+		VALUES (1, ?, ?, ?, ?, ?, ?);`,
 		name,
 		cidr.String(),
 		length,
@@ -85,8 +109,7 @@ func (s *SQLiteStore) CidrRename(
 	_, err := s.db.Exec(`
 		UPDATE cidr
 		SET name=?2
-		WHERE name=?1;
-		`,
+		WHERE name=?1;`,
 		name, newName,
 	)
 	return CheckSqliteErr("renaming cidr", err)
@@ -97,9 +120,35 @@ func (s *SQLiteStore) CidrDelete(
 ) error {
 	_, err := s.db.Exec(`
 		DELETE FROM cidr
-		WHERE name = ?;
-		`,
+		WHERE name = ?;`,
 		name,
 	)
 	return CheckSqliteErr("deleting cidr", err)
+}
+
+func scanCidr(s Scanner) (
+	*server.Cidr,
+	error,
+) {
+	var name, cidrStr string
+	var length, prefix int
+
+	err := s.Scan(
+		&name,
+		&cidrStr,
+		&length,
+		&prefix,
+	)
+	if err != nil {
+		return nil, CheckSqliteErr("scanning cidr info", err)
+	}
+
+	cidr := &server.Cidr{
+		Name:   name,
+		Cidr:   cidrStr,
+		Length: length,
+		Prefix: prefix,
+	}
+
+	return cidr, nil
 }

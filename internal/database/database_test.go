@@ -29,6 +29,14 @@ type TestPeerDesc struct {
 	Confirmed bool
 }
 
+// TestCidrDesc describes a CIDR for testing
+type TestCidrDesc struct {
+	Name   string
+	Cidr   string
+	Length int
+	Prefix int
+}
+
 // Common test invites
 var (
 	TestUser1 = TestInviteDesc{
@@ -98,6 +106,37 @@ var (
 		Admin:     true,
 		Enabled:   true,
 		Confirmed: true,
+	}
+)
+
+// Common test CIDRs
+var (
+	TestCidrRoot = TestCidrDesc{
+		Name:   "test-network",
+		Cidr:   "10.0.0.0/16",
+		Length: 32,
+		Prefix: 16,
+	}
+
+	TestCidr1 = TestCidrDesc{
+		Name:   "subnet-1",
+		Cidr:   "10.0.64.0/24",
+		Length: 32,
+		Prefix: 24,
+	}
+
+	TestCidr2 = TestCidrDesc{
+		Name:   "subnet-2",
+		Cidr:   "10.0.65.0/24",
+		Length: 32,
+		Prefix: 24,
+	}
+
+	TestCidrSmall = TestCidrDesc{
+		Name:   "small-subnet",
+		Cidr:   "10.0.66.0/28",
+		Length: 32,
+		Prefix: 28,
 	}
 )
 
@@ -363,5 +402,103 @@ func assertPeerNotExists(
 	t.Helper()
 	if store.PeerExists(name) {
 		t.Errorf("expected peer %s to not exist, but it was found", name)
+	}
+}
+
+// createCidr creates a CIDR from a TestCidrDesc
+func createCidr(
+	t *testing.T,
+	store *database.SQLiteStore,
+	desc TestCidrDesc,
+) error {
+	t.Helper()
+	_, cidr, err := net.ParseCIDR(desc.Cidr)
+	if err != nil {
+		t.Fatalf("failed to parse test CIDR %s: %v", desc.Cidr, err)
+	}
+	return store.CidrCreate(desc.Name, cidr)
+}
+
+// createRootCidr creates a root CIDR from a TestCidrDesc
+func createRootCidr(
+	t *testing.T,
+	store *database.SQLiteStore,
+	desc TestCidrDesc,
+) error {
+	t.Helper()
+	_, cidr, err := net.ParseCIDR(desc.Cidr)
+	if err != nil {
+		t.Fatalf("failed to parse test CIDR %s: %v", desc.Cidr, err)
+	}
+	return store.CidrCreateRoot(desc.Name, cidr)
+}
+
+// createCidrs creates multiple CIDRs from TestCidrDesc slice
+func createCidrs(
+	t *testing.T,
+	store *database.SQLiteStore,
+	descs []TestCidrDesc,
+) error {
+	t.Helper()
+	for _, desc := range descs {
+		if err := createCidr(t, store, desc); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// assertCidrExists verifies that a CIDR exists and matches expected values
+func assertCidrExists(
+	t *testing.T,
+	store *database.SQLiteStore,
+	desc TestCidrDesc,
+) {
+	t.Helper()
+	cidr, err := store.CidrGet(desc.Name)
+	if err != nil {
+		t.Fatalf("expected CIDR %s to exist, but got error: %v", desc.Name, err)
+	}
+
+	if cidr.Name != desc.Name {
+		t.Errorf("CIDR name = %v, want %v", cidr.Name, desc.Name)
+	}
+	if cidr.Cidr != desc.Cidr {
+		t.Errorf("CIDR cidr = %v, want %v", cidr.Cidr, desc.Cidr)
+	}
+	if cidr.Length != desc.Length {
+		t.Errorf("CIDR length = %v, want %v", cidr.Length, desc.Length)
+	}
+	if cidr.Prefix != desc.Prefix {
+		t.Errorf("CIDR prefix = %v, want %v", cidr.Prefix, desc.Prefix)
+	}
+}
+
+// assertCidrNotExists verifies that a CIDR does not exist
+func assertCidrNotExists(
+	t *testing.T,
+	store *database.SQLiteStore,
+	name string,
+) {
+	t.Helper()
+	_, err := store.CidrGet(name)
+	if err == nil {
+		t.Errorf("expected CIDR %s to not exist, but it was found", name)
+	}
+}
+
+// assertCidrCount verifies the total number of CIDRs
+func assertCidrCount(
+	t *testing.T,
+	store *database.SQLiteStore,
+	expectedCount int,
+) {
+	t.Helper()
+	cidrs, err := store.CidrList()
+	if err != nil {
+		t.Fatalf("failed to list CIDRs: %v", err)
+	}
+	if len(cidrs) != expectedCount {
+		t.Errorf("expected %d CIDRs, got %d", expectedCount, len(cidrs))
 	}
 }
