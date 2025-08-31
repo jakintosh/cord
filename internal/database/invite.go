@@ -99,9 +99,12 @@ func (s *SQLiteStore) InviteRedeem(
 			1,
 			1
 		FROM invite i
-		WHERE i.redeemed=0 AND i.public_key=?1;`,
+		WHERE i.redeemed=0
+			AND i.public_key=?1
+			AND i.expiration > ?3;`,
 		pubKey,
 		newKey,
+		time.Now().Unix(),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create peer from invite: %w", err)

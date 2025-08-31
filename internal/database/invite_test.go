@@ -225,7 +225,7 @@ func TestInviteRedeemAdmin(t *testing.T) {
 	assertPeerExists(t, store, TestAdmin.Name, adminNewKey, true)
 }
 
-// TestInviteRedeemExpired tests behavior with expired invites (if applicable)
+// TestInviteRedeemExpired tests behavior with expired invites
 func TestInviteRedeemExpired(t *testing.T) {
 	store := setupTestDB(t)
 
@@ -245,7 +245,6 @@ func TestInviteRedeemExpired(t *testing.T) {
 	newKey := "new-key-for-expired"
 	err = store.InviteRedeem(expiredInvite.PubKey, newKey)
 
-	// note: current implementation doesn't check expiration during redemption
-	// if expiration checking is added later, this test should expect an error
-	expectNoError(t, err, "redeeming expired invite")
+	// verify that expired invite redemption fails
+	expectError(t, err, "redeeming expired invite")
 }
