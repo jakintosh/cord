@@ -59,13 +59,15 @@ func TestInviteCreateDuplicatePublicKey(t *testing.T) {
 func TestInviteGetExisting(t *testing.T) {
 	store := setupTestDB(t)
 
+	// create valid admin invite
 	err := createInvite(t, store, TestAdmin)
 	expectNoError(t, err, "creating valid invite")
 
+	// retrieve the invite
 	invite, err := store.InviteGet(TestAdmin.Name)
-
 	expectNoError(t, err, "getting existing invite")
 
+	// verify all invite fields match expected values
 	if invite.Name != TestAdmin.Name {
 		t.Errorf("invite name = %v, want %v", invite.Name, TestAdmin.Name)
 	}
@@ -82,7 +84,7 @@ func TestInviteGetExisting(t *testing.T) {
 		t.Errorf("invite expiration = %v, want %v", invite.Expiration.Unix(), TestAdmin.Expiration)
 	}
 
-	// Verify CIDR strings are properly formatted
+	// verify CIDR strings are properly formatted
 	if invite.InviteCidr == "" {
 		t.Error("invite CIDR is empty")
 	}
@@ -95,26 +97,30 @@ func TestInviteGetExisting(t *testing.T) {
 func TestInviteGetNonExistent(t *testing.T) {
 	store := setupTestDB(t)
 
+	// attempt to get non-existent invite
 	_, err := store.InviteGet("non-existent")
-
 	expectError(t, err, "getting non-existent invite")
 }
 
 // TestInviteListMultiple tests listing multiple invites
 func TestInviteListMultiple(t *testing.T) {
 	store := setupTestDB(t)
+
+	// create multiple test invites
 	invites := []TestInviteDesc{TestUser1, TestAdmin, TestUser2}
-	createInvites(t, store, invites)
+	err := createInvites(t, store, invites)
+	expectNoError(t, err, "creating multiple invites")
 
+	// list all invites
 	result, err := store.InviteList()
-
 	expectNoError(t, err, "listing invites")
 
+	// verify correct number of invites returned
 	if len(result) != len(invites) {
 		t.Errorf("returned %d invites, want %d", len(result), len(invites))
 	}
 
-	// Check that results are ordered by expiration DESC (as specified in SQL)
+	// verify results are ordered by expiration DESC (as specified in SQL)
 	for i := 1; i < len(result); i++ {
 		if result[i-1].Expiration.Before(result[i].Expiration) {
 			t.Errorf("results not ordered by expiration DESC: %v < %v",
@@ -122,7 +128,7 @@ func TestInviteListMultiple(t *testing.T) {
 		}
 	}
 
-	// Verify each invite has required fields populated
+	// verify each invite has required fields populated
 	for _, invite := range result {
 		if invite.Name == "" {
 			t.Error("invite has empty name")
@@ -143,47 +149,53 @@ func TestInviteListMultiple(t *testing.T) {
 func TestInviteListEmpty(t *testing.T) {
 	store := setupTestDB(t)
 
+	// list invites from empty database
 	result, err := store.InviteList()
-
 	expectNoError(t, err, "listing empty invites")
-	assertInviteCount(t, store, 0)
 
+	// verify no invites returned
 	if len(result) != 0 {
 		t.Errorf("empty db returned %d invites, want 0", len(result))
 	}
+	assertInviteCount(t, store, 0)
 }
 
 // TestInviteRedeemValid tests redeeming a valid invite
 func TestInviteRedeemValid(t *testing.T) {
 	store := setupTestDB(t)
-	createInvite(t, store, TestUser1)
 
+	// create valid test invite
+	err := createInvite(t, store, TestUser1)
+	expectNoError(t, err, "creating valid invite")
+
+	// redeem the invite with new peer key
 	newPubKey := "new-peer-key"
-	err := store.InviteRedeem(TestUser1.PubKey, newPubKey)
-
+	err = store.InviteRedeem(TestUser1.PubKey, newPubKey)
 	expectNoError(t, err, "redeeming valid invite")
 
-	// Verify invite is marked as redeemed
+	// verify invite is marked as redeemed
 	assertInviteRedeemed(t, store, TestUser1.Name)
 
-	// Verify peer was created
+	// verify peer was created with correct attributes
 	assertPeerExists(t, store, TestUser1.Name, newPubKey, TestUser1.Admin)
 }
 
 // TestInviteRedeemAlreadyRedeemed tests redeeming an already redeemed invite
 func TestInviteRedeemAlreadyRedeemed(t *testing.T) {
 	store := setupTestDB(t)
-	createInvite(t, store, TestUser1)
 
-	// Redeem the invite first
+	// create valid test invite
+	err := createInvite(t, store, TestUser1)
+	expectNoError(t, err, "creating valid invite")
+
+	// redeem the invite first time
 	firstKey := "first-new-key"
-	err := store.InviteRedeem(TestUser1.PubKey, firstKey)
+	err = store.InviteRedeem(TestUser1.PubKey, firstKey)
 	expectNoError(t, err, "initial redeem")
 
-	// Try to redeem again
+	// attempt to redeem the same invite again
 	secondKey := "second-new-key"
 	err = store.InviteRedeem(TestUser1.PubKey, secondKey)
-
 	expectError(t, err, "redeeming already redeemed invite")
 }
 
@@ -191,22 +203,25 @@ func TestInviteRedeemAlreadyRedeemed(t *testing.T) {
 func TestInviteRedeemNonExistent(t *testing.T) {
 	store := setupTestDB(t)
 
+	// attempt to redeem non-existent invite
 	err := store.InviteRedeem("non-existent-key", "some-new-key")
-
 	expectError(t, err, "redeeming non-existent invite")
 }
 
 // TestInviteRedeemAdmin tests redeeming an invite with admin privileges
 func TestInviteRedeemAdmin(t *testing.T) {
 	store := setupTestDB(t)
-	createInvite(t, store, TestAdmin)
 
+	// create valid admin invite
+	err := createInvite(t, store, TestAdmin)
+	expectNoError(t, err, "creating admin invite")
+
+	// redeem admin invite with new peer key
 	adminNewKey := "admin-new-key"
-	err := store.InviteRedeem(TestAdmin.PubKey, adminNewKey)
-
+	err = store.InviteRedeem(TestAdmin.PubKey, adminNewKey)
 	expectNoError(t, err, "redeeming admin invite")
 
-	// Verify admin peer was created with admin privileges
+	// verify admin peer was created with admin privileges
 	assertPeerExists(t, store, TestAdmin.Name, adminNewKey, true)
 }
 
@@ -214,7 +229,7 @@ func TestInviteRedeemAdmin(t *testing.T) {
 func TestInviteRedeemExpired(t *testing.T) {
 	store := setupTestDB(t)
 
-	// Create an invite that's already expired
+	// create an invite that's already expired
 	expiredInvite := TestInviteDesc{
 		Name:       "expired-user",
 		PubKey:     "expired-key",
@@ -223,12 +238,14 @@ func TestInviteRedeemExpired(t *testing.T) {
 		Admin:      false,
 		Expiration: time.Now().Add(-1 * time.Hour).Unix(), // 1 hour ago
 	}
-	createInvite(t, store, expiredInvite)
+	err := createInvite(t, store, expiredInvite)
+	expectNoError(t, err, "creating expired invite")
 
+	// attempt to redeem expired invite
 	newKey := "new-key-for-expired"
-	err := store.InviteRedeem(expiredInvite.PubKey, newKey)
+	err = store.InviteRedeem(expiredInvite.PubKey, newKey)
 
-	// Note: The current implementation doesn't check expiration during redemption
-	// If expiration checking is added later, this test should expect an error
+	// note: current implementation doesn't check expiration during redemption
+	// if expiration checking is added later, this test should expect an error
 	expectNoError(t, err, "redeeming expired invite")
 }

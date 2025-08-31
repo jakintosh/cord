@@ -89,11 +89,14 @@ func createInvites(
 	t *testing.T,
 	store *database.SQLiteStore,
 	descs []TestInviteDesc,
-) {
+) error {
 	t.Helper()
 	for _, desc := range descs {
-		createInvite(t, store, desc)
+		if err := createInvite(t, store, desc); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // assertInviteExists verifies that an invite exists and matches expected values
