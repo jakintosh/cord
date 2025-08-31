@@ -230,4 +230,3 @@ func TestAssociationDeleteWithNonExistentCidr(t *testing.T) {
 	expectNoError(t, err, "deleting association with non-existent CIDR")
 	assertAssociationCount(t, store, 0)
 }
-

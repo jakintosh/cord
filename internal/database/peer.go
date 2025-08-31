@@ -39,38 +39,46 @@ func (s *SQLiteStore) PeerListPeers(
 	error,
 ) {
 	rows, err := s.db.Query(`
-		-- First, find all CIDRs containing the requesting peer
-		WITH requesting_peer_cidrs AS (
-		    SELECT c.id
-		    FROM cidr c, peer p
-		    WHERE p.name = ?1
-		      AND c.base <= p.ip
-		      AND p.ip <= c.last
+		-- Get the requesting peer IP
+		WITH req_ip AS (
+			SELECT ip FROM peer WHERE name = ?1
 		),
-		-- Then find all associated CIDRs
+		-- Find only the most specific CIDR(s) containing the requesting peer
+		requesting_peer_cidrs AS (
+			SELECT c.id
+			FROM cidr c
+			WHERE c.base <= (SELECT ip FROM req_ip)
+				AND (SELECT ip FROM req_ip) <= c.last
+				AND c.prefix = (
+					SELECT MAX(c2.prefix)
+					FROM cidr c2
+					WHERE c2.base <= (SELECT ip FROM req_ip)
+						AND (SELECT ip FROM req_ip) <= c2.last
+				)
+		),
+		-- Then find all associated CIDRs (plus the requesting CIDR itself)
 		associated_cidrs AS (
-		    SELECT DISTINCT cidr_id FROM (
-		        SELECT a.cidr2 as cidr_id
-		        FROM association a
-		        WHERE a.cidr1 IN (SELECT id FROM requesting_peer_cidrs)
-		        UNION
-		        SELECT a.cidr1 as cidr_id
-		        FROM association a
-		        WHERE a.cidr2 IN (SELECT id FROM requesting_peer_cidrs)
-		        UNION
-		        SELECT id as cidr_id FROM requesting_peer_cidrs
-		    )
+			SELECT DISTINCT cidr_id FROM (
+				SELECT a.cidr2 as cidr_id
+				FROM association a
+				WHERE a.cidr1 IN (SELECT id FROM requesting_peer_cidrs)
+				UNION
+				SELECT a.cidr1 as cidr_id
+				FROM association a
+				WHERE a.cidr2 IN (SELECT id FROM requesting_peer_cidrs)
+				UNION
+				SELECT id as cidr_id FROM requesting_peer_cidrs
+			)
 		)
 		-- Finally, find all peers in those CIDRs
 		SELECT DISTINCT p.name, p.public_key, p.ip, p.prefix, p.admin, p.enabled, p.confirmed
 		FROM peer p, cidr c
 		WHERE c.id IN (SELECT cidr_id FROM associated_cidrs)
-		  AND c.base <= p.ip
-		  AND p.ip <= c.last
-		  AND p.confirmed = 1
-		  AND p.enabled = 1
-		  AND p.name != ?1;  -- Exclude the requesting peer
-		`,
+			AND c.base <= p.ip
+			AND p.ip <= c.last
+			AND p.confirmed = 1
+			AND p.enabled = 1
+			AND p.name != ?1;  -- Exclude the requesting peer`,
 		peerName,
 	)
 	if err != nil {

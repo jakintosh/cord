@@ -65,7 +65,7 @@ func (ctx *Context) UpdatePeer(
 	*Peer,
 	error,
 ) {
-	return nil, nil
+	return ctx.Store.PeerUpdate(peer, req)
 }
 
 func (ctx *Context) CheckPeerExists(
