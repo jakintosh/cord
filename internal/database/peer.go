@@ -10,7 +10,26 @@ func (store *SQLiteStore) PeerList() (
 	[]*server.Peer,
 	error,
 ) {
-	panic("unimplemented")
+	rows, err := store.db.Query(`
+		SELECT name, public_key, ip, prefix, admin, enabled, confirmed
+		FROM peer
+		ORDER BY name ASC;`,
+	)
+	if err != nil {
+		return nil, CheckSqliteErr("querying peers", err)
+	}
+	defer rows.Close()
+
+	var peers []*server.Peer
+	for rows.Next() {
+		peer, err := scanPeer(rows)
+		if err != nil {
+			return nil, err
+		}
+		peers = append(peers, peer)
+	}
+
+	return peers, nil
 }
 
 func (s *SQLiteStore) PeerListPeers(
@@ -80,8 +99,9 @@ func (store *SQLiteStore) PeerGet(
 	row := store.db.QueryRow(`
 		SELECT name, public_key, ip, prefix, admin, enabled, confirmed
 		FROM peer
-		WHERE name = ?;
-		`, name)
+		WHERE name = ?;`,
+		name,
+	)
 
 	return scanPeer(row)
 }
@@ -107,17 +127,9 @@ func (s *SQLiteStore) PeerUpdate(
 			enabled = CASE
 				WHEN ?4 IS NOT NULL THEN ?4
 				ELSE enabled
-			END,
+			END
 		WHERE name = ?1
-		RETURNING
-			external_id,
-			created_at,
-			name,
-			CASE
-				WHEN ?4 IS NOT NULL THEN ?4
-				ELSE (SELECT external_id FROM area p WHERE p.id=parent)
-			END;
-		`,
+		RETURNING name, public_key, ip, prefix, admin, enabled, confirmed;`,
 		name,
 		req.Name,
 		req.Admin,
@@ -125,7 +137,6 @@ func (s *SQLiteStore) PeerUpdate(
 	)
 
 	return scanPeer(row)
-
 }
 
 func (s *SQLiteStore) PeerExists(
@@ -133,10 +144,8 @@ func (s *SQLiteStore) PeerExists(
 ) bool {
 	row := s.db.QueryRow(`
 		SELECT COUNT(*)
-		FROM peer p
-		JOIN cidr c ON p.cidr=c.id
-		WHERE c.name=?;
-		`,
+		FROM peer
+		WHERE name = ?;`,
 		peerName,
 	)
 

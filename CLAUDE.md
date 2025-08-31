@@ -47,6 +47,7 @@ SQLite tables managed by server:
 ## Development Notes
 
 - Uses Go 1.24+ with tabs for indentation
+- Documentation can be found in the `docs/` folder; if implementation changes are made that conflict with the docs, make sure to update the relevant documentation at the same time.
 - Many client functions are stubs with TODO comments
 - Server operations override paths with `--config-dir` and `--data-dir`
 - Tests use in-memory storage, production uses filesystem

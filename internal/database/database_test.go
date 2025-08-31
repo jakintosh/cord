@@ -18,6 +18,17 @@ type TestInviteDesc struct {
 	Expiration int64
 }
 
+// TestPeerDesc describes a peer for testing
+type TestPeerDesc struct {
+	Name      string
+	PubKey    string
+	IP        net.IP
+	Prefix    int
+	Admin     bool
+	Enabled   bool
+	Confirmed bool
+}
+
 // Common test invites
 var (
 	TestUser1 = TestInviteDesc{
@@ -54,6 +65,39 @@ var (
 		FinalIP:    net.IPv4(10, 0, 128, 99),
 		Admin:      false,
 		Expiration: time.Now().Add(-24 * time.Hour).Unix(), // expired
+	}
+)
+
+// Common test peers
+var (
+	TestPeer1 = TestPeerDesc{
+		Name:      "test-peer-1",
+		PubKey:    "peer1-public-key",
+		IP:        net.IPv4(10, 0, 128, 1),
+		Prefix:    32,
+		Admin:     false,
+		Enabled:   true,
+		Confirmed: true,
+	}
+
+	TestPeer2 = TestPeerDesc{
+		Name:      "test-peer-2",
+		PubKey:    "peer2-public-key",
+		IP:        net.IPv4(10, 0, 128, 2),
+		Prefix:    32,
+		Admin:     false,
+		Enabled:   true,
+		Confirmed: false,
+	}
+
+	TestPeerAdmin = TestPeerDesc{
+		Name:      "admin-peer",
+		PubKey:    "admin-public-key",
+		IP:        net.IPv4(10, 0, 128, 10),
+		Prefix:    32,
+		Admin:     true,
+		Enabled:   true,
+		Confirmed: true,
 	}
 )
 
@@ -237,5 +281,87 @@ func expectNoError(
 	t.Helper()
 	if err != nil {
 		t.Errorf("%s should have succeeded, but failed with: %v", operation, err)
+	}
+}
+
+// createPeerFromInvite creates a peer by redeeming an invite
+func createPeerFromInvite(
+	t *testing.T,
+	store *database.SQLiteStore,
+	inviteDesc TestInviteDesc,
+	newPubKey string,
+) error {
+	t.Helper()
+
+	// First create the invite
+	err := createInvite(t, store, inviteDesc)
+	if err != nil {
+		return err
+	}
+
+	// Then redeem it to create the peer
+	return store.InviteRedeem(inviteDesc.PubKey, newPubKey)
+}
+
+// peerDescToInviteDesc converts a TestPeerDesc to TestInviteDesc for invite creation
+func peerDescToInviteDesc(desc TestPeerDesc) TestInviteDesc {
+	// Use different temp IP based on final IP to avoid conflicts
+	tempIP := make(net.IP, len(desc.IP))
+	copy(tempIP, desc.IP)
+	if len(tempIP) >= 3 {
+		tempIP[2] = 64 // change third octet to 64 for temp IP
+	}
+
+	return TestInviteDesc{
+		Name:       desc.Name,
+		PubKey:     "invite-" + desc.PubKey, // different key for invite
+		TempIP:     tempIP,                  // unique temp IP
+		FinalIP:    desc.IP,                 // final IP from peer desc
+		Admin:      desc.Admin,
+		Expiration: time.Now().Add(24 * time.Hour).Unix(),
+	}
+}
+
+// createPeersFromInvites creates multiple peers by redeeming invites
+func createPeersFromInvites(
+	t *testing.T,
+	store *database.SQLiteStore,
+	descs []TestPeerDesc,
+) error {
+	t.Helper()
+	for _, desc := range descs {
+		inviteDesc := peerDescToInviteDesc(desc)
+		if err := createPeerFromInvite(t, store, inviteDesc, desc.PubKey); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// assertPeerCount verifies the total number of peers
+func assertPeerCount(
+	t *testing.T,
+	store *database.SQLiteStore,
+	expectedCount int,
+) {
+	t.Helper()
+	peers, err := store.PeerList()
+	if err != nil {
+		t.Fatalf("failed to list peers: %v", err)
+	}
+	if len(peers) != expectedCount {
+		t.Errorf("expected %d peers, got %d", expectedCount, len(peers))
+	}
+}
+
+// assertPeerNotExists verifies that a peer does not exist
+func assertPeerNotExists(
+	t *testing.T,
+	store *database.SQLiteStore,
+	name string,
+) {
+	t.Helper()
+	if store.PeerExists(name) {
+		t.Errorf("expected peer %s to not exist, but it was found", name)
 	}
 }
