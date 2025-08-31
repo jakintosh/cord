@@ -502,3 +502,86 @@ func assertCidrCount(
 		t.Errorf("expected %d CIDRs, got %d", expectedCount, len(cidrs))
 	}
 }
+
+// createAssociation creates an association between two CIDR names
+func createAssociation(
+	t *testing.T,
+	store *database.SQLiteStore,
+	cidr1, cidr2 string,
+) error {
+	t.Helper()
+	return store.AssociationCreate(cidr1, cidr2)
+}
+
+// createAssociations creates multiple associations from pairs of CIDR names
+func createAssociations(
+	t *testing.T,
+	store *database.SQLiteStore,
+	pairs [][2]string,
+) error {
+	t.Helper()
+	for _, pair := range pairs {
+		if err := createAssociation(t, store, pair[0], pair[1]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// assertAssociationExists verifies that an association exists between two CIDRs
+func assertAssociationExists(
+	t *testing.T,
+	store *database.SQLiteStore,
+	cidr1, cidr2 string,
+) {
+	t.Helper()
+	associations, err := store.AssociationList()
+	if err != nil {
+		t.Fatalf("failed to list associations: %v", err)
+	}
+
+	for _, assoc := range associations {
+		if (assoc.Cidr1 == cidr1 && assoc.Cidr2 == cidr2) ||
+			(assoc.Cidr1 == cidr2 && assoc.Cidr2 == cidr1) {
+			return // found the association
+		}
+	}
+	t.Errorf("expected association between %s and %s to exist, but it was not found", cidr1, cidr2)
+}
+
+// assertAssociationNotExists verifies that an association does not exist between two CIDRs
+func assertAssociationNotExists(
+	t *testing.T,
+	store *database.SQLiteStore,
+	cidr1, cidr2 string,
+) {
+	t.Helper()
+	associations, err := store.AssociationList()
+	if err != nil {
+		t.Fatalf("failed to list associations: %v", err)
+	}
+
+	for _, assoc := range associations {
+		if (assoc.Cidr1 == cidr1 && assoc.Cidr2 == cidr2) ||
+			(assoc.Cidr1 == cidr2 && assoc.Cidr2 == cidr1) {
+			t.Errorf("expected association between %s and %s to not exist, but it was found", cidr1, cidr2)
+			return
+		}
+	}
+}
+
+// assertAssociationCount verifies the total number of associations
+func assertAssociationCount(
+	t *testing.T,
+	store *database.SQLiteStore,
+	expectedCount int,
+) {
+	t.Helper()
+	associations, err := store.AssociationList()
+	if err != nil {
+		t.Fatalf("failed to list associations: %v", err)
+	}
+	if len(associations) != expectedCount {
+		t.Errorf("expected %d associations, got %d", expectedCount, len(associations))
+	}
+}

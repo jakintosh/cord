@@ -18,12 +18,12 @@ var migrations = []migration{
 				id                  INTEGER PRIMARY KEY,
 				cidr1               INTEGER NOT NULL,
 				cidr2               INTEGER NOT NULL,
+				CHECK (cidr1 < cidr2),
+				UNIQUE (cidr1, cidr2),
 				FOREIGN KEY (cidr1)
-					REFERENCES cidr (id)
-						ON UPDATE RESTRICT,
+					REFERENCES cidr (id),
 				FOREIGN KEY (cidr2)
 					REFERENCES cidr (id)
-						ON UPDATE RESTRICT
 			);
 			CREATE TABLE IF NOT EXISTS cidr (
 				id                  INTEGER PRIMARY KEY,

@@ -108,8 +108,8 @@ func (s *SQLiteStore) CidrRename(
 ) error {
 	_, err := s.db.Exec(`
 		UPDATE cidr
-		SET name=?2
-		WHERE name=?1;`,
+		SET name = ?2
+		WHERE name = ?1;`,
 		name, newName,
 	)
 	return CheckSqliteErr("renaming cidr", err)
