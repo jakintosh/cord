@@ -77,7 +77,7 @@ func (ctx *Context) CheckPeerExists(
 func (ctx *Context) GetPeersOfPeerNamed(
 	peerName string,
 ) (
-	[]Peer,
+	[]*Peer,
 	error,
 ) {
 	return ctx.Store.PeerListPeers(peerName)

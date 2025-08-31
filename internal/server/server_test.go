@@ -173,7 +173,7 @@ func expectPeerCount(
 		return fmt.Errorf("failed to get peers for peer: %v", err)
 	}
 	if len(peers) != count {
-		return fmt.Errorf("expected %d peers for 'node', found %d: %v", count, len(peers), peers)
+		return fmt.Errorf("expected %d peers for '%s', found %d: %v", count, desc.Name, len(peers), peers)
 	}
 	return nil
 }

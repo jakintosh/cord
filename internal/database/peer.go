@@ -1,11 +1,13 @@
 package database
 
 import (
+	"net"
+
 	"git.sr.ht/~jakintosh/cord/internal/server"
 )
 
 func (store *SQLiteStore) PeerList() (
-	[]server.Peer,
+	[]*server.Peer,
 	error,
 ) {
 	panic("unimplemented")
@@ -14,7 +16,7 @@ func (store *SQLiteStore) PeerList() (
 func (s *SQLiteStore) PeerListPeers(
 	peerName string,
 ) (
-	[]server.Peer,
+	[]*server.Peer,
 	error,
 ) {
 	rows, err := s.db.Query(`
@@ -22,7 +24,7 @@ func (s *SQLiteStore) PeerListPeers(
 		WITH requesting_peer_cidrs AS (
 		    SELECT c.id
 		    FROM cidr c, peer p
-		    WHERE p.name = ?
+		    WHERE p.name = ?1
 		      AND c.base <= p.ip
 		      AND p.ip <= c.last
 		),
@@ -41,14 +43,14 @@ func (s *SQLiteStore) PeerListPeers(
 		    )
 		)
 		-- Finally, find all peers in those CIDRs
-		SELECT DISTINCT p.*
+		SELECT DISTINCT p.name, p.public_key, p.ip, p.prefix, p.admin, p.enabled, p.confirmed
 		FROM peer p, cidr c
 		WHERE c.id IN (SELECT cidr_id FROM associated_cidrs)
 		  AND c.base <= p.ip
 		  AND p.ip <= c.last
 		  AND p.confirmed = 1
 		  AND p.enabled = 1
-		  AND p.name != ?;  -- Exclude the requesting peer
+		  AND p.name != ?1;  -- Exclude the requesting peer
 		`,
 		peerName,
 	)
@@ -57,19 +59,11 @@ func (s *SQLiteStore) PeerListPeers(
 	}
 
 	defer rows.Close()
-	var peers []server.Peer
+	var peers []*server.Peer
 	for rows.Next() {
-		var peer server.Peer
-		err := rows.Scan(
-			&peer.Name,
-			&peer.PublicKey,
-			&peer.Cidr,
-			&peer.Admin,
-			&peer.Confirmed,
-			&peer.Enabled,
-		)
+		peer, err := scanPeer(rows)
 		if err != nil {
-			return nil, CheckSqliteErr("scanning peer info", err)
+			return nil, err
 		}
 		peers = append(peers, peer)
 	}
@@ -83,7 +77,13 @@ func (store *SQLiteStore) PeerGet(
 	*server.Peer,
 	error,
 ) {
-	panic("unimplemented")
+	row := store.db.QueryRow(`
+		SELECT name, public_key, ip, prefix, admin, enabled, confirmed
+		FROM peer
+		WHERE name = ?;
+		`, name)
+
+	return scanPeer(row)
 }
 
 func (s *SQLiteStore) PeerUpdate(
@@ -152,17 +152,38 @@ func scanPeer(s Scanner) (
 	*server.Peer,
 	error,
 ) {
-	var peer server.Peer
+	var name, publicKey string
+	var ip []byte
+	var prefix int
+	var admin, enabled, confirmed int
+
 	err := s.Scan(
-		&peer.Name,
-		&peer.PublicKey,
-		&peer.Cidr,
-		&peer.Admin,
-		&peer.Confirmed,
-		&peer.Enabled,
+		&name,
+		&publicKey,
+		&ip,
+		&prefix,
+		&admin,
+		&enabled,
+		&confirmed,
 	)
 	if err != nil {
 		return nil, CheckSqliteErr("scanning peer info", err)
 	}
-	return &peer, nil
+
+	// Convert IP bytes and prefix to CIDR string
+	ipNet := &net.IPNet{
+		IP:   net.IP(ip),
+		Mask: net.CIDRMask(prefix, len(ip)*8),
+	}
+
+	peer := &server.Peer{
+		Name:      name,
+		PublicKey: publicKey,
+		Cidr:      ipNet.String(),
+		Admin:     admin != 0,
+		Enabled:   enabled != 0,
+		Confirmed: confirmed != 0,
+	}
+
+	return peer, nil
 }

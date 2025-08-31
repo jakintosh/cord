@@ -47,6 +47,8 @@ func (ctx *Context) GetInviteByIP(
 	}, nil
 }
 
+var tempIPAddr = 1
+
 func (ctx *Context) CreateInvite(
 	name string,
 	ip net.IP,
@@ -62,9 +64,11 @@ func (ctx *Context) CreateInvite(
 		return nil, nil, err
 	}
 
-	tempIP := net.IP{}
+	// Generate a temporary IP in the temp range (you may want to make this more sophisticated)
+	tempIP := net.IPv4(10, 0, 255, byte(tempIPAddr))
+	tempIPAddr += 1
 
-	ctx.Store.InviteCreate(
+	err = ctx.Store.InviteCreate(
 		name,
 		pubKey.String(),
 		tempIP,
@@ -72,6 +76,9 @@ func (ctx *Context) CreateInvite(
 		admin,
 		inviteExpires,
 	)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	return &wg.DeviceConfig{}, &wg.PeerConfig{
 		Name:      name,

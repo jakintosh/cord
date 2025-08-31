@@ -3,7 +3,7 @@ package database
 import "git.sr.ht/~jakintosh/cord/internal/server"
 
 func (store *SQLiteStore) AssociationList() (
-	[]server.Association,
+	[]*server.Association,
 	error,
 ) {
 	panic("unimplemented")

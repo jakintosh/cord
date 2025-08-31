@@ -3,15 +3,36 @@ package database
 import (
 	"fmt"
 	"net"
+	"time"
 
 	"git.sr.ht/~jakintosh/cord/internal/server"
+	"git.sr.ht/~jakintosh/cord/internal/utils"
 )
 
 func (store *SQLiteStore) InviteList() (
-	[]server.ServerInvite,
+	[]*server.ServerInvite,
 	error,
 ) {
-	panic("unimplemented")
+	rows, err := store.db.Query(`
+		SELECT name, public_key, temp_ip, final_ip, admin, redeemed, expiration
+		FROM invite
+		ORDER BY expiration DESC;`,
+	)
+	if err != nil {
+		return nil, CheckSqliteErr("querying invites", err)
+	}
+	defer rows.Close()
+
+	var invites []*server.ServerInvite
+	for rows.Next() {
+		invite, err := scanInvite(rows)
+		if err != nil {
+			return nil, err
+		}
+		invites = append(invites, invite)
+	}
+
+	return invites, nil
 }
 
 func (store *SQLiteStore) InviteGet(
@@ -20,7 +41,14 @@ func (store *SQLiteStore) InviteGet(
 	*server.ServerInvite,
 	error,
 ) {
-	panic("unimplemented")
+	row := store.db.QueryRow(`
+		SELECT name, public_key, temp_ip, final_ip, admin, redeemed, expiration
+		FROM invite
+		WHERE name = ?1;`,
+		name,
+	)
+
+	return scanInvite(row)
 }
 
 func (s *SQLiteStore) InviteCreate(
@@ -33,8 +61,7 @@ func (s *SQLiteStore) InviteCreate(
 ) error {
 	_, err := s.db.Exec(`
 		INSERT INTO invite (name, public_key, temp_ip, final_ip, admin, redeemed, expiration)
-		VALUES (?, ?, ?, ?, ?, 0, ?);
-		`,
+		VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6);`,
 		name,
 		pubKey,
 		tempIP,
@@ -44,6 +71,7 @@ func (s *SQLiteStore) InviteCreate(
 	)
 	return CheckSqliteErr("adding invite", err)
 }
+
 func (s *SQLiteStore) InviteRedeem(
 	pubKey string,
 	newKey string,
@@ -71,10 +99,9 @@ func (s *SQLiteStore) InviteRedeem(
 			1,
 			1
 		FROM invite i
-		WHERE i.redeemed=0 AND i.public_key=?1;
-		`,
-		pubKey[:],
-		newKey[:],
+		WHERE i.redeemed=0 AND i.public_key=?1;`,
+		pubKey,
+		newKey,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create peer from invite: %w", err)
@@ -88,9 +115,8 @@ func (s *SQLiteStore) InviteRedeem(
 		UPDATE invite
 		SET redeemed=1
 		WHERE redeemed=0
-		AND public_key=?1;
-		`,
-		pubKey[:],
+		AND public_key=?1;`,
+		pubKey,
 	); err != nil {
 		return fmt.Errorf("failed to mark invite redeemed: %w", err)
 	}
@@ -100,4 +126,43 @@ func (s *SQLiteStore) InviteRedeem(
 	}
 
 	return nil
+}
+
+func scanInvite(s Scanner) (
+	*server.ServerInvite,
+	error,
+) {
+	var name, publicKey string
+	var tempIP, finalIP []byte
+	var admin, redeemed int
+	var expiration int64
+
+	err := s.Scan(
+		&name,
+		&publicKey,
+		&tempIP,
+		&finalIP,
+		&admin,
+		&redeemed,
+		&expiration,
+	)
+	if err != nil {
+		return nil, CheckSqliteErr("scanning invite info", err)
+	}
+
+	// Convert IP bytes to net.IP and then to CIDR strings
+	tempIPNet := utils.GetPeerCidrFromIp(net.IP(tempIP))
+	finalIPNet := utils.GetPeerCidrFromIp(net.IP(finalIP))
+
+	invite := &server.ServerInvite{
+		Name:        name,
+		PublicKey:   publicKey,
+		InviteCidr:  tempIPNet.String(),
+		NetworkCidr: finalIPNet.String(),
+		Admin:       admin != 0,
+		Redeemed:    redeemed != 0,
+		Expiration:  time.Unix(expiration, 0),
+	}
+
+	return invite, nil
 }

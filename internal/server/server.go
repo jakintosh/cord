@@ -18,12 +18,12 @@ const (
 type ServerStore interface {
 	Delete(name string) error
 
-	AssociationList() ([]Association, error)
+	AssociationList() ([]*Association, error)
 	AssociationCreate(cidr1 string, cidr2 string) error
 	AssociationListAssociatedCidrIds(id int64) ([]int64, error)
 	AssociationDelete(cidr1 string, cidr2 string) error
 
-	CidrList() ([]Cidr, error)
+	CidrList() ([]*Cidr, error)
 	CidrGet(name string) (*Cidr, error)
 	CidrCreateRoot(name string, cidr *net.IPNet) error
 	CidrCreate(name string, cidr *net.IPNet) error
@@ -32,13 +32,13 @@ type ServerStore interface {
 
 	EndpointReport(sightings []string) error
 
-	InviteList() ([]ServerInvite, error)
+	InviteList() ([]*ServerInvite, error)
 	InviteGet(name string) (*ServerInvite, error)
 	InviteCreate(name string, pubKey string, tempIP net.IP, finalIP net.IP, admin bool, inviteExpires int64) error
 	InviteRedeem(pubKey string, newKey string) error
 
-	PeerList() ([]Peer, error)
-	PeerListPeers(name string) ([]Peer, error)
+	PeerList() ([]*Peer, error)
+	PeerListPeers(name string) ([]*Peer, error)
 	PeerGet(name string) (*Peer, error)
 	PeerUpdate(name string, req UpdatePeerRequest) (*Peer, error)
 	PeerExists(name string) bool

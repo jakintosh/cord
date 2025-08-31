@@ -9,7 +9,7 @@ import (
 )
 
 func (store *SQLiteStore) CidrList() (
-	[]server.Cidr,
+	[]*server.Cidr,
 	error,
 ) {
 	panic("unimplemented")
