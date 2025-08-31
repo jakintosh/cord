@@ -32,7 +32,7 @@ The coordination server stores state in SQLite. `initNetworkDb` creates five pri
 * **`cidr`** – Named CIDR blocks belonging to the network. Each row stores the textual CIDR, prefix/length, and the numeric range.
 * **`association`** – Pairs of CIDR IDs that are allowed to communicate. Associations are symmetric.
 * **`invite`** – Pending peer invitations containing a temporary public key, temporary (invite network) cidr, assigned permanent cidr, peer name, admin flag, redemption status, and expiration timestampe. Invites are temporary records deleted after successful peer confirmation.
-* **`peer`** – Peers tied to a single CIDR with their public key and flags for admin, confirmed, and disabled status.
+* **`peer`** – Peers tied to a single CIDR with their public key and flags for admin, confirmed, and enabled status.
 * **`endpoint`** – Historical peer endpoint sightings with timestamps and witness. Used for future endpoint gossip and detection of peer changes.
 
 ### CIDR management

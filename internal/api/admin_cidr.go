@@ -22,7 +22,7 @@ type CidrResponse struct {
 	Prefix int    `json:"prefix"`
 }
 
-func (a *API) handlePostAdminCidr(
+func (api *API) handlePostAdminCidr(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -37,7 +37,7 @@ func (a *API) handlePostAdminCidr(
 	writeData(w, http.StatusCreated, CidrResponse{})
 }
 
-func (a *API) handleGetAdminCidrs(
+func (api *API) handleGetAdminCidrs(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -45,7 +45,7 @@ func (a *API) handleGetAdminCidrs(
 	writeData(w, http.StatusOK, []CidrResponse{})
 }
 
-func (a *API) handleGetAdminCidr(
+func (api *API) handleGetAdminCidr(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -59,7 +59,7 @@ func (a *API) handleGetAdminCidr(
 	writeData(w, http.StatusOK, CidrResponse{})
 }
 
-func (a *API) handlePutAdminCidr(
+func (api *API) handlePutAdminCidr(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -84,7 +84,7 @@ func (a *API) handlePutAdminCidr(
 	writeData(w, http.StatusOK, CidrResponse{})
 }
 
-func (a *API) handleDeleteAdminCidr(
+func (api *API) handleDeleteAdminCidr(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {

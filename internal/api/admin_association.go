@@ -10,7 +10,7 @@ type Association struct {
 	Cidr2 string `json:"cidr2"`
 }
 
-func (a *API) handlePostAssociation(
+func (api *API) handlePostAssociation(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -29,7 +29,7 @@ func (a *API) handlePostAssociation(
 	writeData(w, http.StatusCreated, req)
 }
 
-func (a *API) handleDeleteAssociation(
+func (api *API) handleDeleteAssociation(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -47,7 +47,7 @@ func (a *API) handleDeleteAssociation(
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (a *API) handleGetAssociations(
+func (api *API) handleGetAssociations(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {

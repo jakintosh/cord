@@ -38,12 +38,26 @@ func GetFirstAssignableIpFromCidr(cidr *net.IPNet) net.IP {
 // get the smallest and largest IP address possible based on the given
 // cidr (*net.IPNet)
 func GetIpRangeFromCidr(cidr *net.IPNet) (net.IP, net.IP) {
-	start := slices.Clone(cidr.IP)
-	end := slices.Clone(cidr.Mask)
-	for i, octet := range end {
-		end[i] = start[i] + ^octet
+	// Normalize IPv4 to 4-byte form to ensure consistent DB storage/comparisons
+	if v4 := cidr.IP.To4(); v4 != nil {
+		start := slices.Clone(v4)
+		mask := cidr.Mask
+		// mask for IPv4 should be 4 bytes; compute broadcast/end
+		end := make([]byte, 4)
+		for i := range 4 {
+			end[i] = start[i] + ^mask[i]
+		}
+		return net.IP(start), net.IP(end)
 	}
-	return start, net.IP(end)
+
+	// IPv6 path: operate on full 16-byte address
+	start := slices.Clone(cidr.IP)
+	mask := cidr.Mask
+	end := make([]byte, len(start))
+	for i := range start {
+		end[i] = start[i] + ^mask[i]
+	}
+	return net.IP(start), net.IP(end)
 }
 
 // a 'peer CIDR' is just a fully masked CIDR that represents one IP

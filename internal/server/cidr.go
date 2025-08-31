@@ -3,91 +3,63 @@ package server
 import (
 	"fmt"
 	"net"
-
-	db "git.sr.ht/~jakintosh/cord/internal/database"
-	"git.sr.ht/~jakintosh/cord/internal/utils"
 )
 
-type CidrDesc struct {
-	Name string
-	Cidr string
+type Cidr struct {
+	Name   string `json:"name"`
+	Cidr   string `json:"cidr"`
+	Length int    `json:"length"`
+	Prefix int    `json:"prefix"`
+}
+
+type CreateCidrRequest struct {
+	Name string `json:"name"`
+	Cidr string `json:"cidr"`
+}
+
+type UpdateCidrRequest struct {
+	Name string `json:"name"`
 }
 
 func (ctx *Context) CreateCidr(
-	name string,
-	cidr *net.IPNet,
+	req CreateCidrRequest,
 ) error {
-
-	prefix, length := cidr.Mask.Size()
-	base, last := utils.GetIpRangeFromCidr(cidr)
-
-	result, err := ctx.Db.Exec(`
-		INSERT INTO cidr (name, cidr, length, prefix, base, last)
-		SELECT ?1, ?2, ?3, ?4, ?5, ?6
-		FROM cidr c
-		WHERE c.id = 1
-			AND c.base <= ?5
-			AND ?5 <= c.last;
-		`,
-		name, cidr.String(), length, prefix, base, last,
-	)
-
+	cidr, err := parseCidr(req.Cidr)
 	if err != nil {
-		return db.CheckSqliteErr("adding cidr", err)
+		return err
 	}
 
-	if db.ResultsEmpty(result) {
-		return fmt.Errorf("Invalid CIDR")
-	}
-
-	return nil
+	return ctx.Store.CidrCreate(req.Name, cidr)
 }
 
 func (ctx *Context) CreateRootCidr(
 	cidr *net.IPNet,
 ) error {
-	prefix, length := cidr.Mask.Size()
-	base, last := utils.GetIpRangeFromCidr(cidr)
-
-	_, err := ctx.Db.Exec(`
-		INSERT INTO cidr (id, name, cidr, length, prefix, base, last)
-		VALUES (1, ?, ?, ?, ?, ?, ?);
-		`,
-		ctx.Name, cidr.String(), length, prefix, base, last,
-	)
-
-	return db.CheckSqliteErr("adding root cidr", err)
+	return ctx.Store.CidrCreateRoot(ctx.Name, cidr)
 }
 
 func (ctx *Context) RenameCidr(
 	cidr string,
-	newName string,
+	req UpdateCidrRequest,
 ) error {
-
-	// TODO: what if you call rename CIDR on a Peer cidr?
-	// 		 probably need to check, because that is prob not intended
-	// 		 however, right now, RenamePeer points to this func, so more
-	// 			work is needed before changing
-
-	_, err := ctx.Db.Exec(`
-		UPDATE cidr
-		SET name=?2
-		WHERE name=?1;
-		`,
-		cidr, newName,
-	)
-	return db.CheckSqliteErr("renaming cidr", err)
+	return ctx.Store.CidrRename(cidr, req.Name)
 }
 
 func (ctx *Context) DeleteCidr(
 	cidr string,
 ) error {
+	return ctx.Store.CidrDelete(cidr)
+}
 
-	_, err := ctx.Db.Exec(`
-		DELETE FROM cidr
-		WHERE name = ?;
-		`,
-		cidr,
-	)
-	return db.CheckSqliteErr("deleting cidr", err)
+func parseCidr(
+	value string,
+) (
+	*net.IPNet,
+	error,
+) {
+	_, cidr, err := net.ParseCIDR(value)
+	if err != nil {
+		err = fmt.Errorf("failed to parse cidr '%s': %v", value, err)
+	}
+	return cidr, err
 }

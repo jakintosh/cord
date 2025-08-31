@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path"
 
@@ -10,41 +11,125 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-func Open(
+type Scanner interface {
+	Scan(dest ...any) error
+}
+
+type SQLiteStore struct {
+	path    string
+	walMode bool
+	db      *sql.DB
+}
+
+func Init(
 	name string,
-	dataPath string,
+	path string,
+	walMode bool,
 ) (
-	*sql.DB,
+	*SQLiteStore,
 	error,
 ) {
 
-	var dbPath string
-	if dataPath == ":memory:" {
-		dbPath = ":memory:"
-	} else {
-		os.MkdirAll(dataPath, os.ModePerm)
-		dbPath = GetPath(name, dataPath)
+	// create the store
+	store := &SQLiteStore{
+		path:    path,
+		walMode: walMode,
+		db:      nil,
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open to database: %w\n", err)
+	// open database connection
+	if err := store.Open(name); err != nil {
+		log.Fatalf("failed to open database: %v", err)
 	}
-	return db, nil
+
+	// optional WAL config
+	if store.walMode {
+
+		// enable write ahead logging mode
+		_, err := store.db.Exec("PRAGMA journal_mode = WAL;")
+		if err != nil {
+			log.Fatalf("could not enable WAL mode: %v", err)
+		}
+
+		// disallow multiple connections for serial writes
+		store.db.SetMaxOpenConns(1)
+
+		// increase timeout so waiting writes can finish
+		_, err = store.db.Exec("PRAGMA busy_timeout = 5000;")
+		if err != nil {
+			log.Fatalf("could not set busy timeout: %v", err)
+		}
+	}
+
+	if _, err := store.db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
+		log.Fatalf("couldn't enable foreign keys: %v\n", err)
+	}
+
+	// run all migrations
+	if err := migrate(store.db); err != nil {
+		log.Fatalf("could not migrate database: %v", err)
+	}
+
+	return store, nil
 }
 
-func Delete(
+func (s *SQLiteStore) Open(
 	name string,
-	dataPath string,
 ) error {
 
-	dbPath := GetPath(name, dataPath)
+	var dbPath string
+	if s.path == ":memory:" {
+		dbPath = ":memory:"
+	} else {
+		os.MkdirAll(s.path, os.ModePerm)
+		dbPath = GetPath(name, s.path)
+	}
+
+	var err error
+	s.db, err = sql.Open("sqlite", dbPath)
+	if err != nil {
+		return fmt.Errorf("sqlite error: %w\n", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) Delete(
+	name string,
+) error {
+
+	if s.path == ":memory:" {
+		return nil
+	}
+
+	dbPath := GetPath(name, s.path)
 	if err := os.Remove(dbPath); err != nil {
 		return fmt.Errorf("failed to delete database: %w", err)
 	}
 	return nil
 }
 
+func Open(
+	name string,
+	path string,
+) (
+	*sql.DB,
+	error,
+) {
+
+	var dbPath string
+	if path == ":memory:" {
+		dbPath = ":memory:"
+	} else {
+		os.MkdirAll(path, os.ModePerm)
+		dbPath = GetPath(name, path)
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite error: %w\n", err)
+	}
+	return db, nil
+}
 func InitTable(
 	db *sql.DB,
 	name string,
@@ -60,7 +145,6 @@ func InitTable(
 func EnableForeignKeys(
 	db *sql.DB,
 ) error {
-
 	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
 		return fmt.Errorf("couldn't enable foreign keys: %w\n", err)
 	}
@@ -71,7 +155,6 @@ func GetPath(
 	name string,
 	dataPath string,
 ) string {
-
 	dbName := name + ".db"
 	return path.Join(dataPath, dbName)
 }
@@ -79,7 +162,6 @@ func GetPath(
 func ResultsEmpty(
 	result sql.Result,
 ) bool {
-
 	count, err := result.RowsAffected()
 	if err != nil {
 		return false
@@ -91,7 +173,6 @@ func CheckSqliteErr(
 	context string,
 	err error,
 ) error {
-
 	if err == nil {
 		return nil
 	}

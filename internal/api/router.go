@@ -4,17 +4,14 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// BuildRouter registers all API routes under /api/v1 using gorilla/mux
 func BuildRouter(r *mux.Router, api *API) {
 	v1 := r.PathPrefix("/api/v1").Subrouter()
 
 	// main network endpoints
 	v1.HandleFunc("/peers", api.withMainAuth(api.handleGetPeers)).Methods("GET")
-	v1.HandleFunc("/report", api.withMainAuth(api.handlePostReport)).Methods("POST")
-	v1.HandleFunc("/confirm/{key}", api.withMainAuth(api.handlePostConfirm)).Methods("POST")
-
-	// invite network endpoint
-	v1.HandleFunc("/redeem/{key}", api.withInviteAuth(api.handlePostRedeem)).Methods("POST")
+	v1.HandleFunc("/endpoint", api.withMainAuth(api.handlePostEndpoint)).Methods("POST")
+	v1.HandleFunc("/invite/confirm/{key}", api.withMainAuth(api.handlePostInviteConfirm)).Methods("POST")
+	v1.HandleFunc("/invite/redeem/{key}", api.withInviteAuth(api.handlePostInviteRedeem)).Methods("POST")
 
 	// admin endpoints
 	admin := v1.PathPrefix("/admin").Subrouter()

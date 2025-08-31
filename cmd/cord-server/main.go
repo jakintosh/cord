@@ -10,6 +10,7 @@ import (
 	"time"
 
 	cmd "git.sr.ht/~jakintosh/command-go"
+	"git.sr.ht/~jakintosh/cord/internal/database"
 	"git.sr.ht/~jakintosh/cord/internal/server"
 	"git.sr.ht/~jakintosh/cord/internal/wireguard"
 )
@@ -308,17 +309,11 @@ var addCidr = &cmd.Command{
 		// operands
 		network := i.GetOperand("network")
 		name := i.GetOperand("name")
-		cidrValue := i.GetOperand("cidr")
+		cidr := i.GetOperand("cidr")
 
 		// options
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
 		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
-
-		// parse
-		cidr, err := parseCidr(cidrValue)
-		if err != nil {
-			return fmt.Errorf("failed to parse cidr: %w", err)
-		}
 
 		// create app context
 		ctx, err := initContext(network, configDir, dataDir)
@@ -326,7 +321,14 @@ var addCidr = &cmd.Command{
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		err = ctx.CreateCidr(name, cidr)
+		// create request
+		req := server.CreateCidrRequest{
+			Name: name,
+			Cidr: cidr,
+		}
+
+		// execute command
+		err = ctx.CreateCidr(req)
 		if err != nil {
 			return fmt.Errorf("failed to create cidr: %w", err)
 		}
@@ -373,7 +375,13 @@ var renameCidr = &cmd.Command{
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		err = ctx.RenameCidr(cidr, newName)
+		// create request
+		req := server.UpdateCidrRequest{
+			Name: newName,
+		}
+
+		// execute command
+		err = ctx.RenameCidr(cidr, req)
 		if err != nil {
 			return fmt.Errorf("failed to rename cidr: %w", err)
 		}
@@ -551,7 +559,7 @@ var renamePeer = &cmd.Command{
 
 		// operands
 		network := i.GetOperand("network")
-		peer := i.GetOperand("peer")
+		oldName := i.GetOperand("peer")
 		newName := i.GetOperand("new-name")
 
 		// options
@@ -564,7 +572,10 @@ var renamePeer = &cmd.Command{
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		err = ctx.RenamePeer(peer, newName)
+		req := server.UpdatePeerRequest{
+			Name: &newName,
+		}
+		_, err = ctx.UpdatePeer(oldName, req)
 		if err != nil {
 			return fmt.Errorf("failed to rename peer: %w", err)
 		}
@@ -586,7 +597,7 @@ var enablePeer = &cmd.Command{
 		},
 		{
 			Name: "peer",
-			Help: "peer to rename",
+			Help: "peer to enable",
 		},
 	},
 	Options: []cmd.Option{},
@@ -594,7 +605,7 @@ var enablePeer = &cmd.Command{
 
 		// operands
 		network := i.GetOperand("network")
-		peer := i.GetOperand("peer")
+		peerName := i.GetOperand("peer")
 
 		// options
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
@@ -606,7 +617,10 @@ var enablePeer = &cmd.Command{
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		err = ctx.SetPeerEnabled(peer, true)
+		req := server.UpdatePeerRequest{
+			Enabled: boolPtr(true),
+		}
+		_, err = ctx.UpdatePeer(peerName, req)
 		if err != nil {
 			return fmt.Errorf("failed to enable peer: %w", err)
 		}
@@ -636,7 +650,7 @@ var disablePeer = &cmd.Command{
 
 		// operands
 		network := i.GetOperand("network")
-		peer := i.GetOperand("peer")
+		peerName := i.GetOperand("peer")
 
 		// options
 		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
@@ -648,9 +662,12 @@ var disablePeer = &cmd.Command{
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		err = ctx.SetPeerEnabled(peer, false)
+		req := server.UpdatePeerRequest{
+			Enabled: boolPtr(false),
+		}
+		_, err = ctx.UpdatePeer(peerName, req)
 		if err != nil {
-			return fmt.Errorf("failed to disable peer: %w", err)
+			return fmt.Errorf("failed to enable peer: %w", err)
 		}
 
 		return nil
@@ -896,13 +913,25 @@ var deleteAssociation = &cmd.Command{
 // A wireguard peer consists of the peer's public key, external endpoint,
 // and "allowed ips" (cidrs).
 
-func initContext(network string, configDir string, dataDir string) (*server.Context, error) {
+func initContext(
+	network string,
+	configDir string,
+	dataDir string,
+) (*server.Context, error) {
 	config := server.NewFsConfig(configDir)
-	data := server.NewFsData(dataDir)
-	return server.NewContext(network, config, data)
+	store, err := database.Init(network, dataDir, true)
+	if err != nil {
+		return nil, err
+	}
+	return server.NewContext(network, config, store)
 }
 
-func parseCidr(value string) (*net.IPNet, error) {
+func parseCidr(
+	value string,
+) (
+	*net.IPNet,
+	error,
+) {
 	_, cidr, err := net.ParseCIDR(value)
 	if err != nil {
 		err = fmt.Errorf("failed to parse cidr from operand '%s': %v", value, err)
@@ -910,7 +939,12 @@ func parseCidr(value string) (*net.IPNet, error) {
 	return cidr, err
 }
 
-func parseIp(value string) (net.IP, error) {
+func parseIp(
+	value string,
+) (
+	net.IP,
+	error,
+) {
 	ip := net.ParseIP(value)
 	if ip == nil {
 		return nil, fmt.Errorf("failed to parse ip from '%s'", value)
@@ -923,7 +957,12 @@ func parseIp(value string) (net.IP, error) {
 	}
 }
 
-func parsePort(value string) (uint16, error) {
+func parsePort(
+	value string,
+) (
+	uint16,
+	error,
+) {
 	port, err := strconv.ParseUint(value, 10, 16)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse port from '%s': %v", value, err)
@@ -931,7 +970,12 @@ func parsePort(value string) (uint16, error) {
 	return uint16(port), nil
 }
 
-func parseBackend(value string) (server.BackendType, error) {
+func parseBackend(
+	value string,
+) (
+	server.BackendType,
+	error,
+) {
 	switch value {
 	case "kernel":
 		return server.KernelBackend, nil
@@ -942,7 +986,12 @@ func parseBackend(value string) (server.BackendType, error) {
 	}
 }
 
-func parseExpiration(value string) (int64, error) {
+func parseExpiration(
+	value string,
+) (
+	int64,
+	error,
+) {
 	last := len(value) - 1
 	number, err := strconv.ParseInt(value[0:last], 10, 64)
 	if err != nil {
@@ -975,3 +1024,5 @@ func getPwd() string {
 	}
 	return dir
 }
+
+func boolPtr(b bool) *bool { return &b }

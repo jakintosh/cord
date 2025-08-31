@@ -23,11 +23,11 @@ type AdminPeer struct {
 	Cidr      string `json:"cidr"`
 	PublicKey string `json:"publicKey"`
 	Admin     bool   `json:"admin"`
-	Disabled  bool   `json:"disabled"`
+	Enabled   bool   `json:"enabled"`
 	Confirmed bool   `json:"confirmed"`
 }
 
-func (a *API) handlePostAdminPeer(
+func (api *API) handlePostAdminPeer(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -42,7 +42,7 @@ func (a *API) handlePostAdminPeer(
 	writeData(w, http.StatusCreated, AdminPeer{})
 }
 
-func (a *API) handleGetAdminPeers(
+func (api *API) handleGetAdminPeers(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -50,7 +50,7 @@ func (a *API) handleGetAdminPeers(
 	writeData(w, http.StatusOK, []AdminPeer{})
 }
 
-func (a *API) handleGetAdminPeer(
+func (api *API) handleGetAdminPeer(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -64,7 +64,7 @@ func (a *API) handleGetAdminPeer(
 	writeData(w, http.StatusOK, AdminPeer{})
 }
 
-func (a *API) handlePutAdminPeer(
+func (api *API) handlePutAdminPeer(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -85,7 +85,7 @@ func (a *API) handlePutAdminPeer(
 	writeData(w, http.StatusOK, AdminPeer{})
 }
 
-func (a *API) handleDeleteAdminPeer(
+func (api *API) handleDeleteAdminPeer(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
