@@ -32,7 +32,7 @@ type UpdatePeerRequest struct {
 	Enabled *bool   `json:"enabled,omitempty"`
 }
 
-func (ctx *Context) PeerGetByIP(
+func (ctx *Context) GetPeerByIP(
 	ip net.IP,
 ) (
 	*Peer,

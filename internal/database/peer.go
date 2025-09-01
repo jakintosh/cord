@@ -144,8 +144,8 @@ func (store *SQLiteStore) PeerGetByIP(
 		SELECT name, public_key, ip, prefix, admin, enabled, confirmed
 		FROM peer
 		WHERE ip = ?1
-		  AND confirmed = 1
-		  AND enabled = 1;`,
+			AND confirmed = 1
+			AND enabled = 1;`,
 		ip,
 	)
 
