@@ -4,9 +4,11 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path"
 
+	"git.sr.ht/~jakintosh/cord/internal/utils"
 	sqlite "modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 )
@@ -90,6 +92,57 @@ func (s *SQLiteStore) Open(
 	if err != nil {
 		return fmt.Errorf("sqlite error: %w\n", err)
 	}
+	return nil
+}
+
+func (s *SQLiteStore) Create(
+	name string,
+	root *net.IPNet,
+	serverPubKey string,
+) error {
+	// Begin transaction
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin create tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Insert root CIDR with explicit id=1
+	prefix, length := root.Mask.Size()
+	base, last := utils.GetIpRangeFromCidr(root)
+	if _, err := tx.Exec(`
+        INSERT INTO cidr (id, name, cidr, length, prefix, base, last)
+        VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6);`,
+		name,
+		root.String(),
+		length,
+		prefix,
+		base,
+		last,
+	); err != nil {
+		return CheckSqliteErr("adding root cidr", err)
+	}
+
+	// Derive server IP and prefix from root
+	serverIP := utils.GetFirstAssignableIpFromCidr(root)
+	ipPrefix := len(serverIP) * 8
+
+	// Insert server peer directly
+	if _, err := tx.Exec(`
+        INSERT INTO peer (name, ip, prefix, public_key, admin, enabled, confirmed)
+        VALUES ('cord-server', ?1, ?2, ?3, 1, 1, 1);`,
+		serverIP,
+		ipPrefix,
+		serverPubKey,
+	); err != nil {
+		return CheckSqliteErr("adding server peer", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit create tx: %w", err)
+	}
+
 	return nil
 }
 

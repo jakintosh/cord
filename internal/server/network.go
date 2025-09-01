@@ -5,6 +5,7 @@ import (
 	"net"
 
 	"git.sr.ht/~jakintosh/cord/internal/utils"
+	wg "git.sr.ht/~jakintosh/cord/internal/wireguard"
 )
 
 func (ctx *Context) CreateNetwork(
@@ -24,27 +25,22 @@ func (ctx *Context) CreateNetwork(
 		return fmt.Errorf("failed to create config writer: %w", err)
 	}
 
-	if err := ctx.CreateRootCidr(cidr); err != nil {
-		return fmt.Errorf("failed to add root cidr: %w", err)
-	}
-
-	serverIp := utils.GetFirstAssignableIpFromCidr(cidr)
-
-	req := CreateInviteRequest{
-		Name:  "cord-server",
-		IP:    serverIp,
-		Admin: true,
-	}
-	deviceCfg, peerCfg, err := ctx.CreateInvite(req)
+	// Generate server WireGuard keypair in server layer
+	privKey, pubKey, err := wg.GenerateKeypair()
 	if err != nil {
-		return fmt.Errorf("failed to add server peer: %w", err)
+		return fmt.Errorf("failed to generate wireguard keypair: %w", err)
 	}
 
-	deviceCfg.ListenPort = port
+	// Create root CIDR and initial server peer atomically in the store
+	if err := ctx.Store.Create(ctx.Name, cidr, pubKey.String()); err != nil {
+		return fmt.Errorf("failed to create network and server peer: %w", err)
+	}
 
-	pubKey := peerCfg.PublicKey.String()
-	if err := ctx.RedeemInvite(pubKey, pubKey); err != nil {
-		return fmt.Errorf("failed to redeem server peer: %w", err)
+	// Build device config and write it using the generated private key
+	serverIp := utils.GetFirstAssignableIpFromCidr(cidr)
+	deviceCfg, err := wg.NewDeviceConfig(privKey, cidr, serverIp, port)
+	if err != nil {
+		return fmt.Errorf("failed to build device config: %w", err)
 	}
 
 	if err := deviceCfg.Write(cfgFile); err != nil {

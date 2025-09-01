@@ -14,6 +14,7 @@ const (
 )
 
 type ServerStore interface {
+	Create(name string, root *net.IPNet, serverPubKey string) error
 	Delete(name string) error
 
 	AssociationList() ([]*Association, error)
@@ -23,7 +24,6 @@ type ServerStore interface {
 
 	CidrList() ([]*Cidr, error)
 	CidrGet(name string) (*Cidr, error)
-	CidrCreateRoot(name string, cidr *net.IPNet) error
 	CidrCreate(name string, cidr *net.IPNet) error
 	CidrUpdate(name string, req UpdateCidrRequest) error
 	CidrDelete(name string) error

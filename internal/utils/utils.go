@@ -19,20 +19,26 @@ func ValidateHostName(name string) error {
 }
 
 func GetFirstAssignableIpFromCidr(cidr *net.IPNet) net.IP {
+
+	// clone the cidr.IP
+	ip := append(net.IP(nil), cidr.IP...)
+
+	// if the mask is full, the network IP is the only IP, so we
+	// assume that this is an "assignable cidr" itself
 	prefix, length := cidr.Mask.Size()
-	if prefix == length {
-		// if the mask is full, the network IP is the only IP, so we
-		// assume that this is an "assignable cidr" and return the
-		// base/network IP
-		return cidr.IP
-	} else {
+	if prefix != length {
 		// if the mask is not full, we assume the base IP is the
 		// network IP, and we should increment to the next address
 		// to be used as the first assignable IP
-		ip := cidr.IP
 		ip[len(ip)-1] += 1
-		return ip
 	}
+
+	// normalize ip to 4-byte slice if necessary
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+
+	return ip
 }
 
 // get the smallest and largest IP address possible based on the given

@@ -32,12 +32,6 @@ func (ctx *Context) CreateCidr(
 	return ctx.Store.CidrCreate(req.Name, cidr)
 }
 
-func (ctx *Context) CreateRootCidr(
-	cidr *net.IPNet,
-) error {
-	return ctx.Store.CidrCreateRoot(ctx.Name, cidr)
-}
-
 func (ctx *Context) UpdateCidr(
 	cidr string,
 	req UpdateCidrRequest,
