@@ -248,3 +248,46 @@ func TestInviteRedeemExpired(t *testing.T) {
 	// verify that expired invite redemption fails
 	expectError(t, err, "redeeming expired invite")
 }
+
+// TestInviteGetByIPValid tests retrieving an invite by its temp IP when valid
+func TestInviteGetByIPValid(t *testing.T) {
+	store := setupTestDB(t)
+
+	// create invite
+	err := createInvite(t, store, TestUser1)
+	expectNoError(t, err, "creating invite for GetByIP")
+
+	// lookup by temp IP
+	got, err := store.InviteGetByIP(TestUser1.TempIP)
+	expectNoError(t, err, "InviteGetByIP should find valid invite")
+
+	if got == nil {
+		t.Fatalf("InviteGetByIP returned nil invite")
+	}
+	if got.Name != TestUser1.Name {
+		t.Errorf("invite name = %v, want %v", got.Name, TestUser1.Name)
+	}
+	if got.PublicKey != TestUser1.PubKey {
+		t.Errorf("invite public key = %v, want %v", got.PublicKey, TestUser1.PubKey)
+	}
+	if got.Redeemed {
+		t.Errorf("invite should not be redeemed")
+	}
+}
+
+// TestInviteGetByIPRedeemedNotReturned ensures redeemed invites are not returned by IP
+func TestInviteGetByIPRedeemedNotReturned(t *testing.T) {
+	store := setupTestDB(t)
+
+	// Create and redeem invite
+	err := createInvite(t, store, TestUser2)
+	expectNoError(t, err, "creating invite to redeem")
+
+	// redeem it
+	err = store.InviteRedeem(TestUser2.PubKey, "redeemed-key")
+	expectNoError(t, err, "redeeming invite")
+
+	// lookup by temp IP should not return it
+	_, err = store.InviteGetByIP(TestUser2.TempIP)
+	expectError(t, err, "InviteGetByIP should not return redeemed invite")
+}

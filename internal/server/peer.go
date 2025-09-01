@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"net"
 )
 
@@ -33,29 +32,13 @@ type UpdatePeerRequest struct {
 	Enabled *bool   `json:"enabled,omitempty"`
 }
 
-func (p *Peer) String() string {
-	return fmt.Sprintf(
-		"%s | %s | %s",
-		p.PublicKey,
-		p.Cidr,
-		p.Name,
-	)
-}
-
 func (ctx *Context) PeerGetByIP(
 	ip net.IP,
 ) (
 	*Peer,
 	error,
 ) {
-	return &Peer{
-		Name:      "peer",
-		PublicKey: "abc123",
-		Cidr:      "10.0.0.1/32",
-		Admin:     true,
-		Confirmed: true,
-		Enabled:   false,
-	}, nil
+	return ctx.Store.PeerGetByIP(ip)
 }
 
 func (ctx *Context) UpdatePeer(

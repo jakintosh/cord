@@ -286,3 +286,47 @@ func TestPeerListPeersEmpty(t *testing.T) {
 		t.Errorf("expected 0 peers for peer with no associations, got %d", len(result))
 	}
 }
+
+// TestPeerGetByIPValid tests retrieving a peer by IP when enabled and confirmed
+func TestPeerGetByIPValid(t *testing.T) {
+	store := setupTestDB(t)
+
+	peerPub := "peer-public-valid"
+	err := createPeerFromInvite(t, store, TestUser1, peerPub)
+	expectNoError(t, err, "creating peer for GetByIP")
+
+	// Lookup by IP
+	got, err := store.PeerGetByIP(TestUser1.FinalIP)
+	expectNoError(t, err, "PeerGetByIP should find enabled+confirmed peer")
+	if got == nil {
+		t.Fatalf("PeerGetByIP returned nil peer")
+	}
+	if got.Name != TestUser1.Name {
+		t.Errorf("peer name = %v, want %v", got.Name, TestUser1.Name)
+	}
+	if got.PublicKey != peerPub {
+		t.Errorf("peer public key = %v, want %v", got.PublicKey, peerPub)
+	}
+}
+
+// TestPeerGetByIPDisabledNotReturned ensures disabled peers are not returned by IP
+func TestPeerGetByIPDisabledNotReturned(t *testing.T) {
+	store := setupTestDB(t)
+
+	// Create peer via invite redemption with explicit IPv4 addresses (4-byte)
+	peerPub := "peer-public-disabled"
+	err := createPeerFromInvite(t, store, TestUser1, peerPub)
+	expectNoError(t, err, "creating peer to disable")
+
+	// Disable the peer
+	update := server.UpdatePeerRequest{Enabled: boolPtr(false)}
+	_, err = store.PeerUpdate(TestUser1.Name, update)
+	expectNoError(t, err, "disabling peer")
+
+	// Lookup by IP should fail
+	_, err = store.PeerGetByIP(TestAdmin.FinalIP)
+	expectError(t, err, "PeerGetByIP should not return disabled peer")
+}
+
+// local helper for pointer to bool
+func boolPtr(v bool) *bool { return &v }

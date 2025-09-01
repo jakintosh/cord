@@ -51,6 +51,27 @@ func (store *SQLiteStore) InviteGet(
 	return scanInvite(row)
 }
 
+func (store *SQLiteStore) InviteGetByIP(
+	ip net.IP,
+) (
+	*server.ServerInvite,
+	error,
+) {
+	// Normalize IPv4 to 4-byte representation
+	ip = utils.NormalizeIP(ip)
+	row := store.db.QueryRow(`
+		SELECT name, public_key, temp_ip, final_ip, admin, redeemed, expiration
+		FROM invite
+		WHERE temp_ip = ?1
+		  AND redeemed = 0
+		  AND expiration > ?2;`,
+		ip,
+		time.Now().Unix(),
+	)
+
+	return scanInvite(row)
+}
+
 func (s *SQLiteStore) InviteCreate(
 	name string,
 	pubKey string,
@@ -59,6 +80,9 @@ func (s *SQLiteStore) InviteCreate(
 	admin bool,
 	expiration int64,
 ) error {
+	// normalize IPs
+	tempIP = utils.NormalizeIP(tempIP)
+	finalIP = utils.NormalizeIP(finalIP)
 	_, err := s.db.Exec(`
 		INSERT INTO invite (name, public_key, temp_ip, final_ip, admin, redeemed, expiration)
 		VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6);`,

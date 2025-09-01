@@ -19,9 +19,7 @@ func ValidateHostName(name string) error {
 }
 
 func GetFirstAssignableIpFromCidr(cidr *net.IPNet) net.IP {
-
-	// clone the cidr.IP
-	ip := append(net.IP(nil), cidr.IP...)
+	ip := slices.Clone(cidr.IP)
 
 	// if the mask is full, the network IP is the only IP, so we
 	// assume that this is an "assignable cidr" itself
@@ -33,37 +31,19 @@ func GetFirstAssignableIpFromCidr(cidr *net.IPNet) net.IP {
 		ip[len(ip)-1] += 1
 	}
 
-	// normalize ip to 4-byte slice if necessary
-	if v4 := ip.To4(); v4 != nil {
-		ip = v4
-	}
-
-	return ip
+	return NormalizeIP(ip)
 }
 
 // get the smallest and largest IP address possible based on the given
 // cidr (*net.IPNet)
 func GetIpRangeFromCidr(cidr *net.IPNet) (net.IP, net.IP) {
-	// Normalize IPv4 to 4-byte form to ensure consistent DB storage/comparisons
-	if v4 := cidr.IP.To4(); v4 != nil {
-		start := slices.Clone(v4)
-		mask := cidr.Mask
-		// mask for IPv4 should be 4 bytes; compute broadcast/end
-		end := make([]byte, 4)
-		for i := range 4 {
-			end[i] = start[i] + ^mask[i]
-		}
-		return net.IP(start), net.IP(end)
-	}
-
-	// IPv6 path: operate on full 16-byte address
 	start := slices.Clone(cidr.IP)
 	mask := cidr.Mask
 	end := make([]byte, len(start))
 	for i := range start {
 		end[i] = start[i] + ^mask[i]
 	}
-	return net.IP(start), net.IP(end)
+	return NormalizeIP(net.IP(start)), NormalizeIP(net.IP(end))
 }
 
 // a 'peer CIDR' is just a fully masked CIDR that represents one IP
@@ -80,4 +60,11 @@ func GetPeerCidrFromIp(ip net.IP) *net.IPNet {
 			Mask: net.CIDRMask(256, 256),
 		}
 	}
+}
+
+func NormalizeIP(ip net.IP) net.IP {
+	if v4 := ip.To4(); v4 != nil {
+		return v4
+	}
+	return ip
 }

@@ -43,7 +43,7 @@ func (ctx *Context) GetInviteByIP(
 	*ServerInvite,
 	error,
 ) {
-	return nil, nil
+	return ctx.Store.InviteGetByIP(ip)
 }
 
 var tempIPAddr = 1
@@ -60,18 +60,13 @@ func (ctx *Context) CreateInvite(
 		return nil, nil, err
 	}
 
-	// Generate a temporary IP in the temp range (normalize to 4-byte v4)
-	tempIP := net.IPv4(10, 0, 255, byte(tempIPAddr)).To4()
+	// Generate a temporary IP in the temp range
+	tempIP := net.IPv4(10, 0, 255, byte(tempIPAddr))
 	tempIPAddr += 1
 
 	// If no expiration provided, default to 24h from now to ensure redeemable
 	if req.Expiration.IsZero() {
 		req.Expiration = time.Now().Add(24 * time.Hour)
-	}
-
-	// Normalize final IP to 4-byte v4 if applicable for consistent DB storage
-	if v4 := req.IP.To4(); v4 != nil {
-		req.IP = v4
 	}
 
 	err = ctx.Store.InviteCreate(

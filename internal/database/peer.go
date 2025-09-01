@@ -4,6 +4,7 @@ import (
 	"net"
 
 	"git.sr.ht/~jakintosh/cord/internal/server"
+	"git.sr.ht/~jakintosh/cord/internal/utils"
 )
 
 func (s *SQLiteStore) PeerExists(
@@ -127,6 +128,25 @@ func (store *SQLiteStore) PeerGet(
 		FROM peer
 		WHERE name = ?;`,
 		name,
+	)
+
+	return scanPeer(row)
+}
+
+func (store *SQLiteStore) PeerGetByIP(
+	ip net.IP,
+) (
+	*server.Peer,
+	error,
+) {
+	ip = utils.NormalizeIP(ip)
+	row := store.db.QueryRow(`
+		SELECT name, public_key, ip, prefix, admin, enabled, confirmed
+		FROM peer
+		WHERE ip = ?1
+		  AND confirmed = 1
+		  AND enabled = 1;`,
+		ip,
 	)
 
 	return scanPeer(row)

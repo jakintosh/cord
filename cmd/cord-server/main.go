@@ -12,6 +12,7 @@ import (
 	cmd "git.sr.ht/~jakintosh/command-go"
 	"git.sr.ht/~jakintosh/cord/internal/database"
 	"git.sr.ht/~jakintosh/cord/internal/server"
+	"git.sr.ht/~jakintosh/cord/internal/utils"
 	"git.sr.ht/~jakintosh/cord/internal/wireguard"
 )
 
@@ -951,11 +952,7 @@ func parseIp(
 		return nil, fmt.Errorf("failed to parse ip from '%s'", value)
 	}
 
-	if ip4 := ip.To4(); ip4 != nil {
-		return ip4, nil
-	} else {
-		return ip, nil
-	}
+	return utils.NormalizeIP(ip), nil
 }
 
 func parsePort(

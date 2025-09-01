@@ -31,6 +31,7 @@ type ServerStore interface {
 
 	InviteList() ([]*ServerInvite, error)
 	InviteGet(name string) (*ServerInvite, error)
+	InviteGetByIP(ip net.IP) (*ServerInvite, error)
 	InviteCreate(name string, pubKey string, tempIP net.IP, finalIP net.IP, admin bool, expiration int64) error
 	InviteRedeem(pubKey string, newKey string) error
 
@@ -38,6 +39,7 @@ type ServerStore interface {
 	PeerList() ([]*Peer, error)
 	PeerListPeers(name string) ([]*Peer, error)
 	PeerGet(name string) (*Peer, error)
+	PeerGetByIP(ip net.IP) (*Peer, error)
 	PeerUpdate(name string, req UpdatePeerRequest) (*Peer, error)
 }
 
