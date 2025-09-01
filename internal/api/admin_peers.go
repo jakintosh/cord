@@ -64,7 +64,7 @@ func (api *API) handleGetAdminPeer(
 	writeData(w, http.StatusOK, AdminPeer{})
 }
 
-func (api *API) handlePutAdminPeer(
+func (api *API) handlePatchAdminPeer(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {

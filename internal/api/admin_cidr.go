@@ -59,7 +59,7 @@ func (api *API) handleGetAdminCidr(
 	writeData(w, http.StatusOK, CidrResponse{})
 }
 
-func (api *API) handlePutAdminCidr(
+func (api *API) handlePatchAdminCidr(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {

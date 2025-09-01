@@ -19,14 +19,14 @@ func BuildRouter(r *mux.Router, api *API) {
 	admin.HandleFunc("/peers", api.withAdminAuth(api.handleGetAdminPeers)).Methods("GET")
 	admin.HandleFunc("/peer", api.withAdminAuth(api.handlePostAdminPeer)).Methods("POST")
 	admin.HandleFunc("/peer/{name}", api.withAdminAuth(api.handleGetAdminPeer)).Methods("GET")
-	admin.HandleFunc("/peer/{name}", api.withAdminAuth(api.handlePutAdminPeer)).Methods("PUT")
+	admin.HandleFunc("/peer/{name}", api.withAdminAuth(api.handlePatchAdminPeer)).Methods("PATCH")
 	admin.HandleFunc("/peer/{name}", api.withAdminAuth(api.handleDeleteAdminPeer)).Methods("DELETE")
 
 	// cidrs
 	admin.HandleFunc("/cidrs", api.withAdminAuth(api.handleGetAdminCidrs)).Methods("GET")
 	admin.HandleFunc("/cidr", api.withAdminAuth(api.handlePostAdminCidr)).Methods("POST")
 	admin.HandleFunc("/cidr/{name}", api.withAdminAuth(api.handleGetAdminCidr)).Methods("GET")
-	admin.HandleFunc("/cidr/{name}", api.withAdminAuth(api.handlePutAdminCidr)).Methods("PUT")
+	admin.HandleFunc("/cidr/{name}", api.withAdminAuth(api.handlePatchAdminCidr)).Methods("PATCH")
 	admin.HandleFunc("/cidr/{name}", api.withAdminAuth(api.handleDeleteAdminCidr)).Methods("DELETE")
 
 	// associations

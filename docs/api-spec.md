@@ -2,25 +2,25 @@
 
 ## 1) Endpoint List
 
-| METHOD | PATH                       | PURPOSE                    | AUTH         | IDEMPOTENT |
-|--------|----------------------------|----------------------------|--------------|------------|
-| GET    | /api/v1/peers              | List visible peers         | main_net     | yes        |
-| POST   | /api/v1/endpoint           | Report endpoint sightings  | main_net     | no         |
+| METHOD | PATH                         | PURPOSE                    | AUTH         | IDEMPOTENT |
+|--------|------------------------------|----------------------------|--------------|------------|
+| GET    | /api/v1/peers                | List visible peers         | main_net     | yes        |
+| POST   | /api/v1/endpoint             | Report endpoint sightings  | main_net     | no         |
 | POST   | /api/v1/invite/confirm/{key} | Confirm peer presence      | main_net     | yes        |
 | POST   | /api/v1/invite/redeem/{key}  | Redeem invite              | invite_net   | yes        |
-| POST   | /api/v1/admin/peer         | Create peer invite         | admin        | no         |
-| GET    | /api/v1/admin/peers        | List peers                 | admin        | yes        |
-| GET    | /api/v1/admin/peer/{name}  | Get peer                   | admin        | yes        |
-| PUT    | /api/v1/admin/peer/{name}  | Rename/enable/disable peer | admin        | yes        |
-| DELETE | /api/v1/admin/peer/{name}  | Delete peer                | admin        | yes        |
-| POST   | /api/v1/admin/cidr         | Create CIDR                | admin        | no         |
-| GET    | /api/v1/admin/cidrs        | List CIDRs                 | admin        | yes        |
-| GET    | /api/v1/admin/cidr/{name}  | Get CIDR                   | admin        | yes        |
-| PUT    | /api/v1/admin/cidr/{name}  | Rename CIDR                | admin        | yes        |
-| DELETE | /api/v1/admin/cidr/{name}  | Delete CIDR                | admin        | yes        |
-| POST   | /api/v1/admin/association  | Create association         | admin        | yes        |
-| GET    | /api/v1/admin/associations | List associations          | admin        | yes        |
-| DELETE | /api/v1/admin/association  | Delete association         | admin        | yes        |
+| POST   | /api/v1/admin/peer           | Create peer invite         | admin        | no         |
+| GET    | /api/v1/admin/peers          | List peers                 | admin        | yes        |
+| GET    | /api/v1/admin/peer/{name}    | Get peer                   | admin        | yes        |
+| PATCH  | /api/v1/admin/peer/{name}    | Rename/enable/disable peer | admin        | yes        |
+| DELETE | /api/v1/admin/peer/{name}    | Delete peer                | admin        | yes        |
+| POST   | /api/v1/admin/cidr           | Create CIDR                | admin        | no         |
+| GET    | /api/v1/admin/cidrs          | List CIDRs                 | admin        | yes        |
+| GET    | /api/v1/admin/cidr/{name}    | Get CIDR                   | admin        | yes        |
+| PATCH  | /api/v1/admin/cidr/{name}    | Rename CIDR                | admin        | yes        |
+| DELETE | /api/v1/admin/cidr/{name}    | Delete CIDR                | admin        | yes        |
+| POST   | /api/v1/admin/association    | Create association         | admin        | yes        |
+| GET    | /api/v1/admin/associations   | List associations          | admin        | yes        |
+| DELETE | /api/v1/admin/association    | Delete association         | admin        | yes        |
 
 
 ## 2) Conventions
@@ -232,7 +232,7 @@ Status:
 | 401  | Request not from admin peer   |
 | 404  | Peer not found                |
 
-### PUT /api/v1/admin/peer/{name}
+### PATCH /api/v1/admin/peer/{name}
 
 Description: Update peer properties including renaming, enabling, or disabling.
 
@@ -356,7 +356,7 @@ Status:
 | 401  | Request not from admin peer   |
 | 404  | CIDR not found                |
 
-### PUT /api/v1/admin/cidr/{name}
+### PATCH /api/v1/admin/cidr/{name}
 
 Description: Rename existing CIDR.
 
