@@ -38,11 +38,11 @@ func (ctx *Context) CreateRootCidr(
 	return ctx.Store.CidrCreateRoot(ctx.Name, cidr)
 }
 
-func (ctx *Context) RenameCidr(
+func (ctx *Context) UpdateCidr(
 	cidr string,
 	req UpdateCidrRequest,
 ) error {
-	return ctx.Store.CidrRename(cidr, req.Name)
+	return ctx.Store.CidrUpdate(cidr, req)
 }
 
 func (ctx *Context) DeleteCidr(

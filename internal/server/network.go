@@ -30,7 +30,12 @@ func (ctx *Context) CreateNetwork(
 
 	serverIp := utils.GetFirstAssignableIpFromCidr(cidr)
 
-	deviceCfg, peerCfg, err := ctx.CreateInvite("cord-server", serverIp, true, 0)
+	req := CreateInviteRequest{
+		Name:  "cord-server",
+		IP:    serverIp,
+		Admin: true,
+	}
+	deviceCfg, peerCfg, err := ctx.CreateInvite(req)
 	if err != nil {
 		return fmt.Errorf("failed to add server peer: %w", err)
 	}

@@ -6,6 +6,24 @@ import (
 	"git.sr.ht/~jakintosh/cord/internal/server"
 )
 
+func (s *SQLiteStore) PeerExists(
+	peerName string,
+) bool {
+	row := s.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM peer
+		WHERE name = ?;`,
+		peerName,
+	)
+
+	var count int64
+	if err := row.Scan(&count); err != nil {
+		return false
+	}
+
+	return count > 0
+}
+
 func (store *SQLiteStore) PeerList() (
 	[]*server.Peer,
 	error,
@@ -145,24 +163,6 @@ func (s *SQLiteStore) PeerUpdate(
 	)
 
 	return scanPeer(row)
-}
-
-func (s *SQLiteStore) PeerExists(
-	peerName string,
-) bool {
-	row := s.db.QueryRow(`
-		SELECT COUNT(*)
-		FROM peer
-		WHERE name = ?;`,
-		peerName,
-	)
-
-	var count int64
-	if err := row.Scan(&count); err != nil {
-		return false
-	}
-
-	return count > 0
 }
 
 func scanPeer(s Scanner) (

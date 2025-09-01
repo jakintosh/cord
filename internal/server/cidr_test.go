@@ -50,7 +50,7 @@ func TestCreateAndRenameCidr(t *testing.T) {
 	}
 
 	// Renaming the CIDR should succeed and be usable in associations
-	if err := ctx.RenameCidr(
+	if err := ctx.UpdateCidr(
 		"extra",
 		server.UpdateCidrRequest{
 			Name: "extra-renamed",

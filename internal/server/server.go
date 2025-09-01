@@ -3,8 +3,6 @@ package server
 import (
 	"fmt"
 	"net"
-
-	_ "modernc.org/sqlite"
 )
 
 type BackendType int
@@ -27,7 +25,7 @@ type ServerStore interface {
 	CidrGet(name string) (*Cidr, error)
 	CidrCreateRoot(name string, cidr *net.IPNet) error
 	CidrCreate(name string, cidr *net.IPNet) error
-	CidrRename(name string, newName string) error
+	CidrUpdate(name string, req UpdateCidrRequest) error
 	CidrDelete(name string) error
 
 	EndpointReport(sightings []string) error
@@ -37,11 +35,11 @@ type ServerStore interface {
 	InviteCreate(name string, pubKey string, tempIP net.IP, finalIP net.IP, admin bool, inviteExpires int64) error
 	InviteRedeem(pubKey string, newKey string) error
 
+	PeerExists(name string) bool
 	PeerList() ([]*Peer, error)
 	PeerListPeers(name string) ([]*Peer, error)
 	PeerGet(name string) (*Peer, error)
 	PeerUpdate(name string, req UpdatePeerRequest) (*Peer, error)
-	PeerExists(name string) bool
 }
 
 type Context struct {

@@ -381,7 +381,7 @@ var renameCidr = &cmd.Command{
 		}
 
 		// execute command
-		err = ctx.RenameCidr(cidr, req)
+		err = ctx.UpdateCidr(cidr, req)
 		if err != nil {
 			return fmt.Errorf("failed to rename cidr: %w", err)
 		}
@@ -492,7 +492,7 @@ var addPeer = &cmd.Command{
 			return fmt.Errorf("failed to parse ip: %w", err)
 		}
 
-		inviteExpires, err := parseExpiration(inviteValue)
+		expiration, err := parseExpiration(inviteValue)
 		if err != nil {
 			return fmt.Errorf("failed to parse expiration: %w", err)
 		}
@@ -512,12 +512,13 @@ var addPeer = &cmd.Command{
 			return fmt.Errorf("failed to create context: %w", err)
 		}
 
-		peerInterface, _, err := ctx.CreateInvite(
-			name,
-			ip,
-			admin,
-			inviteExpires,
-		)
+		req := server.CreateInviteRequest{
+			Name:       name,
+			IP:         ip,
+			Admin:      admin,
+			Expiration: expiration,
+		}
+		peerInterface, _, err := ctx.CreateInvite(req)
 		if err != nil {
 			return fmt.Errorf("failed to create peer: %w", err)
 		}
@@ -989,13 +990,13 @@ func parseBackend(
 func parseExpiration(
 	value string,
 ) (
-	int64,
+	time.Time,
 	error,
 ) {
 	last := len(value) - 1
 	number, err := strconv.ParseInt(value[0:last], 10, 64)
 	if err != nil {
-		return 0, err
+		return time.Unix(0, 0), err
 	}
 
 	var multiplier int64
@@ -1013,7 +1014,7 @@ func parseExpiration(
 		multiplier = 60 * 60 * 24 * 7
 	}
 
-	return time.Now().Unix() + (number * multiplier), nil
+	return time.Now().Add(time.Duration(number * multiplier)), nil
 }
 
 func getPwd() string {

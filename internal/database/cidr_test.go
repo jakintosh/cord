@@ -2,6 +2,8 @@ package database_test
 
 import (
 	"testing"
+
+	"git.sr.ht/~jakintosh/cord/internal/server"
 )
 
 // TestCidrCreateRoot tests creating a root CIDR
@@ -199,19 +201,19 @@ func TestCidrRename(t *testing.T) {
 	expectNoError(t, err, "creating subnet CIDR")
 
 	// rename the CIDR
-	newName := "renamed-subnet"
-	err = store.CidrRename(TestCidr1.Name, newName)
+	update := server.UpdateCidrRequest{Name: "renamed-subnet"}
+	err = store.CidrUpdate(TestCidr1.Name, update)
 	expectNoError(t, err, "renaming CIDR")
 
 	// verify old name no longer exists
 	assertCidrNotExists(t, store, TestCidr1.Name)
 
 	// verify new name exists and has correct properties
-	renamedCidr, err := store.CidrGet(newName)
+	renamedCidr, err := store.CidrGet(update.Name)
 	expectNoError(t, err, "getting renamed CIDR")
 
-	if renamedCidr.Name != newName {
-		t.Errorf("renamed CIDR name = %v, want %v", renamedCidr.Name, newName)
+	if renamedCidr.Name != update.Name {
+		t.Errorf("renamed CIDR name = %v, want %v", renamedCidr.Name, update.Name)
 	}
 	if renamedCidr.Cidr != TestCidr1.Cidr {
 		t.Errorf("renamed CIDR cidr changed unexpectedly: %v", renamedCidr.Cidr)
@@ -229,7 +231,8 @@ func TestCidrRenameNonExistent(t *testing.T) {
 	store := setupTestDB(t)
 
 	// attempt to rename non-existent CIDR
-	err := store.CidrRename("non-existent", "new-name")
+	update := server.UpdateCidrRequest{Name: "new-name"}
+	err := store.CidrUpdate("non-existent", update)
 	expectNoError(t, err, "renaming non-existent CIDR should succeed silently")
 }
 
@@ -249,7 +252,8 @@ func TestCidrRenameToExistingName(t *testing.T) {
 	expectNoError(t, err, "creating second CIDR")
 
 	// attempt to rename first CIDR to second CIDR's name
-	err = store.CidrRename(TestCidr1.Name, TestCidr2.Name)
+	update := server.UpdateCidrRequest{Name: TestCidr2.Name}
+	err = store.CidrUpdate(TestCidr1.Name, update)
 	expectError(t, err, "renaming to existing name")
 }
 

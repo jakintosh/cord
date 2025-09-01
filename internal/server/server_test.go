@@ -131,7 +131,12 @@ func addPeer(
 	c *server.Context,
 	desc PeerDesc,
 ) (string, error) {
-	_, cfg, err := c.CreateInvite(desc.Name, desc.Ip, desc.Admin, 0)
+	req := server.CreateInviteRequest{
+		Name:  desc.Name,
+		IP:    desc.Ip,
+		Admin: desc.Admin,
+	}
+	_, cfg, err := c.CreateInvite(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to create peer '%s': %v", desc.Name, err)
 	}
@@ -152,11 +157,10 @@ func addAndRedeemPeer(
 	c *server.Context,
 	desc PeerDesc,
 ) error {
-	_, cfg, err := c.CreateInvite(desc.Name, desc.Ip, desc.Admin, 0)
+	pubKey, err := addPeer(c, desc)
 	if err != nil {
-		return fmt.Errorf("failed to create peer '%s': %v", desc.Name, err)
+		return fmt.Errorf("failed to add peer: %v", err)
 	}
-	pubKey := cfg.PublicKey.String()
 	if err := c.RedeemInvite(pubKey, pubKey); err != nil {
 		return fmt.Errorf("failed to redeem peer for key '%s': %v", pubKey, err)
 	}

@@ -102,15 +102,16 @@ func (s *SQLiteStore) CidrCreateRoot(
 	return CheckSqliteErr("adding root cidr", err)
 }
 
-func (s *SQLiteStore) CidrRename(
+func (s *SQLiteStore) CidrUpdate(
 	name string,
-	newName string,
+	req server.UpdateCidrRequest,
 ) error {
 	_, err := s.db.Exec(`
 		UPDATE cidr
 		SET name = ?2
 		WHERE name = ?1;`,
-		name, newName,
+		name,
+		req.Name,
 	)
 	return CheckSqliteErr("renaming cidr", err)
 }
