@@ -64,44 +64,6 @@ func (store *SQLiteStore) AssociationCreate(
 	return nil
 }
 
-func (store *SQLiteStore) AssociationListAssociatedCidrIds(
-	baseCidrId int64,
-) (
-	[]int64,
-	error,
-) {
-	// query the cidrs associated with the base cidr
-	rows, err := store.db.Query(`
-		SELECT DISTINCT COALESCE(c1.id, c2.id) as cidr
-		FROM association a
-		LEFT JOIN (
-			SELECT * FROM cidr c
-			WHERE c.id<>?1
-		) AS c1 ON a.cidr1=c1.id
-		LEFT JOIN (
-			SELECT * FROM cidr c
-			WHERE c.id<>?1
-		) AS c2 ON a.cidr2=c2.id
-		WHERE a.cidr1=?1 OR a.cidr2<>?1;`,
-		baseCidrId,
-	)
-	if err != nil {
-		return nil, CheckSqliteErr("getting associated cidrs", err)
-	}
-
-	// scan the resulting list of cidr id ints
-	defer rows.Close()
-	var id int64
-	var cidrIds []int64
-	for rows.Next() {
-		if err := rows.Scan(&id); err != nil {
-			return nil, CheckSqliteErr("scanning cidr id", err)
-		}
-		cidrIds = append(cidrIds, id)
-	}
-	return cidrIds, nil
-}
-
 func (store *SQLiteStore) AssociationDelete(
 	a string,
 	b string,

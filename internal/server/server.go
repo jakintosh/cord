@@ -19,7 +19,6 @@ type ServerStore interface {
 
 	AssociationList() ([]*Association, error)
 	AssociationCreate(cidr1 string, cidr2 string) error
-	AssociationListAssociatedCidrIds(id int64) ([]int64, error)
 	AssociationDelete(cidr1 string, cidr2 string) error
 
 	CidrList() ([]*Cidr, error)
@@ -32,7 +31,7 @@ type ServerStore interface {
 
 	InviteList() ([]*ServerInvite, error)
 	InviteGet(name string) (*ServerInvite, error)
-	InviteCreate(name string, pubKey string, tempIP net.IP, finalIP net.IP, admin bool, inviteExpires int64) error
+	InviteCreate(name string, pubKey string, tempIP net.IP, finalIP net.IP, admin bool, expiration int64) error
 	InviteRedeem(pubKey string, newKey string) error
 
 	PeerExists(name string) bool

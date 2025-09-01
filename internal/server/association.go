@@ -18,12 +18,3 @@ func (ctx *Context) DeleteAssociation(
 ) error {
 	return ctx.Store.AssociationDelete(cidr1, cidr2)
 }
-
-func (ctx *Context) GetAssociatedCidrIdsForCidrId(
-	baseCidrId int64,
-) (
-	[]int64,
-	error,
-) {
-	return ctx.Store.AssociationListAssociatedCidrIds(baseCidrId)
-}
