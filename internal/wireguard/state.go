@@ -29,12 +29,6 @@ type Interface struct {
 	backend Backend // Internal field for OS-specific implementation
 }
 
-// Backend defines the set of operations for a WireGuard implementation.
-type Backend interface {
-	Up(iface *Interface, configPath string) error
-	Down(iface *Interface, delete bool) error
-	Sync(iface *Interface) error
-}
 
 // ToWgConfig converts the Interface configuration to a wg-quick compatible .conf file format.
 func (i *Interface) ToWgConfig() string {
