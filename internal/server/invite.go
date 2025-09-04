@@ -52,7 +52,7 @@ func (ctx *Context) CreateInvite(
 	req CreateInviteRequest,
 ) (
 	*wg.DeviceConfig,
-	*wg.PeerConfig,
+	*wg.Peer,
 	error,
 ) {
 	_, pubKey, err := wg.GenerateKeypair()
@@ -81,10 +81,11 @@ func (ctx *Context) CreateInvite(
 		return nil, nil, err
 	}
 
-	return &wg.DeviceConfig{}, &wg.PeerConfig{
-		Name:      req.Name,
-		Cidr:      &net.IPNet{},
-		PublicKey: pubKey,
+	return &wg.DeviceConfig{}, &wg.Peer{
+		PublicKey:           pubKey,
+		AllowedIPs:          []*net.IPNet{},
+		Endpoint:            &net.UDPAddr{},
+		PersistentKeepalive: 0,
 	}, nil
 }
 

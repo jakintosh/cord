@@ -11,13 +11,13 @@ import (
 )
 
 type DeviceConfig struct {
-	PrivateKey PrivateKey // wg private key
-	Cidr       *net.IPNet // internal ip / network mask
-	ListenPort uint16     // external listening port
+	PrivateKey wgtypes.Key // wg private key
+	Cidr       *net.IPNet  // internal ip / network mask
+	ListenPort uint16      // external listening port
 }
 
 func NewDeviceConfig(
-	privateKey PrivateKey,
+	privateKey wgtypes.Key,
 	networkCidr *net.IPNet,
 	address net.IP,
 	port uint16,
