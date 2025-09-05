@@ -118,3 +118,48 @@ type Backend interface {
   * The code for creating the TUN device will have its own OS-specific build tags (e.g., //go:build darwin for macOS, //go:build windows for Windows).
 
 The NewInterface constructor will be responsible for detecting the OS and instantiating the correct Backend implementation. This completely hides the complexity from the rest of the cord application.
+
+### **7.2. KernelBackend Internal Primitives**
+
+The KernelBackend implementation will be built from a set of small, reusable, internal functions.
+
+**Link Management (netlink):**
+
+- `getLink(name string) (netlink.Link, error)`: Gets a link by name, return nil if doesn't exist.
+- `ensureLink(name string) (netlink.Link, error)`: Idempotently ensures a WireGuard network interface with the given name exists.
+- `setLinkUp(link netlink.Link) error` Ensures the interface is active ("up").
+- `setLinkDown(link netlink.Link) error` Ensures the interface is inactive ("down").
+- `removeLink(link netlink.Link) error` Deletes the interface.
+- `syncAddress(link netlink.Link, addr net.IPNet) error` Ensures the interface has exactly the specified IP address, adding it if missing and removing any others.
+
+**WireGuard Configuration (wgctrl):**
+- `applyDeviceConfig(name string, key wgtypes.Key, port int) error`: Sets the device-specific WireGuard parameters (private key, listen port).
+- `applyPeers(name string, peers []Peer) error`: Atomically replaces the entire peer list on the device.
+
+### **7.3. KernelBackend Action Plan**
+
+The public Backend methods will be implemented as compositions of the internal primitives defined above.
+
+`Up(iface *Interface, configPath string)`
+
+**Purpose:** Ensure the network interface exists, is fully configured, and is active.
+- Call `ensureLink(iface.Name)` to get the link object.
+- Call `syncAddress(link, iface.Address)`.
+- Call `applyDeviceConfig(iface.Name, iface.PrivateKey, iface.ListenPort)`.
+- Call `applyPeers(iface.Name, iface.Peers)`.
+- Call `setLinkUp(link)`.
+- Write the native config file to 1configPath1.
+
+`Down(iface *Interface, delete bool)`
+
+**Purpose:** Deactivate and optionally remove the network interface.
+- Call `getLink(iface.Name)` to get the link object. If it doesn't exist, return success.
+- Call `setLinkDown(link)`.
+- If delete is true, call `removeLink(link)`.
+- If delete is true, also remove the config file at `configPath`.
+
+`Sync(iface *Interface)`
+
+**Purpose:** Efficiently update only the peer list of an already running interface.
+- Call `getLink(iface.Name)` to get the link object. If it doesn't exist or is not up, return an error.
+- Call `applyPeers(iface.Name, iface.Peers)`.
