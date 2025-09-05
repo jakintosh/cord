@@ -5,10 +5,10 @@ package wireguard
 // WireGuard protocol in userspace.
 //
 // It uses:
-// - wireguard-go library to run the WireGuard protocol in userspace
-// - A helper library (like songgao/water or an internal equivalent) to create
-//   the virtual TUN network interface
-// - OS-specific build tags for TUN device creation
+//   - wireguard-go library to run the WireGuard protocol in userspace
+//   - A helper library (like songgao/water or an internal equivalent) to create
+//     the virtual TUN network interface
+//   - OS-specific build tags for TUN device creation
 type UserspaceBackend struct{}
 
 // Up creates the network device if it doesn't exist, configures it with the

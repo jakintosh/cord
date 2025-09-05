@@ -29,7 +29,6 @@ type Interface struct {
 	backend Backend // Internal field for OS-specific implementation
 }
 
-
 // ToWgConfig converts the Interface configuration to a wg-quick compatible .conf file format.
 func (i *Interface) ToWgConfig() string {
 	var config strings.Builder
