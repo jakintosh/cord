@@ -2,9 +2,80 @@ package wireguard_test
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"testing"
+
+	"git.sr.ht/~jakintosh/cord/internal/wireguard"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
+
+func TestNewInterface(t *testing.T) {
+	// Generate a test private key
+	privateKey, err := wgtypes.GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("failed to generate private key: %v", err)
+	}
+
+	// Parse test address
+	_, address, err := net.ParseCIDR("10.0.0.1/24")
+	if err != nil {
+		t.Fatalf("failed to parse address: %v", err)
+	}
+
+	iface, err := wireguard.NewInterface("test-interface", privateKey, *address, 51820)
+	expectNoError(t, err, "NewInterface")
+
+	if iface.Name != "test-interface" {
+		t.Errorf("expected Name to be 'test-interface', got %s", iface.Name)
+	}
+
+	if iface.PrivateKey != privateKey {
+		t.Error("private key doesn't match")
+	}
+
+	if iface.Address.String() != address.String() {
+		t.Errorf("expected Address to be %s, got %s", address.String(), iface.Address.String())
+	}
+
+	if iface.ListenPort != 51820 {
+		t.Errorf("expected ListenPort to be 51820, got %d", iface.ListenPort)
+	}
+
+	if len(iface.Peers) != 0 {
+		t.Errorf("expected Peers to be empty, got %d peers", len(iface.Peers))
+	}
+}
+
+func TestInterface_AddRemovePeer(t *testing.T) {
+	// Create test interface
+	privateKey, _ := wgtypes.GeneratePrivateKey()
+	_, address, _ := net.ParseCIDR("10.0.0.1/24")
+	iface, err := wireguard.NewInterface("test-interface", privateKey, *address, 51820)
+	expectNoError(t, err, "NewInterface")
+
+	// Create test peer
+	peer := createTestPeer(t, TestPeerMinimal)
+
+	// Test AddPeer
+	iface.AddPeer(peer)
+	if len(iface.Peers) != 1 {
+		t.Errorf("expected 1 peer after adding, got %d", len(iface.Peers))
+	}
+
+	// Test RemovePeer
+	iface.RemovePeer(peer.PublicKey)
+	if len(iface.Peers) != 0 {
+		t.Errorf("expected 0 peers after removing, got %d", len(iface.Peers))
+	}
+
+	// Test RemovePeer with non-existent peer (should not panic)
+	nonExistentKey, _ := wgtypes.GeneratePrivateKey()
+	iface.RemovePeer(nonExistentKey.PublicKey())
+	if len(iface.Peers) != 0 {
+		t.Errorf("expected 0 peers after removing non-existent peer, got %d", len(iface.Peers))
+	}
+}
 
 // TestInterface_ToWgConfig tests generating config with multiple peer types
 func TestInterface_ToWgConfig(t *testing.T) {

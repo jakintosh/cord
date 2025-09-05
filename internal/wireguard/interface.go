@@ -18,15 +18,48 @@ type Peer struct {
 }
 
 // Interface represents the complete configuration for a WireGuard network interface.
-// It holds all the state needed to apply to the kernel and generate a native .conf file.
 type Interface struct {
-	Name       string // The interface name, e.g., "cord-prod"
+	Name       string
 	PrivateKey wgtypes.Key
 	Address    net.IPNet
 	ListenPort int
 	Peers      []Peer
 
 	backend Backend // Internal field for OS-specific implementation
+}
+
+// Up creates the network device if it doesn't exist, configures it with the
+// current state of the Interface object, and brings it up.
+// It also writes the native .conf file to the specified path.
+func (i *Interface) Up(configPath string) error {
+	return i.backend.Up(i, configPath)
+}
+
+// Down brings the interface down and, optionally, deletes it.
+func (i *Interface) Down(delete bool) error {
+	return i.backend.Down(i, delete)
+}
+
+// Sync applies only the changes to the peer list to a live interface
+// without tearing it down. This is more efficient for updates.
+func (i *Interface) Sync() error {
+	return i.backend.Sync(i)
+}
+
+// AddPeer adds a peer to the interface's configuration.
+func (i *Interface) AddPeer(peer Peer) {
+	i.Peers = append(i.Peers, peer)
+}
+
+// RemovePeer removes a peer from the configuration by its public key.
+func (i *Interface) RemovePeer(publicKey wgtypes.Key) {
+	for j, peer := range i.Peers {
+		if peer.PublicKey == publicKey {
+			// Remove the peer by slicing
+			i.Peers = append(i.Peers[:j], i.Peers[j+1:]...)
+			return
+		}
+	}
 }
 
 // ToWgConfig converts the Interface configuration to a wg-quick compatible .conf file format.
