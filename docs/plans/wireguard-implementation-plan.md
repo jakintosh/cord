@@ -163,3 +163,53 @@ The public Backend methods will be implemented as compositions of the internal p
 **Purpose:** Efficiently update only the peer list of an already running interface.
 - Call `getLink(iface.Name)` to get the link object. If it doesn't exist or is not up, return an error.
 - Call `applyPeers(iface.Name, iface.Peers)`.
+
+### 7.4. UserspaceBackend Internal Primitives
+
+The `UserspaceBackend` implementation will manage a long-running wireguard-go device. The backend struct itself will hold the state of the running device (e.g., `device.Device`, `net.Interface`), a channel for graceful shutdown, and a mutex-protected `isRunning` flag.
+
+#### State Management
+- The `UserspaceBackend` struct will contain fields like `device *device.Device`, `tun net.Interface`, `stopChan chan struct{}`, `isRunning bool`, and `mu sync.Mutex`.
+
+#### TUN Device Management
+- `createTun(name string) (net.Interface, error)`: Creates a platform-specific TUN virtual network interface.
+- `setTunUp(name string, addr net.IPNet, mtu int) error`: Configures the TUN interface with its IP address and MTU, and brings it up. This is a highly OS-specific operation (often requiring `ip` or `ifconfig` commands).
+- `closeTun(tun net.Interface) error`: Closes the TUN interface, effectively destroying it.
+
+#### wireguard-go Device Management
+- `startDevice(tun net.Interface, port int) (*device.Device, error)`: Instantiates a new device.Device from wireguard-go, connects it to the TUN interface, and starts its packet processing goroutines.
+- `stopDevice(device *device.Device) error`: Gracefully closes the wireguard-go device.
+- `applyConfig(device *device.Device, key wgtypes.Key, port int, peers []Peer) error`: Constructs the configuration in the line-based `uapi` format (private_key=...\nlisten_port=...\npublic_key=...\n...) and sends it to the running `device.Device` via its `IpcSet` method.
+
+### 7.5. UserspaceBackend Action Plan
+
+The public `Backend` methods will manage the lifecycle of the wireguard-go device and the underlying TUN interface. Idempotency is managed by checking the backend's internal `isRunning` state.
+
+`Up(iface *Interface, configPath string)`
+
+**Purpose:** Create and configure a TUN device, then start a wireguard-go instance in a background goroutine. The function is non-blocking.
+- Idempotency Check: Lock the mutex and check if `backend.isRunning` is true. If so, unlock and return nil.
+- Call `createTun(iface.Name)`.
+- Call `setTunUp(tun, iface.Address, defaultMTU)`.
+- Instantiate the wireguard-go device via `device.NewDevice()`.
+- Create a `stopChan` for graceful shutdown.
+- Launch Goroutine: Start a new goroutine that runs the main device loop (`device.Up()`). This goroutine will also listen for a signal on `stopChan` to call `device.Close()` for cleanup.
+- Call `applyConfig(device, iface.PrivateKey, iface.ListenPort, iface.Peers)` to apply the initial configuration.
+- Write the native config file to `configPath`.
+- Update backend state: set `isRunning` to true, store the device and `stopChan`. Unlock the mutex and return nil.
+
+`Down(iface *Interface, delete bool)`
+
+**Purpose:** Gracefully stop the wireguard-go device and destroy the TUN interface by signaling the background goroutine.
+- Idempotency Check: Lock the mutex and check if `backend.isRunning` is false. If so, unlock and return nil.
+- Signal Shutdown: Close the `backend.stopChan`. This will cause the goroutine started in `Up()` to exit its loop and clean up the device and TUN interface.
+- Update backend state: set `isRunning` to false. Unlock the mutex.
+- If delete is true, remove the config file.
+
+`Sync(iface *Interface)`
+
+**Purpose:** Apply an updated peer configuration to the live wireguard-go device.
+- State Check: Lock the mutex and check if `backend.isRunning` is true. If not, unlock and return an error.
+- Retrieve the running `device.Device` from the backend's state.
+- Call `applyConfig(device, iface.PrivateKey, iface.ListenPort, iface.Peers)`.
+- Unlock the mutex and return nil.
