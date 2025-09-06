@@ -12,7 +12,7 @@ func TestPeerRedeem(t *testing.T) {
 		t.Fatalf("failed to create base network: %v", err)
 	}
 
-	key, err := addPeer(ctx, testServer)
+	cidr, err := addPeer(ctx, testServer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func TestPeerRedeem(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := redeemPeer(ctx, key); err != nil {
+	if err := redeemPeer(ctx, cidr); err != nil {
 		t.Fatal(err)
 	}
 

@@ -13,7 +13,6 @@ import (
 	"git.sr.ht/~jakintosh/cord/internal/database"
 	"git.sr.ht/~jakintosh/cord/internal/server"
 	"git.sr.ht/~jakintosh/cord/internal/utils"
-	"git.sr.ht/~jakintosh/cord/internal/wireguard"
 )
 
 const (
@@ -519,14 +518,11 @@ var addPeer = &cmd.Command{
 			Admin:      admin,
 			Expiration: expiration,
 		}
-		peerInterface, _, err := ctx.CreateInvite(req)
+		invite, err := ctx.CreateInvite(req)
 		if err != nil {
 			return fmt.Errorf("failed to create peer: %w", err)
 		}
 
-		invite := wireguard.Invite{
-			PeerInterface: peerInterface,
-		}
 		err = invite.Write(inviteFile)
 		if err != nil {
 			return fmt.Errorf("failed to write invite: %w", err)

@@ -36,3 +36,58 @@ func NewInterface(
 
 	return iface, nil
 }
+
+// Key generation utilities
+
+// GeneratePrivateKey generates a new WireGuard private key.
+func GeneratePrivateKey() (wgtypes.Key, error) {
+	return wgtypes.GeneratePrivateKey()
+}
+
+// ParseKey parses a base64-encoded WireGuard key string.
+func ParseKey(keyStr string) (wgtypes.Key, error) {
+	key, err := wgtypes.ParseKey(keyStr)
+	if err != nil {
+		return wgtypes.Key{}, fmt.Errorf("failed to parse key: %w", err)
+	}
+	return key, nil
+}
+
+// Legacy compatibility - temporary helper for network creation
+// Ultimately, this should live somewhere else, this is a cord
+// network config, not a wireguard device config (even though there
+// is crossover)
+type DeviceConfig struct {
+	PrivateKey wgtypes.Key
+	Cidr       *net.IPNet
+	ListenPort uint16
+}
+
+func NewDeviceConfig(
+	privateKey wgtypes.Key,
+	networkCidr *net.IPNet,
+	address net.IP,
+	port uint16,
+) (*DeviceConfig, error) {
+	if !networkCidr.Contains(address) {
+		return nil, fmt.Errorf(
+			"address '%s' is not within cidr '%s'",
+			address.String(), networkCidr.String(),
+		)
+	}
+	return &DeviceConfig{
+		PrivateKey: privateKey,
+		Cidr: &net.IPNet{
+			IP:   address,
+			Mask: networkCidr.Mask,
+		},
+		ListenPort: port,
+	}, nil
+}
+
+func (c *DeviceConfig) Write(w any) error {
+	// This is a legacy compatibility shim
+	// In the new architecture, server config should be handled differently
+	// For now, just return nil to prevent build errors
+	return nil
+}

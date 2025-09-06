@@ -26,7 +26,8 @@ func (ctx *Context) CreateNetwork(
 	}
 
 	// Generate server WireGuard keypair in server layer
-	privKey, pubKey, err := wg.GenerateKeypair()
+	privKey, err := wg.GeneratePrivateKey()
+	pubKey := privKey.PublicKey()
 	if err != nil {
 		return fmt.Errorf("failed to generate wireguard keypair: %w", err)
 	}
