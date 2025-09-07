@@ -136,19 +136,34 @@ func addPeer(
 		IP:    desc.Ip,
 		Admin: desc.Admin,
 	}
-	_, cfg, err := c.CreateInvite(req)
+	invite, err := c.CreateInvite(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to create peer '%s': %v", desc.Name, err)
 	}
-	return cfg.PublicKey.String(), nil
+
+	// Return the temporary cidr that can be used for redemption
+	return invite.Interface.AssignedCidr, nil
 }
 
 func redeemPeer(
 	c *server.Context,
-	key string,
+	cidr string,
 ) error {
-	if err := c.RedeemInvite(key, key); err != nil {
-		return fmt.Errorf("failed to redeem peer for key '%s': %v", key, err)
+	// parse ip from cidr
+	ip, _, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return fmt.Errorf("failed to parse cidr %s: %v", cidr, err)
+	}
+
+	// get invite from ip
+	invite, err := c.Store.InviteGetByIP(ip)
+	if err != nil {
+		return fmt.Errorf("failed to get peer for ip %v: %v", ip, err)
+	}
+
+	// redeem invite with invite's public key
+	if err := c.RedeemInvite(invite.PublicKey, invite.PublicKey); err != nil {
+		return fmt.Errorf("failed to redeem invite for key '%s': %v", invite.PublicKey, err)
 	}
 	return nil
 }
@@ -157,14 +172,11 @@ func addAndRedeemPeer(
 	c *server.Context,
 	desc PeerDesc,
 ) error {
-	pubKey, err := addPeer(c, desc)
+	cidr, err := addPeer(c, desc)
 	if err != nil {
 		return fmt.Errorf("failed to add peer: %v", err)
 	}
-	if err := c.RedeemInvite(pubKey, pubKey); err != nil {
-		return fmt.Errorf("failed to redeem peer for key '%s': %v", pubKey, err)
-	}
-	return nil
+	return redeemPeer(c, cidr)
 }
 
 func expectPeerCount(

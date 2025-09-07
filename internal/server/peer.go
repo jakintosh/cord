@@ -48,7 +48,17 @@ func (ctx *Context) UpdatePeer(
 	*Peer,
 	error,
 ) {
-	return ctx.Store.PeerUpdate(peer, req)
+	result, err := ctx.Store.PeerUpdate(peer, req)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: After updating peer in database, should call Interface.Sync()
+	// to update the live WireGuard interface with the new peer configuration
+	// This requires the server context to maintain references to the
+	// main and invite Interface instances created in Serve()
+
+	return result, nil
 }
 
 func (ctx *Context) CheckPeerExists(

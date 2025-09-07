@@ -1,6 +1,8 @@
 package server
 
 import (
+	"encoding/json"
+	"io"
 	"net"
 	"time"
 
@@ -18,6 +20,12 @@ type PeerInvite struct {
 		ExternalEndpoint string `json:"externalEndpoint"`
 		InternalEndpoint string `json:"internalEndpoint"`
 	} `json:"server"`
+}
+
+func (i *PeerInvite) Write(w io.Writer) error {
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(i)
 }
 
 type ServerInvite struct {
@@ -51,13 +59,12 @@ var tempIPAddr = 1
 func (ctx *Context) CreateInvite(
 	req CreateInviteRequest,
 ) (
-	*wg.DeviceConfig,
-	*wg.PeerConfig,
+	*PeerInvite,
 	error,
 ) {
-	_, pubKey, err := wg.GenerateKeypair()
+	tempPrivKey, err := wg.GeneratePrivateKey()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Generate a temporary IP in the temp range
@@ -71,21 +78,29 @@ func (ctx *Context) CreateInvite(
 
 	err = ctx.Store.InviteCreate(
 		req.Name,
-		pubKey.String(),
+		tempPrivKey.PublicKey().String(),
 		tempIP,
 		req.IP,
 		req.Admin,
 		req.Expiration.Unix(),
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return &wg.DeviceConfig{}, &wg.PeerConfig{
-		Name:      req.Name,
-		Cidr:      &net.IPNet{},
-		PublicKey: pubKey,
-	}, nil
+	// Create the invite struct with proper network information
+	// TODO: Need to implement config reading to get actual server info
+	invite := &PeerInvite{}
+	invite.Interface.NetworkName = ctx.Name
+	invite.Interface.PrivateKey = tempPrivKey.String()
+	invite.Interface.AssignedCidr = tempIP.String() + "/32" // Single host assignment
+
+	// These should come from server configuration - placeholder values for now
+	invite.Server.PublicKey = "placeholder_server_pubkey"
+	invite.Server.ExternalEndpoint = "placeholder_external_endpoint"
+	invite.Server.InternalEndpoint = "placeholder_internal_endpoint"
+
+	return invite, nil
 }
 
 func (ctx *Context) RedeemInvite(

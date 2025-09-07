@@ -6,6 +6,7 @@ require (
 	git.sr.ht/~jakintosh/command-go v0.0.4
 	github.com/gorilla/mux v1.8.1
 	github.com/vishvananda/netlink v1.3.0
+	golang.zx2c4.com/wireguard v0.0.0-20231211153847-12269c276173
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	modernc.org/sqlite v1.36.0
 )
@@ -27,7 +28,7 @@ require (
 	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
-	golang.zx2c4.com/wireguard v0.0.0-20231211153847-12269c276173 // indirect
+	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	modernc.org/libc v1.61.13 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.8.2 // indirect
