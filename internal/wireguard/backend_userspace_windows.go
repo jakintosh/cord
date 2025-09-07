@@ -8,7 +8,6 @@ import (
 	"os/exec"
 )
 
-// configureTunOS configures the TUN interface with its IP address and MTU, and brings it up on Windows
 func configureTunOS(
 	name string,
 	addr net.IPNet,

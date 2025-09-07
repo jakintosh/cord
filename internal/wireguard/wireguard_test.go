@@ -26,39 +26,32 @@ type TestPeerDesc struct {
 }
 
 // Pre-configured test data
-var (
-	TestInterface = TestInterfaceDesc{
-		Name:       "cord-test",
-		Address:    "10.0.0.1/24",
-		ListenPort: 51820,
-	}
+var TestInterface = TestInterfaceDesc{
+	Name:       "cord-test",
+	Address:    "10.0.0.1/24",
+	ListenPort: 51820,
+}
+var TestInterfaceNoPort = TestInterfaceDesc{
+	Name:       "cord-empty",
+	Address:    "10.0.0.1/24",
+	ListenPort: 0, // No listen port
+}
+var TestPeerWithEndpoint = TestPeerDesc{
+	Name:                "peer1",
+	AllowedIPs:          []string{"10.0.0.2/32"},
+	Endpoint:            "192.168.1.100:51820",
+	PersistentKeepalive: 25,
+}
+var TestPeerMinimal = TestPeerDesc{
+	Name:       "peer2",
+	AllowedIPs: []string{"10.0.0.3/32"},
+	// No endpoint, no keepalive
+}
+var TestPeerMultipleIPs = TestPeerDesc{
+	Name:       "peer-multi",
+	AllowedIPs: []string{"10.0.0.2/32", "192.168.1.0/24"},
+}
 
-	TestInterfaceNoPort = TestInterfaceDesc{
-		Name:       "cord-empty",
-		Address:    "10.0.0.1/24",
-		ListenPort: 0, // No listen port
-	}
-
-	TestPeerWithEndpoint = TestPeerDesc{
-		Name:                "peer1",
-		AllowedIPs:          []string{"10.0.0.2/32"},
-		Endpoint:            "192.168.1.100:51820",
-		PersistentKeepalive: 25,
-	}
-
-	TestPeerMinimal = TestPeerDesc{
-		Name:       "peer2",
-		AllowedIPs: []string{"10.0.0.3/32"},
-		// No endpoint, no keepalive
-	}
-
-	TestPeerMultipleIPs = TestPeerDesc{
-		Name:       "peer-multi",
-		AllowedIPs: []string{"10.0.0.2/32", "192.168.1.0/24"},
-	}
-)
-
-// createTestInterface creates an Interface from a TestInterfaceDesc and TestPeerDescs
 func createTestInterface(
 	t *testing.T,
 	ifaceDesc TestInterfaceDesc,
@@ -99,7 +92,6 @@ func createTestInterface(
 	}
 }
 
-// createTestPeer creates a Peer from a TestPeerDesc
 func createTestPeer(
 	t *testing.T,
 	desc TestPeerDesc,
@@ -113,13 +105,13 @@ func createTestPeer(
 	}
 
 	// Parse allowed IPs
-	var allowedIPs []*net.IPNet
+	var allowedIPs []net.IPNet
 	for _, allowedIPStr := range desc.AllowedIPs {
 		_, allowedIP, err := net.ParseCIDR(allowedIPStr)
 		if err != nil {
 			t.Fatalf("failed to parse allowed IP %s for peer %s: %v", allowedIPStr, desc.Name, err)
 		}
-		allowedIPs = append(allowedIPs, allowedIP)
+		allowedIPs = append(allowedIPs, *allowedIP)
 	}
 
 	// Parse endpoint if specified
@@ -139,7 +131,6 @@ func createTestPeer(
 	}
 }
 
-// assertConfigContains verifies config contains expected content
 func assertConfigContains(
 	t *testing.T,
 	config string,
@@ -151,7 +142,6 @@ func assertConfigContains(
 	}
 }
 
-// assertConfigNotContains verifies config does not contain content
 func assertConfigNotContains(
 	t *testing.T,
 	config string,
@@ -163,7 +153,6 @@ func assertConfigNotContains(
 	}
 }
 
-// expectNoError is a helper to assert that an operation should succeed
 func expectNoError(
 	t *testing.T,
 	err error,
@@ -175,7 +164,6 @@ func expectNoError(
 	}
 }
 
-// expectError is a helper to assert that an operation should fail
 func expectError(
 	t *testing.T,
 	err error,

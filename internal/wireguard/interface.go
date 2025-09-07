@@ -12,7 +12,7 @@ import (
 // Peer represents a single peer in a WireGuard configuration.
 type Peer struct {
 	PublicKey           wgtypes.Key
-	AllowedIPs          []*net.IPNet
+	AllowedIPs          []net.IPNet
 	Endpoint            *net.UDPAddr
 	PersistentKeepalive time.Duration
 }

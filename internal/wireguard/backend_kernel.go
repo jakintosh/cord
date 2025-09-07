@@ -17,11 +17,6 @@ import (
 // on Linux systems.
 type KernelBackend struct{}
 
-// Backend interface implementation
-
-// Up creates the network device if it doesn't exist, configures it with the
-// current state of the Interface object, and brings it up.
-// It also writes the native .conf file to the specified path.
 func (b *KernelBackend) Up(
 	iface *Interface,
 	configPath string,
@@ -68,7 +63,6 @@ func (b *KernelBackend) Up(
 	return nil
 }
 
-// Down brings the interface down and, optionally, deletes it.
 func (b *KernelBackend) Down(
 	iface *Interface,
 	delete bool,
@@ -101,8 +95,6 @@ func (b *KernelBackend) Down(
 	return nil
 }
 
-// Sync applies only the changes to the peer list to a live interface
-// without tearing it down. This is more efficient for updates.
 func (b *KernelBackend) Sync(
 	iface *Interface,
 ) error {
@@ -242,14 +234,9 @@ func applyPeers(
 	// Convert our Peer structs to wgtypes.PeerConfig
 	var peerConfigs []wgtypes.PeerConfig
 	for _, peer := range peers {
-		var allowedIPs []net.IPNet
-		for _, ip := range peer.AllowedIPs {
-			allowedIPs = append(allowedIPs, *ip)
-		}
-
 		peerConfig := wgtypes.PeerConfig{
 			PublicKey:  peer.PublicKey,
-			AllowedIPs: allowedIPs,
+			AllowedIPs: peer.AllowedIPs,
 		}
 
 		if peer.Endpoint != nil {
