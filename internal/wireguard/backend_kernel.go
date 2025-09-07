@@ -155,8 +155,6 @@ func ensureLink(
 	return wg, nil
 }
 
-// syncAddress ensures the interface has exactly the specified IP address,
-// adding it if missing and removing any others.
 func syncAddress(
 	link netlink.Link,
 	addr net.IPNet,
