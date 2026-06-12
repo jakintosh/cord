@@ -2,12 +2,14 @@ package server
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path"
 	"strconv"
+	"syscall"
 
 	"github.com/BurntSushi/toml"
 
@@ -17,6 +19,7 @@ import (
 type Config interface {
 	GetConfigWriter(name string) (io.Writer, error)
 	GetConfigReader(name string) (io.Reader, error)
+	DeleteConfig(name string) error
 }
 
 // NetworkConfig is the persistent identity of a cord network, written
@@ -163,6 +166,21 @@ func (cfg *FsConfig) GetConfigReader(name string) (io.Reader, error) {
 	return r, nil
 }
 
+func (cfg *FsConfig) DeleteConfig(name string) error {
+
+	filepath := path.Join(cfg.Directory, name)
+	if err := os.Remove(filepath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete config '%s': %w", filepath, err)
+	}
+	if err := os.Remove(cfg.Directory); err != nil &&
+		!os.IsNotExist(err) &&
+		!errors.Is(err, syscall.ENOTEMPTY) &&
+		!errors.Is(err, syscall.EEXIST) {
+		return fmt.Errorf("failed to delete empty config directory '%s': %w", cfg.Directory, err)
+	}
+	return nil
+}
+
 // MemConfig
 // Uses memory to manage the configuration
 
@@ -193,4 +211,10 @@ func (cfg *MemConfig) GetConfigReader(name string) (io.Reader, error) {
 		return nil, fmt.Errorf("no config named '%s'", name)
 	}
 	return bytes.NewReader(buf.Bytes()), nil
+}
+
+func (cfg *MemConfig) DeleteConfig(name string) error {
+
+	delete(cfg.Buffers, name)
+	return nil
 }

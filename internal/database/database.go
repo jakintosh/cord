@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"syscall"
 
 	"git.sr.ht/~jakintosh/cord/internal/server"
 	"git.sr.ht/~jakintosh/cord/internal/utils"
@@ -164,7 +165,16 @@ func (s *ServerDB) Delete(
 	if err := s.Conn.Close(); err != nil {
 		return fmt.Errorf("failed to close database: %w", err)
 	}
-	return removeDbFiles(dbPath(name, s.dir), false)
+	if err := removeDbFiles(dbPath(name, s.dir), false); err != nil {
+		return err
+	}
+	if err := os.Remove(s.dir); err != nil &&
+		!os.IsNotExist(err) &&
+		!errors.Is(err, syscall.ENOTEMPTY) &&
+		!errors.Is(err, syscall.EEXIST) {
+		return fmt.Errorf("failed to delete empty data directory: %w", err)
+	}
+	return nil
 }
 
 func dbPath(

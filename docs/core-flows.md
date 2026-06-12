@@ -17,6 +17,13 @@
 **Outputs:** SQLite database at `<data-dir>/<name>.db`, network config
 file, network ready for invites.
 
+## Network Deletion
+
+`cord server delete-network <name>` deletes the network database and its
+sidecars, then deletes `<config-dir>/<name>.toml`. After removing those
+files, the config and data directories are also removed if they are empty;
+shared directories containing other networks or files are left intact.
+
 ## Serving
 
 `cord server serve <name>` loads the network config and runs until

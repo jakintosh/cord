@@ -74,5 +74,11 @@ func (srv *Server) CreateNetwork(
 
 func (srv *Server) DeleteNetwork() error {
 
-	return srv.Store.Delete(srv.Network)
+	if err := srv.Store.Delete(srv.Network); err != nil {
+		return fmt.Errorf("failed to delete network state: %w", err)
+	}
+	if err := srv.Config.DeleteConfig(configFileName(srv.Network)); err != nil {
+		return fmt.Errorf("failed to delete network config: %w", err)
+	}
+	return nil
 }
