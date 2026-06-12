@@ -555,6 +555,9 @@ func LoadInvite(
 	if invite.Interface.NetworkName == "" {
 		return nil, fmt.Errorf("invite has no network name")
 	}
+	if err := server.ValidateNetworkName(invite.Interface.NetworkName); err != nil {
+		return nil, fmt.Errorf("invite has invalid network name: %w", err)
+	}
 	return invite, nil
 }
 

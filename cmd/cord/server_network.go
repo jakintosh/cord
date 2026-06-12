@@ -68,6 +68,10 @@ var serverNetworkAdd = &args.Command{
 		inviteCidrValue := i.GetParameterOr("invite-cidr", DEFAULT_INVITE_CIDR)
 
 		// parse
+		if err := server.ValidateNetworkName(network); err != nil {
+			return err
+		}
+
 		cidr, err := parseCidr(cidrValue)
 		if err != nil {
 			return fmt.Errorf("failed to parse cidr: %w", err)
@@ -92,7 +96,7 @@ var serverNetworkAdd = &args.Command{
 		apiPort := uint16(i.GetIntParameterOr("api-port", int(port)))
 
 		// create server
-		srv, err := newServer(i, network)
+		srv, err := newServerCreate(i, network)
 		if err != nil {
 			return fmt.Errorf("failed to create server: %w", err)
 		}
@@ -200,7 +204,7 @@ var serverNetworkShow = &args.Command{
 		jsonOut := i.GetFlag("json")
 
 		// create server
-		srv, err := newServerRead(i, network)
+		srv, err := newServer(i, network)
 		if err != nil {
 			return err
 		}

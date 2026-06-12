@@ -10,11 +10,11 @@ import (
 	"git.sr.ht/~jakintosh/cord/internal/server"
 )
 
-func TestOpenServerReadMissingNetworkErrors(t *testing.T) {
+func TestOpenServerMissingNetworkErrors(t *testing.T) {
 	configDir := path.Join(t.TempDir(), "cfg")
 	dataDir := path.Join(t.TempDir(), "data")
 
-	_, err := openServerRead(configDir, dataDir, "ghost")
+	_, err := openServer(configDir, dataDir, "ghost", true)
 
 	if err == nil {
 		t.Fatal("expected an error for a missing network")
@@ -24,22 +24,22 @@ func TestOpenServerReadMissingNetworkErrors(t *testing.T) {
 	}
 }
 
-func TestOpenServerReadCreatesNoState(t *testing.T) {
+func TestOpenServerMissingNetworkCreatesNoState(t *testing.T) {
 	configDir := path.Join(t.TempDir(), "cfg")
 	dataDir := path.Join(t.TempDir(), "data")
 
-	_, _ = openServerRead(configDir, dataDir, "ghost")
+	_, _ = openServer(configDir, dataDir, "ghost", true)
 
 	expectMissing(t, configDir)
 	expectMissing(t, dataDir)
 }
 
-func TestOpenServerReadOpensExistingNetwork(t *testing.T) {
+func TestOpenServerOpensExistingNetwork(t *testing.T) {
 	configDir := path.Join(t.TempDir(), "cfg")
 	dataDir := path.Join(t.TempDir(), "data")
 	seedNetwork(t, configDir, dataDir, "homenet")
 
-	srv, err := openServerRead(configDir, dataDir, "homenet")
+	srv, err := openServer(configDir, dataDir, "homenet", true)
 	if err != nil {
 		t.Fatalf("failed to open existing network: %v", err)
 	}
@@ -65,7 +65,7 @@ func expectMissing(t *testing.T, dir string) {
 func seedNetwork(t *testing.T, configDir string, dataDir string, name string) {
 	t.Helper()
 
-	srv, err := openServerWrite(configDir, dataDir, name)
+	srv, err := openServer(configDir, dataDir, name, false)
 	if err != nil {
 		t.Fatalf("failed to open server for seeding: %v", err)
 	}

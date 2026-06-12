@@ -21,6 +21,7 @@ import (
 type Config interface {
 	GetConfigWriter(name string) (io.Writer, error)
 	GetConfigReader(name string) (io.Reader, error)
+	HasConfig(name string) bool
 	DeleteConfig(name string) error
 	ListConfigs() ([]string, error)
 }
@@ -174,6 +175,12 @@ func (cfg *FsConfig) GetConfigReader(name string) (io.Reader, error) {
 	return r, nil
 }
 
+func (cfg *FsConfig) HasConfig(name string) bool {
+
+	_, err := os.Stat(path.Join(cfg.Directory, name))
+	return err == nil
+}
+
 func (cfg *FsConfig) ListConfigs() ([]string, error) {
 
 	entries, err := os.ReadDir(cfg.Directory)
@@ -244,6 +251,12 @@ func (cfg *MemConfig) GetConfigReader(name string) (io.Reader, error) {
 		return nil, fmt.Errorf("no config named '%s'", name)
 	}
 	return bytes.NewReader(buf.Bytes()), nil
+}
+
+func (cfg *MemConfig) HasConfig(name string) bool {
+
+	_, ok := cfg.Buffers[name]
+	return ok
 }
 
 func (cfg *MemConfig) ListConfigs() ([]string, error) {

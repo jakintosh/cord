@@ -64,6 +64,18 @@ func TestCreateNetwork_RejectsInvalidInterfaceNames(t *testing.T) {
 	}
 }
 
+func TestCreateNetwork_RejectsExistingNetwork(t *testing.T) {
+	ctx, err := createBaseNetwork()
+	if err != nil {
+		t.Fatalf("failed to create base network: %v", err)
+	}
+
+	err = addNetwork(ctx, testNetwork)
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected an 'already exists' error, got: %v", err)
+	}
+}
+
 func TestDeleteNetwork_RemovesFilesAndEmptyDirectories(t *testing.T) {
 	srv, configDir, dataDir := createFilesystemNetwork(t)
 

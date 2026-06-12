@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path"
 	"strconv"
 	"syscall"
 	"time"
@@ -117,8 +116,8 @@ func serverDirs(i *args.Input) (string, string) {
 	return configDir, dataDir
 }
 
-// newServer opens a network for mutation, creating directories and the
-// database as needed.
+// newServer opens an existing network; it errors without creating any
+// state if the network's database is missing.
 func newServer(
 	i *args.Input,
 	network string,
@@ -127,12 +126,12 @@ func newServer(
 	error,
 ) {
 	configDir, dataDir := serverDirs(i)
-	return openServerWrite(configDir, dataDir, network)
+	return openServer(configDir, dataDir, network, true)
 }
 
-// newServerRead opens an existing network without creating any state;
-// it errors if the network's config or database is missing.
-func newServerRead(
+// newServerCreate opens a network for creation, creating directories
+// and the database as needed.
+func newServerCreate(
 	i *args.Input,
 	network string,
 ) (
@@ -140,52 +139,23 @@ func newServerRead(
 	error,
 ) {
 	configDir, dataDir := serverDirs(i)
-	return openServerRead(configDir, dataDir, network)
-}
-
-func openServerWrite(
-	configDir string,
-	dataDir string,
-	network string,
-) (
-	*server.Server,
-	error,
-) {
-	if err := ensureDirs(configDir, dataDir); err != nil {
-		return nil, err
-	}
-	return openServer(configDir, dataDir, network)
-}
-
-func openServerRead(
-	configDir string,
-	dataDir string,
-	network string,
-) (
-	*server.Server,
-	error,
-) {
-	if _, err := os.Stat(path.Join(configDir, network+".toml")); err != nil {
-		return nil, fmt.Errorf("network '%s' not found", network)
-	}
-	if _, err := os.Stat(path.Join(dataDir, network+".db")); err != nil {
-		return nil, fmt.Errorf("network '%s' not found", network)
-	}
-	return openServer(configDir, dataDir, network)
+	return openServer(configDir, dataDir, network, false)
 }
 
 func openServer(
 	configDir string,
 	dataDir string,
 	network string,
+	mustExist bool,
 ) (
 	*server.Server,
 	error,
 ) {
 	dbOpts := database.Options{
-		Name: network,
-		Dir:  dataDir,
-		WAL:  true,
+		Name:      network,
+		Dir:       dataDir,
+		WAL:       true,
+		MustExist: mustExist,
 	}
 	store, err := database.OpenServer(dbOpts)
 	if err != nil {

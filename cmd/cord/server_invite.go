@@ -34,7 +34,7 @@ var serverInviteList = &args.Command{
 		jsonOut := i.GetFlag("json")
 
 		// create server
-		srv, err := newServerRead(i, network)
+		srv, err := newServer(i, network)
 		if err != nil {
 			return err
 		}

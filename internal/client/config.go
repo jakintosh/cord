@@ -46,6 +46,16 @@ func (c *Client) configPath() string {
 	return path.Join(c.ConfigDir, c.Network+".toml")
 }
 
+// RequireInstalled verifies that a network's client config exists under
+// a config directory. Commands that operate on an installed network use
+// it to fail before any other state is created.
+func RequireInstalled(configDir string, network string) error {
+	if _, err := os.Stat(path.Join(configDir, network+".toml")); err != nil {
+		return fmt.Errorf("%w: network '%s' is not installed", server.ErrNotFound, network)
+	}
+	return nil
+}
+
 // HasConfig reports whether a client config exists for this network.
 func (c *Client) HasConfig() bool {
 	_, err := os.Stat(c.configPath())

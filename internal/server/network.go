@@ -41,6 +41,10 @@ func (srv *Server) CreateNetwork(
 		return err
 	}
 
+	if srv.Config.HasConfig(configFileName(srv.Network)) {
+		return fmt.Errorf("%w: network '%s' already exists", ErrConflict, srv.Network)
+	}
+
 	if req.RootCidr.Contains(req.InviteCidr.IP) || req.InviteCidr.Contains(req.RootCidr.IP) {
 		return fmt.Errorf(
 			"invite cidr '%s' must not overlap root cidr '%s'",

@@ -4,11 +4,14 @@
 
 1. Admin runs `cord server network add <name> <cidr> <external-ip> <port>`
    (optionally `--invite-cidr`, `--invite-port`, `--api-port`).
-2. Server validates the network name (alphanumeric, hyphen, period) and
-   that the invite CIDR does not overlap the root CIDR. Network names are
-   limited to 13 bytes and must not end in the reserved `-i` suffix so the
-   main (`<name>`) and invite (`<name>-i`) Linux interface names remain
-   distinct and fit the kernel's 15-byte limit.
+2. The name is validated (alphanumeric, hyphen, period) before any state
+   is created: invalid names fail without leaving directories or database
+   files behind. Network names are limited to 13 bytes and must not end
+   in the reserved `-i` suffix so the main (`<name>`) and invite
+   (`<name>-i`) Linux interface names remain distinct and fit the
+   kernel's 15-byte limit. Creating a network whose config file already
+   exists fails with a conflict; the server also validates that the
+   invite CIDR does not overlap the root CIDR.
 3. Server verifies it can write the config file before touching the database.
 4. Server generates its WireGuard keypair.
 5. In one transaction: schema is migrated, the root CIDR is inserted as
@@ -93,8 +96,10 @@ Rename, enable/disable, grant/revoke admin (`PATCH`), and delete
 Read-only inspection is available the same two ways: locally via
 `cord server network|cidr|peer|association|invite list` (plus
 `network show`), remotely via the admin `GET` endpoints
-(`cord client admin ... list`). Local read commands never create
-directories or database files.
+(`cord client admin ... list`). Every server command except
+`network add` requires the network's database to already exist and
+fails with "not found" otherwise — a mistyped network name never
+creates directories or database files.
 Disabling a peer removes it from other peers' lists and interfaces on
 the next sync (immediately, when done over the API) and revokes its API
 access. Deleting a peer also removes its endpoint history and any invite
@@ -113,6 +118,14 @@ the local database in `<data-dir>/<network>.db`.
 
 If anything fails mid-flow, rerunning install reuses the persisted
 keypair and the server's idempotent redeem/confirm semantics.
+
+The invite's network name is validated when the invite file is parsed,
+so a malformed invite is rejected before any local state is created.
+Every other client command (`uninstall`, `show -n`, `fetch`, `up`,
+`down`, `admin`) requires `<config-dir>/<network>.toml` to exist and
+fails with "not installed" otherwise — a mistyped network name never
+creates directories or database files. The local peer database is a
+recreatable cache and is rebuilt as needed for installed networks.
 
 ## Connecting
 

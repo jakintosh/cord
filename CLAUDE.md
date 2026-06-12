@@ -33,7 +33,7 @@ Cord is a WireGuard configuration manager shipped as a single `cord` binary with
 - **Dual networks** (ADR-001): the server runs a main interface and an invite-only interface; the invite network exposes only the redeem endpoint
 - **Peers** join via invite redemption: temporary WG interface → redeem (client-generated permanent key) → permanent configuration → confirmation
 - **Service pattern**: `server.Server` and `client.Client` are constructed via `New(Options)`; store interfaces (`server.ServerStore`, `client.PeerStore`) are owned by the consumer packages, implemented by `internal/database`, and built/injected by `cmd/cord` (the composition root)
-- **Storage abstractions**: FsConfig/MemConfig for configuration, SQLite on disk or in-memory for data (enables in-memory testing)
+- **Storage abstractions**: FsConfig/MemConfig for configuration, SQLite on disk or in-memory for data (enables in-memory testing); adapters create their own directories, and existence rules live in the domain (`database.Options.MustExist`, `Config.HasConfig`, `client.RequireInstalled`) — `cmd/cord` only parses operands and wires dependencies
 - **File formats**: all cord files on disk are TOML via BurntSushi/toml (server network config, invite files, client config); the HTTP API speaks JSON
 - **Platforms**: Linux (kernel WireGuard via netlink/wgctrl) and macOS (userspace wireguard-go, devices named utunN); no Windows support
 

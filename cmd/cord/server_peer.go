@@ -285,7 +285,7 @@ var serverPeerList = &args.Command{
 		jsonOut := i.GetFlag("json")
 
 		// create server
-		srv, err := newServerRead(i, network)
+		srv, err := newServer(i, network)
 		if err != nil {
 			return err
 		}
@@ -344,7 +344,7 @@ var serverPeerVisible = &args.Command{
 		jsonOut := i.GetFlag("json")
 
 		// create server
-		srv, err := newServerRead(i, network)
+		srv, err := newServer(i, network)
 		if err != nil {
 			return err
 		}

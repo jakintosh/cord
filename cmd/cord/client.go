@@ -8,6 +8,15 @@ import (
 	"git.sr.ht/~jakintosh/cord/internal/database"
 )
 
+func clientDirs(i *args.Input) (string, string) {
+	configDir := i.GetParameterOr("config-dir", CLIENT_DEFAULT_CFG)
+	dataDir := i.GetParameterOr("data-dir", CLIENT_DEFAULT_DATA)
+	return configDir, dataDir
+}
+
+// newClient opens an installed network; it errors without creating any
+// state if the network's config is missing. The peer database is a
+// recreatable cache, so it is created as needed.
 func newClient(
 	i *args.Input,
 	network string,
@@ -15,12 +24,34 @@ func newClient(
 	*client.Client,
 	error,
 ) {
-	configDir := i.GetParameterOr("config-dir", CLIENT_DEFAULT_CFG)
-	dataDir := i.GetParameterOr("data-dir", CLIENT_DEFAULT_DATA)
-	if err := ensureDirs(configDir, dataDir); err != nil {
+	configDir, dataDir := clientDirs(i)
+	if err := client.RequireInstalled(configDir, network); err != nil {
 		return nil, err
 	}
+	return openClient(configDir, dataDir, network)
+}
 
+// newClientCreate opens a network for installation, creating
+// directories and the peer database as needed.
+func newClientCreate(
+	i *args.Input,
+	network string,
+) (
+	*client.Client,
+	error,
+) {
+	configDir, dataDir := clientDirs(i)
+	return openClient(configDir, dataDir, network)
+}
+
+func openClient(
+	configDir string,
+	dataDir string,
+	network string,
+) (
+	*client.Client,
+	error,
+) {
 	dbOpts := database.Options{
 		Name: network,
 		Dir:  dataDir,
@@ -73,7 +104,7 @@ var clientInstall = &args.Command{
 			return err
 		}
 
-		c, err := newClient(i, invite.Interface.NetworkName)
+		c, err := newClientCreate(i, invite.Interface.NetworkName)
 		if err != nil {
 			return fmt.Errorf("failed to create client: %w", err)
 		}
@@ -132,7 +163,7 @@ var clientShow = &args.Command{
 
 		// with no network selected, list the installed networks
 		if network == "" {
-			configDir := i.GetParameterOr("config-dir", CLIENT_DEFAULT_CFG)
+			configDir, _ := clientDirs(i)
 			return client.ShowInstalled(configDir)
 		}
 

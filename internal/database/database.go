@@ -21,9 +21,10 @@ type Scanner interface {
 
 // Options configures a database opened by OpenServer or OpenClient.
 type Options struct {
-	Name string // network name; the database file is <Name>.db inside Dir
-	Dir  string // data directory, or ":memory:" for an in-memory database
-	WAL  bool   // enable write-ahead logging (file-backed databases)
+	Name      string // network name; the database file is <Name>.db inside Dir
+	Dir       string // data directory, or ":memory:" for an in-memory database
+	WAL       bool   // enable write-ahead logging (file-backed databases)
+	MustExist bool   // require the database file to already exist (file-backed databases)
 }
 
 // ServerDB is the SQLite adapter backing a coordination server's
@@ -72,10 +73,17 @@ func openConn(
 ) {
 	target := ":memory:"
 	if opts.Dir != ":memory:" {
-		if err := os.MkdirAll(opts.Dir, 0755); err != nil {
+		target = dbPath(opts.Name, opts.Dir)
+		if opts.MustExist {
+			if _, err := os.Stat(target); err != nil {
+				return nil, fmt.Errorf(
+					"%w: no database for network '%s'",
+					server.ErrNotFound, opts.Name,
+				)
+			}
+		} else if err := os.MkdirAll(opts.Dir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create directory '%s': %w", opts.Dir, err)
 		}
-		target = dbPath(opts.Name, opts.Dir)
 	}
 
 	conn, err := sql.Open("sqlite", target)
