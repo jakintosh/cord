@@ -1,20 +1,18 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- Root Go module in `go.mod`. Binaries in `cmd/`:
-  - `cmd/cord-server`: coordination server CLI.
-  - `cmd/cord`: client/administration CLI.
+- Root Go module in `go.mod`. Single binary in `cmd/cord` with two top-level subcommands:
+  - `cord server` (`cmd/cord/server.go`): coordination server commands.
+  - `cord client` (`cmd/cord/client.go`): client/administration commands.
 - Shared packages in `internal/`: `server`, `client`, `database`, `wireguard`, `utils`.
 - Build outputs in `bin/`. Docs in `docs/` (ADRs in `docs/adrs/`).
 - Tests are colocated as `*_test.go` next to sources (e.g., `internal/server/server_test.go`).
 
 ## Build, Test, and Development Commands
-- `make client`: builds `./bin/cord` from `cmd/cord`.
-- `make server`: builds `./bin/cord-server` from `cmd/cord-server`.
-- `make all`: builds both binaries.
+- `make all` (or `make cord`): builds `./bin/cord` from `cmd/cord`.
 - `make test` or `go test ./...`: runs the unit tests.
 - `sudo make test-integration`: integration tests that create real WireGuard interfaces.
-- Example: `./bin/cord-server add-network <name> <cidr> <external-ip> <port>`.
+- Example: `./bin/cord server add-network <name> <cidr> <external-ip> <port>`.
 - Dev tip: override paths with `--config-dir` and `--data-dir`.
 
 ## Coding Style & Naming Conventions
@@ -42,4 +40,4 @@
 - SQLite schema is owned by the server; keep test DBs within the project, not system paths.
 
 ## Architecture Overview
-- Two CLIs share `internal/*`. Server persists state in SQLite; `wireguard` handles key generation and config serialization. Keep package boundaries clean and cyclic-dep free.
+- One CLI over `internal/*`. Server persists state in SQLite; `wireguard` handles key generation and config serialization. Keep package boundaries clean and cyclic-dep free.

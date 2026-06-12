@@ -2,7 +2,7 @@
 
 ## Network Initialization
 
-1. Admin runs `cord-server add-network <name> <cidr> <external-ip> <port>`
+1. Admin runs `cord server add-network <name> <cidr> <external-ip> <port>`
    (optionally `--invite-cidr`, `--invite-port`, `--api-port`).
 2. Server validates the network name (alphanumeric, hyphen, period) and
    that the invite CIDR does not overlap the root CIDR.
@@ -19,7 +19,7 @@ file, network ready for invites.
 
 ## Serving
 
-`cord-server serve <name>` loads the network config and runs until
+`cord server serve <name>` loads the network config and runs until
 interrupted:
 
 1. Brings up the **main interface** (`<name>`) with the server's key and
@@ -37,14 +37,14 @@ interrupted:
 
 ## Peer Redemption
 
-1. Admin creates an invite (`cord-server add-peer` or `POST /admin/peer`):
+1. Admin creates an invite (`cord server add-peer` or `POST /admin/peer`):
    the requested main-network IP is reserved, a temporary keypair and the
    lowest free invite-network IP are assigned, and the invite record is
    stored with an expiration.
 2. The invite file (TOML) is delivered to the client out-of-band. It
    contains the temporary private key, the assigned invite-network CIDR,
    and the server's public key + invite endpoints.
-3. Client (`cord install`) generates and persists a permanent keypair
+3. Client (`cord client install`) generates and persists a permanent keypair
    *first* (so the flow is retryable), brings up a temporary interface on
    the invite network, and `POST /invite/redeem`s with the permanent
    public key in the body.
@@ -69,7 +69,7 @@ network only, fully operational.
 
 ## Peer Visibility
 
-`GET /peers` (or `cord-server get-peers`) resolves the requesting peer's
+`GET /peers` (or `cord server get-peers`) resolves the requesting peer's
 most specific CIDR, expands it with associated CIDRs, and returns all
 confirmed, enabled peers in that set (excluding the requester), each with
 its endpoint sightings from the last 24h, newest first. Associations are
@@ -79,7 +79,7 @@ deleting one narrows it.
 ## Peer Administration
 
 Rename, enable/disable, grant/revoke admin (`PATCH`), and delete
-(`DELETE`) work locally via `cord-server` or remotely via the admin API.
+(`DELETE`) work locally via `cord server` or remotely via the admin API.
 Disabling a peer removes it from other peers' lists and interfaces on
 the next sync (immediately, when done over the API) and revokes its API
 access. Deleting a peer also removes its endpoint history and any invite
@@ -89,7 +89,7 @@ reserving its IP.
 
 ## Installation
 
-`cord install <invite-file>`: parse invite → persist permanent keypair →
+`cord client install <invite-file>`: parse invite → persist permanent keypair →
 invite interface up → redeem (with retry/backoff while the tunnel
 handshakes) → persist assignment → main interface up → confirm → seed
 local peer database → tear both interfaces down. The client config lands
@@ -101,7 +101,7 @@ keypair and the server's idempotent redeem/confirm semantics.
 
 ## Connecting
 
-`cord up <network>` runs in the foreground:
+`cord client up <network>` runs in the foreground:
 
 1. Builds the interface from the client config and local peer database.
    The server peer's allowed-ips span the whole network (relay fallback);
@@ -113,8 +113,9 @@ keypair and the server's idempotent redeem/confirm semantics.
 4. Ctrl-C tears the interface down and exits.
 
 On Linux the device is kernel WireGuard; on macOS it is a userspace
-(wireguard-go) device that lives inside the `cord up` process. `cord
-down` removes a kernel device left behind by a crashed process.
+(wireguard-go) device that lives inside the `cord client up` process.
+`cord client down` removes a kernel device left behind by a crashed
+process.
 
 ## Endpoint Gossip
 
@@ -127,6 +128,6 @@ report or receive sightings.
 
 ## Uninstallation
 
-`cord uninstall <network>` brings the interface down (best effort) and
+`cord client uninstall <network>` brings the interface down (best effort) and
 deletes the client config, local database, and generated wg config.
 Idempotent: uninstalling an absent network succeeds.

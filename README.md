@@ -1,6 +1,6 @@
 # Cord
 
-Cord is a WireGuard configuration manager and virtual network orchestrator. A small coordination server (`cord-server`) tracks a network's address ranges, peers, and communication rules in SQLite; a client CLI (`cord`) joins networks from invite files and keeps a local WireGuard interface in sync with the network. A "cord" is one such network: its CIDRs, the peers that may join, and which subnets may talk to each other.
+Cord is a WireGuard configuration manager and virtual network orchestrator. A single `cord` binary serves both roles: `cord server` runs a small coordination server that tracks a network's address ranges, peers, and communication rules in SQLite; `cord client` joins networks from invite files and keeps a local WireGuard interface in sync with the network. A "cord" is one such network: its CIDRs, the peers that may join, and which subnets may talk to each other.
 
 Cord began as a Go rewrite and evolution of [tonarino/innernet](https://github.com/tonarino/innernet).
 
@@ -17,7 +17,7 @@ Linux (kernel WireGuard) and macOS (userspace via wireguard-go) are supported.
 ## Building
 
 ```bash
-make all      # builds ./bin/cord and ./bin/cord-server
+make all      # builds ./bin/cord
 make test     # unit tests (run anywhere, no privileges needed)
 sudo make test-integration   # creates real WireGuard interfaces
 ```
@@ -28,13 +28,13 @@ On the coordination host:
 
 ```bash
 # create a network: name, root CIDR, public IP, WireGuard port
-cord-server add-network homenet 10.42.0.0/16 198.51.100.7 51820
+cord server add-network homenet 10.42.0.0/16 198.51.100.7 51820
 
 # mint an invite for a peer (writes ./alice.invite.toml)
-cord-server add-peer homenet alice 10.42.0.10
+cord server add-peer homenet alice 10.42.0.10
 
 # serve (foreground): brings up both WireGuard interfaces + the API
-cord-server serve homenet
+cord server serve homenet
 ```
 
 `add-network` options: `--invite-cidr` (default `172.16.10.0/24`), `--invite-port` (default WireGuard port + 1), `--api-port` (TCP, default same number as the WireGuard port). The network's identity lands in `/etc/cord-server/<name>.toml`; state lives in `/var/lib/cord-server/<name>.db`.
@@ -42,30 +42,30 @@ cord-server serve homenet
 Deliver the invite file out-of-band. On the joining machine:
 
 ```bash
-cord install alice.invite.toml   # redeem + confirm, then exits
-cord up homenet                  # connect (foreground; ctrl-c disconnects)
+cord client install alice.invite.toml   # redeem + confirm, then exits
+cord client up homenet                  # connect (foreground; ctrl-c disconnects)
 ```
 
-`cord up` stays in the foreground: it periodically fetches peer state, applies changes to the live interface, and reports endpoint sightings. On Linux the interface uses kernel WireGuard; on macOS it is a userspace device that lives and dies with the `cord up` process. Other commands: `cord show`, `cord fetch <net>`, `cord down <net>`, `cord uninstall <net>`.
+`cord client up` stays in the foreground: it periodically fetches peer state, applies changes to the live interface, and reports endpoint sightings. On Linux the interface uses kernel WireGuard; on macOS it is a userspace device that lives and dies with the `cord client up` process. Other commands: `cord client show`, `cord client fetch <net>`, `cord client down <net>`, `cord client uninstall <net>`.
 
 ### Managing the network
 
-Locally on the server host, `cord-server` offers the full set: `add-cidr`, `rename-cidr`, `delete-cidr`, `add-peer`, `rename-peer`, `enable-peer`, `disable-peer`, `delete-peer`, `add-association`, `delete-association`, `get-peers`.
+Locally on the server host, `cord server` offers the full set: `add-cidr`, `rename-cidr`, `delete-cidr`, `add-peer`, `rename-peer`, `enable-peer`, `disable-peer`, `delete-peer`, `add-association`, `delete-association`, `get-peers`.
 
-Remotely, any *admin* peer can do the same over the API:
+Remotely, any *admin* peer can do the same over the API via `cord client admin`:
 
 ```bash
-cord server peer add homenet bob 10.42.0.11 --save-invite ~/invites
-cord server peer disable homenet bob
-cord server cidr add homenet infra 10.42.1.0/24
-cord server association add homenet infra fleet
+cord client admin peer add homenet bob 10.42.0.11 --save-invite ~/invites
+cord client admin peer disable homenet bob
+cord client admin cidr add homenet infra 10.42.1.0/24
+cord client admin association add homenet infra fleet
 ```
 
-(Create an admin peer with `cord-server add-peer ... --admin`.)
+(Create an admin peer with `cord server add-peer ... --admin`.)
 
 ## Architecture
 
-Two binaries share packages under `internal/`:
+The `cord` binary is a thin CLI over packages in `internal/`:
 
 - `internal/server` — network/CIDR/peer/invite logic, the network config file, and the serve `Runtime` (interfaces + sync loop).
 - `internal/api` — HTTP handlers; the main network serves the full API, the invite network serves *only* the redeem endpoint.

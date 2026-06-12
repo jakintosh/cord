@@ -5,9 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Development Commands
 
 Build commands:
-- `make client` - builds `./bin/cord` (client CLI)
-- `make server` - builds `./bin/cord-server` (coordination server)
-- `make all` - builds both binaries
+- `make all` (or `make cord`) - builds `./bin/cord`
 - `make test` or `go test ./...` - runs all unit tests
 - `sudo make test-integration` - creates real WireGuard interfaces (root required)
 
@@ -15,10 +13,10 @@ Test specific packages: `go test ./internal/server -v`
 
 ## Architecture Overview
 
-Cord is a WireGuard configuration manager with two main binaries:
+Cord is a WireGuard configuration manager shipped as a single `cord` binary with two top-level subcommands:
 
-- **cord-server**: coordination server that manages network state in SQLite and exposes administration commands
-- **cord**: client/administrative tool for peer management and WireGuard interface control
+- **cord server**: coordination server that manages network state in SQLite and exposes administration commands (defaults to `/etc/cord-server` and `/var/lib/cord-server`)
+- **cord client**: client/administrative tool for peer management and WireGuard interface control (defaults to `/etc/cord` and `/var/lib/cord`)
 
 ### Key Internal Packages
 
@@ -54,7 +52,7 @@ SQLite tables managed by server:
 - Documentation can be found in the `docs/` folder; if implementation changes are made that conflict with the docs, make sure to update the relevant documentation at the same time.
 - Server operations override paths with `--config-dir` and `--data-dir`
 - Tests use in-memory storage, production uses filesystem
-- `cord up` and `cord-server serve` run in the foreground; on macOS the userspace interface lives and dies with the process
+- `cord client up` and `cord server serve` run in the foreground; on macOS the userspace interface lives and dies with the process
 - **Security**: Never commit WireGuard keys, invite payloads, or real endpoints
 
 ## Test Design Philosophy

@@ -12,8 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	cmd "git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.sr.ht/~jakintosh/command-go/pkg/version"
+	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.sr.ht/~jakintosh/cord/internal/api"
 	"git.sr.ht/~jakintosh/cord/internal/database"
 	"git.sr.ht/~jakintosh/cord/internal/server"
@@ -21,99 +20,63 @@ import (
 	wg "git.sr.ht/~jakintosh/cord/internal/wireguard"
 )
 
-const (
-	BIN_NAME     = "cord-server"
-	AUTHOR       = "jakintosh"
-	DEFAULT_CFG  = "/etc/" + BIN_NAME
-	DEFAULT_DATA = "/var/lib/" + BIN_NAME
+const DEFAULT_INVITE_CIDR = "172.16.10.0/24"
 
-	DEFAULT_INVITE_CIDR = "172.16.10.0/24"
-)
-
-func main() {
-	root.Parse()
-}
-
-var root = &cmd.Command{
-	Name: BIN_NAME,
-	Help: "manage cords",
-	Config: &cmd.Config{
-		Author:     AUTHOR,
-		Version:    VersionInfo.Version,
-		HelpOption: &cmd.HelpOption{Short: 'h', Long: "help"},
-	},
-	Subcommands: []*cmd.Command{
-		version.Command(VersionInfo),
+var serverCmd = &args.Command{
+	Name: "server",
+	Help: "run and manage a cord coordination server",
+	Subcommands: []*args.Command{
 		serve,
 		addNetwork,
 		deleteNetwork,
-		addCidr,
-		renameCidr,
-		deleteCidr,
-		addPeer,
-		renamePeer,
-		enablePeer,
-		disablePeer,
-		deletePeer,
-		getPeers,
-		addAssociation,
-		deleteAssociation,
-	},
-	Operands: []cmd.Operand{},
-	Options: []cmd.Option{
-		{
-			Short: 'v',
-			Long:  "verbose",
-			Type:  cmd.OptionTypeFlag,
-			Help:  "enable verbose output",
-		},
-		{
-			Long: "config-dir",
-			Type: cmd.OptionTypeParameter,
-			Help: "directory for config files",
-		},
-		{
-			Long: "data-dir",
-			Type: cmd.OptionTypeParameter,
-			Help: "directory for program data",
-		},
+		serverAddCidr,
+		serverRenameCidr,
+		serverDeleteCidr,
+		serverAddPeer,
+		serverRenamePeer,
+		serverEnablePeer,
+		serverDisablePeer,
+		serverDeletePeer,
+		serverGetPeers,
+		serverAddAssociation,
+		serverDeleteAssociation,
 	},
 }
 
-var serve = &cmd.Command{
+var serve = &args.Command{
 	Name: "serve",
 	Help: "serve a cord coordination server",
-	Operands: []cmd.Operand{
+	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "name of the cord network the server coordinates",
 		},
 	},
-	Options: []cmd.Option{
+	Options: []args.Option{
 		{
 			Long: "no-routing",
-			Type: cmd.OptionTypeFlag,
+			Type: args.OptionTypeFlag,
 			Help: "tell cord not to handle routing",
 		},
 		{
 			Long: "mtu",
-			Type: cmd.OptionTypeParameter,
+			Type: args.OptionTypeParameter,
 			Help: "MTU for the WireGuard interfaces (default 1420)",
 		},
 		{
 			Long: "backend",
-			Type: cmd.OptionTypeParameter,
+			Type: args.OptionTypeParameter,
 			Help: "WireGuard backend ('auto', 'kernel' or 'userspace')",
 		},
 	},
-	Handler: func(i *cmd.Input) error {
+	Handler: func(i *args.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 		noRouting := i.GetFlag("no-routing")
 		mtu := i.GetIntParameterOr("mtu", 1420)
 		backendValue := i.GetParameterOr("backend", "auto")
@@ -125,7 +88,7 @@ var serve = &cmd.Command{
 		}
 
 		// create app context
-		ctx, err := initContext(network, configDir, dataDir)
+		ctx, err := newServerContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -159,10 +122,10 @@ var serve = &cmd.Command{
 	},
 }
 
-var addNetwork = &cmd.Command{
+var addNetwork = &args.Command{
 	Name: "add-network",
 	Help: "create a new cord",
-	Operands: []cmd.Operand{
+	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "name for the new network",
@@ -180,24 +143,24 @@ var addNetwork = &cmd.Command{
 			Help: "external port the coordination server listens on",
 		},
 	},
-	Options: []cmd.Option{
+	Options: []args.Option{
 		{
 			Long: "invite-cidr",
-			Type: cmd.OptionTypeParameter,
+			Type: args.OptionTypeParameter,
 			Help: "CIDR for the invite network (default " + DEFAULT_INVITE_CIDR + ")",
 		},
 		{
 			Long: "invite-port",
-			Type: cmd.OptionTypeParameter,
+			Type: args.OptionTypeParameter,
 			Help: "external port for the invite network (default: external-port + 1)",
 		},
 		{
 			Long: "api-port",
-			Type: cmd.OptionTypeParameter,
+			Type: args.OptionTypeParameter,
 			Help: "internal TCP port for the HTTP API (default: external-port)",
 		},
 	},
-	Handler: func(i *cmd.Input) error {
+	Handler: func(i *args.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -206,8 +169,8 @@ var addNetwork = &cmd.Command{
 		portValue := i.GetOperand("external-port")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 		inviteCidrValue := i.GetParameterOr("invite-cidr", DEFAULT_INVITE_CIDR)
 
 		// parse
@@ -235,7 +198,7 @@ var addNetwork = &cmd.Command{
 		apiPort := uint16(i.GetIntParameterOr("api-port", int(port)))
 
 		// create app context
-		ctx, err := initContext(network, configDir, dataDir)
+		ctx, err := newServerContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -257,26 +220,26 @@ var addNetwork = &cmd.Command{
 	},
 }
 
-var deleteNetwork = &cmd.Command{
+var deleteNetwork = &args.Command{
 	Name: "delete-network",
 	Help: "delete an existing cord",
-	Operands: []cmd.Operand{
+	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "name of the network to delete",
 		},
 	},
-	Handler: func(i *cmd.Input) error {
+	Handler: func(i *args.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 
 		// create app context
-		ctx, err := initContext(network, configDir, dataDir)
+		ctx, err := newServerContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -290,10 +253,10 @@ var deleteNetwork = &cmd.Command{
 	},
 }
 
-var addCidr = &cmd.Command{
+var serverAddCidr = &args.Command{
 	Name: "add-cidr",
 	Help: "add a child CIDR to a network",
-	Operands: []cmd.Operand{
+	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "network to add a CIDR to",
@@ -307,7 +270,7 @@ var addCidr = &cmd.Command{
 			Help: "address range in CIDR notation (i.e. 10.0.0.0/8)",
 		},
 	},
-	Handler: func(i *cmd.Input) error {
+	Handler: func(i *args.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -315,11 +278,11 @@ var addCidr = &cmd.Command{
 		cidr := i.GetOperand("cidr")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 
 		// create app context
-		ctx, err := initContext(network, configDir, dataDir)
+		ctx, err := newServerContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -338,10 +301,10 @@ var addCidr = &cmd.Command{
 	},
 }
 
-var renameCidr = &cmd.Command{
+var serverRenameCidr = &args.Command{
 	Name: "rename-cidr",
 	Help: "rename an existing CIDR from a network",
-	Operands: []cmd.Operand{
+	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "network to be modified",
@@ -355,7 +318,7 @@ var renameCidr = &cmd.Command{
 			Help: "new name for CIDR",
 		},
 	},
-	Handler: func(i *cmd.Input) error {
+	Handler: func(i *args.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -363,11 +326,11 @@ var renameCidr = &cmd.Command{
 		newName := i.GetOperand("new-name")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 
 		// create app context
-		ctx, err := initContext(network, configDir, dataDir)
+		ctx, err := newServerContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -385,10 +348,10 @@ var renameCidr = &cmd.Command{
 	},
 }
 
-var deleteCidr = &cmd.Command{
+var serverDeleteCidr = &args.Command{
 	Name: "delete-cidr",
 	Help: "delete an existing CIDR from a network",
-	Operands: []cmd.Operand{
+	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "network to be modified",
@@ -398,18 +361,18 @@ var deleteCidr = &cmd.Command{
 			Help: "CIDR to delete",
 		},
 	},
-	Handler: func(i *cmd.Input) error {
+	Handler: func(i *args.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
 		cidr := i.GetOperand("cidr")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 
 		// create app context
-		ctx, err := initContext(network, configDir, dataDir)
+		ctx, err := newServerContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -423,10 +386,10 @@ var deleteCidr = &cmd.Command{
 	},
 }
 
-var addPeer = &cmd.Command{
+var serverAddPeer = &args.Command{
 	Name: "add-peer",
 	Help: "create a new peer invite",
-	Operands: []cmd.Operand{
+	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "network to add peer to",
@@ -440,25 +403,25 @@ var addPeer = &cmd.Command{
 			Help: "IP of peer (immutable once created)",
 		},
 	},
-	Options: []cmd.Option{
+	Options: []args.Option{
 		{
 			Short: 'a',
 			Long:  "admin",
-			Type:  cmd.OptionTypeFlag,
+			Type:  args.OptionTypeFlag,
 			Help:  "make new peer an admin?",
 		},
 		{
 			Long: "save-invite",
-			Type: cmd.OptionTypeParameter,
+			Type: args.OptionTypeParameter,
 			Help: "directory to write the invite to",
 		},
 		{
 			Long: "invite-expires",
-			Type: cmd.OptionTypeParameter,
+			Type: args.OptionTypeParameter,
 			Help: "invite expiration period (eg. '30d', '7w', '2h', '1000s')",
 		},
 	},
-	Handler: func(i *cmd.Input) error {
+	Handler: func(i *args.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -466,8 +429,8 @@ var addPeer = &cmd.Command{
 		ipValue := i.GetOperand("ip")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 		admin := i.GetFlag("admin")
 		savePath := i.GetParameterOr("save-invite", getPwd())
 		inviteValue := i.GetParameterOr("invite-expires", "7d")
@@ -492,7 +455,7 @@ var addPeer = &cmd.Command{
 		}
 		defer inviteFile.Close()
 
-		ctx, err := initContext(network, configDir, dataDir)
+		ctx, err := newServerContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -518,10 +481,10 @@ var addPeer = &cmd.Command{
 	},
 }
 
-var renamePeer = &cmd.Command{
+var serverRenamePeer = &args.Command{
 	Name: "rename-peer",
 	Help: "rename an existing peer",
-	Operands: []cmd.Operand{
+	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "network to be modified",
@@ -535,7 +498,7 @@ var renamePeer = &cmd.Command{
 			Help: "new name for peer",
 		},
 	},
-	Handler: func(i *cmd.Input) error {
+	Handler: func(i *args.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -543,11 +506,11 @@ var renamePeer = &cmd.Command{
 		newName := i.GetOperand("new-name")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 
 		// create app context
-		ctx, err := initContext(network, configDir, dataDir)
+		ctx, err := newServerContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -564,10 +527,10 @@ var renamePeer = &cmd.Command{
 	},
 }
 
-var enablePeer = &cmd.Command{
+var serverEnablePeer = &args.Command{
 	Name: "enable-peer",
 	Help: "enable an existing peer",
-	Operands: []cmd.Operand{
+	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "network to be modified",
@@ -577,18 +540,18 @@ var enablePeer = &cmd.Command{
 			Help: "peer to enable",
 		},
 	},
-	Handler: func(i *cmd.Input) error {
+	Handler: func(i *args.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
 		peerName := i.GetOperand("peer")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 
 		// create app context
-		ctx, err := initContext(network, configDir, dataDir)
+		ctx, err := newServerContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -605,10 +568,10 @@ var enablePeer = &cmd.Command{
 	},
 }
 
-var disablePeer = &cmd.Command{
+var serverDisablePeer = &args.Command{
 	Name: "disable-peer",
 	Help: "disable an existing peer",
-	Operands: []cmd.Operand{
+	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "network to be modified",
@@ -618,18 +581,18 @@ var disablePeer = &cmd.Command{
 			Help: "peer to disable",
 		},
 	},
-	Handler: func(i *cmd.Input) error {
+	Handler: func(i *args.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
 		peerName := i.GetOperand("peer")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 
 		// create app context
-		ctx, err := initContext(network, configDir, dataDir)
+		ctx, err := newServerContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -646,10 +609,10 @@ var disablePeer = &cmd.Command{
 	},
 }
 
-var deletePeer = &cmd.Command{
+var serverDeletePeer = &args.Command{
 	Name: "delete-peer",
 	Help: "delete an existing peer",
-	Operands: []cmd.Operand{
+	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "network to be modified",
@@ -659,18 +622,18 @@ var deletePeer = &cmd.Command{
 			Help: "peer to delete",
 		},
 	},
-	Handler: func(i *cmd.Input) error {
+	Handler: func(i *args.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
 		peerName := i.GetOperand("peer")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 
 		// create app context
-		ctx, err := initContext(network, configDir, dataDir)
+		ctx, err := newServerContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -684,10 +647,10 @@ var deletePeer = &cmd.Command{
 	},
 }
 
-var getPeers = &cmd.Command{
+var serverGetPeers = &args.Command{
 	Name: "get-peers",
 	Help: "get peer list for a given peer",
-	Operands: []cmd.Operand{
+	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "name of the cord network the server coordinates",
@@ -697,18 +660,18 @@ var getPeers = &cmd.Command{
 			Help: "the name of the requesting peer",
 		},
 	},
-	Handler: func(i *cmd.Input) error {
+	Handler: func(i *args.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
 		peerName := i.GetOperand("peer")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 
 		// create app context
-		ctx, err := initContext(network, configDir, dataDir)
+		ctx, err := newServerContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -729,10 +692,10 @@ var getPeers = &cmd.Command{
 	},
 }
 
-var addAssociation = &cmd.Command{
+var serverAddAssociation = &args.Command{
 	Name: "add-association",
 	Help: "create an association between two CIDRs",
-	Operands: []cmd.Operand{
+	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "network to add an association to",
@@ -746,7 +709,7 @@ var addAssociation = &cmd.Command{
 			Help: "name of the second CIDR",
 		},
 	},
-	Handler: func(i *cmd.Input) error {
+	Handler: func(i *args.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -754,11 +717,11 @@ var addAssociation = &cmd.Command{
 		cidr2 := i.GetOperand("cidr2")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 
 		// create app context
-		ctx, err := initContext(network, configDir, dataDir)
+		ctx, err := newServerContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -772,10 +735,10 @@ var addAssociation = &cmd.Command{
 	},
 }
 
-var deleteAssociation = &cmd.Command{
+var serverDeleteAssociation = &args.Command{
 	Name: "delete-association",
 	Help: "delete an association between two CIDRs",
-	Operands: []cmd.Operand{
+	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "network to delete an association from",
@@ -789,7 +752,7 @@ var deleteAssociation = &cmd.Command{
 			Help: "name of the second CIDR",
 		},
 	},
-	Handler: func(i *cmd.Input) error {
+	Handler: func(i *args.Input) error {
 
 		// operands
 		network := i.GetOperand("network")
@@ -797,11 +760,11 @@ var deleteAssociation = &cmd.Command{
 		cidr2 := i.GetOperand("cidr2")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", DEFAULT_DATA)
+		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 
 		// create app context
-		ctx, err := initContext(network, configDir, dataDir)
+		ctx, err := newServerContext(network, configDir, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to create context: %w", err)
 		}
@@ -815,7 +778,7 @@ var deleteAssociation = &cmd.Command{
 	},
 }
 
-func initContext(
+func newServerContext(
 	network string,
 	configDir string,
 	dataDir string,
