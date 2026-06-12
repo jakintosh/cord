@@ -6,13 +6,13 @@ import (
 	"path"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
+	"git.sr.ht/~jakintosh/command-go/pkg/version"
 	"git.sr.ht/~jakintosh/cord/internal/client"
 )
 
 const (
 	BIN_NAME     = "cord"
 	AUTHOR       = "jakintosh"
-	VERSION      = "0.2"
 	DEFAULT_CFG  = "/etc/" + BIN_NAME
 	DEFAULT_DATA = "/var/lib/" + BIN_NAME
 )
@@ -38,13 +38,14 @@ var root = &args.Command{
 	Help: "map cords to wireguard interfaces",
 	Config: &args.Config{
 		Author:  AUTHOR,
-		Version: VERSION,
+		Version: VersionInfo.Version,
 		HelpOption: &args.HelpOption{
 			Short: 'h',
 			Long:  "help",
 		},
 	},
 	Subcommands: []*args.Command{
+		version.Command(VersionInfo),
 		install,
 		uninstall,
 		show,
@@ -54,6 +55,12 @@ var root = &args.Command{
 		serverCmd,
 	},
 	Options: []args.Option{
+		{
+			Short: 'v',
+			Long:  "verbose",
+			Type:  args.OptionTypeFlag,
+			Help:  "enable verbose output",
+		},
 		{
 			Long: "config-dir",
 			Type: args.OptionTypeParameter,

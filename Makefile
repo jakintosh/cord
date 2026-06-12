@@ -1,10 +1,13 @@
 all: client server
 
-client:
+client: generate
 	go build -o ./bin/cord ./cmd/cord
 
-server:
+server: generate
 	go build -o ./bin/cord-server ./cmd/cord-server
+
+generate:
+	go generate ./...
 
 test:
 	go test ./...
@@ -16,4 +19,4 @@ test-integration:
 clean:
 	rm -rf ./bin
 
-.PHONY: all client server test test-integration clean
+.PHONY: all client server generate test test-integration clean

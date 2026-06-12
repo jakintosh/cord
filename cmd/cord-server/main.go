@@ -13,6 +13,7 @@ import (
 	"time"
 
 	cmd "git.sr.ht/~jakintosh/command-go/pkg/args"
+	"git.sr.ht/~jakintosh/command-go/pkg/version"
 	"git.sr.ht/~jakintosh/cord/internal/api"
 	"git.sr.ht/~jakintosh/cord/internal/database"
 	"git.sr.ht/~jakintosh/cord/internal/server"
@@ -23,7 +24,6 @@ import (
 const (
 	BIN_NAME     = "cord-server"
 	AUTHOR       = "jakintosh"
-	VERSION      = "0.2"
 	DEFAULT_CFG  = "/etc/" + BIN_NAME
 	DEFAULT_DATA = "/var/lib/" + BIN_NAME
 
@@ -39,10 +39,11 @@ var root = &cmd.Command{
 	Help: "manage cords",
 	Config: &cmd.Config{
 		Author:     AUTHOR,
-		Version:    VERSION,
+		Version:    VersionInfo.Version,
 		HelpOption: &cmd.HelpOption{Short: 'h', Long: "help"},
 	},
 	Subcommands: []*cmd.Command{
+		version.Command(VersionInfo),
 		serve,
 		addNetwork,
 		deleteNetwork,
@@ -60,6 +61,12 @@ var root = &cmd.Command{
 	},
 	Operands: []cmd.Operand{},
 	Options: []cmd.Option{
+		{
+			Short: 'v',
+			Long:  "verbose",
+			Type:  cmd.OptionTypeFlag,
+			Help:  "enable verbose output",
+		},
 		{
 			Long: "config-dir",
 			Type: cmd.OptionTypeParameter,
