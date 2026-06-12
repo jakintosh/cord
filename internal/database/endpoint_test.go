@@ -9,7 +9,7 @@ import (
 )
 
 // setupTwoPeers creates two confirmed peers and returns their public keys
-func setupTwoPeers(t *testing.T) (*database.SQLiteStore, string, string) {
+func setupTwoPeers(t *testing.T) (*database.ServerDB, string, string) {
 	t.Helper()
 	store := setupTestDB(t)
 

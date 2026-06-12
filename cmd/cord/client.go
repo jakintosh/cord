@@ -7,13 +7,14 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.sr.ht/~jakintosh/cord/internal/client"
+	"git.sr.ht/~jakintosh/cord/internal/database"
 )
 
-func newClientContext(
+func newClient(
 	i *args.Input,
 	network string,
 ) (
-	*client.Context,
+	*client.Client,
 	error,
 ) {
 	configDir := i.GetParameterOr("config-dir", CLIENT_DEFAULT_CFG)
@@ -21,7 +22,23 @@ func newClientContext(
 	if err := ensureDirs(configDir, dataDir); err != nil {
 		return nil, err
 	}
-	return client.NewContext(network, configDir, dataDir)
+
+	dbOpts := database.Options{
+		Name: network,
+		Dir:  dataDir,
+	}
+	store, err := database.OpenClient(dbOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open peer store: %w", err)
+	}
+
+	opts := client.Options{
+		Network:   network,
+		ConfigDir: configDir,
+		DataDir:   dataDir,
+		Store:     store,
+	}
+	return client.New(opts)
 }
 
 var clientCmd = &args.Command{
@@ -50,15 +67,20 @@ var install = &args.Command{
 	Handler: func(i *args.Input) error {
 
 		// operands
-		invite := i.GetOperand("invite")
+		invitePath := i.GetOperand("invite")
 
-		// create client context; the network name comes from the invite
-		ctx, err := newClientContext(i, "")
+		// the network name comes from the invite
+		invite, err := client.LoadInvite(invitePath)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return err
 		}
 
-		if err := ctx.Install(invite); err != nil {
+		c, err := newClient(i, invite.Interface.NetworkName)
+		if err != nil {
+			return fmt.Errorf("failed to create client: %w", err)
+		}
+
+		if err := c.Install(invite); err != nil {
 			return fmt.Errorf("failed to install: %w", err)
 		}
 
@@ -80,13 +102,13 @@ var uninstall = &args.Command{
 		// operands
 		network := i.GetOperand("network")
 
-		// create client context
-		ctx, err := newClientContext(i, network)
+		// create client
+		c, err := newClient(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create client: %w", err)
 		}
 
-		if err := ctx.Uninstall(); err != nil {
+		if err := c.Uninstall(); err != nil {
 			return fmt.Errorf("failed to uninstall: %w", err)
 		}
 
@@ -110,13 +132,18 @@ var show = &args.Command{
 		// options
 		network := i.GetParameterOr("network", "")
 
-		// create client context
-		ctx, err := newClientContext(i, network)
-		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+		// with no network selected, list the installed networks
+		if network == "" {
+			configDir := i.GetParameterOr("config-dir", CLIENT_DEFAULT_CFG)
+			return client.ShowInstalled(configDir)
 		}
 
-		if err := ctx.Show(); err != nil {
+		c, err := newClient(i, network)
+		if err != nil {
+			return fmt.Errorf("failed to create client: %w", err)
+		}
+
+		if err := c.Show(); err != nil {
 			return fmt.Errorf("failed to show: %w", err)
 		}
 
@@ -138,13 +165,13 @@ var fetch = &args.Command{
 		// operands
 		network := i.GetOperand("network")
 
-		// create client context
-		ctx, err := newClientContext(i, network)
+		// create client
+		c, err := newClient(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create client: %w", err)
 		}
 
-		if err := ctx.Fetch(); err != nil {
+		if err := c.Fetch(); err != nil {
 			return fmt.Errorf("failed to fetch: %w", err)
 		}
 
@@ -176,13 +203,13 @@ var up = &args.Command{
 		// options
 		noFetch := i.GetFlag("no-fetch")
 
-		// create client context
-		ctx, err := newClientContext(i, network)
+		// create client
+		c, err := newClient(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create client: %w", err)
 		}
 
-		if err := ctx.Up(noFetch); err != nil {
+		if err := c.Up(noFetch); err != nil {
 			return fmt.Errorf("failed to bring cord up: %w", err)
 		}
 
@@ -204,13 +231,13 @@ var down = &args.Command{
 		// operands
 		network := i.GetOperand("network")
 
-		// create client context
-		ctx, err := newClientContext(i, network)
+		// create client
+		c, err := newClient(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create client: %w", err)
 		}
 
-		if err := ctx.Down(); err != nil {
+		if err := c.Down(); err != nil {
 			return fmt.Errorf("failed to bring cord down: %w", err)
 		}
 
@@ -222,11 +249,11 @@ var down = &args.Command{
 // machine to be an admin peer on the network
 
 func adminFor(i *args.Input, network string) (*client.Admin, error) {
-	ctx, err := newClientContext(i, network)
+	c, err := newClient(i, network)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create context: %w", err)
+		return nil, fmt.Errorf("failed to create client: %w", err)
 	}
-	admin, err := ctx.Admin()
+	admin, err := c.Admin()
 	if err != nil {
 		return nil, err
 	}

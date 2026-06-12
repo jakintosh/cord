@@ -21,23 +21,23 @@ type UpdateCidrRequest struct {
 	Name string `json:"name"`
 }
 
-func (ctx *Context) GetCidr(
+func (srv *Server) GetCidr(
 	name string,
 ) (
 	*Cidr,
 	error,
 ) {
-	return ctx.Store.CidrGet(name)
+	return srv.Store.CidrGet(name)
 }
 
-func (ctx *Context) ListCidrs() (
+func (srv *Server) ListCidrs() (
 	[]*Cidr,
 	error,
 ) {
-	return ctx.Store.CidrList()
+	return srv.Store.CidrList()
 }
 
-func (ctx *Context) CreateCidr(
+func (srv *Server) CreateCidr(
 	req CreateCidrRequest,
 ) error {
 	cidr, err := parseCidr(req.Cidr)
@@ -45,20 +45,20 @@ func (ctx *Context) CreateCidr(
 		return err
 	}
 
-	return ctx.Store.CidrCreate(req.Name, cidr)
+	return srv.Store.CidrCreate(req.Name, cidr)
 }
 
-func (ctx *Context) UpdateCidr(
+func (srv *Server) UpdateCidr(
 	cidr string,
 	req UpdateCidrRequest,
 ) error {
-	return ctx.Store.CidrUpdate(cidr, req)
+	return srv.Store.CidrUpdate(cidr, req)
 }
 
-func (ctx *Context) DeleteCidr(
+func (srv *Server) DeleteCidr(
 	cidr string,
 ) error {
-	return ctx.Store.CidrDelete(cidr)
+	return srv.Store.CidrDelete(cidr)
 }
 
 func parseCidr(

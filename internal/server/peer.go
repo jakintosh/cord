@@ -30,86 +30,86 @@ type UpdatePeerRequest struct {
 	Enabled *bool   `json:"enabled,omitempty"`
 }
 
-func (ctx *Context) GetPeerByIP(
+func (srv *Server) GetPeerByIP(
 	ip net.IP,
 ) (
 	*Peer,
 	error,
 ) {
-	return ctx.Store.PeerGetByIP(ip)
+	return srv.Store.PeerGetByIP(ip)
 }
 
-func (ctx *Context) GetPeer(
+func (srv *Server) GetPeer(
 	name string,
 ) (
 	*Peer,
 	error,
 ) {
-	return ctx.Store.PeerGet(name)
+	return srv.Store.PeerGet(name)
 }
 
-func (ctx *Context) ListPeers() (
+func (srv *Server) ListPeers() (
 	[]*Peer,
 	error,
 ) {
-	return ctx.Store.PeerList()
+	return srv.Store.PeerList()
 }
 
-func (ctx *Context) UpdatePeer(
+func (srv *Server) UpdatePeer(
 	peer string,
 	req UpdatePeerRequest,
 ) (
 	*Peer,
 	error,
 ) {
-	return ctx.Store.PeerUpdate(peer, req)
+	return srv.Store.PeerUpdate(peer, req)
 }
 
-func (ctx *Context) DeletePeer(
+func (srv *Server) DeletePeer(
 	peer string,
 ) error {
-	return ctx.Store.PeerDelete(peer)
+	return srv.Store.PeerDelete(peer)
 }
 
 // ConfirmPeer finalizes redemption: the peer has proven it can reach
 // the server over the main network from its assigned IP.
-func (ctx *Context) ConfirmPeer(
+func (srv *Server) ConfirmPeer(
 	pubKey string,
 	ip net.IP,
 ) error {
-	return ctx.Store.PeerConfirm(pubKey, ip)
+	return srv.Store.PeerConfirm(pubKey, ip)
 }
 
-func (ctx *Context) CheckPeerExists(
+func (srv *Server) CheckPeerExists(
 	peerName string,
 ) bool {
-	return ctx.Store.PeerExists(peerName)
+	return srv.Store.PeerExists(peerName)
 }
 
-func (ctx *Context) GetPeersOfPeerNamed(
+func (srv *Server) GetPeersOfPeerNamed(
 	peerName string,
 ) (
 	[]*Peer,
 	error,
 ) {
-	return ctx.Store.PeerListPeers(peerName)
+	return srv.Store.PeerListPeers(peerName)
 }
 
 // GetVisiblePeers returns the peers visible to the named peer along
 // with each peer's recently witnessed endpoints, newest first.
-func (ctx *Context) GetVisiblePeers(
+func (srv *Server) GetVisiblePeers(
 	peerName string,
 ) (
 	[]*PublicPeer,
 	error,
 ) {
-	peers, err := ctx.Store.PeerListPeers(peerName)
+	peers, err := srv.Store.PeerListPeers(peerName)
 	if err != nil {
 		return nil, err
 	}
 
 	since := time.Now().Add(-endpointTTL).Unix()
-	endpoints, err := ctx.Store.EndpointsRecent(since)
+	endpoints, err := srv.Store.EndpointsRecent(since)
 	if err != nil {
 		return nil, err
 	}
@@ -128,8 +128,8 @@ func (ctx *Context) GetVisiblePeers(
 }
 
 // ReportEndpoints records endpoint sightings witnessed by a peer.
-func (ctx *Context) ReportEndpoints(
+func (srv *Server) ReportEndpoints(
 	sightings []EndpointSighting,
 ) error {
-	return ctx.Store.EndpointReport(sightings)
+	return srv.Store.EndpointReport(sightings)
 }

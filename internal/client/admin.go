@@ -13,8 +13,8 @@ type Admin struct {
 }
 
 // Admin returns a remote administration handle for this network.
-func (ctx *Context) Admin() (*Admin, error) {
-	cfg, err := ctx.LoadConfig()
+func (c *Client) Admin() (*Admin, error) {
+	cfg, err := c.LoadConfig()
 	if err != nil {
 		return nil, err
 	}

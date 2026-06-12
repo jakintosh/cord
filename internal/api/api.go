@@ -12,7 +12,7 @@ import (
 // Options carries the dependencies for constructing an API.
 type Options struct {
 	// Service is the cord network service the API exposes.
-	Service *server.Context
+	Service *server.Server
 
 	// OnMutation, when set, is called after every successful state
 	// change so the serving runtime can resync WireGuard interfaces
@@ -24,7 +24,7 @@ type Options struct {
 // route trees: the full API served on the main network, and a
 // redemption-only API served on the invite network (see ADR-001).
 type API struct {
-	service    *server.Context
+	service    *server.Server
 	onMutation func()
 }
 

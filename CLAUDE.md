@@ -21,10 +21,10 @@ Cord is a WireGuard configuration manager shipped as a single `cord` binary with
 ### Key Internal Packages
 
 - `internal/server` - core network management logic, CIDR handling, peer lifecycle
-- `internal/database` - SQLite persistence layer with schema for cidrs, peers, invites, associations, endpoints
+- `internal/database` - SQLite adapters (`ServerDB` for network state, `ClientDB` for the client peer cache) with versioned migrations
 - `internal/wireguard` - WireGuard key generation, device/peer configuration, OS integration
 - `internal/api` - HTTP API endpoints for peer redemption, confirmation, and admin operations
-- `internal/client` - client-side flows: install/up/down/show/fetch/uninstall, local peer DB, API client, remote admin
+- `internal/client` - client-side flows: install/up/down/show/fetch/uninstall, local peer cache (via `PeerStore`), API client, remote admin
 - `internal/utils` - IP/CIDR manipulation utilities
 
 ### Core Concepts
@@ -32,12 +32,14 @@ Cord is a WireGuard configuration manager shipped as a single `cord` binary with
 - **Networks** start with a root CIDR, sub-CIDRs can be created and associated
 - **Dual networks** (ADR-001): the server runs a main interface and an invite-only interface; the invite network exposes only the redeem endpoint
 - **Peers** join via invite redemption: temporary WG interface → redeem (client-generated permanent key) → permanent configuration → confirmation
-- **Context pattern**: operations use a Context bundling network name, config store, and DB-backed ServerStore
+- **Service pattern**: `server.Server` and `client.Client` are constructed via `New(Options)`; store interfaces (`server.ServerStore`, `client.PeerStore`) are owned by the consumer packages, implemented by `internal/database`, and built/injected by `cmd/cord` (the composition root)
 - **Storage abstractions**: FsConfig/MemConfig for configuration, SQLite on disk or in-memory for data (enables in-memory testing)
 - **File formats**: all cord files on disk are TOML via BurntSushi/toml (server network config, invite files, client config); the HTTP API speaks JSON
 - **Platforms**: Linux (kernel WireGuard via netlink/wgctrl) and macOS (userspace wireguard-go, devices named utunN); no Windows support
 
 ## Database Schema
+
+Schema is created by ordered migrations (one list per database in `internal/database/migrations.go`) tracked with `PRAGMA user_version`; both schemas are currently at version 1. The client database holds a single `peer` cache table.
 
 SQLite tables managed by server:
 - `cidr` - named CIDR blocks with numeric ranges

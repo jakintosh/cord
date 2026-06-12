@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"path"
@@ -19,93 +18,97 @@ type Scanner interface {
 	Scan(dest ...any) error
 }
 
-type SQLiteStore struct {
-	path    string
-	walMode bool
-	db      *sql.DB
+// Options configures a database opened by OpenServer or OpenClient.
+type Options struct {
+	Name string // network name; the database file is <Name>.db inside Dir
+	Dir  string // data directory, or ":memory:" for an in-memory database
+	WAL  bool   // enable write-ahead logging (file-backed databases)
 }
 
-func Init(
-	name string,
-	path string,
-	walMode bool,
+// ServerDB is the SQLite adapter backing a coordination server's
+// network state.
+type ServerDB struct {
+	Conn *sql.DB
+	dir  string
+}
+
+var _ server.ServerStore = (*ServerDB)(nil)
+
+// OpenServer opens (creating and migrating as needed) the server
+// database for a network and returns a handle ready for use.
+func OpenServer(
+	opts Options,
 ) (
-	*SQLiteStore,
+	*ServerDB,
 	error,
 ) {
-
-	// create the store
-	store := &SQLiteStore{
-		path:    path,
-		walMode: walMode,
-		db:      nil,
-	}
-
-	// open database connection
-	if err := store.Open(name); err != nil {
-		log.Fatalf("failed to open database: %v", err)
-	}
-
-	// optional WAL config
-	if store.walMode {
-
-		// enable write ahead logging mode
-		_, err := store.db.Exec("PRAGMA journal_mode = WAL;")
-		if err != nil {
-			log.Fatalf("could not enable WAL mode: %v", err)
-		}
-
-		// disallow multiple connections for serial writes
-		store.db.SetMaxOpenConns(1)
-
-		// increase timeout so waiting writes can finish
-		_, err = store.db.Exec("PRAGMA busy_timeout = 5000;")
-		if err != nil {
-			log.Fatalf("could not set busy timeout: %v", err)
-		}
-	}
-
-	if _, err := store.db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
-		log.Fatalf("couldn't enable foreign keys: %v\n", err)
-	}
-
-	// run all migrations
-	if err := migrate(store.db); err != nil {
-		log.Fatalf("could not migrate database: %v", err)
-	}
-
-	return store, nil
-}
-
-func (s *SQLiteStore) Open(
-	name string,
-) error {
-
-	var dbPath string
-	if s.path == ":memory:" {
-		dbPath = ":memory:"
-	} else {
-		if err := os.MkdirAll(s.path, 0755); err != nil {
-			return fmt.Errorf("failed to create directory '%s': %w", s.path, err)
-		}
-		dbPath = GetPath(name, s.path)
-	}
-
-	var err error
-	s.db, err = sql.Open("sqlite", dbPath)
+	conn, err := openConn(opts)
 	if err != nil {
-		return fmt.Errorf("sqlite error: %w\n", err)
+		return nil, err
 	}
-	return nil
+
+	if err := migrate(conn, serverMigrations); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("run migrations: %w", err)
+	}
+
+	return &ServerDB{Conn: conn, dir: opts.Dir}, nil
 }
 
-func (s *SQLiteStore) Create(
+func (s *ServerDB) Close() error {
+	return s.Conn.Close()
+}
+
+// openConn opens a SQLite connection with the settings every cord
+// database requires. Writes are serialized through a single connection;
+// with modernc sqlite this also keeps ':memory:' databases coherent
+// (each pooled connection would otherwise see its own empty database).
+func openConn(
+	opts Options,
+) (
+	*sql.DB,
+	error,
+) {
+	target := ":memory:"
+	if opts.Dir != ":memory:" {
+		if err := os.MkdirAll(opts.Dir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create directory '%s': %w", opts.Dir, err)
+		}
+		target = dbPath(opts.Name, opts.Dir)
+	}
+
+	conn, err := sql.Open("sqlite", target)
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+
+	conn.SetMaxOpenConns(1)
+
+	if _, err := conn.Exec("PRAGMA foreign_keys = ON;"); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
+	if _, err := conn.Exec("PRAGMA busy_timeout = 5000;"); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("set busy timeout: %w", err)
+	}
+	if opts.WAL {
+		if _, err := conn.Exec("PRAGMA journal_mode = WAL;"); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("enable wal mode: %w", err)
+		}
+	}
+
+	return conn, nil
+}
+
+func (s *ServerDB) Create(
 	name string,
 	root *net.IPNet,
 	serverPubKey string,
 ) error {
 	// Begin transaction
-	tx, err := s.db.Begin()
+	tx, err := s.Conn.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin create tx: %w", err)
 	}
@@ -150,72 +153,46 @@ func (s *SQLiteStore) Create(
 	return nil
 }
 
-func (s *SQLiteStore) Delete(
+func (s *ServerDB) Delete(
 	name string,
 ) error {
 
-	if s.path == ":memory:" {
+	if s.dir == ":memory:" {
 		return nil
 	}
 
-	dbPath := GetPath(name, s.path)
-	if err := os.Remove(dbPath); err != nil {
-		return fmt.Errorf("failed to delete database: %w", err)
+	if err := s.Conn.Close(); err != nil {
+		return fmt.Errorf("failed to close database: %w", err)
 	}
-	return nil
+	return removeDbFiles(dbPath(name, s.dir), false)
 }
 
-func Open(
-	name string,
-	path string,
-) (
-	*sql.DB,
-	error,
-) {
-
-	var dbPath string
-	if path == ":memory:" {
-		dbPath = ":memory:"
-	} else {
-		if err := os.MkdirAll(path, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create directory '%s': %w", path, err)
-		}
-		dbPath = GetPath(name, path)
-	}
-
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("sqlite error: %w\n", err)
-	}
-	return db, nil
-}
-func InitTable(
-	db *sql.DB,
-	name string,
-	sql string,
-) error {
-
-	if _, err := db.Exec(sql); err != nil {
-		return fmt.Errorf("failed to init '%s' table schema: %w\n", name, err)
-	}
-	return nil
-}
-
-func EnableForeignKeys(
-	db *sql.DB,
-) error {
-	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
-		return fmt.Errorf("couldn't enable foreign keys: %w\n", err)
-	}
-	return nil
-}
-
-func GetPath(
+func dbPath(
 	name string,
 	dataPath string,
 ) string {
 	dbName := name + ".db"
 	return path.Join(dataPath, dbName)
+}
+
+// removeDbFiles removes a database file and its WAL sidecars. The
+// sidecars are always allowed to be missing; missingOk extends that to
+// the database file itself.
+func removeDbFiles(
+	dbPath string,
+	missingOk bool,
+) error {
+	if err := os.Remove(dbPath); err != nil {
+		if !missingOk || !os.IsNotExist(err) {
+			return fmt.Errorf("failed to delete database: %w", err)
+		}
+	}
+	for _, sidecar := range []string{dbPath + "-wal", dbPath + "-shm"} {
+		if err := os.Remove(sidecar); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to delete database sidecar: %w", err)
+		}
+	}
+	return nil
 }
 
 func ResultsEmpty(

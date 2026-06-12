@@ -1,71 +1,67 @@
-package client
+package database
 
 import (
 	"database/sql"
 	"fmt"
-	"os"
-	"path"
 
-	db "git.sr.ht/~jakintosh/cord/internal/database"
+	"git.sr.ht/~jakintosh/cord/internal/client"
 	"git.sr.ht/~jakintosh/cord/internal/server"
 )
 
-// LocalPeer is the client's record of a network peer: identity plus
-// the most recently known endpoint.
-type LocalPeer struct {
-	Name         string
-	PublicKey    string
-	Cidr         string
-	Endpoint     string
-	EndpointTime int64
+// ClientDB is the SQLite adapter backing a client's local peer cache
+// for one network.
+type ClientDB struct {
+	Conn *sql.DB
+	name string
+	dir  string
 }
 
-func (ctx *Context) dbPath() string {
-	return path.Join(ctx.DataDir, ctx.Name+".db")
-}
+var _ client.PeerStore = (*ClientDB)(nil)
 
-// openDb opens (and initializes) the network's local peer database.
-func (ctx *Context) openDb() (*sql.DB, error) {
-	if err := os.MkdirAll(ctx.DataDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create data dir: %w", err)
-	}
-
-	d, err := db.Open(ctx.Name, ctx.DataDir)
+// OpenClient opens (creating and migrating as needed) the client
+// database for a network and returns a handle ready for use.
+func OpenClient(
+	opts Options,
+) (
+	*ClientDB,
+	error,
+) {
+	conn, err := openConn(opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	if err := db.InitTable(d, "peer", `
-		CREATE TABLE IF NOT EXISTS peer (
-			id                INTEGER PRIMARY KEY,
-			name              TEXT NOT NULL UNIQUE,
-			public_key        TEXT NOT NULL UNIQUE,
-			cidr              TEXT NOT NULL,
-			endpoint          TEXT DEFAULT '' NOT NULL,
-			endpoint_time     INTEGER DEFAULT 0 NOT NULL
-		);
-	`); err != nil {
-		d.Close()
 		return nil, err
 	}
 
-	return d, nil
-}
-
-// deleteDb removes the local database file; missing files are fine.
-func (ctx *Context) deleteDb() error {
-	err := os.Remove(ctx.dbPath())
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to delete database: %w", err)
+	if err := migrate(conn, clientMigrations); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("run migrations: %w", err)
 	}
-	return nil
+
+	return &ClientDB{Conn: conn, name: opts.Name, dir: opts.Dir}, nil
 }
 
-// reconcilePeers replaces the local peer set with the server's view,
+func (c *ClientDB) Close() error {
+	return c.Conn.Close()
+}
+
+// Delete closes the database and removes its files; missing files are
+// fine.
+func (c *ClientDB) Delete() error {
+	if err := c.Conn.Close(); err != nil {
+		return fmt.Errorf("failed to close database: %w", err)
+	}
+	if c.dir == ":memory:" {
+		return nil
+	}
+	return removeDbFiles(dbPath(c.name, c.dir), true)
+}
+
+// ReconcilePeers replaces the stored peer set with the server's view,
 // keeping locally observed endpoints when they are fresher than what
 // the server reports.
-func reconcilePeers(d *sql.DB, peers []server.PublicPeer) error {
-	tx, err := d.Begin()
+func (c *ClientDB) ReconcilePeers(
+	peers []server.PublicPeer,
+) error {
+	tx, err := c.Conn.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin reconcile tx: %w", err)
 	}
@@ -133,9 +129,9 @@ func placeholders(n int) string {
 	return s
 }
 
-// listLocalPeers returns all locally known peers.
-func listLocalPeers(d *sql.DB) ([]LocalPeer, error) {
-	rows, err := d.Query(`
+// ListPeers returns all stored peers, ordered by name.
+func (c *ClientDB) ListPeers() ([]client.LocalPeer, error) {
+	rows, err := c.Conn.Query(`
 		SELECT name, public_key, cidr, endpoint, endpoint_time
 		FROM peer
 		ORDER BY name ASC;`,
@@ -145,9 +141,9 @@ func listLocalPeers(d *sql.DB) ([]LocalPeer, error) {
 	}
 	defer rows.Close()
 
-	var peers []LocalPeer
+	var peers []client.LocalPeer
 	for rows.Next() {
-		var peer LocalPeer
+		var peer client.LocalPeer
 		if err := rows.Scan(
 			&peer.Name,
 			&peer.PublicKey,
@@ -160,12 +156,20 @@ func listLocalPeers(d *sql.DB) ([]LocalPeer, error) {
 		peers = append(peers, peer)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate peers: %w", err)
+	}
+
 	return peers, nil
 }
 
-// updateLocalEndpoint records a locally observed peer endpoint.
-func updateLocalEndpoint(d *sql.DB, publicKey, endpoint string, when int64) error {
-	_, err := d.Exec(`
+// UpdateEndpoint records a locally observed peer endpoint.
+func (c *ClientDB) UpdateEndpoint(
+	publicKey string,
+	endpoint string,
+	when int64,
+) error {
+	_, err := c.Conn.Exec(`
 		UPDATE peer
 		SET endpoint = ?2, endpoint_time = ?3
 		WHERE public_key = ?1;`,

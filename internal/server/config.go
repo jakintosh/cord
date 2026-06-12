@@ -101,9 +101,9 @@ func configFileName(network string) string {
 	return network + ".toml"
 }
 
-// SaveConfig persists the network config through the context's config store.
-func (ctx *Context) SaveConfig(cfg *NetworkConfig) error {
-	w, err := ctx.Config.GetConfigWriter(configFileName(ctx.Name))
+// SaveConfig persists the network config through the server's config store.
+func (srv *Server) SaveConfig(cfg *NetworkConfig) error {
+	w, err := srv.Config.GetConfigWriter(configFileName(srv.Network))
 	if err != nil {
 		return fmt.Errorf("failed to open config for writing: %w", err)
 	}
@@ -114,9 +114,9 @@ func (ctx *Context) SaveConfig(cfg *NetworkConfig) error {
 	return nil
 }
 
-// LoadConfig reads the network config from the context's config store.
-func (ctx *Context) LoadConfig() (*NetworkConfig, error) {
-	r, err := ctx.Config.GetConfigReader(configFileName(ctx.Name))
+// LoadConfig reads the network config from the server's config store.
+func (srv *Server) LoadConfig() (*NetworkConfig, error) {
+	r, err := srv.Config.GetConfigReader(configFileName(srv.Network))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open config for reading: %w", err)
 	}

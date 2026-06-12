@@ -8,11 +8,11 @@ import (
 	"git.sr.ht/~jakintosh/cord/internal/utils"
 )
 
-func (store *SQLiteStore) CidrList() (
+func (store *ServerDB) CidrList() (
 	[]*server.Cidr,
 	error,
 ) {
-	rows, err := store.db.Query(`
+	rows, err := store.Conn.Query(`
 		SELECT name, cidr, length, prefix
 		FROM cidr
 		ORDER BY name ASC;`,
@@ -34,13 +34,13 @@ func (store *SQLiteStore) CidrList() (
 	return cidrs, nil
 }
 
-func (store *SQLiteStore) CidrGet(
+func (store *ServerDB) CidrGet(
 	name string,
 ) (
 	*server.Cidr,
 	error,
 ) {
-	row := store.db.QueryRow(`
+	row := store.Conn.QueryRow(`
 		SELECT name, cidr, length, prefix
 		FROM cidr
 		WHERE name = ?1;`,
@@ -50,13 +50,13 @@ func (store *SQLiteStore) CidrGet(
 	return scanCidr(row)
 }
 
-func (s *SQLiteStore) CidrCreate(
+func (s *ServerDB) CidrCreate(
 	name string,
 	cidr *net.IPNet,
 ) error {
 	prefix, length := cidr.Mask.Size()
 	base, last := utils.GetIpRangeFromCidr(cidr)
-	result, err := s.db.Exec(`
+	result, err := s.Conn.Exec(`
 		INSERT INTO cidr (name, cidr, length, prefix, base, last)
 		SELECT ?1, ?2, ?3, ?4, ?5, ?6
 		FROM cidr c
@@ -82,13 +82,13 @@ func (s *SQLiteStore) CidrCreate(
 	return nil
 }
 
-func (s *SQLiteStore) CidrCreateRoot(
+func (s *ServerDB) CidrCreateRoot(
 	name string,
 	cidr *net.IPNet,
 ) error {
 	prefix, length := cidr.Mask.Size()
 	base, last := utils.GetIpRangeFromCidr(cidr)
-	_, err := s.db.Exec(`
+	_, err := s.Conn.Exec(`
 		INSERT INTO cidr (id, name, cidr, length, prefix, base, last)
 		VALUES (1, ?, ?, ?, ?, ?, ?);`,
 		name,
@@ -102,11 +102,11 @@ func (s *SQLiteStore) CidrCreateRoot(
 	return CheckSqliteErr("adding root cidr", err)
 }
 
-func (s *SQLiteStore) CidrUpdate(
+func (s *ServerDB) CidrUpdate(
 	name string,
 	req server.UpdateCidrRequest,
 ) error {
-	_, err := s.db.Exec(`
+	_, err := s.Conn.Exec(`
 		UPDATE cidr
 		SET name = ?2
 		WHERE name = ?1;`,
@@ -118,10 +118,10 @@ func (s *SQLiteStore) CidrUpdate(
 
 // CidrDelete removes a CIDR and its associations. The root CIDR
 // (id=1) cannot be deleted.
-func (s *SQLiteStore) CidrDelete(
+func (s *ServerDB) CidrDelete(
 	name string,
 ) error {
-	tx, err := s.db.Begin()
+	tx, err := s.Conn.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin delete tx: %w", err)
 	}

@@ -8,10 +8,10 @@ import (
 	"git.sr.ht/~jakintosh/cord/internal/utils"
 )
 
-func (s *SQLiteStore) PeerExists(
+func (s *ServerDB) PeerExists(
 	peerName string,
 ) bool {
-	row := s.db.QueryRow(`
+	row := s.Conn.QueryRow(`
 		SELECT COUNT(*)
 		FROM peer
 		WHERE name = ?;`,
@@ -26,11 +26,11 @@ func (s *SQLiteStore) PeerExists(
 	return count > 0
 }
 
-func (store *SQLiteStore) PeerList() (
+func (store *ServerDB) PeerList() (
 	[]*server.Peer,
 	error,
 ) {
-	rows, err := store.db.Query(`
+	rows, err := store.Conn.Query(`
 		SELECT name, public_key, ip, prefix, admin, enabled, confirmed
 		FROM peer
 		ORDER BY name ASC;`,
@@ -52,13 +52,13 @@ func (store *SQLiteStore) PeerList() (
 	return peers, nil
 }
 
-func (s *SQLiteStore) PeerListPeers(
+func (s *ServerDB) PeerListPeers(
 	peerName string,
 ) (
 	[]*server.Peer,
 	error,
 ) {
-	rows, err := s.db.Query(`
+	rows, err := s.Conn.Query(`
 		-- Get the requesting peer IP
 		WITH req_ip AS (
 			SELECT ip FROM peer WHERE name = ?1
@@ -118,13 +118,13 @@ func (s *SQLiteStore) PeerListPeers(
 	return peers, nil
 }
 
-func (store *SQLiteStore) PeerGet(
+func (store *ServerDB) PeerGet(
 	name string,
 ) (
 	*server.Peer,
 	error,
 ) {
-	row := store.db.QueryRow(`
+	row := store.Conn.QueryRow(`
 		SELECT name, public_key, ip, prefix, admin, enabled, confirmed
 		FROM peer
 		WHERE name = ?;`,
@@ -134,14 +134,14 @@ func (store *SQLiteStore) PeerGet(
 	return scanPeer(row)
 }
 
-func (store *SQLiteStore) PeerGetByIP(
+func (store *ServerDB) PeerGetByIP(
 	ip net.IP,
 ) (
 	*server.Peer,
 	error,
 ) {
 	ip = utils.NormalizeIP(ip)
-	row := store.db.QueryRow(`
+	row := store.Conn.QueryRow(`
 		SELECT name, public_key, ip, prefix, admin, enabled, confirmed
 		FROM peer
 		WHERE ip = ?1
@@ -155,13 +155,13 @@ func (store *SQLiteStore) PeerGetByIP(
 
 // PeerGetByKey looks up a peer by its permanent public key, regardless
 // of confirmation state. Used for idempotent redeem/confirm handling.
-func (store *SQLiteStore) PeerGetByKey(
+func (store *ServerDB) PeerGetByKey(
 	pubKey string,
 ) (
 	*server.Peer,
 	error,
 ) {
-	row := store.db.QueryRow(`
+	row := store.Conn.QueryRow(`
 		SELECT name, public_key, ip, prefix, admin, enabled, confirmed
 		FROM peer
 		WHERE public_key = ?1;`,
@@ -174,13 +174,13 @@ func (store *SQLiteStore) PeerGetByKey(
 // PeerConfirm marks the peer with the given key and IP as confirmed and
 // deletes the invite that created it. Idempotent: confirming an
 // already-confirmed peer succeeds.
-func (s *SQLiteStore) PeerConfirm(
+func (s *ServerDB) PeerConfirm(
 	pubKey string,
 	ip net.IP,
 ) error {
 	ip = utils.NormalizeIP(ip)
 
-	tx, err := s.db.Begin()
+	tx, err := s.Conn.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin confirm tx: %w", err)
 	}
@@ -219,10 +219,10 @@ func (s *SQLiteStore) PeerConfirm(
 
 // PeerDelete removes a peer and its endpoint history. Any invite that
 // reserved the peer's IP is removed as well.
-func (s *SQLiteStore) PeerDelete(
+func (s *ServerDB) PeerDelete(
 	name string,
 ) error {
-	tx, err := s.db.Begin()
+	tx, err := s.Conn.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin delete tx: %w", err)
 	}
@@ -264,14 +264,14 @@ func (s *SQLiteStore) PeerDelete(
 	return nil
 }
 
-func (s *SQLiteStore) PeerUpdate(
+func (s *ServerDB) PeerUpdate(
 	name string,
 	req server.UpdatePeerRequest,
 ) (
 	*server.Peer,
 	error,
 ) {
-	row := s.db.QueryRow(`
+	row := s.Conn.QueryRow(`
 		UPDATE peer
 		SET
 			name = CASE

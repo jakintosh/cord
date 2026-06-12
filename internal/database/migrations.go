@@ -5,16 +5,18 @@ import (
 	"fmt"
 )
 
-type migration struct {
-	version int
-	sql     string
+type Migration struct {
+	Version int
+	Name    string
+	SQL     string
 }
 
-var migrations = []migration{
+var serverMigrations = []Migration{
 	{
-		version: 1,
-		sql: `
-			CREATE TABLE IF NOT EXISTS association (
+		Version: 1,
+		Name:    "create server schema",
+		SQL: `
+			CREATE TABLE association (
 				id                  INTEGER PRIMARY KEY,
 				cidr1               INTEGER NOT NULL,
 				cidr2               INTEGER NOT NULL,
@@ -25,7 +27,7 @@ var migrations = []migration{
 				FOREIGN KEY (cidr2)
 					REFERENCES cidr (id)
 			);
-			CREATE TABLE IF NOT EXISTS cidr (
+			CREATE TABLE cidr (
 				id                  INTEGER PRIMARY KEY,
 				name                TEXT NOT NULL UNIQUE,
 				cidr                TEXT NOT NULL UNIQUE,
@@ -35,7 +37,7 @@ var migrations = []migration{
 				last                BLOB NOT NULL,
 				UNIQUE (base, prefix)
 			);
-			CREATE TABLE IF NOT EXISTS endpoint (
+			CREATE TABLE endpoint (
 				id                  INTEGER PRIMARY KEY,
 				witness             INTEGER NOT NULL,
 				peer                INTEGER NOT NULL,
@@ -46,7 +48,7 @@ var migrations = []migration{
 				FOREIGN KEY (witness)
 					REFERENCES peer (id)
 			);
-			CREATE TABLE IF NOT EXISTS invite (
+			CREATE TABLE invite (
 				id                  INTEGER PRIMARY KEY,
 				name                TEXT NOT NULL UNIQUE,
 				public_key          TEXT NOT NULL UNIQUE,
@@ -56,7 +58,7 @@ var migrations = []migration{
 				redeemed            INTEGER DEFAULT 0 NOT NULL,
 				expiration          INTEGER NOT NULL
 			);
-			CREATE TABLE IF NOT EXISTS peer (
+			CREATE TABLE peer (
 				id                  INTEGER PRIMARY KEY,
 				name                TEXT NOT NULL UNIQUE,
 				ip                  BLOB NOT NULL UNIQUE,
@@ -70,54 +72,69 @@ var migrations = []migration{
 	},
 }
 
-func getSchemaVersion(
-	db *sql.DB,
+var clientMigrations = []Migration{
+	{
+		Version: 1,
+		Name:    "create peer cache table",
+		SQL: `
+			CREATE TABLE peer (
+				id                INTEGER PRIMARY KEY,
+				name              TEXT NOT NULL UNIQUE,
+				public_key        TEXT NOT NULL UNIQUE,
+				cidr              TEXT NOT NULL,
+				endpoint          TEXT DEFAULT '' NOT NULL,
+				endpoint_time     INTEGER DEFAULT 0 NOT NULL
+			);
+		`,
+	},
+}
+
+func migrate(
+	conn *sql.DB,
+	migrations []Migration,
+) error {
+	current, err := userVersion(conn)
+	if err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+
+	for _, m := range migrations {
+		if m.Version <= current {
+			continue
+		}
+
+		tx, err := conn.Begin()
+		if err != nil {
+			return fmt.Errorf("begin migration %d %q: %w", m.Version, m.Name, err)
+		}
+
+		if _, err := tx.Exec(m.SQL); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("run migration %d %q: %w", m.Version, m.Name, err)
+		}
+		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", m.Version)); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("set schema version %d: %w", m.Version, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration %d %q: %w", m.Version, m.Name, err)
+		}
+
+		current = m.Version
+	}
+
+	return nil
+}
+
+func userVersion(
+	conn *sql.DB,
 ) (
 	int,
 	error,
 ) {
 	var version int
-	row := db.QueryRow(`PRAGMA user_version;`)
-	err := row.Scan(&version)
-	if err != nil {
-		return -1, err
+	if err := conn.QueryRow(`PRAGMA user_version;`).Scan(&version); err != nil {
+		return 0, err
 	}
 	return version, nil
-}
-
-func setSchemaVersion(
-	db *sql.DB,
-	version int,
-) error {
-	stmt := fmt.Sprintf(`PRAGMA user_version = %d;`, version)
-	_, err := db.Exec(stmt)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func migrate(
-	db *sql.DB,
-) error {
-
-	version, err := getSchemaVersion(db)
-	if err != nil {
-		return fmt.Errorf("failed to get schema version: %w", err)
-	}
-
-	for _, migration := range migrations {
-		if version < migration.version {
-			_, err := db.Exec(migration.sql)
-			if err != nil {
-				return fmt.Errorf("error migrating to version %d: %w", migration.version, err)
-			}
-
-			err = setSchemaVersion(db, migration.version)
-			if err != nil {
-				return fmt.Errorf("failed to set schema version: %w", err)
-			}
-		}
-	}
-	return nil
 }

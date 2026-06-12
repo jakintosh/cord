@@ -8,10 +8,10 @@ import (
 
 // EndpointReport records endpoint sightings witnessed by peers.
 // Sightings referencing unknown peer or witness keys are skipped.
-func (s *SQLiteStore) EndpointReport(
+func (s *ServerDB) EndpointReport(
 	sightings []server.EndpointSighting,
 ) error {
-	tx, err := s.db.Begin()
+	tx, err := s.Conn.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin report tx: %w", err)
 	}
@@ -42,13 +42,13 @@ func (s *SQLiteStore) EndpointReport(
 
 // EndpointsRecent returns sightings recorded at or after the given Unix
 // time, newest first, keyed by the sighted peer's public key.
-func (s *SQLiteStore) EndpointsRecent(
+func (s *ServerDB) EndpointsRecent(
 	since int64,
 ) (
 	map[string][]server.EndpointWitness,
 	error,
 ) {
-	rows, err := s.db.Query(`
+	rows, err := s.Conn.Query(`
 		SELECT p.public_key, w.public_key, e.endpoint, e.time
 		FROM endpoint e
 		JOIN peer p ON p.id = e.peer
@@ -81,10 +81,10 @@ func (s *SQLiteStore) EndpointsRecent(
 }
 
 // EndpointsPrune deletes sightings recorded before the given Unix time.
-func (s *SQLiteStore) EndpointsPrune(
+func (s *ServerDB) EndpointsPrune(
 	before int64,
 ) error {
-	_, err := s.db.Exec(`
+	_, err := s.Conn.Exec(`
 		DELETE FROM endpoint
 		WHERE time < ?1;`,
 		before,

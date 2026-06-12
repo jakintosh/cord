@@ -75,8 +75,6 @@ var serve = &args.Command{
 		network := i.GetOperand("network")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 		noRouting := i.GetFlag("no-routing")
 		mtu := i.GetIntParameterOr("mtu", 1420)
 		backendValue := i.GetParameterOr("backend", "auto")
@@ -87,21 +85,21 @@ var serve = &args.Command{
 			return fmt.Errorf("failed to parse backend: %w", err)
 		}
 
-		// create app context
-		ctx, err := newServerContext(network, configDir, dataDir)
+		// create server
+		srv, err := newServer(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create server: %w", err)
 		}
 
 		// build the runtime and the two API routers; mutations made
 		// over the API poke the runtime for an immediate resync
-		runtime, err := server.NewRuntime(ctx, noRouting, mtu, backend)
+		runtime, err := server.NewRuntime(srv, noRouting, mtu, backend)
 		if err != nil {
 			return fmt.Errorf("failed to prepare server: %w", err)
 		}
 
 		apiServer, err := api.New(api.Options{
-			Service:    ctx,
+			Service:    srv,
 			OnMutation: runtime.Poke,
 		})
 		if err != nil {
@@ -169,8 +167,6 @@ var addNetwork = &args.Command{
 		portValue := i.GetOperand("external-port")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 		inviteCidrValue := i.GetParameterOr("invite-cidr", DEFAULT_INVITE_CIDR)
 
 		// parse
@@ -197,13 +193,13 @@ var addNetwork = &args.Command{
 		invitePort := uint16(i.GetIntParameterOr("invite-port", int(port)+1))
 		apiPort := uint16(i.GetIntParameterOr("api-port", int(port)))
 
-		// create app context
-		ctx, err := newServerContext(network, configDir, dataDir)
+		// create server
+		srv, err := newServer(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create server: %w", err)
 		}
 
-		err = ctx.CreateNetwork(server.CreateNetworkRequest{
+		err = srv.CreateNetwork(server.CreateNetworkRequest{
 			RootCidr:   cidr,
 			InviteCidr: inviteCidr,
 			ExternalIP: ip,
@@ -234,17 +230,13 @@ var deleteNetwork = &args.Command{
 		// operands
 		network := i.GetOperand("network")
 
-		// options
-		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
-
-		// create app context
-		ctx, err := newServerContext(network, configDir, dataDir)
+		// create server
+		srv, err := newServer(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create server: %w", err)
 		}
 
-		err = ctx.DeleteNetwork()
+		err = srv.DeleteNetwork()
 		if err != nil {
 			return fmt.Errorf("failed to delete network: %w", err)
 		}
@@ -277,14 +269,10 @@ var serverAddCidr = &args.Command{
 		name := i.GetOperand("name")
 		cidr := i.GetOperand("cidr")
 
-		// options
-		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
-
-		// create app context
-		ctx, err := newServerContext(network, configDir, dataDir)
+		// create server
+		srv, err := newServer(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create server: %w", err)
 		}
 
 		// execute command
@@ -292,7 +280,7 @@ var serverAddCidr = &args.Command{
 			Name: name,
 			Cidr: cidr,
 		}
-		err = ctx.CreateCidr(req)
+		err = srv.CreateCidr(req)
 		if err != nil {
 			return fmt.Errorf("failed to create cidr: %w", err)
 		}
@@ -325,21 +313,17 @@ var serverRenameCidr = &args.Command{
 		cidr := i.GetOperand("cidr")
 		newName := i.GetOperand("new-name")
 
-		// options
-		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
-
-		// create app context
-		ctx, err := newServerContext(network, configDir, dataDir)
+		// create server
+		srv, err := newServer(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create server: %w", err)
 		}
 
 		// execute command
 		req := server.UpdateCidrRequest{
 			Name: newName,
 		}
-		err = ctx.UpdateCidr(cidr, req)
+		err = srv.UpdateCidr(cidr, req)
 		if err != nil {
 			return fmt.Errorf("failed to rename cidr: %w", err)
 		}
@@ -367,17 +351,13 @@ var serverDeleteCidr = &args.Command{
 		network := i.GetOperand("network")
 		cidr := i.GetOperand("cidr")
 
-		// options
-		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
-
-		// create app context
-		ctx, err := newServerContext(network, configDir, dataDir)
+		// create server
+		srv, err := newServer(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create server: %w", err)
 		}
 
-		err = ctx.DeleteCidr(cidr)
+		err = srv.DeleteCidr(cidr)
 		if err != nil {
 			return fmt.Errorf("failed to delete cidr: %w", err)
 		}
@@ -429,8 +409,6 @@ var serverAddPeer = &args.Command{
 		ipValue := i.GetOperand("ip")
 
 		// options
-		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
 		admin := i.GetFlag("admin")
 		savePath := i.GetParameterOr("save-invite", getPwd())
 		inviteValue := i.GetParameterOr("invite-expires", "7d")
@@ -455,9 +433,9 @@ var serverAddPeer = &args.Command{
 		}
 		defer inviteFile.Close()
 
-		ctx, err := newServerContext(network, configDir, dataDir)
+		srv, err := newServer(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create server: %w", err)
 		}
 
 		req := server.CreateInviteRequest{
@@ -466,7 +444,7 @@ var serverAddPeer = &args.Command{
 			Admin:      admin,
 			Expiration: expiration,
 		}
-		invite, err := ctx.CreateInvite(req)
+		invite, err := srv.CreateInvite(req)
 		if err != nil {
 			return fmt.Errorf("failed to create peer: %w", err)
 		}
@@ -505,20 +483,16 @@ var serverRenamePeer = &args.Command{
 		oldName := i.GetOperand("peer")
 		newName := i.GetOperand("new-name")
 
-		// options
-		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
-
-		// create app context
-		ctx, err := newServerContext(network, configDir, dataDir)
+		// create server
+		srv, err := newServer(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create server: %w", err)
 		}
 
 		req := server.UpdatePeerRequest{
 			Name: &newName,
 		}
-		_, err = ctx.UpdatePeer(oldName, req)
+		_, err = srv.UpdatePeer(oldName, req)
 		if err != nil {
 			return fmt.Errorf("failed to rename peer: %w", err)
 		}
@@ -546,20 +520,16 @@ var serverEnablePeer = &args.Command{
 		network := i.GetOperand("network")
 		peerName := i.GetOperand("peer")
 
-		// options
-		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
-
-		// create app context
-		ctx, err := newServerContext(network, configDir, dataDir)
+		// create server
+		srv, err := newServer(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create server: %w", err)
 		}
 
 		req := server.UpdatePeerRequest{
 			Enabled: boolPtr(true),
 		}
-		_, err = ctx.UpdatePeer(peerName, req)
+		_, err = srv.UpdatePeer(peerName, req)
 		if err != nil {
 			return fmt.Errorf("failed to enable peer: %w", err)
 		}
@@ -587,20 +557,16 @@ var serverDisablePeer = &args.Command{
 		network := i.GetOperand("network")
 		peerName := i.GetOperand("peer")
 
-		// options
-		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
-
-		// create app context
-		ctx, err := newServerContext(network, configDir, dataDir)
+		// create server
+		srv, err := newServer(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create server: %w", err)
 		}
 
 		req := server.UpdatePeerRequest{
 			Enabled: boolPtr(false),
 		}
-		_, err = ctx.UpdatePeer(peerName, req)
+		_, err = srv.UpdatePeer(peerName, req)
 		if err != nil {
 			return fmt.Errorf("failed to disable peer: %w", err)
 		}
@@ -628,17 +594,13 @@ var serverDeletePeer = &args.Command{
 		network := i.GetOperand("network")
 		peerName := i.GetOperand("peer")
 
-		// options
-		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
-
-		// create app context
-		ctx, err := newServerContext(network, configDir, dataDir)
+		// create server
+		srv, err := newServer(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create server: %w", err)
 		}
 
-		err = ctx.DeletePeer(peerName)
+		err = srv.DeletePeer(peerName)
 		if err != nil {
 			return fmt.Errorf("failed to delete peer: %w", err)
 		}
@@ -666,17 +628,13 @@ var serverGetPeers = &args.Command{
 		network := i.GetOperand("network")
 		peerName := i.GetOperand("peer")
 
-		// options
-		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
-
-		// create app context
-		ctx, err := newServerContext(network, configDir, dataDir)
+		// create server
+		srv, err := newServer(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create server: %w", err)
 		}
 
-		peers, err := ctx.GetVisiblePeers(peerName)
+		peers, err := srv.GetVisiblePeers(peerName)
 		if err != nil {
 			return fmt.Errorf("failed to get peers for '%s': %w", peerName, err)
 		}
@@ -716,17 +674,13 @@ var serverAddAssociation = &args.Command{
 		cidr1 := i.GetOperand("cidr1")
 		cidr2 := i.GetOperand("cidr2")
 
-		// options
-		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
-
-		// create app context
-		ctx, err := newServerContext(network, configDir, dataDir)
+		// create server
+		srv, err := newServer(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create server: %w", err)
 		}
 
-		err = ctx.CreateAssociation(cidr1, cidr2)
+		err = srv.CreateAssociation(cidr1, cidr2)
 		if err != nil {
 			return fmt.Errorf("failed to create association: %w", err)
 		}
@@ -759,17 +713,13 @@ var serverDeleteAssociation = &args.Command{
 		cidr1 := i.GetOperand("cidr1")
 		cidr2 := i.GetOperand("cidr2")
 
-		// options
-		configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
-		dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
-
-		// create app context
-		ctx, err := newServerContext(network, configDir, dataDir)
+		// create server
+		srv, err := newServer(i, network)
 		if err != nil {
-			return fmt.Errorf("failed to create context: %w", err)
+			return fmt.Errorf("failed to create server: %w", err)
 		}
 
-		err = ctx.DeleteAssociation(cidr1, cidr2)
+		err = srv.DeleteAssociation(cidr1, cidr2)
 		if err != nil {
 			return fmt.Errorf("failed to delete association: %w", err)
 		}
@@ -778,20 +728,35 @@ var serverDeleteAssociation = &args.Command{
 	},
 }
 
-func newServerContext(
+func newServer(
+	i *args.Input,
 	network string,
-	configDir string,
-	dataDir string,
-) (*server.Context, error) {
+) (
+	*server.Server,
+	error,
+) {
+	configDir := i.GetParameterOr("config-dir", CLIENT_DEFAULT_CFG)
+	dataDir := i.GetParameterOr("data-dir", CLIENT_DEFAULT_DATA)
 	if err := ensureDirs(configDir, dataDir); err != nil {
 		return nil, err
 	}
-	config := server.NewFsConfig(configDir)
-	store, err := database.Init(network, dataDir, true)
-	if err != nil {
-		return nil, err
+
+	dbOpts := database.Options{
+		Name: network,
+		Dir:  dataDir,
+		WAL:  true,
 	}
-	return server.NewContext(network, config, store)
+	store, err := database.OpenServer(dbOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open network store: %w", err)
+	}
+
+	opts := server.Options{
+		Network: network,
+		Config:  server.NewFsConfig(configDir),
+		Store:   store,
+	}
+	return server.New(opts)
 }
 
 func parseCidr(

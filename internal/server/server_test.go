@@ -77,14 +77,21 @@ var testUser3 = PeerDesc{
 // func TestRenamePeer()
 
 func createBaseNetwork() (
-	*server.Context,
+	*server.Server,
 	error,
 ) {
-	store, err := database.Init(testNetwork.Name, ":memory:", false)
+	store, err := database.OpenServer(database.Options{
+		Name: testNetwork.Name,
+		Dir:  ":memory:",
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to init databse: %w", err)
+		return nil, fmt.Errorf("failed to open databse: %w", err)
 	}
-	ctx, err := server.NewContext(testNetwork.Name, server.NewMemConfig(), store)
+	ctx, err := server.New(server.Options{
+		Network: testNetwork.Name,
+		Config:  server.NewMemConfig(),
+		Store:   store,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to init test server: %v", err)
 	}
@@ -105,7 +112,7 @@ func createBaseNetwork() (
 }
 
 func addNetwork(
-	c *server.Context,
+	c *server.Server,
 	desc NetworkDesc,
 ) error {
 	_, cidr, _ := net.ParseCIDR(desc.Cidr)
@@ -125,7 +132,7 @@ func addNetwork(
 }
 
 func addCidr(
-	c *server.Context,
+	c *server.Server,
 	desc CidrDesc,
 ) error {
 	req := server.CreateCidrRequest{
@@ -139,7 +146,7 @@ func addCidr(
 }
 
 func addPeer(
-	c *server.Context,
+	c *server.Server,
 	desc PeerDesc,
 ) (string, error) {
 	req := server.CreateInviteRequest{
@@ -157,7 +164,7 @@ func addPeer(
 }
 
 func redeemPeer(
-	c *server.Context,
+	c *server.Server,
 	cidr string,
 ) error {
 	// parse ip from cidr
@@ -191,7 +198,7 @@ func redeemPeer(
 }
 
 func addAndRedeemPeer(
-	c *server.Context,
+	c *server.Server,
 	desc PeerDesc,
 ) error {
 	cidr, err := addPeer(c, desc)
@@ -202,7 +209,7 @@ func addAndRedeemPeer(
 }
 
 func expectPeerCount(
-	c *server.Context,
+	c *server.Server,
 	desc PeerDesc,
 	count int,
 ) error {

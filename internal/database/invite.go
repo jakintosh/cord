@@ -9,11 +9,11 @@ import (
 	"git.sr.ht/~jakintosh/cord/internal/utils"
 )
 
-func (store *SQLiteStore) InviteList() (
+func (store *ServerDB) InviteList() (
 	[]*server.ServerInvite,
 	error,
 ) {
-	rows, err := store.db.Query(`
+	rows, err := store.Conn.Query(`
 		SELECT name, public_key, temp_ip, final_ip, admin, redeemed, expiration
 		FROM invite
 		ORDER BY expiration DESC;`,
@@ -35,13 +35,13 @@ func (store *SQLiteStore) InviteList() (
 	return invites, nil
 }
 
-func (store *SQLiteStore) InviteGet(
+func (store *ServerDB) InviteGet(
 	name string,
 ) (
 	*server.ServerInvite,
 	error,
 ) {
-	row := store.db.QueryRow(`
+	row := store.Conn.QueryRow(`
 		SELECT name, public_key, temp_ip, final_ip, admin, redeemed, expiration
 		FROM invite
 		WHERE name = ?1;`,
@@ -53,11 +53,11 @@ func (store *SQLiteStore) InviteGet(
 
 // InviteListActive returns unredeemed, unexpired invites. These are the
 // peers that belong on the invite network interface.
-func (store *SQLiteStore) InviteListActive() (
+func (store *ServerDB) InviteListActive() (
 	[]*server.ServerInvite,
 	error,
 ) {
-	rows, err := store.db.Query(`
+	rows, err := store.Conn.Query(`
 		SELECT name, public_key, temp_ip, final_ip, admin, redeemed, expiration
 		FROM invite
 		WHERE redeemed = 0
@@ -82,7 +82,7 @@ func (store *SQLiteStore) InviteListActive() (
 	return invites, nil
 }
 
-func (store *SQLiteStore) InviteGetByIP(
+func (store *ServerDB) InviteGetByIP(
 	ip net.IP,
 ) (
 	*server.ServerInvite,
@@ -90,7 +90,7 @@ func (store *SQLiteStore) InviteGetByIP(
 ) {
 	// Normalize IPv4 to 4-byte representation
 	ip = utils.NormalizeIP(ip)
-	row := store.db.QueryRow(`
+	row := store.Conn.QueryRow(`
 		SELECT name, public_key, temp_ip, final_ip, admin, redeemed, expiration
 		FROM invite
 		WHERE temp_ip = ?1
@@ -106,14 +106,14 @@ func (store *SQLiteStore) InviteGetByIP(
 // InviteGetByIPAny is like InviteGetByIP but also returns invites that
 // have already been redeemed. Redemption must stay reachable for a
 // redeemed-but-unconfirmed invite so the flow can be retried.
-func (store *SQLiteStore) InviteGetByIPAny(
+func (store *ServerDB) InviteGetByIPAny(
 	ip net.IP,
 ) (
 	*server.ServerInvite,
 	error,
 ) {
 	ip = utils.NormalizeIP(ip)
-	row := store.db.QueryRow(`
+	row := store.Conn.QueryRow(`
 		SELECT name, public_key, temp_ip, final_ip, admin, redeemed, expiration
 		FROM invite
 		WHERE temp_ip = ?1
@@ -125,7 +125,7 @@ func (store *SQLiteStore) InviteGetByIPAny(
 	return scanInvite(row)
 }
 
-func (s *SQLiteStore) InviteCreate(
+func (s *ServerDB) InviteCreate(
 	name string,
 	pubKey string,
 	tempIP net.IP,
@@ -136,7 +136,7 @@ func (s *SQLiteStore) InviteCreate(
 	// normalize IPs
 	tempIP = utils.NormalizeIP(tempIP)
 	finalIP = utils.NormalizeIP(finalIP)
-	_, err := s.db.Exec(`
+	_, err := s.Conn.Exec(`
 		INSERT INTO invite (name, public_key, temp_ip, final_ip, admin, redeemed, expiration)
 		VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6);`,
 		name,
@@ -151,10 +151,10 @@ func (s *SQLiteStore) InviteCreate(
 
 // InvitesPruneExpired removes invite records whose expiration has
 // passed, freeing their reserved invite-network addresses.
-func (s *SQLiteStore) InvitesPruneExpired(
+func (s *ServerDB) InvitesPruneExpired(
 	before int64,
 ) error {
-	_, err := s.db.Exec(`
+	_, err := s.Conn.Exec(`
 		DELETE FROM invite
 		WHERE expiration < ?1;`,
 		before,
@@ -162,13 +162,13 @@ func (s *SQLiteStore) InvitesPruneExpired(
 	return CheckSqliteErr("pruning expired invites", err)
 }
 
-func (s *SQLiteStore) InviteRedeem(
+func (s *ServerDB) InviteRedeem(
 	pubKey string,
 	newKey string,
 ) error {
 
 	// Create a peer from an unredeemed invite and mark invite redeemed.
-	tx, err := s.db.Begin()
+	tx, err := s.Conn.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin redeem tx: %w", err)
 	}

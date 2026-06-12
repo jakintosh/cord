@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net"
 )
 
@@ -42,23 +43,34 @@ type ServerStore interface {
 	PeerUpdate(name string, req UpdatePeerRequest) (*Peer, error)
 }
 
-type Context struct {
-	Name   string
-	Config Config
-	Store  ServerStore
+// Server is the cord network service: domain operations over the
+// network's config store and state store, both injected at
+// construction.
+type Server struct {
+	Network string
+	Config  Config
+	Store   ServerStore
 }
 
-func NewContext(
-	network string,
-	config Config,
-	store ServerStore,
-) (*Context, error) {
+// Options configures a Server. The stores are built by the caller (the
+// composition root) and passed in ready for use.
+type Options struct {
+	Network string
+	Config  Config
+	Store   ServerStore
+}
 
-	ctx := &Context{
-		Name:   network,
-		Config: config,
-		Store:  store,
+// New prepares a server for a network.
+func New(opts Options) (*Server, error) {
+	if opts.Config == nil {
+		return nil, fmt.Errorf("server requires a config store")
 	}
-
-	return ctx, nil
+	if opts.Store == nil {
+		return nil, fmt.Errorf("server requires a network store")
+	}
+	return &Server{
+		Network: opts.Network,
+		Config:  opts.Config,
+		Store:   opts.Store,
+	}, nil
 }

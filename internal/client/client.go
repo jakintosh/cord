@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net"
 	"os"
@@ -21,26 +20,37 @@ const (
 	handshakeFresh = 3 * time.Minute
 )
 
-// Context bundles the identity and storage locations for one network.
-type Context struct {
-	Name      string
+// Client manages one network on this machine: its identity, its
+// WireGuard interface, and its local peer cache.
+type Client struct {
+	Network   string
 	ConfigDir string
 	DataDir   string
 	Backend   wg.BackendType
+
+	store PeerStore
 }
 
-// NewContext prepares a client context for a network. The name may be
-// empty for install, which learns it from the invite file.
-func NewContext(
-	networkName string,
-	configDir string,
-	dataDir string,
-) (*Context, error) {
-	return &Context{
-		Name:      networkName,
-		ConfigDir: configDir,
-		DataDir:   dataDir,
+// Options configures a Client. The store is built by the caller (the
+// composition root) and passed in ready for use.
+type Options struct {
+	Network   string
+	ConfigDir string
+	DataDir   string
+	Store     PeerStore
+}
+
+// New prepares a client for a network.
+func New(opts Options) (*Client, error) {
+	if opts.Store == nil {
+		return nil, fmt.Errorf("client requires a peer store")
+	}
+	return &Client{
+		Network:   opts.Network,
+		ConfigDir: opts.ConfigDir,
+		DataDir:   opts.DataDir,
 		Backend:   wg.BackendAuto,
+		store:     opts.Store,
 	}, nil
 }
 
@@ -49,33 +59,18 @@ func NewContext(
 // presence on the main network, then tear everything down. The
 // permanent keypair is persisted before redemption so the flow can be
 // retried safely.
-func (ctx *Context) Install(
-	invitePath string,
+func (c *Client) Install(
+	invite *server.PeerInvite,
 ) error {
-	// parse the invite file
-	file, err := os.Open(invitePath)
-	if err != nil {
-		return fmt.Errorf("failed to open invite: %w", err)
-	}
-	invite, err := server.ReadPeerInvite(file)
-	file.Close()
-	if err != nil {
-		return err
-	}
-	if invite.Interface.NetworkName == "" {
-		return fmt.Errorf("invite has no network name")
-	}
-	ctx.Name = invite.Interface.NetworkName
-
 	// load or create the permanent identity; persisting it first
 	// makes redemption retryable
-	cfg, err := ctx.installIdentity()
+	cfg, err := c.installIdentity()
 	if err != nil {
 		return err
 	}
 
 	// stand up the temporary invite interface
-	inviteIface, err := ctx.buildInviteInterface(invite)
+	inviteIface, err := c.buildInviteInterface(invite)
 	if err != nil {
 		return err
 	}
@@ -95,13 +90,13 @@ func (ctx *Context) Install(
 	// persist the permanent network assignment
 	cfg.AssignedCidr = result.AssignedCidr
 	cfg.Server = result.Server
-	if err := ctx.SaveConfig(cfg); err != nil {
+	if err := c.SaveConfig(cfg); err != nil {
 		return err
 	}
 	fmt.Printf("redeemed: assigned %s\n", cfg.AssignedCidr)
 
 	// stand up the main interface and confirm presence
-	mainIface, err := ctx.buildMainInterface(cfg, nil)
+	mainIface, err := c.buildMainInterface(cfg, nil)
 	if err != nil {
 		return err
 	}
@@ -116,14 +111,9 @@ func (ctx *Context) Install(
 	}
 	fmt.Println("confirmed on main network")
 
-	// seed the local peer database
-	d, err := ctx.openDb()
-	if err != nil {
-		return err
-	}
-	defer d.Close()
+	// seed the local peer cache
 	if peers, err := mainApi.peers(); err == nil {
-		if err := reconcilePeers(d, peers); err != nil {
+		if err := c.store.ReconcilePeers(peers); err != nil {
 			return err
 		}
 		fmt.Printf("fetched %d peer(s)\n", len(peers))
@@ -131,15 +121,18 @@ func (ctx *Context) Install(
 		fmt.Printf("warning: initial peer fetch failed: %v\n", err)
 	}
 
-	fmt.Printf("installed network '%s'; run 'cord up %s' to connect\n", ctx.Name, ctx.Name)
+	fmt.Printf("installed network '%s'; run 'cord client up %s' to connect\n", c.Network, c.Network)
 	return nil
 }
 
 // installIdentity loads the persisted keypair for this network or
 // generates and persists a fresh one.
-func (ctx *Context) installIdentity() (*ClientConfig, error) {
-	if ctx.HasConfig() {
-		cfg, err := ctx.LoadConfig()
+func (c *Client) installIdentity() (
+	*ClientConfig,
+	error,
+) {
+	if c.HasConfig() {
+		cfg, err := c.LoadConfig()
 		if err != nil {
 			return nil, err
 		}
@@ -153,46 +146,41 @@ func (ctx *Context) installIdentity() (*ClientConfig, error) {
 	}
 
 	cfg := &ClientConfig{
-		NetworkName: ctx.Name,
+		NetworkName: c.Network,
 		PrivateKey:  key.String(),
 		PublicKey:   key.PublicKey().String(),
 	}
-	if err := ctx.SaveConfig(cfg); err != nil {
+	if err := c.SaveConfig(cfg); err != nil {
 		return nil, err
 	}
 	return cfg, nil
 }
 
 // Uninstall removes all local state for a network: interface, config,
-// and database. Idempotent.
-func (ctx *Context) Uninstall() error {
+// and peer cache. Idempotent.
+func (c *Client) Uninstall() error {
 	// best effort: tear down a lingering interface (kernel backend)
-	if err := ctx.Down(); err != nil {
+	if err := c.Down(); err != nil {
 		fmt.Printf("warning: could not bring interface down: %v\n", err)
 	}
 
-	if err := ctx.DeleteConfig(); err != nil {
+	if err := c.DeleteConfig(); err != nil {
 		return err
 	}
-	if err := ctx.deleteDb(); err != nil {
+	if err := c.store.Delete(); err != nil {
 		return err
 	}
-	if err := os.Remove(ctx.confPath()); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(c.confPath()); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete wg config: %w", err)
 	}
 
-	fmt.Printf("uninstalled network '%s'\n", ctx.Name)
+	fmt.Printf("uninstalled network '%s'\n", c.Network)
 	return nil
 }
 
-// Show prints the local state for one network or, with no network
-// selected, lists the installed networks.
-func (ctx *Context) Show() error {
-	if ctx.Name == "" {
-		return ctx.showInstalled()
-	}
-
-	cfg, err := ctx.LoadConfig()
+// Show prints the local state for this network.
+func (c *Client) Show() error {
+	cfg, err := c.LoadConfig()
 	if err != nil {
 		return err
 	}
@@ -202,13 +190,7 @@ func (ctx *Context) Show() error {
 	fmt.Printf("pubkey:   %s\n", cfg.PublicKey)
 	fmt.Printf("server:   %s (api %s)\n", cfg.Server.ExternalEndpoint, cfg.Server.InternalEndpoint)
 
-	d, err := ctx.openDb()
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-
-	peers, err := listLocalPeers(d)
+	peers, err := c.store.ListPeers()
 	if err != nil {
 		return err
 	}
@@ -224,50 +206,20 @@ func (ctx *Context) Show() error {
 	return nil
 }
 
-func (ctx *Context) showInstalled() error {
-	entries, err := os.ReadDir(ctx.ConfigDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("no networks installed")
-			return nil
-		}
-		return fmt.Errorf("failed to read config dir: %w", err)
-	}
-
-	found := false
-	for _, entry := range entries {
-		name := entry.Name()
-		if path.Ext(name) == ".toml" {
-			fmt.Println(name[:len(name)-len(".toml")])
-			found = true
-		}
-	}
-	if !found {
-		fmt.Println("no networks installed")
-	}
-	return nil
-}
-
-// Fetch updates the local peer database from the server. It requires
-// the network to be reachable (interface up in another process, or the
+// Fetch updates the local peer cache from the server. It requires the
+// network to be reachable (interface up in another process, or the
 // server's API otherwise routable).
-func (ctx *Context) Fetch() error {
-	cfg, err := ctx.LoadConfig()
+func (c *Client) Fetch() error {
+	cfg, err := c.LoadConfig()
 	if err != nil {
 		return err
 	}
-
-	d, err := ctx.openDb()
-	if err != nil {
-		return err
-	}
-	defer d.Close()
 
 	peers, err := newApiClient(cfg.Server.InternalEndpoint).peers()
 	if err != nil {
 		return fmt.Errorf("failed to fetch peers: %w", err)
 	}
-	if err := reconcilePeers(d, peers); err != nil {
+	if err := c.store.ReconcilePeers(peers); err != nil {
 		return err
 	}
 
@@ -278,30 +230,24 @@ func (ctx *Context) Fetch() error {
 // Up connects to the network and stays in the foreground: it keeps the
 // local peer set in sync with the server and reports endpoint changes
 // it witnesses (endpoint gossip) until interrupted.
-func (ctx *Context) Up(noFetch bool) error {
-	cfg, err := ctx.LoadConfig()
+func (c *Client) Up(noFetch bool) error {
+	cfg, err := c.LoadConfig()
 	if err != nil {
 		return err
 	}
-
-	d, err := ctx.openDb()
-	if err != nil {
-		return err
-	}
-	defer d.Close()
 
 	apiClient := newApiClient(cfg.Server.InternalEndpoint)
 
-	peers, err := listLocalPeers(d)
+	peers, err := c.store.ListPeers()
 	if err != nil {
 		return err
 	}
 
-	iface, err := ctx.buildMainInterface(cfg, peers)
+	iface, err := c.buildMainInterface(cfg, peers)
 	if err != nil {
 		return err
 	}
-	if err := iface.Up(ctx.confPath()); err != nil {
+	if err := iface.Up(c.confPath()); err != nil {
 		return fmt.Errorf("failed to bring up interface: %w", err)
 	}
 	defer func() { _ = iface.Down(true) }()
@@ -309,7 +255,7 @@ func (ctx *Context) Up(noFetch bool) error {
 
 	// initial fetch now that the network is reachable
 	if !noFetch {
-		if err := ctx.syncOnce(cfg, d, apiClient, iface); err != nil {
+		if err := c.syncOnce(cfg, apiClient, iface); err != nil {
 			fmt.Printf("warning: sync failed: %v\n", err)
 		}
 	}
@@ -327,24 +273,40 @@ func (ctx *Context) Up(noFetch bool) error {
 			fmt.Println("\ndisconnecting")
 			return nil
 		case <-ticker.C:
-			if err := ctx.syncOnce(cfg, d, apiClient, iface); err != nil {
+			if err := c.syncOnce(cfg, apiClient, iface); err != nil {
 				fmt.Printf("warning: sync failed: %v\n", err)
 			}
 		}
 	}
 }
 
+// Down tears down the network interface. On Linux this removes a
+// kernel WireGuard device left by another process; with the userspace
+// backend the interface lives and dies with its 'cord client up'
+// process.
+func (c *Client) Down() error {
+	cfg, err := c.LoadConfig()
+	if err != nil {
+		return err
+	}
+
+	iface, err := c.buildMainInterface(cfg, nil)
+	if err != nil {
+		return err
+	}
+	return iface.Down(true)
+}
+
 // syncOnce performs one round of the state synchronization flow:
 // report witnessed endpoint changes, refresh the peer list, and apply
 // any changes to the live interface.
-func (ctx *Context) syncOnce(
+func (c *Client) syncOnce(
 	cfg *ClientConfig,
-	d *sql.DB,
 	apiClient *apiClient,
 	iface *wg.Interface,
 ) error {
-	// gossip: compare live endpoints against the local database
-	if sightings := ctx.scanEndpoints(d, iface); len(sightings) > 0 {
+	// gossip: compare live endpoints against the local peer cache
+	if sightings := c.scanEndpoints(iface); len(sightings) > 0 {
 		if err := apiClient.reportEndpoints(sightings); err != nil {
 			fmt.Printf("warning: endpoint report failed: %v\n", err)
 		}
@@ -355,16 +317,16 @@ func (ctx *Context) syncOnce(
 	if err != nil {
 		return err
 	}
-	if err := reconcilePeers(d, peers); err != nil {
+	if err := c.store.ReconcilePeers(peers); err != nil {
 		return err
 	}
 
 	// rebuild and apply the interface peer list
-	localPeers, err := listLocalPeers(d)
+	localPeers, err := c.store.ListPeers()
 	if err != nil {
 		return err
 	}
-	wgPeers, err := ctx.buildPeers(cfg, localPeers)
+	wgPeers, err := c.buildPeers(cfg, localPeers)
 	if err != nil {
 		return err
 	}
@@ -375,8 +337,7 @@ func (ctx *Context) syncOnce(
 // scanEndpoints inspects the live device for peers whose endpoint
 // changed since we last saw them, records the changes locally, and
 // returns sightings to report to the server.
-func (ctx *Context) scanEndpoints(
-	d *sql.DB,
+func (c *Client) scanEndpoints(
 	iface *wg.Interface,
 ) []server.EndpointSighting {
 	status, err := iface.Status()
@@ -384,7 +345,7 @@ func (ctx *Context) scanEndpoints(
 		return nil
 	}
 
-	known, err := listLocalPeers(d)
+	known, err := c.store.ListPeers()
 	if err != nil {
 		return nil
 	}
@@ -411,7 +372,7 @@ func (ctx *Context) scanEndpoints(
 		}
 
 		endpoint := peerStatus.Endpoint.String()
-		if err := updateLocalEndpoint(d, key, endpoint, now.Unix()); err != nil {
+		if err := c.store.UpdateEndpoint(key, endpoint, now.Unix()); err != nil {
 			continue
 		}
 		sightings = append(sightings, server.EndpointSighting{
@@ -424,30 +385,14 @@ func (ctx *Context) scanEndpoints(
 	return sightings
 }
 
-// Down tears down the network interface. On Linux this removes a
-// kernel WireGuard device left by another process; with the userspace
-// backend the interface lives and dies with its 'cord up' process.
-func (ctx *Context) Down() error {
-	cfg, err := ctx.LoadConfig()
-	if err != nil {
-		return err
-	}
-
-	iface, err := ctx.buildMainInterface(cfg, nil)
-	if err != nil {
-		return err
-	}
-	return iface.Down(true)
-}
-
-func (ctx *Context) confPath() string {
-	return path.Join(ctx.DataDir, ctx.Name+".conf")
+func (c *Client) confPath() string {
+	return path.Join(c.DataDir, c.Network+".conf")
 }
 
 // buildInviteInterface constructs the temporary interface described by
 // an invite: the server is the only peer, reachable at its public
 // invite endpoint.
-func (ctx *Context) buildInviteInterface(
+func (c *Client) buildInviteInterface(
 	invite *server.PeerInvite,
 ) (
 	*wg.Interface,
@@ -464,11 +409,11 @@ func (ctx *Context) buildInviteInterface(
 	}
 
 	iface, err := wg.NewInterface(
-		ctx.Name+"-invite",
+		c.Network+"-invite",
 		tempKey,
 		net.IPNet{IP: ip, Mask: inviteNet.Mask},
 		0,
-		ctx.Backend,
+		c.Backend,
 	)
 	if err != nil {
 		return nil, err
@@ -488,8 +433,8 @@ func (ctx *Context) buildInviteInterface(
 }
 
 // buildMainInterface constructs the permanent interface from the
-// client config and the local peer database.
-func (ctx *Context) buildMainInterface(
+// client config and the local peer cache.
+func (c *Client) buildMainInterface(
 	cfg *ClientConfig,
 	peers []LocalPeer,
 ) (
@@ -506,12 +451,12 @@ func (ctx *Context) buildMainInterface(
 		return nil, err
 	}
 
-	iface, err := wg.NewInterface(ctx.Name, privKey, *address, 0, ctx.Backend)
+	iface, err := wg.NewInterface(c.Network, privKey, *address, 0, c.Backend)
 	if err != nil {
 		return nil, err
 	}
 
-	wgPeers, err := ctx.buildPeers(cfg, peers)
+	wgPeers, err := c.buildPeers(cfg, peers)
 	if err != nil {
 		return nil, err
 	}
@@ -524,7 +469,7 @@ func (ctx *Context) buildMainInterface(
 // WireGuard peers. The server's allowed IPs cover the whole network so
 // it can relay until direct peer connections are established; peers'
 // narrower allowed IPs take precedence via longest-prefix match.
-func (ctx *Context) buildPeers(
+func (c *Client) buildPeers(
 	cfg *ClientConfig,
 	peers []LocalPeer,
 ) (
@@ -576,6 +521,58 @@ func (ctx *Context) buildPeers(
 	}
 
 	return wgPeers, nil
+}
+
+// LoadInvite reads and validates a peer invite file. Callers use the
+// invite's network name to construct the Client (and its store) before
+// running Install.
+func LoadInvite(
+	invitePath string,
+) (
+	*server.PeerInvite,
+	error,
+) {
+	file, err := os.Open(invitePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open invite: %w", err)
+	}
+	defer file.Close()
+
+	invite, err := server.ReadPeerInvite(file)
+	if err != nil {
+		return nil, err
+	}
+	if invite.Interface.NetworkName == "" {
+		return nil, fmt.Errorf("invite has no network name")
+	}
+	return invite, nil
+}
+
+// ShowInstalled lists the networks installed under a config directory.
+func ShowInstalled(
+	configDir string,
+) error {
+	entries, err := os.ReadDir(configDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("no networks installed")
+			return nil
+		}
+		return fmt.Errorf("failed to read config dir: %w", err)
+	}
+
+	found := false
+	for _, entry := range entries {
+		name := entry.Name()
+		if path.Ext(name) == ".toml" {
+			fmt.Println(name[:len(name)-len(".toml")])
+			found = true
+		}
+	}
+	if !found {
+		fmt.Println("no networks installed")
+	}
+	return nil
 }
 
 func buildServerPeer(

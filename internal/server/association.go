@@ -5,23 +5,23 @@ type Association struct {
 	Cidr2 string `json:"cidr2"`
 }
 
-func (ctx *Context) ListAssociations() (
+func (srv *Server) ListAssociations() (
 	[]*Association,
 	error,
 ) {
-	return ctx.Store.AssociationList()
+	return srv.Store.AssociationList()
 }
 
-func (ctx *Context) CreateAssociation(
+func (srv *Server) CreateAssociation(
 	cidr1 string,
 	cidr2 string,
 ) error {
-	return ctx.Store.AssociationCreate(cidr1, cidr2)
+	return srv.Store.AssociationCreate(cidr1, cidr2)
 }
 
-func (ctx *Context) DeleteAssociation(
+func (srv *Server) DeleteAssociation(
 	cidr1 string,
 	cidr2 string,
 ) error {
-	return ctx.Store.AssociationDelete(cidr1, cidr2)
+	return srv.Store.AssociationDelete(cidr1, cidr2)
 }

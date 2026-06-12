@@ -51,7 +51,7 @@ func withTestRemoteAddr(next http.Handler) http.Handler {
 
 // TestEnv is one fully wired in-memory cord network.
 type TestEnv struct {
-	Service      *server.Context
+	Service      *server.Server
 	Router       http.Handler
 	InviteRouter http.Handler
 	Mutations    int
@@ -64,12 +64,20 @@ func SetupTestEnv(
 ) *TestEnv {
 	t.Helper()
 
-	store, err := database.Init(NetworkName, ":memory:", false)
+	store, err := database.OpenServer(database.Options{
+		Name: NetworkName,
+		Dir:  ":memory:",
+	})
 	if err != nil {
 		t.Fatalf("open test store: %v", err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 
-	service, err := server.NewContext(NetworkName, server.NewMemConfig(), store)
+	service, err := server.New(server.Options{
+		Network: NetworkName,
+		Config:  server.NewMemConfig(),
+		Store:   store,
+	})
 	if err != nil {
 		t.Fatalf("create service: %v", err)
 	}

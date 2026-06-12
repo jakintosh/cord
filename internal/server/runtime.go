@@ -21,7 +21,7 @@ const (
 // Runtime owns the live state of a serving cord network: the main and
 // invite WireGuard interfaces and the listeners for the HTTP API.
 type Runtime struct {
-	Ctx    *Context
+	Srv    *Server
 	Cfg    *NetworkConfig
 	Notify chan struct{} // poke to trigger an immediate peer sync
 
@@ -32,7 +32,7 @@ type Runtime struct {
 // NewRuntime loads the network config and prepares (but does not bring
 // up) both WireGuard interfaces.
 func NewRuntime(
-	ctx *Context,
+	srv *Server,
 	noRouting bool,
 	mtu int,
 	backend wg.BackendType,
@@ -40,7 +40,7 @@ func NewRuntime(
 	*Runtime,
 	error,
 ) {
-	cfg, err := ctx.LoadConfig()
+	cfg, err := srv.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func NewRuntime(
 	}
 
 	main, err := wg.NewInterface(
-		ctx.Name,
+		srv.Network,
 		privKey,
 		net.IPNet{IP: serverIP, Mask: rootNet.Mask},
 		int(cfg.ListenPort),
@@ -82,7 +82,7 @@ func NewRuntime(
 	main.NoRoutes = noRouting
 
 	invite, err := wg.NewInterface(
-		ctx.Name+"-invite",
+		srv.Network+"-invite",
 		privKey,
 		net.IPNet{IP: inviteIP, Mask: inviteNet.Mask},
 		int(cfg.InviteListenPort),
@@ -95,7 +95,7 @@ func NewRuntime(
 	invite.NoRoutes = noRouting
 
 	return &Runtime{
-		Ctx:    ctx,
+		Srv:    srv,
 		Cfg:    cfg,
 		Notify: make(chan struct{}, 1),
 		main:   main,
@@ -139,7 +139,7 @@ func (r *Runtime) SyncPeers() error {
 // mainPeers converts confirmed, enabled peers into WireGuard peers for
 // the main interface. The server's own record is excluded.
 func (r *Runtime) mainPeers() ([]wg.Peer, error) {
-	peers, err := r.Ctx.Store.PeerList()
+	peers, err := r.Srv.Store.PeerList()
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func (r *Runtime) mainPeers() ([]wg.Peer, error) {
 // invitePeers converts active invites into WireGuard peers for the
 // invite interface.
 func (r *Runtime) invitePeers() ([]wg.Peer, error) {
-	invites, err := r.Ctx.Store.InviteListActive()
+	invites, err := r.Srv.Store.InviteListActive()
 	if err != nil {
 		return nil, err
 	}
@@ -278,10 +278,10 @@ func (r *Runtime) Run(
 // maintain prunes expired invites and stale endpoint sightings.
 func (r *Runtime) maintain() {
 	now := time.Now()
-	if err := r.Ctx.Store.InvitesPruneExpired(now.Unix()); err != nil {
+	if err := r.Srv.Store.InvitesPruneExpired(now.Unix()); err != nil {
 		log.Printf("invite pruning failed: %v", err)
 	}
-	if err := r.Ctx.Store.EndpointsPrune(now.Add(-endpointTTL).Unix()); err != nil {
+	if err := r.Srv.Store.EndpointsPrune(now.Add(-endpointTTL).Unix()); err != nil {
 		log.Printf("endpoint pruning failed: %v", err)
 	}
 }

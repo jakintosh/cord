@@ -5,11 +5,11 @@ import (
 	"git.sr.ht/~jakintosh/cord/internal/server"
 )
 
-func (store *SQLiteStore) AssociationList() (
+func (store *ServerDB) AssociationList() (
 	[]*server.Association,
 	error,
 ) {
-	rows, err := store.db.Query(`
+	rows, err := store.Conn.Query(`
 		SELECT c1.name, c2.name
 		FROM association a
 		JOIN cidr c1 ON c1.id = a.cidr1
@@ -37,11 +37,11 @@ func (store *SQLiteStore) AssociationList() (
 	return associations, nil
 }
 
-func (store *SQLiteStore) AssociationCreate(
+func (store *ServerDB) AssociationCreate(
 	a string,
 	b string,
 ) error {
-	result, err := store.db.Exec(`
+	result, err := store.Conn.Exec(`
 		INSERT INTO association (cidr1, cidr2)
 		SELECT
 			MIN(c1.id, c2.id),
@@ -64,11 +64,11 @@ func (store *SQLiteStore) AssociationCreate(
 	return nil
 }
 
-func (store *SQLiteStore) AssociationDelete(
+func (store *ServerDB) AssociationDelete(
 	a string,
 	b string,
 ) error {
-	_, err := store.db.Exec(`
+	_, err := store.Conn.Exec(`
 		DELETE FROM association
 		WHERE id in (
 			SELECT a.id

@@ -42,19 +42,19 @@ func (cfg *ClientConfig) Address() (*net.IPNet, error) {
 	return &net.IPNet{IP: ip, Mask: network.Mask}, nil
 }
 
-func (ctx *Context) configPath() string {
-	return path.Join(ctx.ConfigDir, ctx.Name+".toml")
+func (c *Client) configPath() string {
+	return path.Join(c.ConfigDir, c.Network+".toml")
 }
 
 // HasConfig reports whether a client config exists for this network.
-func (ctx *Context) HasConfig() bool {
-	_, err := os.Stat(ctx.configPath())
+func (c *Client) HasConfig() bool {
+	_, err := os.Stat(c.configPath())
 	return err == nil
 }
 
 // SaveConfig writes the client config with key-file permissions.
-func (ctx *Context) SaveConfig(cfg *ClientConfig) error {
-	if err := os.MkdirAll(ctx.ConfigDir, 0755); err != nil {
+func (c *Client) SaveConfig(cfg *ClientConfig) error {
+	if err := os.MkdirAll(c.ConfigDir, 0755); err != nil {
 		return fmt.Errorf("failed to create config dir: %w", err)
 	}
 
@@ -64,19 +64,19 @@ func (ctx *Context) SaveConfig(cfg *ClientConfig) error {
 	}
 
 	// the config holds the private key: owner read/write only
-	if err := os.WriteFile(ctx.configPath(), payload.Bytes(), 0600); err != nil {
+	if err := os.WriteFile(c.configPath(), payload.Bytes(), 0600); err != nil {
 		return fmt.Errorf("failed to write client config: %w", err)
 	}
 	return nil
 }
 
 // LoadConfig reads the client config for this network.
-func (ctx *Context) LoadConfig() (*ClientConfig, error) {
-	payload, err := os.ReadFile(ctx.configPath())
+func (c *Client) LoadConfig() (*ClientConfig, error) {
+	payload, err := os.ReadFile(c.configPath())
 	if err != nil {
 		return nil, fmt.Errorf(
 			"no installed network '%s' (missing %s): %w",
-			ctx.Name, ctx.configPath(), err,
+			c.Network, c.configPath(), err,
 		)
 	}
 
@@ -88,8 +88,8 @@ func (ctx *Context) LoadConfig() (*ClientConfig, error) {
 }
 
 // DeleteConfig removes the client config; missing files are fine.
-func (ctx *Context) DeleteConfig() error {
-	err := os.Remove(ctx.configPath())
+func (c *Client) DeleteConfig() error {
+	err := os.Remove(c.configPath())
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete client config: %w", err)
 	}

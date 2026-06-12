@@ -74,25 +74,25 @@ type RedeemResult struct {
 	Server       ServerInfo `json:"server"`
 }
 
-func (ctx *Context) GetInviteByIP(
+func (srv *Server) GetInviteByIP(
 	ip net.IP,
 ) (
 	*ServerInvite,
 	error,
 ) {
-	return ctx.Store.InviteGetByIPAny(ip)
+	return srv.Store.InviteGetByIPAny(ip)
 }
 
 // CreateInvite reserves the requested main-network IP for a new peer,
 // assigns it a temporary identity on the invite network, and returns
 // the invite payload to deliver out-of-band.
-func (ctx *Context) CreateInvite(
+func (srv *Server) CreateInvite(
 	req CreateInviteRequest,
 ) (
 	*PeerInvite,
 	error,
 ) {
-	cfg, err := ctx.LoadConfig()
+	cfg, err := srv.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func (ctx *Context) CreateInvite(
 		return nil, err
 	}
 
-	tempIP, err := ctx.nextInviteIP(inviteNet)
+	tempIP, err := srv.nextInviteIP(inviteNet)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (ctx *Context) CreateInvite(
 		req.Expiration = time.Now().Add(24 * time.Hour)
 	}
 
-	err = ctx.Store.InviteCreate(
+	err = srv.Store.InviteCreate(
 		req.Name,
 		tempPrivKey.PublicKey().String(),
 		tempIP,
@@ -136,7 +136,7 @@ func (ctx *Context) CreateInvite(
 	}
 
 	invite := &PeerInvite{}
-	invite.Interface.NetworkName = ctx.Name
+	invite.Interface.NetworkName = srv.Network
 	invite.Interface.PrivateKey = tempPrivKey.String()
 	invite.Interface.AssignedCidr = fmt.Sprintf("%s/%d", tempIP.String(), prefix)
 	invite.Server.PublicKey = cfg.PublicKey
@@ -149,13 +149,13 @@ func (ctx *Context) CreateInvite(
 // nextInviteIP finds the lowest free address on the invite network,
 // skipping the network address, the server's own invite address, and
 // addresses held by existing invite records.
-func (ctx *Context) nextInviteIP(
+func (srv *Server) nextInviteIP(
 	inviteNet *net.IPNet,
 ) (
 	net.IP,
 	error,
 ) {
-	invites, err := ctx.Store.InviteList()
+	invites, err := srv.Store.InviteList()
 	if err != nil {
 		return nil, err
 	}
@@ -186,39 +186,39 @@ func (ctx *Context) nextInviteIP(
 // RedeemInvite trades an invite's temporary key for a permanent peer
 // registration. Idempotent: redeeming an already-redeemed invite with
 // the same permanent key returns the same result.
-func (ctx *Context) RedeemInvite(
+func (srv *Server) RedeemInvite(
 	invite *ServerInvite,
 	permKey string,
 ) (
 	*RedeemResult,
 	error,
 ) {
-	if err := ctx.Store.InviteRedeem(invite.PublicKey, permKey); err != nil {
+	if err := srv.Store.InviteRedeem(invite.PublicKey, permKey); err != nil {
 		// the invite may already be redeemed with this same key; if
 		// so, return the same configuration again so the client can
 		// retry a flow the network interrupted
-		peer, lookupErr := ctx.Store.PeerGetByKey(permKey)
+		peer, lookupErr := srv.Store.PeerGetByKey(permKey)
 		if lookupErr == nil && !peer.Confirmed && peer.Name == invite.Name {
-			return ctx.redeemResultForPeer(peer)
+			return srv.redeemResultForPeer(peer)
 		}
 		return nil, err
 	}
 
-	peer, err := ctx.Store.PeerGetByKey(permKey)
+	peer, err := srv.Store.PeerGetByKey(permKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load redeemed peer: %w", err)
 	}
 
-	return ctx.redeemResultForPeer(peer)
+	return srv.redeemResultForPeer(peer)
 }
 
-func (ctx *Context) redeemResultForPeer(
+func (srv *Server) redeemResultForPeer(
 	peer *Peer,
 ) (
 	*RedeemResult,
 	error,
 ) {
-	cfg, err := ctx.LoadConfig()
+	cfg, err := srv.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +240,7 @@ func (ctx *Context) redeemResultForPeer(
 
 	prefix, _ := rootNet.Mask.Size()
 	result := &RedeemResult{
-		NetworkName:  ctx.Name,
+		NetworkName:  srv.Network,
 		AssignedCidr: fmt.Sprintf("%s/%d", peerIP.String(), prefix),
 	}
 	result.Server.PublicKey = cfg.PublicKey

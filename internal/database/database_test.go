@@ -141,19 +141,23 @@ var (
 )
 
 // setupTestDB creates a new in-memory SQLite database for testing
-func setupTestDB(t *testing.T) *database.SQLiteStore {
+func setupTestDB(t *testing.T) *database.ServerDB {
 	t.Helper()
-	store, err := database.Init("test-network", ":memory:", false)
+	store, err := database.OpenServer(database.Options{
+		Name: "test-network",
+		Dir:  ":memory:",
+	})
 	if err != nil {
-		t.Fatalf("failed to init test database: %v", err)
+		t.Fatalf("failed to open test database: %v", err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	return store
 }
 
 // createInvite creates an invite from a TestInviteDesc
 func createInvite(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	desc TestInviteDesc,
 ) error {
 	t.Helper()
@@ -170,7 +174,7 @@ func createInvite(
 // createInvites creates multiple invites from TestInviteDesc slice
 func createInvites(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	descs []TestInviteDesc,
 ) error {
 	t.Helper()
@@ -185,7 +189,7 @@ func createInvites(
 // assertInviteExists verifies that an invite exists and matches expected values
 func assertInviteExists(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	desc TestInviteDesc,
 ) {
 	t.Helper()
@@ -211,7 +215,7 @@ func assertInviteExists(
 // assertInviteNotExists verifies that an invite does not exist
 func assertInviteNotExists(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	name string,
 ) {
 	t.Helper()
@@ -224,7 +228,7 @@ func assertInviteNotExists(
 // assertInviteRedeemed verifies that an invite is marked as redeemed
 func assertInviteRedeemed(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	name string,
 ) {
 	t.Helper()
@@ -240,7 +244,7 @@ func assertInviteRedeemed(
 // assertInviteNotRedeemed verifies that an invite is not marked as redeemed
 func assertInviteNotRedeemed(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	name string,
 ) {
 	t.Helper()
@@ -256,7 +260,7 @@ func assertInviteNotRedeemed(
 // assertInviteCount verifies the total number of invites
 func assertInviteCount(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	expectedCount int,
 ) {
 	t.Helper()
@@ -272,7 +276,7 @@ func assertInviteCount(
 // assertPeerExists verifies that a peer was created with expected values
 func assertPeerExists(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	name, pubKey string,
 	admin bool,
 	confirmed bool,
@@ -328,7 +332,7 @@ func expectNoError(
 // and confirming the resulting peer, mirroring the full join flow
 func createPeerFromInvite(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	inviteDesc TestInviteDesc,
 	newPubKey string,
 ) error {
@@ -371,7 +375,7 @@ func peerDescToInviteDesc(desc TestPeerDesc) TestInviteDesc {
 // createPeersFromInvites creates multiple peers by redeeming invites
 func createPeersFromInvites(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	descs []TestPeerDesc,
 ) error {
 	t.Helper()
@@ -387,7 +391,7 @@ func createPeersFromInvites(
 // assertPeerCount verifies the total number of peers
 func assertPeerCount(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	expectedCount int,
 ) {
 	t.Helper()
@@ -403,7 +407,7 @@ func assertPeerCount(
 // assertPeerNotExists verifies that a peer does not exist
 func assertPeerNotExists(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	name string,
 ) {
 	t.Helper()
@@ -415,7 +419,7 @@ func assertPeerNotExists(
 // createCidr creates a CIDR from a TestCidrDesc
 func createCidr(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	desc TestCidrDesc,
 ) error {
 	t.Helper()
@@ -429,7 +433,7 @@ func createCidr(
 // createRootCidr creates a root CIDR from a TestCidrDesc
 func createRootCidr(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	desc TestCidrDesc,
 ) error {
 	t.Helper()
@@ -443,7 +447,7 @@ func createRootCidr(
 // createCidrs creates multiple CIDRs from TestCidrDesc slice
 func createCidrs(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	descs []TestCidrDesc,
 ) error {
 	t.Helper()
@@ -458,7 +462,7 @@ func createCidrs(
 // assertCidrExists verifies that a CIDR exists and matches expected values
 func assertCidrExists(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	desc TestCidrDesc,
 ) {
 	t.Helper()
@@ -484,7 +488,7 @@ func assertCidrExists(
 // assertCidrNotExists verifies that a CIDR does not exist
 func assertCidrNotExists(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	name string,
 ) {
 	t.Helper()
@@ -497,7 +501,7 @@ func assertCidrNotExists(
 // assertCidrCount verifies the total number of CIDRs
 func assertCidrCount(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	expectedCount int,
 ) {
 	t.Helper()
@@ -513,7 +517,7 @@ func assertCidrCount(
 // createAssociation creates an association between two CIDR names
 func createAssociation(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	cidr1, cidr2 string,
 ) error {
 	t.Helper()
@@ -523,7 +527,7 @@ func createAssociation(
 // createAssociations creates multiple associations from pairs of CIDR names
 func createAssociations(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	pairs [][2]string,
 ) error {
 	t.Helper()
@@ -538,7 +542,7 @@ func createAssociations(
 // assertAssociationExists verifies that an association exists between two CIDRs
 func assertAssociationExists(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	cidr1, cidr2 string,
 ) {
 	t.Helper()
@@ -559,7 +563,7 @@ func assertAssociationExists(
 // assertAssociationNotExists verifies that an association does not exist between two CIDRs
 func assertAssociationNotExists(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	cidr1, cidr2 string,
 ) {
 	t.Helper()
@@ -580,7 +584,7 @@ func assertAssociationNotExists(
 // assertAssociationCount verifies the total number of associations
 func assertAssociationCount(
 	t *testing.T,
-	store *database.SQLiteStore,
+	store *database.ServerDB,
 	expectedCount int,
 ) {
 	t.Helper()
