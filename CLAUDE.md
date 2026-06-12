@@ -9,6 +9,7 @@ Build commands:
 - `make server` - builds `./bin/cord-server` (coordination server)
 - `make all` - builds both binaries
 - `make test` or `go test ./...` - runs all unit tests
+- `sudo make test-integration` - creates real WireGuard interfaces (root required)
 
 Test specific packages: `go test ./internal/server -v`
 
@@ -25,15 +26,18 @@ Cord is a WireGuard configuration manager with two main binaries:
 - `internal/database` - SQLite persistence layer with schema for cidrs, peers, invites, associations, endpoints
 - `internal/wireguard` - WireGuard key generation, device/peer configuration, OS integration
 - `internal/api` - HTTP API endpoints for peer redemption, confirmation, and admin operations
-- `internal/client` - client-side operations (largely aspirational/stubbed)
+- `internal/client` - client-side flows: install/up/down/show/fetch/uninstall, local peer DB, API client, remote admin
 - `internal/utils` - IP/CIDR manipulation utilities
 
 ### Core Concepts
 
 - **Networks** start with a root CIDR, sub-CIDRs can be created and associated
-- **Peers** join via invite redemption: temporary WG interface → key exchange → permanent configuration → confirmation
-- **Context pattern**: operations use a Context bundling network name, DB handle, config writer, data location
-- **Storage abstractions**: FsConfig/MemConfig for configuration, FsData/MemData for data (enables in-memory testing)
+- **Dual networks** (ADR-001): the server runs a main interface and an invite-only interface; the invite network exposes only the redeem endpoint
+- **Peers** join via invite redemption: temporary WG interface → redeem (client-generated permanent key) → permanent configuration → confirmation
+- **Context pattern**: operations use a Context bundling network name, config store, and DB-backed ServerStore
+- **Storage abstractions**: FsConfig/MemConfig for configuration, SQLite on disk or in-memory for data (enables in-memory testing)
+- **File formats**: all cord files on disk are TOML via BurntSushi/toml (server network config, invite files, client config); the HTTP API speaks JSON
+- **Platforms**: Linux (kernel WireGuard via netlink/wgctrl) and macOS (userspace wireguard-go, devices named utunN); no Windows support
 
 ## Database Schema
 
@@ -41,16 +45,16 @@ SQLite tables managed by server:
 - `cidr` - named CIDR blocks with numeric ranges
 - `association` - symmetric communication permissions between CIDRs
 - `invite` - temporary peer invitations with temp keys, assignments, expiration
-- `peer` - confirmed peers with public keys, admin/enabled flags
+- `peer` - peers with public keys and admin/enabled/confirmed flags (unconfirmed = redeemed but not yet confirmed)
 - `endpoint` - historical peer endpoint sightings for gossip
 
 ## Development Notes
 
 - Uses Go 1.24+ with tabs for indentation
 - Documentation can be found in the `docs/` folder; if implementation changes are made that conflict with the docs, make sure to update the relevant documentation at the same time.
-- Many client functions are stubs with TODO comments
 - Server operations override paths with `--config-dir` and `--data-dir`
 - Tests use in-memory storage, production uses filesystem
+- `cord up` and `cord-server serve` run in the foreground; on macOS the userspace interface lives and dies with the process
 - **Security**: Never commit WireGuard keys, invite payloads, or real endpoints
 
 ## Test Design Philosophy

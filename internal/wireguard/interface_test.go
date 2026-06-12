@@ -23,7 +23,7 @@ func TestNewInterface(t *testing.T) {
 		t.Fatalf("failed to parse address: %v", err)
 	}
 
-	iface, err := wireguard.NewInterface("test-interface", privateKey, *address, 51820)
+	iface, err := wireguard.NewInterface("test-interface", privateKey, *address, 51820, wireguard.BackendAuto)
 	expectNoError(t, err, "NewInterface")
 
 	if iface.Name != "test-interface" {
@@ -51,7 +51,7 @@ func TestInterface_AddRemovePeer(t *testing.T) {
 	// Create test interface
 	privateKey, _ := wgtypes.GeneratePrivateKey()
 	_, address, _ := net.ParseCIDR("10.0.0.1/24")
-	iface, err := wireguard.NewInterface("test-interface", privateKey, *address, 51820)
+	iface, err := wireguard.NewInterface("test-interface", privateKey, *address, 51820, wireguard.BackendAuto)
 	expectNoError(t, err, "NewInterface")
 
 	// Create test peer

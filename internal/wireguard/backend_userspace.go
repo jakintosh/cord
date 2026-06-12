@@ -1,9 +1,15 @@
 package wireguard
 
 import (
+	"bufio"
+	"encoding/hex"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
@@ -11,18 +17,13 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-const (
-	defaultMTU = 1420
-)
-
-// UserspaceBackend implements the Backend interface for non-Linux systems
-// (macOS, Windows) and optionally for Linux. This implementation runs the
-// WireGuard protocol in userspace.
+// UserspaceBackend implements the Backend interface using wireguard-go.
+// It is the only option on macOS and an opt-in alternative on Linux.
+// The device lives inside this process: when the process exits, the
+// interface disappears with it.
 type UserspaceBackend struct {
 	device    *device.Device
 	tunDevice tun.Device
-	stopChan  chan struct{}
-	isRunning bool
 	mu        sync.Mutex
 }
 
@@ -33,52 +34,60 @@ func (b *UserspaceBackend) Up(
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Idempotency check: if already running, return nil
-	if b.isRunning {
-		return nil
+	// Idempotency check: if already running, just re-apply config
+	if b.device != nil {
+		return b.applyConfig(iface)
 	}
 
-	// Create TUN device
-	tunDevice, err := tun.CreateTUN(iface.Name, defaultMTU)
+	mtu := iface.MTU
+	if mtu <= 0 {
+		mtu = defaultMTU
+	}
+
+	// Create TUN device (on macOS the OS assigns a utunN name)
+	tunDevice, err := tun.CreateTUN(tunName(iface.Name), mtu)
 	if err != nil {
 		return fmt.Errorf("failed to create TUN device: %w", err)
 	}
 
-	// Configure TUN device (bring up with IP address)
-	if err := configureTunOS(iface.Name, iface.Address, defaultMTU); err != nil {
+	realName, err := tunDevice.Name()
+	if err != nil {
+		tunDevice.Close()
+		return fmt.Errorf("failed to get TUN device name: %w", err)
+	}
+	iface.realName = realName
+
+	// Assign address, set MTU, bring the OS device up
+	if err := configureTunOS(realName, iface.Address, mtu, iface.NoRoutes); err != nil {
 		tunDevice.Close()
 		return fmt.Errorf("failed to configure TUN device: %w", err)
 	}
 
-	// Start wireguard-go device
-	device, err := b.startDevice(tunDevice)
-	if err != nil {
-		tunDevice.Close()
-		return fmt.Errorf("failed to start WireGuard device: %w", err)
-	}
+	// Start the wireguard-go device
+	logger := device.NewLogger(device.LogLevelError, fmt.Sprintf("(%s) ", realName))
+	dev := device.NewDevice(tunDevice, conn.NewDefaultBind(), logger)
 
-	// Apply initial configuration
-	if err := b.applyConfig(device, iface.PrivateKey, iface.ListenPort, iface.Peers); err != nil {
-		device.Close()
-		tunDevice.Close()
-		return fmt.Errorf("failed to apply initial configuration: %w", err)
-	}
-
-	// Write native config file
-	if err := os.WriteFile(configPath, []byte(iface.ToWgConfig()), 0600); err != nil {
-		device.Close()
-		tunDevice.Close()
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-
-	// Update backend state
-	b.device = device
+	b.device = dev
 	b.tunDevice = tunDevice
-	b.stopChan = make(chan struct{})
-	b.isRunning = true
 
-	// Start background goroutine to handle cleanup
-	go b.waitForStop()
+	// Apply configuration (private key, port, peers)
+	if err := b.applyConfig(iface); err != nil {
+		b.closeLocked()
+		return fmt.Errorf("failed to apply configuration: %w", err)
+	}
+
+	if err := dev.Up(); err != nil {
+		b.closeLocked()
+		return fmt.Errorf("failed to bring device up: %w", err)
+	}
+
+	// Write the native config file
+	if configPath != "" {
+		if err := os.WriteFile(configPath, []byte(iface.ToWgConfig()), 0600); err != nil {
+			b.closeLocked()
+			return fmt.Errorf("failed to write config file: %w", err)
+		}
+	}
 
 	return nil
 }
@@ -91,13 +100,12 @@ func (b *UserspaceBackend) Down(
 	defer b.mu.Unlock()
 
 	// Idempotency check: if not running, return nil
-	if !b.isRunning {
+	if b.device == nil {
 		return nil
 	}
 
-	// Signal shutdown to the background goroutine
-	close(b.stopChan)
-
+	b.closeLocked()
+	iface.realName = ""
 	return nil
 }
 
@@ -107,89 +115,133 @@ func (b *UserspaceBackend) Sync(
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// State check: ensure the backend is running
-	if !b.isRunning || b.device == nil {
+	if b.device == nil {
 		return fmt.Errorf("cannot sync: WireGuard device is not running")
 	}
 
-	// Apply the updated configuration to the running device
-	if err := b.applyConfig(b.device, iface.PrivateKey, iface.ListenPort, iface.Peers); err != nil {
+	if err := b.applyConfig(iface); err != nil {
 		return fmt.Errorf("failed to sync configuration: %w", err)
 	}
 
 	return nil
 }
 
-// startDevice instantiates a new device.Device from wireguard-go, connects it to the TUN interface, and sets it up
-func (b *UserspaceBackend) startDevice(
-	tunDevice tun.Device,
+func (b *UserspaceBackend) Status(
+	iface *Interface,
 ) (
-	*device.Device,
+	*DeviceStatus,
 	error,
 ) {
-	logger := device.NewLogger(device.LogLevelError, "")
-	device := device.NewDevice(tunDevice, conn.NewDefaultBind(), logger)
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
-	// Wait for the device to be ready
-	device.Up()
+	if b.device == nil {
+		return nil, fmt.Errorf("WireGuard device is not running")
+	}
 
-	return device, nil
+	raw, err := b.device.IpcGet()
+	if err != nil {
+		return nil, fmt.Errorf("failed to query device: %w", err)
+	}
+
+	return parseUapiStatus(iface.DeviceName(), raw)
 }
 
-// applyConfig constructs the configuration in the line-based uapi format and sends it to the running device.Device via its IpcSet method
-func (b *UserspaceBackend) applyConfig(
-	device *device.Device,
-	key wgtypes.Key,
-	port int,
-	peers []Peer,
-) error {
-	config := fmt.Sprintf("private_key=%s\n", key.String())
+// closeLocked tears down the device; callers must hold b.mu.
+func (b *UserspaceBackend) closeLocked() {
+	if b.device != nil {
+		// closes the TUN device as well
+		b.device.Close()
+	}
+	b.device = nil
+	b.tunDevice = nil
+}
 
-	if port > 0 {
-		config += fmt.Sprintf("listen_port=%d\n", port)
+// applyConfig constructs the configuration in the line-based uapi format
+// and sends it to the running device via IpcSet. Callers must hold b.mu.
+func (b *UserspaceBackend) applyConfig(iface *Interface) error {
+	var sb strings.Builder
+
+	fmt.Fprintf(&sb, "private_key=%s\n", hex.EncodeToString(iface.PrivateKey[:]))
+
+	if iface.ListenPort > 0 {
+		fmt.Fprintf(&sb, "listen_port=%d\n", iface.ListenPort)
 	}
 
 	// Clear existing peers first
-	config += "replace_peers=true\n"
+	sb.WriteString("replace_peers=true\n")
 
-	// Add each peer
-	for _, peer := range peers {
-		config += fmt.Sprintf("public_key=%s\n", peer.PublicKey.String())
+	for _, peer := range iface.Peers {
+		fmt.Fprintf(&sb, "public_key=%s\n", hex.EncodeToString(peer.PublicKey[:]))
 
-		// Add allowed IPs
 		for _, allowedIP := range peer.AllowedIPs {
-			config += fmt.Sprintf("allowed_ip=%s\n", allowedIP.String())
+			fmt.Fprintf(&sb, "allowed_ip=%s\n", allowedIP.String())
 		}
 
-		// Add endpoint if specified
 		if peer.Endpoint != nil {
-			config += fmt.Sprintf("endpoint=%s\n", peer.Endpoint.String())
+			fmt.Fprintf(&sb, "endpoint=%s\n", peer.Endpoint.String())
 		}
 
-		// Add persistent keepalive if specified
 		if peer.PersistentKeepalive > 0 {
-			config += fmt.Sprintf("persistent_keepalive_interval=%d\n", int(peer.PersistentKeepalive.Seconds()))
+			fmt.Fprintf(&sb, "persistent_keepalive_interval=%d\n", int(peer.PersistentKeepalive.Seconds()))
 		}
 	}
 
-	return device.IpcSet(config)
+	return b.device.IpcSet(sb.String())
 }
 
-// waitForStop runs in a background goroutine and handles graceful shutdown
-func (b *UserspaceBackend) waitForStop() {
-	<-b.stopChan
+// parseUapiStatus converts wireguard-go's uapi "get" output into a DeviceStatus.
+func parseUapiStatus(name string, raw string) (*DeviceStatus, error) {
+	status := &DeviceStatus{Name: name}
 
-	// Clean up resources
-	if b.device != nil {
-		b.device.Close()
-	}
-	if b.tunDevice != nil {
-		b.tunDevice.Close()
+	var peer *PeerStatus
+	var handshakeSec int64
+
+	flushPeer := func() {
+		if peer != nil {
+			if handshakeSec > 0 {
+				peer.LastHandshake = time.Unix(handshakeSec, 0)
+			}
+			status.Peers = append(status.Peers, *peer)
+		}
+		peer = nil
+		handshakeSec = 0
 	}
 
-	// Update backend state
-	b.device = nil
-	b.tunDevice = nil
-	b.stopChan = nil
-	b.isRunning = false
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	for scanner.Scan() {
+		line := scanner.Text()
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+
+		switch key {
+		case "listen_port":
+			port, err := strconv.Atoi(value)
+			if err == nil {
+				status.ListenPort = port
+			}
+		case "public_key":
+			flushPeer()
+			keyBytes, err := hex.DecodeString(value)
+			if err != nil || len(keyBytes) != wgtypes.KeyLen {
+				return nil, fmt.Errorf("invalid public key in device status: %s", value)
+			}
+			peer = &PeerStatus{PublicKey: wgtypes.Key(keyBytes)}
+		case "endpoint":
+			if peer != nil {
+				if addr, err := net.ResolveUDPAddr("udp", value); err == nil {
+					peer.Endpoint = addr
+				}
+			}
+		case "last_handshake_time_sec":
+			if sec, err := strconv.ParseInt(value, 10, 64); err == nil {
+				handshakeSec = sec
+			}
+		}
+	}
+	flushPeer()
+
+	return status, nil
 }

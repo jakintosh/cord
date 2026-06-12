@@ -9,6 +9,8 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
+const defaultMTU = 1420
+
 // Peer represents a single peer in a WireGuard configuration.
 type Peer struct {
 	PublicKey           wgtypes.Key
@@ -23,14 +25,52 @@ type Interface struct {
 	PrivateKey wgtypes.Key
 	Address    net.IPNet
 	ListenPort int
+	MTU        int
+	NoRoutes   bool
 	Peers      []Peer
 
-	backend Backend // Internal field for OS-specific implementation
+	backend  Backend
+	realName string // actual OS device name (e.g. utun4 on darwin)
+}
+
+// NewInterface creates a new in-memory representation of a WireGuard
+// interface, backed by the requested implementation. On macOS the OS
+// chooses the real device name (utunN); use DeviceName() after Up().
+func NewInterface(
+	name string,
+	privateKey wgtypes.Key,
+	address net.IPNet,
+	listenPort int,
+	backendType BackendType,
+) (*Interface, error) {
+	backend, err := newBackend(backendType)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Interface{
+		Name:       name,
+		PrivateKey: privateKey,
+		Address:    address,
+		ListenPort: listenPort,
+		MTU:        defaultMTU,
+		Peers:      make([]Peer, 0),
+		backend:    backend,
+	}, nil
+}
+
+// DeviceName returns the actual OS device name once the interface is up.
+// Before Up() (and everywhere on Linux) it is the configured name.
+func (i *Interface) DeviceName() string {
+	if i.realName != "" {
+		return i.realName
+	}
+	return i.Name
 }
 
 // Up creates the network device if it doesn't exist, configures it with the
 // current state of the Interface object, and brings it up.
-// It also writes the native .conf file to the specified path.
+// It also writes the native .conf file to configPath when non-empty.
 func (i *Interface) Up(configPath string) error {
 	return i.backend.Up(i, configPath)
 }
@@ -46,6 +86,11 @@ func (i *Interface) Sync() error {
 	return i.backend.Sync(i)
 }
 
+// Status reports the live device state (peer endpoints, handshakes).
+func (i *Interface) Status() (*DeviceStatus, error) {
+	return i.backend.Status(i)
+}
+
 // AddPeer adds a peer to the interface's configuration.
 func (i *Interface) AddPeer(peer Peer) {
 	i.Peers = append(i.Peers, peer)
@@ -55,11 +100,15 @@ func (i *Interface) AddPeer(peer Peer) {
 func (i *Interface) RemovePeer(publicKey wgtypes.Key) {
 	for j, peer := range i.Peers {
 		if peer.PublicKey == publicKey {
-			// Remove the peer by slicing
 			i.Peers = append(i.Peers[:j], i.Peers[j+1:]...)
 			return
 		}
 	}
+}
+
+// SetPeers replaces the entire peer list.
+func (i *Interface) SetPeers(peers []Peer) {
+	i.Peers = peers
 }
 
 // ToWgConfig converts the Interface configuration to a wg-quick compatible .conf file format.

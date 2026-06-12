@@ -28,7 +28,7 @@ func TestCreateNetworkAtomic_Success(t *testing.T) {
 	assertCidrExists(t, store, TestCidrRoot)
 
 	// Validate server peer exists with expected fields
-	assertPeerExists(t, store, "cord-server", serverPubKey, true)
+	assertPeerExists(t, store, "cord-server", serverPubKey, true, true)
 
 	// Validate server peer IP and prefix derived from root
 	peer, err := store.PeerGet("cord-server")
@@ -64,7 +64,7 @@ func TestCreateNetworkAtomic_Duplicate(t *testing.T) {
 
 	// Ensure prior state intact: 1 cidr (root) and 1 peer (cord-server)
 	assertCidrExists(t, store, TestCidrRoot)
-	assertPeerExists(t, store, "cord-server", "server-pub-1", true)
+	assertPeerExists(t, store, "cord-server", "server-pub-1", true, true)
 }
 
 // TestCreateNetworkAtomic_IPv6 validates prefix correctness for IPv6.

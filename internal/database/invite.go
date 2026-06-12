@@ -51,6 +51,37 @@ func (store *SQLiteStore) InviteGet(
 	return scanInvite(row)
 }
 
+// InviteListActive returns unredeemed, unexpired invites. These are the
+// peers that belong on the invite network interface.
+func (store *SQLiteStore) InviteListActive() (
+	[]*server.ServerInvite,
+	error,
+) {
+	rows, err := store.db.Query(`
+		SELECT name, public_key, temp_ip, final_ip, admin, redeemed, expiration
+		FROM invite
+		WHERE redeemed = 0
+		  AND expiration > ?1
+		ORDER BY expiration DESC;`,
+		time.Now().Unix(),
+	)
+	if err != nil {
+		return nil, CheckSqliteErr("querying active invites", err)
+	}
+	defer rows.Close()
+
+	var invites []*server.ServerInvite
+	for rows.Next() {
+		invite, err := scanInvite(rows)
+		if err != nil {
+			return nil, err
+		}
+		invites = append(invites, invite)
+	}
+
+	return invites, nil
+}
+
 func (store *SQLiteStore) InviteGetByIP(
 	ip net.IP,
 ) (
@@ -64,6 +95,28 @@ func (store *SQLiteStore) InviteGetByIP(
 		FROM invite
 		WHERE temp_ip = ?1
 		  AND redeemed = 0
+		  AND expiration > ?2;`,
+		ip,
+		time.Now().Unix(),
+	)
+
+	return scanInvite(row)
+}
+
+// InviteGetByIPAny is like InviteGetByIP but also returns invites that
+// have already been redeemed. Redemption must stay reachable for a
+// redeemed-but-unconfirmed invite so the flow can be retried.
+func (store *SQLiteStore) InviteGetByIPAny(
+	ip net.IP,
+) (
+	*server.ServerInvite,
+	error,
+) {
+	ip = utils.NormalizeIP(ip)
+	row := store.db.QueryRow(`
+		SELECT name, public_key, temp_ip, final_ip, admin, redeemed, expiration
+		FROM invite
+		WHERE temp_ip = ?1
 		  AND expiration > ?2;`,
 		ip,
 		time.Now().Unix(),
@@ -96,6 +149,19 @@ func (s *SQLiteStore) InviteCreate(
 	return CheckSqliteErr("adding invite", err)
 }
 
+// InvitesPruneExpired removes invite records whose expiration has
+// passed, freeing their reserved invite-network addresses.
+func (s *SQLiteStore) InvitesPruneExpired(
+	before int64,
+) error {
+	_, err := s.db.Exec(`
+		DELETE FROM invite
+		WHERE expiration < ?1;`,
+		before,
+	)
+	return CheckSqliteErr("pruning expired invites", err)
+}
+
 func (s *SQLiteStore) InviteRedeem(
 	pubKey string,
 	newKey string,
@@ -108,7 +174,9 @@ func (s *SQLiteStore) InviteRedeem(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Insert into peer using details from invite
+	// Insert into peer using details from invite. The peer starts
+	// unconfirmed: it becomes operational once it calls confirm over
+	// the main network (see PeerConfirm).
 	res, err := tx.Exec(`
 		INSERT INTO peer (name, ip, prefix, public_key, admin, enabled, confirmed)
 		SELECT
@@ -121,7 +189,7 @@ func (s *SQLiteStore) InviteRedeem(
 			?2,
 			i.admin,
 			1,
-			1
+			0
 		FROM invite i
 		WHERE i.redeemed=0
 			AND i.public_key=?1
@@ -134,7 +202,7 @@ func (s *SQLiteStore) InviteRedeem(
 		return fmt.Errorf("failed to create peer from invite: %w", err)
 	}
 	if ResultsEmpty(res) {
-		return fmt.Errorf("failed to redeem peer: no redeemable invites")
+		return fmt.Errorf("%w: no redeemable invite for that key", server.ErrNotFound)
 	}
 
 	// Mark invite as redeemed

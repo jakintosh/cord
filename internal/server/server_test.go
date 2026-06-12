@@ -33,6 +33,8 @@ var testNetwork = NetworkDesc{
 	Port: 10000,
 }
 
+const testInviteCidr = "172.16.10.0/24"
+
 var infraCidr = CidrDesc{
 	Name: "infra",
 	Cidr: "10.0.0.0/17",
@@ -107,7 +109,16 @@ func addNetwork(
 	desc NetworkDesc,
 ) error {
 	_, cidr, _ := net.ParseCIDR(desc.Cidr)
-	if err := c.CreateNetwork(cidr, desc.Ip, desc.Port); err != nil {
+	_, inviteCidr, _ := net.ParseCIDR(testInviteCidr)
+	req := server.CreateNetworkRequest{
+		RootCidr:   cidr,
+		InviteCidr: inviteCidr,
+		ExternalIP: desc.Ip,
+		ListenPort: desc.Port,
+		InvitePort: desc.Port + 1,
+		ApiPort:    desc.Port,
+	}
+	if err := c.CreateNetwork(req); err != nil {
 		return fmt.Errorf("failed to create network '%s': %v", desc.Name, err)
 	}
 	return nil
@@ -161,9 +172,20 @@ func redeemPeer(
 		return fmt.Errorf("failed to get peer for ip %v: %v", ip, err)
 	}
 
-	// redeem invite with invite's public key
-	if err := c.RedeemInvite(invite.PublicKey, invite.PublicKey); err != nil {
+	// redeem invite with invite's public key standing in for a
+	// client-generated permanent key
+	result, err := c.RedeemInvite(invite, invite.PublicKey)
+	if err != nil {
 		return fmt.Errorf("failed to redeem invite for key '%s': %v", invite.PublicKey, err)
+	}
+
+	// confirm the peer from its assigned main-network IP
+	finalIP, _, err := net.ParseCIDR(result.AssignedCidr)
+	if err != nil {
+		return fmt.Errorf("failed to parse assigned cidr %s: %v", result.AssignedCidr, err)
+	}
+	if err := c.ConfirmPeer(invite.PublicKey, finalIP); err != nil {
+		return fmt.Errorf("failed to confirm peer: %v", err)
 	}
 	return nil
 }

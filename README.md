@@ -1,103 +1,87 @@
 # Cord
 
-Note: `cord` is a rewrite and evolution of [tonarino/innernet](https://github.com/tonarino/innernet), written in go. It started as a direct go translation, but evolved significantly enough to warrant a name change. At the moment, much of the original design remains.
+Cord is a WireGuard configuration manager and virtual network orchestrator. A small coordination server (`cord-server`) tracks a network's address ranges, peers, and communication rules in SQLite; a client CLI (`cord`) joins networks from invite files and keeps a local WireGuard interface in sync with the network. A "cord" is one such network: its CIDRs, the peers that may join, and which subnets may talk to each other.
 
-Cord is a wireguard configuration manager and virtual network orchestrator. It aims to provide a small coordination server and complementary CLI for managing WireGuard networks built around the concept of "cords". A cord describes a network's address ranges, the peers that may join, and how those peers may communicate.
+Cord began as a Go rewrite and evolution of [tonarino/innernet](https://github.com/tonarino/innernet).
 
-## Project status
+Linux (kernel WireGuard) and macOS (userspace via wireguard-go) are supported.
 
-The code base is a work in progress. Many commands and functions exist only as stubs or contain TODOs. The repository is useful for understanding the intended design and for running the existing unit tests, but it is **not yet a complete implementation**.
+## How it works
+
+- **Networks** are created with a root CIDR. Sub-CIDRs can be carved out and *associated* with each other; peers may only see peers in their own (most specific) CIDR and any associated CIDRs.
+- **The server runs two WireGuard interfaces** ([ADR-001](docs/adrs/001-separate-invite-network-redemption.md)): the main network, and a separate *invite network* used only for redeeming invites. Untrusted invitees never touch the main network.
+- **Peers join via invites.** An admin mints an invite file (a temporary keypair and IP on the invite network). The client connects to the invite network, generates its own permanent keypair, and redeems the invite for its main-network assignment. It then connects to the main network and *confirms*, proving the transition worked, at which point the invite is destroyed and the peer is operational.
+- **Authentication is WireGuard itself.** The HTTP API is only reachable over the tunnel; the server maps the source IP — cryptographically bound to a peer key by WireGuard — to a peer record. Admin endpoints additionally require the peer's `admin` flag.
+- **Endpoint gossip.** Connected clients watch their live WireGuard sessions; when a peer's endpoint changes (e.g. it roamed networks), they report the sighting. The server folds recent sightings into peer listings so everyone can find roaming peers again. Sightings expire after 24h.
+
+## Building
+
+```bash
+make all      # builds ./bin/cord and ./bin/cord-server
+make test     # unit tests (run anywhere, no privileges needed)
+sudo make test-integration   # creates real WireGuard interfaces
+```
+
+## Running a network
+
+On the coordination host:
+
+```bash
+# create a network: name, root CIDR, public IP, WireGuard port
+cord-server add-network homenet 10.42.0.0/16 198.51.100.7 51820
+
+# mint an invite for a peer (writes ./alice.invite.toml)
+cord-server add-peer homenet alice 10.42.0.10
+
+# serve (foreground): brings up both WireGuard interfaces + the API
+cord-server serve homenet
+```
+
+`add-network` options: `--invite-cidr` (default `172.16.10.0/24`), `--invite-port` (default WireGuard port + 1), `--api-port` (TCP, default same number as the WireGuard port). The network's identity lands in `/etc/cord-server/<name>.toml`; state lives in `/var/lib/cord-server/<name>.db`.
+
+Deliver the invite file out-of-band. On the joining machine:
+
+```bash
+cord install alice.invite.toml   # redeem + confirm, then exits
+cord up homenet                  # connect (foreground; ctrl-c disconnects)
+```
+
+`cord up` stays in the foreground: it periodically fetches peer state, applies changes to the live interface, and reports endpoint sightings. On Linux the interface uses kernel WireGuard; on macOS it is a userspace device that lives and dies with the `cord up` process. Other commands: `cord show`, `cord fetch <net>`, `cord down <net>`, `cord uninstall <net>`.
+
+### Managing the network
+
+Locally on the server host, `cord-server` offers the full set: `add-cidr`, `rename-cidr`, `delete-cidr`, `add-peer`, `rename-peer`, `enable-peer`, `disable-peer`, `delete-peer`, `add-association`, `delete-association`, `get-peers`.
+
+Remotely, any *admin* peer can do the same over the API:
+
+```bash
+cord server peer add homenet bob 10.42.0.11 --save-invite ~/invites
+cord server peer disable homenet bob
+cord server cidr add homenet infra 10.42.1.0/24
+cord server association add homenet infra fleet
+```
+
+(Create an admin peer with `cord-server add-peer ... --admin`.)
 
 ## Architecture
 
-The system is split into two binaries:
+Two binaries share packages under `internal/`:
 
-* **`cord-server`** – manages network state, stores it in SQLite, and exposes administration commands. The server tracks CIDR ranges, peer identities, and associations between ranges. It is designed to run on a coordination host.
-* **`cord`** – client/administrative tool. It installs peers from invites, fetches updated state, and can control WireGuard interfaces on local machines. Many subcommands are placeholders intended to eventually call the server's HTTP API.
+- `internal/server` — network/CIDR/peer/invite logic, the network config file, and the serve `Runtime` (interfaces + sync loop).
+- `internal/api` — HTTP handlers; the main network serves the full API, the invite network serves *only* the redeem endpoint.
+- `internal/client` — install/up/down/show/fetch/uninstall flows, local peer DB, API client.
+- `internal/database` — SQLite store (cidr, association, invite, peer, endpoint tables).
+- `internal/wireguard` — interface management with two backends: Linux kernel (netlink/wgctrl) and userspace (embedded wireguard-go). On macOS the OS names devices `utunN`; cord tracks the mapping.
+- `internal/utils` — IP/CIDR helpers.
 
-Both programs share internal packages under `internal/`:
+The API surface is described in [docs/api-spec.md](docs/api-spec.md), and the main flows in [docs/core-flows.md](docs/core-flows.md).
 
-* `internal/server` – core network management logic used by the server CLI.
-* `internal/client` – placeholder logic for client operations.
-* `internal/database` – wrappers around SQLite for creating and manipulating the persistence layer.
-* `internal/wireguard` – helpers for generating WireGuard device and peer configs and interacting with the OS' WireGuard implementation.
-* `internal/utils` – miscellaneous helpers for IP/CIDR manipulation and validation.
+### Notes & limitations
 
-### Contexts, Config and Data
-
-Server operations run through a `Context` that bundles the network name, database handle, configuration writer, and data location. Two implementations exist for both configuration storage (`FsConfig` for filesystem and `MemConfig` for in-memory) and data storage (`FsData` for files and `MemData` for in-memory), allowing tests to use memory while the CLI uses disk storage.
-
-### Database schema
-
-The coordination server stores state in SQLite. `initNetworkDb` creates five primary tables:
-
-* **`cidr`** – Named CIDR blocks belonging to the network. Each row stores the textual CIDR, prefix/length, and the numeric range.
-* **`association`** – Pairs of CIDR IDs that are allowed to communicate. Associations are symmetric.
-* **`invite`** – Pending peer invitations containing a temporary public key, temporary (invite network) cidr, assigned permanent cidr, peer name, admin flag, redemption status, and expiration timestampe. Invites are temporary records deleted after successful peer confirmation.
-* **`peer`** – Peers tied to a single CIDR with their public key and flags for admin, confirmed, and enabled status.
-* **`endpoint`** – Historical peer endpoint sightings with timestamps and witness. Used for future endpoint gossip and detection of peer changes.
-
-### CIDR management
-
-Networks start with a *root CIDR* (row `id=1` in the `cidr` table). Sub-CIDRs may be created, renamed or removed. `CreateCidr` ensures new CIDRs fall within the root range. CIDRs may be associated to permit communication across ranges.
-
-### Peer lifecycle
-
-Peers join the network through a temporary wireguard interface. `CreatePeer` generates a an invite record with the peer's assigned temporary and permanent IP, name, and permissions. It is also given a temporary wireguard key pair. The invite data as packaged into a file and delivered out-of-band to the client.
-
-The client begins the redemption process using the invite file to connect to the server's "invite" wireguard network, then generates their own WireGuard keypair locally and redeems the invite by POSTing their public key to the redemption endpoint. Upon successful redemption, the server creates a peer record (marked as unconfirmed), returns the complete WireGuard configuration, and marks the invite as redeemed. 
-
-The client then configures their permanent WireGuard interface and establishes a connection to confirm their presence on the network via the `/api/v1/peer/confirm` endpoint. Only after this confirmation step is the peer marked as operational and the invite record deleted.
-
-Peers can be renamed (through CIDR renaming) or enabled/disabled. The server computes peer visibility by resolving associated CIDR ranges and collecting all confirmed (`confirmed=1`) and enabled (`disabled=0`) peers within them.
-
-### WireGuard configuration
-
-`internal/wireguard` defines types for representing devices and peers. `DeviceConfig` describes the local interface (private key, internal CIDR, listen port) and can be written to an `io.Writer`. `PeerConfig` will eventually write out full invite files combining device and server information (not yet implemented). Helper functions exist for key generation and interacting with the OS via `wgctrl`/`netlink`.
-
-### Client operations
-
-The client package is largely aspirational. Functions like `Install`, `Fetch`, `Up`, and `Sync` outline how a peer should consume an invite, generate a key pair, redeem it with the server, maintain a local database of peer state, and configure a WireGuard interface. Extensive comments describe plans for a state log and endpoint gossip mechanism.
-
-## Command line usage
-
-The Makefile builds both binaries:
-
-```bash
-make client   # builds ./bin/cord
-make server   # builds ./bin/cord-server
-```
-
-Some example server commands (many rely on stubbed functionality):
-
-```bash
-cord-server add-network <name> <cidr> <external-ip> <port>
-cord-server add-cidr <network> <cidr-name> <cidr>
-cord-server add-peer <network> <peer-name> <ip>
-cord-server get-peers <network> <peer-name>
-```
-
-The `cord` binary is intended for clients and administrators. Planned subcommands include installing from an invite, fetching state, and bringing interfaces up or down.
-
-Both binaries accept `--config-dir` and `--data-dir` to override the default paths (`/etc/cord*` and `/var/lib/cord*`).
+- All cord files on disk are TOML: server network config, invite files, and client config (`/etc/cord/<network>.toml`, which contains the private key). The HTTP API speaks JSON.
+- Peer-to-peer traffic that has no direct path is routed through the server (its allowed-IPs cover the whole network from a client's view); this requires IP forwarding to be enabled on the server host.
+- IPv4 is the well-tested path; IPv6 plumbing exists in the database layer but hasn't been exercised end-to-end.
 
 ## Testing
 
-Run the existing Go tests with:
-
-```bash
-go test ./...
-```
-
-Only the utility and server packages currently contain tests.
-
-## Roadmap / TODOs
-
-The code includes many TODOs and design notes outlining future work. Highlights include:
-
-* Implement `PeerConfig.WriteInvite` to emit full invite files.
-* Have `CreateNetwork` write the server's WireGuard config.
-* Notify peers when others are redeemed or disabled.
-* Flesh out the client-side workflow for redeeming invites, polling state, managing WireGuard interfaces, and syncing endpoint sightings.
-* Add an HTTP API for server operations so the `cord` client can manage networks remotely.
-* Develop a state log and endpoint gossip mechanism for tracking peer endpoints and sharing updates efficiently.
+Unit tests use in-memory SQLite and in-memory config stores; they run unprivileged on macOS and Linux (`make test`). The integration tests (`sudo make test-integration`) create real interfaces: device lifecycle, OS visibility, peer sync, config file output, and a live two-interface WireGuard handshake over loopback.

@@ -76,7 +76,7 @@ func (s *SQLiteStore) CidrCreate(
 	}
 
 	if ResultsEmpty(result) {
-		return fmt.Errorf("Invalid CIDR")
+		return fmt.Errorf("%w: cidr is outside the root range", server.ErrInvalid)
 	}
 
 	return nil
@@ -116,15 +116,51 @@ func (s *SQLiteStore) CidrUpdate(
 	return CheckSqliteErr("renaming cidr", err)
 }
 
+// CidrDelete removes a CIDR and its associations. The root CIDR
+// (id=1) cannot be deleted.
 func (s *SQLiteStore) CidrDelete(
 	name string,
 ) error {
-	_, err := s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin delete tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`
+		DELETE FROM association
+		WHERE cidr1 IN (SELECT id FROM cidr WHERE name = ?1 AND id != 1)
+		   OR cidr2 IN (SELECT id FROM cidr WHERE name = ?1 AND id != 1);`,
+		name,
+	); err != nil {
+		return CheckSqliteErr("deleting cidr associations", err)
+	}
+
+	res, err := tx.Exec(`
 		DELETE FROM cidr
-		WHERE name = ?;`,
+		WHERE name = ?1
+		  AND id != 1;`,
 		name,
 	)
-	return CheckSqliteErr("deleting cidr", err)
+	if err != nil {
+		return CheckSqliteErr("deleting cidr", err)
+	}
+	if ResultsEmpty(res) {
+		var id int
+		if lookupErr := tx.QueryRow(`
+			SELECT id FROM cidr WHERE name = ?1;`,
+			name,
+		).Scan(&id); lookupErr == nil {
+			return fmt.Errorf("%w: the root cidr cannot be deleted", server.ErrConflict)
+		}
+		return fmt.Errorf("%w: no cidr named '%s'", server.ErrNotFound, name)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit delete tx: %w", err)
+	}
+
+	return nil
 }
 
 func scanCidr(s Scanner) (

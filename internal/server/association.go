@@ -5,6 +5,13 @@ type Association struct {
 	Cidr2 string `json:"cidr2"`
 }
 
+func (ctx *Context) ListAssociations() (
+	[]*Association,
+	error,
+) {
+	return ctx.Store.AssociationList()
+}
+
 func (ctx *Context) CreateAssociation(
 	cidr1 string,
 	cidr2 string,

@@ -58,7 +58,7 @@ func (store *SQLiteStore) AssociationCreate(
 	}
 
 	if ResultsEmpty(result) {
-		return fmt.Errorf("invalid CIDR names or association already exists")
+		return fmt.Errorf("%w: unknown cidr names or association already exists", server.ErrConflict)
 	}
 
 	return nil

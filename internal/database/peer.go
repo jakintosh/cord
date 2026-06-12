@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"net"
 
 	"git.sr.ht/~jakintosh/cord/internal/server"
@@ -150,6 +151,117 @@ func (store *SQLiteStore) PeerGetByIP(
 	)
 
 	return scanPeer(row)
+}
+
+// PeerGetByKey looks up a peer by its permanent public key, regardless
+// of confirmation state. Used for idempotent redeem/confirm handling.
+func (store *SQLiteStore) PeerGetByKey(
+	pubKey string,
+) (
+	*server.Peer,
+	error,
+) {
+	row := store.db.QueryRow(`
+		SELECT name, public_key, ip, prefix, admin, enabled, confirmed
+		FROM peer
+		WHERE public_key = ?1;`,
+		pubKey,
+	)
+
+	return scanPeer(row)
+}
+
+// PeerConfirm marks the peer with the given key and IP as confirmed and
+// deletes the invite that created it. Idempotent: confirming an
+// already-confirmed peer succeeds.
+func (s *SQLiteStore) PeerConfirm(
+	pubKey string,
+	ip net.IP,
+) error {
+	ip = utils.NormalizeIP(ip)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin confirm tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.Exec(`
+		UPDATE peer
+		SET confirmed = 1
+		WHERE public_key = ?1
+		  AND ip = ?2;`,
+		pubKey,
+		ip,
+	)
+	if err != nil {
+		return CheckSqliteErr("confirming peer", err)
+	}
+	if ResultsEmpty(res) {
+		return fmt.Errorf("%w: no peer with that key and IP to confirm", server.ErrNotFound)
+	}
+
+	// The peer is operational; its invite has served its purpose
+	if _, err := tx.Exec(`
+		DELETE FROM invite
+		WHERE final_ip = ?1;`,
+		ip,
+	); err != nil {
+		return CheckSqliteErr("deleting confirmed invite", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit confirm tx: %w", err)
+	}
+
+	return nil
+}
+
+// PeerDelete removes a peer and its endpoint history. Any invite that
+// reserved the peer's IP is removed as well.
+func (s *SQLiteStore) PeerDelete(
+	name string,
+) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin delete tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`
+		DELETE FROM endpoint
+		WHERE peer IN (SELECT id FROM peer WHERE name = ?1)
+		   OR witness IN (SELECT id FROM peer WHERE name = ?1);`,
+		name,
+	); err != nil {
+		return CheckSqliteErr("deleting peer endpoints", err)
+	}
+
+	if _, err := tx.Exec(`
+		DELETE FROM invite
+		WHERE final_ip IN (SELECT ip FROM peer WHERE name = ?1);`,
+		name,
+	); err != nil {
+		return CheckSqliteErr("deleting peer invite", err)
+	}
+
+	res, err := tx.Exec(`
+		DELETE FROM peer
+		WHERE name = ?1;`,
+		name,
+	)
+	if err != nil {
+		return CheckSqliteErr("deleting peer", err)
+	}
+	if ResultsEmpty(res) {
+		return fmt.Errorf("%w: no peer named '%s'", server.ErrNotFound, name)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit delete tx: %w", err)
+	}
+
+	return nil
 }
 
 func (s *SQLiteStore) PeerUpdate(

@@ -2,7 +2,11 @@ package server
 
 import (
 	"net"
+	"time"
 )
+
+// endpointTTL is how long an endpoint sighting is considered current.
+const endpointTTL = 24 * time.Hour
 
 type PublicPeer struct {
 	Name      string            `json:"name"`
@@ -20,12 +24,6 @@ type Peer struct {
 	Confirmed bool   `json:"confirmed"`
 }
 
-type CreatePeerRequest struct {
-	Name  string `json:"name"`
-	Cidr  string `json:"cidr"`
-	Admin bool   `json:"admin"`
-}
-
 type UpdatePeerRequest struct {
 	Name    *string `json:"name,omitempty"`
 	Admin   *bool   `json:"admin,omitempty"`
@@ -41,6 +39,22 @@ func (ctx *Context) GetPeerByIP(
 	return ctx.Store.PeerGetByIP(ip)
 }
 
+func (ctx *Context) GetPeer(
+	name string,
+) (
+	*Peer,
+	error,
+) {
+	return ctx.Store.PeerGet(name)
+}
+
+func (ctx *Context) ListPeers() (
+	[]*Peer,
+	error,
+) {
+	return ctx.Store.PeerList()
+}
+
 func (ctx *Context) UpdatePeer(
 	peer string,
 	req UpdatePeerRequest,
@@ -48,17 +62,22 @@ func (ctx *Context) UpdatePeer(
 	*Peer,
 	error,
 ) {
-	result, err := ctx.Store.PeerUpdate(peer, req)
-	if err != nil {
-		return nil, err
-	}
+	return ctx.Store.PeerUpdate(peer, req)
+}
 
-	// TODO: After updating peer in database, should call Interface.Sync()
-	// to update the live WireGuard interface with the new peer configuration
-	// This requires the server context to maintain references to the
-	// main and invite Interface instances created in Serve()
+func (ctx *Context) DeletePeer(
+	peer string,
+) error {
+	return ctx.Store.PeerDelete(peer)
+}
 
-	return result, nil
+// ConfirmPeer finalizes redemption: the peer has proven it can reach
+// the server over the main network from its assigned IP.
+func (ctx *Context) ConfirmPeer(
+	pubKey string,
+	ip net.IP,
+) error {
+	return ctx.Store.PeerConfirm(pubKey, ip)
 }
 
 func (ctx *Context) CheckPeerExists(
@@ -74,4 +93,43 @@ func (ctx *Context) GetPeersOfPeerNamed(
 	error,
 ) {
 	return ctx.Store.PeerListPeers(peerName)
+}
+
+// GetVisiblePeers returns the peers visible to the named peer along
+// with each peer's recently witnessed endpoints, newest first.
+func (ctx *Context) GetVisiblePeers(
+	peerName string,
+) (
+	[]*PublicPeer,
+	error,
+) {
+	peers, err := ctx.Store.PeerListPeers(peerName)
+	if err != nil {
+		return nil, err
+	}
+
+	since := time.Now().Add(-endpointTTL).Unix()
+	endpoints, err := ctx.Store.EndpointsRecent(since)
+	if err != nil {
+		return nil, err
+	}
+
+	public := make([]*PublicPeer, 0, len(peers))
+	for _, peer := range peers {
+		public = append(public, &PublicPeer{
+			Name:      peer.Name,
+			Cidr:      peer.Cidr,
+			PublicKey: peer.PublicKey,
+			Endpoints: endpoints[peer.PublicKey],
+		})
+	}
+
+	return public, nil
+}
+
+// ReportEndpoints records endpoint sightings witnessed by a peer.
+func (ctx *Context) ReportEndpoints(
+	sightings []EndpointSighting,
+) error {
+	return ctx.Store.EndpointReport(sightings)
 }

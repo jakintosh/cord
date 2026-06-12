@@ -1,6 +1,7 @@
 package database_test
 
 import (
+	"errors"
 	"testing"
 
 	"git.sr.ht/~jakintosh/cord/internal/server"
@@ -288,10 +289,13 @@ func TestCidrDeleteNonExistent(t *testing.T) {
 
 	// attempt to delete non-existent CIDR
 	err := store.CidrDelete("non-existent")
-	expectNoError(t, err, "deleting non-existent CIDR should succeed silently")
+	expectError(t, err, "deleting non-existent CIDR")
+	if !errors.Is(err, server.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
 }
 
-// TestCidrDeleteRoot tests deleting the root CIDR
+// TestCidrDeleteRoot tests that the root CIDR cannot be deleted
 func TestCidrDeleteRoot(t *testing.T) {
 	store := setupTestDB(t)
 
@@ -299,11 +303,13 @@ func TestCidrDeleteRoot(t *testing.T) {
 	err := createRootCidr(t, store, TestCidrRoot)
 	expectNoError(t, err, "creating root CIDR")
 
-	// delete root CIDR
+	// attempt to delete the root CIDR
 	err = store.CidrDelete(TestCidrRoot.Name)
-	expectNoError(t, err, "deleting root CIDR")
+	expectError(t, err, "deleting root CIDR")
+	if !errors.Is(err, server.ErrConflict) {
+		t.Errorf("expected ErrConflict, got %v", err)
+	}
 
-	// verify root CIDR no longer exists
-	assertCidrNotExists(t, store, TestCidrRoot.Name)
-	assertCidrCount(t, store, 0)
+	// verify the root CIDR still exists
+	assertCidrExists(t, store, TestCidrRoot)
 }

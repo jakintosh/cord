@@ -1,31 +1,52 @@
 package server
 
 import (
-	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"time"
 
+	"github.com/BurntSushi/toml"
+
+	"git.sr.ht/~jakintosh/cord/internal/utils"
 	wg "git.sr.ht/~jakintosh/cord/internal/wireguard"
 )
 
+// ServerInfo describes how peers reach the coordination server: its
+// WireGuard identity, public endpoint, and internal API address. It
+// travels as JSON over the API and as TOML in files on disk.
+type ServerInfo struct {
+	PublicKey        string `json:"publicKey" toml:"public_key"`
+	ExternalEndpoint string `json:"externalEndpoint" toml:"external_endpoint"`
+	InternalEndpoint string `json:"internalEndpoint" toml:"internal_endpoint"`
+}
+
+// InviteInterface is the temporary identity an invitee uses on the
+// invite network.
+type InviteInterface struct {
+	NetworkName  string `json:"networkName" toml:"network_name"`
+	PrivateKey   string `json:"privateKey" toml:"private_key"`
+	AssignedCidr string `json:"assignedCidr" toml:"assigned_cidr"`
+}
+
+// PeerInvite is the payload written to an invite file and delivered
+// out-of-band to a prospective peer. It contains everything the client
+// needs to join the invite network and redeem its place on the main one.
 type PeerInvite struct {
-	Interface struct {
-		NetworkName  string `json:"networkName"`
-		PrivateKey   string `json:"privateKey"`
-		AssignedCidr string `json:"assignedCidr"`
-	} `json:"interface"`
-	Server struct {
-		PublicKey        string `json:"publicKey"`
-		ExternalEndpoint string `json:"externalEndpoint"`
-		InternalEndpoint string `json:"internalEndpoint"`
-	} `json:"server"`
+	Interface InviteInterface `json:"interface" toml:"interface"`
+	Server    ServerInfo      `json:"server" toml:"server"`
 }
 
 func (i *PeerInvite) Write(w io.Writer) error {
-	encoder := json.NewEncoder(w)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(i)
+	return toml.NewEncoder(w).Encode(i)
+}
+
+func ReadPeerInvite(r io.Reader) (*PeerInvite, error) {
+	invite := &PeerInvite{}
+	if _, err := toml.NewDecoder(r).Decode(invite); err != nil {
+		return nil, fmt.Errorf("failed to parse invite: %w", err)
+	}
+	return invite, nil
 }
 
 type ServerInvite struct {
@@ -45,33 +66,53 @@ type CreateInviteRequest struct {
 	Expiration time.Time
 }
 
+// RedeemResult is what a redeeming peer receives: its assignment on the
+// main network and how to reach the server there.
+type RedeemResult struct {
+	NetworkName  string     `json:"networkName"`
+	AssignedCidr string     `json:"assignedCidr"`
+	Server       ServerInfo `json:"server"`
+}
+
 func (ctx *Context) GetInviteByIP(
 	ip net.IP,
 ) (
 	*ServerInvite,
 	error,
 ) {
-	return ctx.Store.InviteGetByIP(ip)
+	return ctx.Store.InviteGetByIPAny(ip)
 }
 
-var tempIPAddr = 1
-
+// CreateInvite reserves the requested main-network IP for a new peer,
+// assigns it a temporary identity on the invite network, and returns
+// the invite payload to deliver out-of-band.
 func (ctx *Context) CreateInvite(
 	req CreateInviteRequest,
 ) (
 	*PeerInvite,
 	error,
 ) {
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	inviteNet, err := cfg.InviteNet()
+	if err != nil {
+		return nil, err
+	}
+
 	tempPrivKey, err := wg.GeneratePrivateKey()
 	if err != nil {
 		return nil, err
 	}
 
-	// Generate a temporary IP in the temp range
-	tempIP := net.IPv4(10, 0, 255, byte(tempIPAddr))
-	tempIPAddr += 1
+	tempIP, err := ctx.nextInviteIP(inviteNet)
+	if err != nil {
+		return nil, err
+	}
 
-	// If no expiration provided, default to 24h from now to ensure redeemable
+	// If no expiration provided, default to 24h from now
 	if req.Expiration.IsZero() {
 		req.Expiration = time.Now().Add(24 * time.Hour)
 	}
@@ -88,24 +129,123 @@ func (ctx *Context) CreateInvite(
 		return nil, err
 	}
 
-	// Create the invite struct with proper network information
-	// TODO: Need to implement config reading to get actual server info
+	prefix, _ := inviteNet.Mask.Size()
+	inviteApiEndpoint, err := cfg.InviteApiEndpoint()
+	if err != nil {
+		return nil, err
+	}
+
 	invite := &PeerInvite{}
 	invite.Interface.NetworkName = ctx.Name
 	invite.Interface.PrivateKey = tempPrivKey.String()
-	invite.Interface.AssignedCidr = tempIP.String() + "/32" // Single host assignment
-
-	// These should come from server configuration - placeholder values for now
-	invite.Server.PublicKey = "placeholder_server_pubkey"
-	invite.Server.ExternalEndpoint = "placeholder_external_endpoint"
-	invite.Server.InternalEndpoint = "placeholder_internal_endpoint"
+	invite.Interface.AssignedCidr = fmt.Sprintf("%s/%d", tempIP.String(), prefix)
+	invite.Server.PublicKey = cfg.PublicKey
+	invite.Server.ExternalEndpoint = cfg.ExternalInviteEndpoint()
+	invite.Server.InternalEndpoint = inviteApiEndpoint
 
 	return invite, nil
 }
 
+// nextInviteIP finds the lowest free address on the invite network,
+// skipping the network address, the server's own invite address, and
+// addresses held by existing invite records.
+func (ctx *Context) nextInviteIP(
+	inviteNet *net.IPNet,
+) (
+	net.IP,
+	error,
+) {
+	invites, err := ctx.Store.InviteList()
+	if err != nil {
+		return nil, err
+	}
+
+	used := map[string]bool{}
+	for _, invite := range invites {
+		ip, _, err := net.ParseCIDR(invite.InviteCidr)
+		if err != nil {
+			continue
+		}
+		used[utils.NormalizeIP(ip).String()] = true
+	}
+
+	serverIP := utils.GetFirstAssignableIpFromCidr(inviteNet)
+	_, last := utils.GetIpRangeFromCidr(inviteNet)
+
+	candidate := utils.IncrementIP(serverIP)
+	for inviteNet.Contains(candidate) && !candidate.Equal(last) {
+		if !used[candidate.String()] {
+			return candidate, nil
+		}
+		candidate = utils.IncrementIP(candidate)
+	}
+
+	return nil, fmt.Errorf("invite network '%s' has no free addresses", inviteNet.String())
+}
+
+// RedeemInvite trades an invite's temporary key for a permanent peer
+// registration. Idempotent: redeeming an already-redeemed invite with
+// the same permanent key returns the same result.
 func (ctx *Context) RedeemInvite(
-	pubKey string,
-	newKey string,
-) error {
-	return ctx.Store.InviteRedeem(pubKey, newKey)
+	invite *ServerInvite,
+	permKey string,
+) (
+	*RedeemResult,
+	error,
+) {
+	if err := ctx.Store.InviteRedeem(invite.PublicKey, permKey); err != nil {
+		// the invite may already be redeemed with this same key; if
+		// so, return the same configuration again so the client can
+		// retry a flow the network interrupted
+		peer, lookupErr := ctx.Store.PeerGetByKey(permKey)
+		if lookupErr == nil && !peer.Confirmed && peer.Name == invite.Name {
+			return ctx.redeemResultForPeer(peer)
+		}
+		return nil, err
+	}
+
+	peer, err := ctx.Store.PeerGetByKey(permKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load redeemed peer: %w", err)
+	}
+
+	return ctx.redeemResultForPeer(peer)
+}
+
+func (ctx *Context) redeemResultForPeer(
+	peer *Peer,
+) (
+	*RedeemResult,
+	error,
+) {
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	rootNet, err := cfg.RootNet()
+	if err != nil {
+		return nil, err
+	}
+
+	peerIP, _, err := net.ParseCIDR(peer.Cidr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid peer cidr '%s': %w", peer.Cidr, err)
+	}
+
+	apiEndpoint, err := cfg.InternalApiEndpoint()
+	if err != nil {
+		return nil, err
+	}
+
+	prefix, _ := rootNet.Mask.Size()
+	result := &RedeemResult{
+		NetworkName:  ctx.Name,
+		AssignedCidr: fmt.Sprintf("%s/%d", peerIP.String(), prefix),
+	}
+	result.Server.PublicKey = cfg.PublicKey
+	result.Server.ExternalEndpoint = cfg.ExternalEndpoint()
+	result.Server.InternalEndpoint = apiEndpoint
+
+	return result, nil
 }

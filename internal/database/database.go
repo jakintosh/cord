@@ -2,12 +2,14 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"path"
 
+	"git.sr.ht/~jakintosh/cord/internal/server"
 	"git.sr.ht/~jakintosh/cord/internal/utils"
 	sqlite "modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
@@ -222,6 +224,9 @@ func ResultsEmpty(
 	return count == 0
 }
 
+// CheckSqliteErr translates database errors into service-level
+// sentinels (server.ErrNotFound, server.ErrConflict) where the cause
+// is recognizable, so callers never inspect SQL details.
 func CheckSqliteErr(
 	context string,
 	err error,
@@ -230,16 +235,19 @@ func CheckSqliteErr(
 		return nil
 	}
 
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: no rows while %s", server.ErrNotFound, context)
+	}
+
 	if sqliteErr, ok := err.(*sqlite.Error); ok {
 		if sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return fmt.Errorf("Unique constraint violation while %s", context)
-		} else {
-			return fmt.Errorf(
-				"SQLite error (%d) while %s: %s",
-				sqliteErr.Code(), context, sqliteErr.Error(),
-			)
+			return fmt.Errorf("%w: unique constraint violation while %s", server.ErrConflict, context)
 		}
-	} else {
-		return fmt.Errorf("other database error while %s: %w", context, err)
+		return fmt.Errorf(
+			"SQLite error (%d) while %s: %s",
+			sqliteErr.Code(), context, sqliteErr.Error(),
+		)
 	}
+
+	return fmt.Errorf("database error while %s: %w", context, err)
 }

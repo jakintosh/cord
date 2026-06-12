@@ -21,6 +21,22 @@ type UpdateCidrRequest struct {
 	Name string `json:"name"`
 }
 
+func (ctx *Context) GetCidr(
+	name string,
+) (
+	*Cidr,
+	error,
+) {
+	return ctx.Store.CidrGet(name)
+}
+
+func (ctx *Context) ListCidrs() (
+	[]*Cidr,
+	error,
+) {
+	return ctx.Store.CidrList()
+}
+
 func (ctx *Context) CreateCidr(
 	req CreateCidrRequest,
 ) error {

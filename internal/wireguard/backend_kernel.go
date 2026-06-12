@@ -3,6 +3,7 @@
 package wireguard
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -13,8 +14,8 @@ import (
 )
 
 // KernelBackend implements the Backend interface for Linux systems using
-// the kernel WireGuard implementation. This is the default implementation
-// on Linux systems.
+// the kernel WireGuard implementation. This is the default on Linux.
+// Unlike the userspace backend, the device outlives this process.
 type KernelBackend struct{}
 
 func (b *KernelBackend) Up(
@@ -31,6 +32,15 @@ func (b *KernelBackend) Up(
 	err = syncAddress(link, iface.Address)
 	if err != nil {
 		return err
+	}
+
+	// Set MTU
+	mtu := iface.MTU
+	if mtu <= 0 {
+		mtu = defaultMTU
+	}
+	if err := netlink.LinkSetMTU(link, mtu); err != nil {
+		return fmt.Errorf("failed to set MTU on %s: %w", iface.Name, err)
 	}
 
 	// Apply device configuration (private key, listen port)
@@ -67,14 +77,13 @@ func (b *KernelBackend) Down(
 	iface *Interface,
 	delete bool,
 ) error {
-	// Get the link - if it doesn't exist, return success
 	link, err := netlink.LinkByName(iface.Name)
-	if link == nil {
-		// Interface doesn't exist, nothing to do
-		return nil
-	}
 	if err != nil {
-		// error getting interface, surface err
+		// Interface doesn't exist, nothing to do
+		var notFound netlink.LinkNotFoundError
+		if errors.As(err, &notFound) {
+			return nil
+		}
 		return fmt.Errorf("failed to get link named %s: %w", iface.Name, err)
 	}
 
@@ -98,11 +107,7 @@ func (b *KernelBackend) Down(
 func (b *KernelBackend) Sync(
 	iface *Interface,
 ) error {
-	// Get the link - if it doesn't exist or is not up, return an error
 	link, err := netlink.LinkByName(iface.Name)
-	if link == nil {
-		return fmt.Errorf("interface %s does not exist: %w", iface.Name, err)
-	}
 	if err != nil {
 		return fmt.Errorf("failed to get link named %s: %w", iface.Name, err)
 	}
@@ -121,6 +126,38 @@ func (b *KernelBackend) Sync(
 	return nil
 }
 
+func (b *KernelBackend) Status(
+	iface *Interface,
+) (
+	*DeviceStatus,
+	error,
+) {
+	client, err := wgctrl.New()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create WireGuard client: %w", err)
+	}
+	defer client.Close()
+
+	device, err := client.Device(iface.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query device %s: %w", iface.Name, err)
+	}
+
+	status := &DeviceStatus{
+		Name:       device.Name,
+		ListenPort: device.ListenPort,
+	}
+	for _, peer := range device.Peers {
+		status.Peers = append(status.Peers, PeerStatus{
+			PublicKey:     peer.PublicKey,
+			Endpoint:      peer.Endpoint,
+			LastHandshake: peer.LastHandshakeTime,
+		})
+	}
+
+	return status, nil
+}
+
 func ensureLink(
 	name string,
 ) (
@@ -128,16 +165,17 @@ func ensureLink(
 	error,
 ) {
 	link, err := netlink.LinkByName(name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get link named %s: %w", name, err)
-	}
-
-	// if link exists, return it immediately
-	if link != nil {
+	if err == nil {
 		return link, nil
 	}
 
-	// If link doesn't exist, create it
+	// Anything other than "not found" is a real error
+	var notFound netlink.LinkNotFoundError
+	if !errors.As(err, &notFound) {
+		return nil, fmt.Errorf("failed to get link named %s: %w", name, err)
+	}
+
+	// Link doesn't exist: create it
 
 	// create netlink attributes
 	attr := netlink.NewLinkAttrs()

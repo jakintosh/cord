@@ -4,7 +4,7 @@
 
 **Decision:** Implement two separate WireGuard networks - an "invite network" (e.g. 172.16.0.0/16 on port 51821) exclusively for redemption, and the main network (e.g. 10.0.0.0/8 on port 51820) for operational peers. The invite network only exposes the `/peer/redeem` endpoint, while the main network hosts the full API. Peers connect to the invite network with temporary credentials, receive their permanent configuration, then transition to the main network. Both of these root network CIDRs will be provided by the admin at network initialization.
 
-**Status:** Preliminary
+**Status:** Accepted
 
 **Consequences:**
 - Positive: Complete isolation between untrusted invite peers and the production network, natural security boundary, simple IP management, clean peer lifecycle with no intermediate states, atomic cleanup (just remove from invite network), reuses existing WireGuard management code

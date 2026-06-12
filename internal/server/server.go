@@ -1,16 +1,7 @@
 package server
 
 import (
-	"fmt"
 	"net"
-)
-
-type BackendType int
-
-const (
-	UndefinedBackend BackendType = iota
-	KernelBackend
-	UserspaceBackend
 )
 
 type ServerStore interface {
@@ -27,19 +18,27 @@ type ServerStore interface {
 	CidrUpdate(name string, req UpdateCidrRequest) error
 	CidrDelete(name string) error
 
-	EndpointReport(sightings []string) error
+	EndpointReport(sightings []EndpointSighting) error
+	EndpointsRecent(since int64) (map[string][]EndpointWitness, error)
+	EndpointsPrune(before int64) error
 
 	InviteList() ([]*ServerInvite, error)
+	InviteListActive() ([]*ServerInvite, error)
 	InviteGet(name string) (*ServerInvite, error)
 	InviteGetByIP(ip net.IP) (*ServerInvite, error)
+	InviteGetByIPAny(ip net.IP) (*ServerInvite, error)
 	InviteCreate(name string, pubKey string, tempIP net.IP, finalIP net.IP, admin bool, expiration int64) error
 	InviteRedeem(pubKey string, newKey string) error
+	InvitesPruneExpired(before int64) error
 
 	PeerExists(name string) bool
 	PeerList() ([]*Peer, error)
 	PeerListPeers(name string) ([]*Peer, error)
 	PeerGet(name string) (*Peer, error)
 	PeerGetByIP(ip net.IP) (*Peer, error)
+	PeerGetByKey(pubKey string) (*Peer, error)
+	PeerConfirm(pubKey string, ip net.IP) error
+	PeerDelete(name string) error
 	PeerUpdate(name string, req UpdatePeerRequest) (*Peer, error)
 }
 
@@ -62,31 +61,4 @@ func NewContext(
 	}
 
 	return ctx, nil
-}
-
-func (ctx *Context) Serve(
-	noRouting bool,
-	mtu int,
-	backend BackendType,
-) error {
-
-	fmt.Println("Serve Network")
-	fmt.Printf("network: %s\n", ctx.Name)
-	fmt.Printf("noRouting: %t\n", noRouting)
-	fmt.Printf("mtu: %d\n", mtu)
-	fmt.Printf("backend: %v\n", backend)
-
-	// TODO: Implement proper server interface management
-	// According to the documentation, the serve function should:
-	// 1. Read server configuration from ctx.Config
-	// 2. Create main network interface using wireguard.NewInterface()
-	// 3. Create invite network interface using wireguard.NewInterface()
-	// 4. Bring up both interfaces using Interface.Up()
-	// 5. Start HTTP API server
-	// 6. Handle peer updates using Interface.Sync()
-
-	fmt.Println("TODO: Implement actual WireGuard interface management")
-	fmt.Println("This should create and manage both main and invite interfaces")
-
-	return nil
 }

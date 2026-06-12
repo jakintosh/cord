@@ -1,280 +1,605 @@
 package client
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"net"
 	"os"
+	"os/signal"
+	"path"
+	"syscall"
+	"time"
 
-	db "git.sr.ht/~jakintosh/cord/internal/database"
+	"git.sr.ht/~jakintosh/cord/internal/server"
+	wg "git.sr.ht/~jakintosh/cord/internal/wireguard"
 )
 
+const (
+	syncInterval   = 25 * time.Second
+	keepalive      = 25 * time.Second
+	handshakeFresh = 3 * time.Minute
+)
+
+// Context bundles the identity and storage locations for one network.
 type Context struct {
-	Db        *sql.DB
 	Name      string
 	ConfigDir string
 	DataDir   string
+	Backend   wg.BackendType
 }
 
-// NewContext prepares a client context for a network. It ensures
-// paths exist and opens the network-scoped SQLite database.
+// NewContext prepares a client context for a network. The name may be
+// empty for install, which learns it from the invite file.
 func NewContext(
 	networkName string,
 	configDir string,
 	dataDir string,
 ) (*Context, error) {
-
-	os.MkdirAll(configDir, 0755)
-	database, err := db.Open(networkName, dataDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
 	return &Context{
-		Db:        database,
 		Name:      networkName,
 		ConfigDir: configDir,
 		DataDir:   dataDir,
+		Backend:   wg.BackendAuto,
 	}, nil
 }
 
-// WIREGUARD INTERFACE
-// DEPENDENCY: `internal/wireguard` function to create and configure
-// a WireGuard device, applying config via wgctrl/netlink and bringing
-// the interface up idempotently.
-// DEPENDENCY: add a `wireguard` function to set link down and clear WG
-// device state where appropriate.
-// DEPENDENCY: expose a wireguard function to reliably remove interfaces
-// and clean routes idempotently.
-// DEPENDENCY: need a wireguard function which configures the interface
-// and peers via wgctrl/netlink and ensures the desired state is applied
-// idempotently.
-// DEPENDENCY: add a `wireguard` status helper to query device presence,
-// listen port, and peer count via wgctrl; return structured info.
-// DEPENDENCY: add a `wireguard` status helper to query structured peer info
-// for a given interface.
-
-// API CLIENT INTERFACE
-// DEPENDENCY: server API endpoint for `POST /redeem`
-// DEPENDENCY: server API endpoint for `POST /confirm`
-// DEPENDENCY: server API endpoint for `GET /state`
-// DEPENDENCY: server API endpoint for `POST /report`
-
-// CONFIG INTERFACE
-// DEPENDENCY: data/config helper that list installed networks by
-// scanning for expected DB or config files.
-// DEPENDENCY: implement key/config storage to read permanent keys, assigned
-// IP, network CIDR, and client listen port from disk/DB.
-
-// Install consumes an invite to join a network. It follows the
-// Peer Redemption flow: configure a temporary invite interface, make
-// a permanent keypair, redeem, configure the main interface, fetch
-// state, confirm with the server, then tear down the invite
-// interface and persist local state.
+// Install consumes an invite to join a network: bring up a temporary
+// interface on the invite network, redeem a permanent identity, prove
+// presence on the main network, then tear everything down. The
+// permanent keypair is persisted before redemption so the flow can be
+// retried safely.
 func (ctx *Context) Install(
 	invitePath string,
 ) error {
+	// parse the invite file
+	file, err := os.Open(invitePath)
+	if err != nil {
+		return fmt.Errorf("failed to open invite: %w", err)
+	}
+	invite, err := server.ReadPeerInvite(file)
+	file.Close()
+	if err != nil {
+		return err
+	}
+	if invite.Interface.NetworkName == "" {
+		return fmt.Errorf("invite has no network name")
+	}
+	ctx.Name = invite.Interface.NetworkName
 
-	// 1. Parse invite file: endpoint, invite keypair, assigned IP
-	// 2. Initialize local database schema for new network
-	// 3. Configure temporary WireGuard invite interface
-	// 4. Generate permanent WireGuard keypair for this client
-	// 5. POST /peer/redeem with permanent public key over invite net
-	// 6. Persist returned main-network config and server pubkey
-	// 7. Configure main WireGuard interface with permanent key/IP
-	// 8. POST /confirm over main network
-	// 9. (On 200 OK) Tear down temporary invite interface
-	// 10. Call `Fetch()` for initial network snapshot
+	// load or create the permanent identity; persisting it first
+	// makes redemption retryable
+	cfg, err := ctx.installIdentity()
+	if err != nil {
+		return err
+	}
 
-	fmt.Printf(
-		"Install\nInvite: %s\nNetwork: %s\nConfig: %s\nData: %s\n",
-		invitePath, ctx.Name, ctx.ConfigDir, ctx.DataDir,
-	)
+	// stand up the temporary invite interface
+	inviteIface, err := ctx.buildInviteInterface(invite)
+	if err != nil {
+		return err
+	}
+	if err := inviteIface.Up(""); err != nil {
+		return fmt.Errorf("failed to bring up invite interface: %w", err)
+	}
+	defer func() { _ = inviteIface.Down(true) }()
+	fmt.Printf("invite interface up (%s), redeeming...\n", inviteIface.DeviceName())
+
+	// redeem over the invite network
+	inviteApi := newApiClient(invite.Server.InternalEndpoint)
+	result, err := inviteApi.redeem(cfg.PublicKey)
+	if err != nil {
+		return fmt.Errorf("failed to redeem invite: %w", err)
+	}
+
+	// persist the permanent network assignment
+	cfg.AssignedCidr = result.AssignedCidr
+	cfg.Server = result.Server
+	if err := ctx.SaveConfig(cfg); err != nil {
+		return err
+	}
+	fmt.Printf("redeemed: assigned %s\n", cfg.AssignedCidr)
+
+	// stand up the main interface and confirm presence
+	mainIface, err := ctx.buildMainInterface(cfg, nil)
+	if err != nil {
+		return err
+	}
+	if err := mainIface.Up(""); err != nil {
+		return fmt.Errorf("failed to bring up main interface: %w", err)
+	}
+	defer func() { _ = mainIface.Down(true) }()
+
+	mainApi := newApiClient(cfg.Server.InternalEndpoint)
+	if err := mainApi.confirm(cfg.PublicKey); err != nil {
+		return fmt.Errorf("failed to confirm peer: %w", err)
+	}
+	fmt.Println("confirmed on main network")
+
+	// seed the local peer database
+	d, err := ctx.openDb()
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	if peers, err := mainApi.peers(); err == nil {
+		if err := reconcilePeers(d, peers); err != nil {
+			return err
+		}
+		fmt.Printf("fetched %d peer(s)\n", len(peers))
+	} else {
+		fmt.Printf("warning: initial peer fetch failed: %v\n", err)
+	}
+
+	fmt.Printf("installed network '%s'; run 'cord up %s' to connect\n", ctx.Name, ctx.Name)
 	return nil
 }
 
-// Uninstall removes all local client state for a network. It
-// follows the Network Uninstallation flow: bring the interface
-// down, remove generated configuration, delete the network's local
-// SQLite database, and optionally clean directories. Idempotent.
+// installIdentity loads the persisted keypair for this network or
+// generates and persists a fresh one.
+func (ctx *Context) installIdentity() (*ClientConfig, error) {
+	if ctx.HasConfig() {
+		cfg, err := ctx.LoadConfig()
+		if err != nil {
+			return nil, err
+		}
+		fmt.Println("reusing existing keypair from previous install attempt")
+		return cfg, nil
+	}
+
+	key, err := wg.GeneratePrivateKey()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate keypair: %w", err)
+	}
+
+	cfg := &ClientConfig{
+		NetworkName: ctx.Name,
+		PrivateKey:  key.String(),
+		PublicKey:   key.PublicKey().String(),
+	}
+	if err := ctx.SaveConfig(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// Uninstall removes all local state for a network: interface, config,
+// and database. Idempotent.
 func (ctx *Context) Uninstall() error {
+	// best effort: tear down a lingering interface (kernel backend)
+	if err := ctx.Down(); err != nil {
+		fmt.Printf("warning: could not bring interface down: %v\n", err)
+	}
 
-	// 1. Attempt to bring the WireGuard interface down
-	// 2. Remove any routes or OS-specific artifacts
-	// 3. Delete generated WireGuard config files (if any)
-	// 4. Close database handle if open
-	// 5. Delete the network's SQLite database file
-	// 6. Optionally remove empty config/data directories
-	// 7. Return success even if components were already absent
+	if err := ctx.DeleteConfig(); err != nil {
+		return err
+	}
+	if err := ctx.deleteDb(); err != nil {
+		return err
+	}
+	if err := os.Remove(ctx.confPath()); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete wg config: %w", err)
+	}
 
-	fmt.Printf(
-		"Uninstall\nNetwork: %s\nConfig: %s\nData: %s\n",
-		ctx.Name, ctx.ConfigDir, ctx.DataDir,
-	)
+	fmt.Printf("uninstalled network '%s'\n", ctx.Name)
 	return nil
 }
 
-// Show reports local client state for the network: wireguard
-// interface information (including peers/keys), and recent endpoints.
-// Read-only helper to inspect health.
+// Show prints the local state for one network or, with no network
+// selected, lists the installed networks.
 func (ctx *Context) Show() error {
+	if ctx.Name == "" {
+		return ctx.showInstalled()
+	}
 
-	// 1. Check existence and status of WireGuard interface
-	// 2. Read local keys and assigned IP (if stored)
-	// 3. Query local DB for peers and last endpoint sightings
-	// 4. Print a concise report of the current local state
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return err
+	}
 
-	fmt.Printf(
-		"Show\nNetwork: %s\nConfig: %s\nData: %s\n",
-		ctx.Name, ctx.ConfigDir, ctx.DataDir,
-	)
+	fmt.Printf("network:  %s\n", cfg.NetworkName)
+	fmt.Printf("address:  %s\n", cfg.AssignedCidr)
+	fmt.Printf("pubkey:   %s\n", cfg.PublicKey)
+	fmt.Printf("server:   %s (api %s)\n", cfg.Server.ExternalEndpoint, cfg.Server.InternalEndpoint)
+
+	d, err := ctx.openDb()
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+
+	peers, err := listLocalPeers(d)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("peers:    %d\n", len(peers))
+	for _, peer := range peers {
+		line := fmt.Sprintf("  %-20s %-18s", peer.Name, peer.Cidr)
+		if peer.Endpoint != "" {
+			line += " last seen at " + peer.Endpoint
+		}
+		fmt.Println(line)
+	}
+
 	return nil
 }
 
-// Fetch updates local state from the server. It follows the Peer
-// State Query flow: request visible peers and their latest endpoints,
-// upsert into the local DB, delete any peers not returned, and prepare
-// interface updates. Idempotent and safe to call before bringing the
-// interface up.
+func (ctx *Context) showInstalled() error {
+	entries, err := os.ReadDir(ctx.ConfigDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("no networks installed")
+			return nil
+		}
+		return fmt.Errorf("failed to read config dir: %w", err)
+	}
+
+	found := false
+	for _, entry := range entries {
+		name := entry.Name()
+		if path.Ext(name) == ".toml" {
+			fmt.Println(name[:len(name)-len(".toml")])
+			found = true
+		}
+	}
+	if !found {
+		fmt.Println("no networks installed")
+	}
+	return nil
+}
+
+// Fetch updates the local peer database from the server. It requires
+// the network to be reachable (interface up in another process, or the
+// server's API otherwise routable).
 func (ctx *Context) Fetch() error {
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return err
+	}
 
-	// 1. Retrieve server endpoint
-	// 2. GET peers for this network over the main interface
-	// 3. Parse JSON list of confirmed, enabled peers
-	// 4. Upsert peers into local DB (keys, names, IPs)
-	// 5. Delete peers in local DB that were not returned
-	// 6. Create wireguard peer with initial endpoint from server
-	// 7. Compute add/remove/update sets for interface peers
-	// 8. Return without mutating if nothing changed
+	d, err := ctx.openDb()
+	if err != nil {
+		return err
+	}
+	defer d.Close()
 
-	fmt.Printf(
-		"Fetch\nNetwork: %s\nConfig: %s\nData: %s\n",
-		ctx.Name, ctx.ConfigDir, ctx.DataDir,
-	)
+	peers, err := newApiClient(cfg.Server.InternalEndpoint).peers()
+	if err != nil {
+		return fmt.Errorf("failed to fetch peers: %w", err)
+	}
+	if err := reconcilePeers(d, peers); err != nil {
+		return err
+	}
+
+	fmt.Printf("fetched %d peer(s)\n", len(peers))
 	return nil
 }
 
-// Up constructs and applies the WireGuard configuration for this
-// network. It aligns with the Interface Management flow: optionally
-// fetch state, build device and peer configs from local DB, write the
-// interface using OS APIs, set routes, and bring it up. Idempotent.
-func (ctx *Context) Up(fetch bool) error {
+// Up connects to the network and stays in the foreground: it keeps the
+// local peer set in sync with the server and reports endpoint changes
+// it witnesses (endpoint gossip) until interrupted.
+func (ctx *Context) Up(noFetch bool) error {
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
+		return err
+	}
 
-	// 1. Optionally call Fetch() to refresh local peer state
-	// 2. Load local keys, IP/CIDR, and listen port
-	// 3. Build DeviceConfig structure for the interface
-	// 4. Build PeerConfig entries from local DB peers
-	// 5. Write configuration via wgctrl/netlink
-	// 6. Ensure routing rules are present (unless disabled)
-	// 7. Bring the interface up; handle already-up idempotently
+	d, err := ctx.openDb()
+	if err != nil {
+		return err
+	}
+	defer d.Close()
 
-	fmt.Printf(
-		"Up\nNetwork: %s\nConfig: %s\nData: %s\n",
-		ctx.Name, ctx.ConfigDir, ctx.DataDir,
-	)
-	return nil
+	apiClient := newApiClient(cfg.Server.InternalEndpoint)
+
+	peers, err := listLocalPeers(d)
+	if err != nil {
+		return err
+	}
+
+	iface, err := ctx.buildMainInterface(cfg, peers)
+	if err != nil {
+		return err
+	}
+	if err := iface.Up(ctx.confPath()); err != nil {
+		return fmt.Errorf("failed to bring up interface: %w", err)
+	}
+	defer func() { _ = iface.Down(true) }()
+	fmt.Printf("interface up: %s (%s)\n", iface.DeviceName(), cfg.AssignedCidr)
+
+	// initial fetch now that the network is reachable
+	if !noFetch {
+		if err := ctx.syncOnce(cfg, d, apiClient, iface); err != nil {
+			fmt.Printf("warning: sync failed: %v\n", err)
+		}
+	}
+
+	sigCtx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	ticker := time.NewTicker(syncInterval)
+	defer ticker.Stop()
+
+	fmt.Println("connected; press ctrl-c to disconnect")
+	for {
+		select {
+		case <-sigCtx.Done():
+			fmt.Println("\ndisconnecting")
+			return nil
+		case <-ticker.C:
+			if err := ctx.syncOnce(cfg, d, apiClient, iface); err != nil {
+				fmt.Printf("warning: sync failed: %v\n", err)
+			}
+		}
+	}
 }
 
-// Down deactivates the WireGuard interface. Part of the Interface
-// Management flow: remove routes, bring the interface down, and clean
-// ephemeral state. Safe to call if the interface is already down.
+// syncOnce performs one round of the state synchronization flow:
+// report witnessed endpoint changes, refresh the peer list, and apply
+// any changes to the live interface.
+func (ctx *Context) syncOnce(
+	cfg *ClientConfig,
+	d *sql.DB,
+	apiClient *apiClient,
+	iface *wg.Interface,
+) error {
+	// gossip: compare live endpoints against the local database
+	if sightings := ctx.scanEndpoints(d, iface); len(sightings) > 0 {
+		if err := apiClient.reportEndpoints(sightings); err != nil {
+			fmt.Printf("warning: endpoint report failed: %v\n", err)
+		}
+	}
+
+	// pull the server's view of the network
+	peers, err := apiClient.peers()
+	if err != nil {
+		return err
+	}
+	if err := reconcilePeers(d, peers); err != nil {
+		return err
+	}
+
+	// rebuild and apply the interface peer list
+	localPeers, err := listLocalPeers(d)
+	if err != nil {
+		return err
+	}
+	wgPeers, err := ctx.buildPeers(cfg, localPeers)
+	if err != nil {
+		return err
+	}
+	iface.SetPeers(wgPeers)
+	return iface.Sync()
+}
+
+// scanEndpoints inspects the live device for peers whose endpoint
+// changed since we last saw them, records the changes locally, and
+// returns sightings to report to the server.
+func (ctx *Context) scanEndpoints(
+	d *sql.DB,
+	iface *wg.Interface,
+) []server.EndpointSighting {
+	status, err := iface.Status()
+	if err != nil {
+		return nil
+	}
+
+	known, err := listLocalPeers(d)
+	if err != nil {
+		return nil
+	}
+	knownByKey := map[string]LocalPeer{}
+	for _, peer := range known {
+		knownByKey[peer.PublicKey] = peer
+	}
+
+	now := time.Now()
+	var sightings []server.EndpointSighting
+	for _, peerStatus := range status.Peers {
+		// only trust endpoints with a recent handshake
+		if peerStatus.Endpoint == nil {
+			continue
+		}
+		if now.Sub(peerStatus.LastHandshake) > handshakeFresh {
+			continue
+		}
+
+		key := peerStatus.PublicKey.String()
+		local, ok := knownByKey[key]
+		if !ok || local.Endpoint == peerStatus.Endpoint.String() {
+			continue
+		}
+
+		endpoint := peerStatus.Endpoint.String()
+		if err := updateLocalEndpoint(d, key, endpoint, now.Unix()); err != nil {
+			continue
+		}
+		sightings = append(sightings, server.EndpointSighting{
+			PeerKey:   key,
+			Endpoint:  endpoint,
+			Timestamp: now.Unix(),
+		})
+	}
+
+	return sightings
+}
+
+// Down tears down the network interface. On Linux this removes a
+// kernel WireGuard device left by another process; with the userspace
+// backend the interface lives and dies with its 'cord up' process.
 func (ctx *Context) Down() error {
-
-	// 1. Locate the WireGuard interface for this network
-	// 2. Bring the interface down using OS APIs
-	// 3. Optionally delete transient configuration artifacts
-	// 4. Exit cleanly if the interface does not exist
-
-	fmt.Printf(
-		"Down\nNetwork: %s\nConfig: %s\nData: %s\n",
-		ctx.Name, ctx.ConfigDir, ctx.DataDir,
-	)
-	return nil
-}
-
-// Watch runs the Endpoint Discovery flow continuously. It periodically
-// scans the interface, records endpoint changes, and syncs updates to
-// the server. Long‑running and cancelable; intended to run after Up.
-func (ctx *Context) Watch() error {
-
-	// 1. Initialize a ticker with the configured interval
-	// 2. On each tick, invoke Scan() to detect endpoint changes
-	// 3. If changes or reporting TTL elapsed, call Sync()
-	// 4. Handle shutdown via signal or context cancellation
-	// 5. Backoff on transient errors; keep loop running
-
-	fmt.Printf(
-		"Down\nNetwork: %s\nConfig: %s\nData: %s\n",
-		ctx.Name, ctx.ConfigDir, ctx.DataDir,
-	)
-	return nil
-}
-
-// Scan inspects the WireGuard interface to observe current peer
-// endpoints. It detects changes against the local database and stores
-// updated endpoints with timestamps for later Sync().
-func (ctx *Context) Scan() error {
-
-	// 1. Query OS/WireGuard for current peer endpoint list
-	// 2. Read last-known endpoints for peers from local DB
-	// 3. Compare and identify changed endpoints; make sure wg endpoint is recent
-	// 4. Upsert changed endpoints with current timestamp
-
-	fmt.Printf(
-		"Down\nNetwork: %s\nConfig: %s\nData: %s\n",
-		ctx.Name, ctx.ConfigDir, ctx.DataDir,
-	)
-	return nil
-}
-
-// Sync sends locally observed endpoint changes to the server. Part
-// of the Endpoint Gossip flow: post only changed endpoints with
-// timestamps, update local reporting state, and optionally refresh
-// recent endpoints for peers.
-func (ctx *Context) Sync() error {
-
-	// 1. Gather endpoint changes since last report or TTL
-	// 2. Build request payload of peer keys, endpoints, timestamps
-	// 3. POST to server endpoint sighting API over main network
-	// 4. On success, mark records as reported with time
-
-	fmt.Printf(
-		"Down\nNetwork: %s\nConfig: %s\nData: %s\n",
-		ctx.Name, ctx.ConfigDir, ctx.DataDir,
-	)
-	return nil
-}
-
-// initNetworkDb initializes local client tables used by Install and
-// endpoint gossip: peers and endpoint sightings. Enables foreign keys
-// and creates tables if absent. No-op if already initialized.
-func initNetworkDb(d *sql.DB) error {
-
-	if err := db.EnableForeignKeys(d); err != nil {
+	cfg, err := ctx.LoadConfig()
+	if err != nil {
 		return err
 	}
 
-	if err := db.InitTable(d, "peer", `
-		CREATE TABLE IF NOT EXISTS peer (
-			id                INTEGER PRIMARY KEY,
-			public_key        TEXT NOT NULL UNIQUE,
-			name              TEXT NOT NULL UNIQUE,
-			ip                INTEGER NOT NULL UNIQUE
-		);
-	`); err != nil {
+	iface, err := ctx.buildMainInterface(cfg, nil)
+	if err != nil {
 		return err
 	}
+	return iface.Down(true)
+}
 
-	if err := db.InitTable(d, "endpoint", `
-		CREATE TABLE IF NOT EXISTS endpoint (
-			id                INTEGER PRIMARY KEY,
-			peer_key          TEXT NOT NULL,        -- target peer's public key
-			witness_key       TEXT NOT NULL,        -- witnessing peer's public key
-			endpoint          TEXT NOT NULL,        -- ip:port endpoint
-			time              INTEGER NOT NULL,     -- witness timestamp
-		);
-	`); err != nil {
-		return err
+func (ctx *Context) confPath() string {
+	return path.Join(ctx.DataDir, ctx.Name+".conf")
+}
+
+// buildInviteInterface constructs the temporary interface described by
+// an invite: the server is the only peer, reachable at its public
+// invite endpoint.
+func (ctx *Context) buildInviteInterface(
+	invite *server.PeerInvite,
+) (
+	*wg.Interface,
+	error,
+) {
+	tempKey, err := wg.ParseKey(invite.Interface.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid invite private key: %w", err)
 	}
 
-	return nil
+	ip, inviteNet, err := net.ParseCIDR(invite.Interface.AssignedCidr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid invite cidr: %w", err)
+	}
+
+	iface, err := wg.NewInterface(
+		ctx.Name+"-invite",
+		tempKey,
+		net.IPNet{IP: ip, Mask: inviteNet.Mask},
+		0,
+		ctx.Backend,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	serverPeer, err := buildServerPeer(
+		invite.Server.PublicKey,
+		invite.Server.ExternalEndpoint,
+		inviteNet,
+	)
+	if err != nil {
+		return nil, err
+	}
+	iface.AddPeer(*serverPeer)
+
+	return iface, nil
+}
+
+// buildMainInterface constructs the permanent interface from the
+// client config and the local peer database.
+func (ctx *Context) buildMainInterface(
+	cfg *ClientConfig,
+	peers []LocalPeer,
+) (
+	*wg.Interface,
+	error,
+) {
+	privKey, err := wg.ParseKey(cfg.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid private key: %w", err)
+	}
+
+	address, err := cfg.Address()
+	if err != nil {
+		return nil, err
+	}
+
+	iface, err := wg.NewInterface(ctx.Name, privKey, *address, 0, ctx.Backend)
+	if err != nil {
+		return nil, err
+	}
+
+	wgPeers, err := ctx.buildPeers(cfg, peers)
+	if err != nil {
+		return nil, err
+	}
+	iface.SetPeers(wgPeers)
+
+	return iface, nil
+}
+
+// buildPeers converts the server peer plus local peer records into
+// WireGuard peers. The server's allowed IPs cover the whole network so
+// it can relay until direct peer connections are established; peers'
+// narrower allowed IPs take precedence via longest-prefix match.
+func (ctx *Context) buildPeers(
+	cfg *ClientConfig,
+	peers []LocalPeer,
+) (
+	[]wg.Peer,
+	error,
+) {
+	network, err := cfg.NetworkCidr()
+	if err != nil {
+		return nil, err
+	}
+
+	serverPeer, err := buildServerPeer(
+		cfg.Server.PublicKey,
+		cfg.Server.ExternalEndpoint,
+		network,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	wgPeers := []wg.Peer{*serverPeer}
+	for _, peer := range peers {
+		if peer.PublicKey == cfg.Server.PublicKey {
+			continue
+		}
+
+		key, err := wg.ParseKey(peer.PublicKey)
+		if err != nil {
+			fmt.Printf("warning: skipping peer '%s': invalid key\n", peer.Name)
+			continue
+		}
+		_, allowed, err := net.ParseCIDR(peer.Cidr)
+		if err != nil {
+			fmt.Printf("warning: skipping peer '%s': invalid cidr\n", peer.Name)
+			continue
+		}
+
+		wgPeer := wg.Peer{
+			PublicKey:           key,
+			AllowedIPs:          []net.IPNet{*allowed},
+			PersistentKeepalive: keepalive,
+		}
+		if peer.Endpoint != "" {
+			if addr, err := net.ResolveUDPAddr("udp", peer.Endpoint); err == nil {
+				wgPeer.Endpoint = addr
+			}
+		}
+		wgPeers = append(wgPeers, wgPeer)
+	}
+
+	return wgPeers, nil
+}
+
+func buildServerPeer(
+	pubKey string,
+	endpoint string,
+	allowed *net.IPNet,
+) (
+	*wg.Peer,
+	error,
+) {
+	key, err := wg.ParseKey(pubKey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid server public key: %w", err)
+	}
+
+	addr, err := net.ResolveUDPAddr("udp", endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("invalid server endpoint '%s': %w", endpoint, err)
+	}
+
+	return &wg.Peer{
+		PublicKey:           key,
+		AllowedIPs:          []net.IPNet{*allowed},
+		Endpoint:            addr,
+		PersistentKeepalive: keepalive,
+	}, nil
 }

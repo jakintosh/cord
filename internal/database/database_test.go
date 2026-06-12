@@ -275,6 +275,7 @@ func assertPeerExists(
 	store *database.SQLiteStore,
 	name, pubKey string,
 	admin bool,
+	confirmed bool,
 ) {
 	t.Helper()
 	peer, err := store.PeerGet(name)
@@ -294,8 +295,8 @@ func assertPeerExists(
 	if !peer.Enabled {
 		t.Error("redeemed peer should be enabled")
 	}
-	if !peer.Confirmed {
-		t.Error("redeemed peer should be confirmed")
+	if peer.Confirmed != confirmed {
+		t.Errorf("peer confirmed = %v, want %v", peer.Confirmed, confirmed)
 	}
 }
 
@@ -323,7 +324,8 @@ func expectNoError(
 	}
 }
 
-// createPeerFromInvite creates a peer by redeeming an invite
+// createPeerFromInvite creates a confirmed peer by redeeming an invite
+// and confirming the resulting peer, mirroring the full join flow
 func createPeerFromInvite(
 	t *testing.T,
 	store *database.SQLiteStore,
@@ -338,8 +340,13 @@ func createPeerFromInvite(
 		return err
 	}
 
-	// Then redeem it to create the peer
-	return store.InviteRedeem(inviteDesc.PubKey, newPubKey)
+	// Then redeem it to create the (unconfirmed) peer
+	if err := store.InviteRedeem(inviteDesc.PubKey, newPubKey); err != nil {
+		return err
+	}
+
+	// Finally confirm the peer at its assigned IP
+	return store.PeerConfirm(newPubKey, inviteDesc.FinalIP)
 }
 
 // peerDescToInviteDesc converts a TestPeerDesc to TestInviteDesc for invite creation

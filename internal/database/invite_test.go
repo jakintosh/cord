@@ -176,8 +176,8 @@ func TestInviteRedeemValid(t *testing.T) {
 	// verify invite is marked as redeemed
 	assertInviteRedeemed(t, store, TestUser1.Name)
 
-	// verify peer was created with correct attributes
-	assertPeerExists(t, store, TestUser1.Name, newPubKey, TestUser1.Admin)
+	// verify peer was created with correct attributes, not yet confirmed
+	assertPeerExists(t, store, TestUser1.Name, newPubKey, TestUser1.Admin, false)
 }
 
 // TestInviteRedeemAlreadyRedeemed tests redeeming an already redeemed invite
@@ -221,8 +221,8 @@ func TestInviteRedeemAdmin(t *testing.T) {
 	err = store.InviteRedeem(TestAdmin.PubKey, adminNewKey)
 	expectNoError(t, err, "redeeming admin invite")
 
-	// verify admin peer was created with admin privileges
-	assertPeerExists(t, store, TestAdmin.Name, adminNewKey, true)
+	// verify admin peer was created with admin privileges, not yet confirmed
+	assertPeerExists(t, store, TestAdmin.Name, adminNewKey, true, false)
 }
 
 // TestInviteRedeemExpired tests behavior with expired invites

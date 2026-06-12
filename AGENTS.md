@@ -13,6 +13,7 @@
 - `make server`: builds `./bin/cord-server` from `cmd/cord-server`.
 - `make all`: builds both binaries.
 - `make test` or `go test ./...`: runs the unit tests.
+- `sudo make test-integration`: integration tests that create real WireGuard interfaces.
 - Example: `./bin/cord-server add-network <name> <cidr> <external-ip> <port>`.
 - Dev tip: override paths with `--config-dir` and `--data-dir`.
 

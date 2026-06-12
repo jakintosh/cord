@@ -62,6 +62,19 @@ func GetPeerCidrFromIp(ip net.IP) *net.IPNet {
 	}
 }
 
+// IncrementIP returns the IP address immediately after the given one.
+// The input is not modified.
+func IncrementIP(ip net.IP) net.IP {
+	next := slices.Clone(NormalizeIP(ip))
+	for i := len(next) - 1; i >= 0; i-- {
+		next[i]++
+		if next[i] != 0 {
+			break
+		}
+	}
+	return next
+}
+
 func NormalizeIP(ip net.IP) net.IP {
 	if v4 := ip.To4(); v4 != nil {
 		return v4
