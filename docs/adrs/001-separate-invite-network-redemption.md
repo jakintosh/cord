@@ -26,6 +26,6 @@
 - Risk: Invite network could accumulate stale entries if cleanup fails
 - Mitigation: Periodic garbage collection of expired invites, monitoring of invite network size
 - Risk: Confusion about which network a peer is on during debugging
-- Mitigation: Clear logging with network identification, separate interface names (`network` vs `network-invite`)
+- Mitigation: Clear logging with network identification, separate interface names (`network` vs `network-i`)
 
 **Security benefits:** Invite peers cannot access admin endpoints, peer discovery endpoints, or any production network resources. Even compromised invites can only reach a single redemption endpoint, providing defense in depth.

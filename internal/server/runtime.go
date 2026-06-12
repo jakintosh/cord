@@ -68,8 +68,13 @@ func NewRuntime(
 		return nil, err
 	}
 
+	mainName, inviteName, err := wg.NetworkInterfaceNames(srv.Network)
+	if err != nil {
+		return nil, fmt.Errorf("invalid network interface names: %w", err)
+	}
+
 	main, err := wg.NewInterface(
-		srv.Network,
+		mainName,
 		privKey,
 		net.IPNet{IP: serverIP, Mask: rootNet.Mask},
 		int(cfg.ListenPort),
@@ -82,7 +87,7 @@ func NewRuntime(
 	main.NoRoutes = noRouting
 
 	invite, err := wg.NewInterface(
-		srv.Network+"-invite",
+		inviteName,
 		privKey,
 		net.IPNet{IP: inviteIP, Mask: inviteNet.Mask},
 		int(cfg.InviteListenPort),

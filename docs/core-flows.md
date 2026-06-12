@@ -2,10 +2,13 @@
 
 ## Network Initialization
 
-1. Admin runs `cord server add-network <name> <cidr> <external-ip> <port>`
+1. Admin runs `cord server network add <name> <cidr> <external-ip> <port>`
    (optionally `--invite-cidr`, `--invite-port`, `--api-port`).
 2. Server validates the network name (alphanumeric, hyphen, period) and
-   that the invite CIDR does not overlap the root CIDR.
+   that the invite CIDR does not overlap the root CIDR. Network names are
+   limited to 13 bytes and must not end in the reserved `-i` suffix so the
+   main (`<name>`) and invite (`<name>-i`) Linux interface names remain
+   distinct and fit the kernel's 15-byte limit.
 3. Server verifies it can write the config file before touching the database.
 4. Server generates its WireGuard keypair.
 5. In one transaction: schema is migrated, the root CIDR is inserted as
@@ -19,7 +22,7 @@ file, network ready for invites.
 
 ## Network Deletion
 
-`cord server delete-network <name>` deletes the network database and its
+`cord server network delete <name>` deletes the network database and its
 sidecars, then deletes `<config-dir>/<name>.toml`. After removing those
 files, the config and data directories are also removed if they are empty;
 shared directories containing other networks or files are left intact.
@@ -31,7 +34,7 @@ interrupted:
 
 1. Brings up the **main interface** (`<name>`) with the server's key and
    address, peers = all confirmed+enabled peers (allowed-ips = their /32).
-2. Brings up the **invite interface** (`<name>-invite`), peers = all
+2. Brings up the **invite interface** (`<name>-i`), peers = all
    active invites' temporary keys (allowed-ips = their invite /32).
 3. Starts two HTTP listeners: the full API on the main internal address,
    and a redeem-only API on the invite internal address.
@@ -44,7 +47,7 @@ interrupted:
 
 ## Peer Redemption
 
-1. Admin creates an invite (`cord server add-peer` or `POST /admin/peer`):
+1. Admin creates an invite (`cord server peer add` or `POST /admin/peer`):
    the requested main-network IP is reserved, a temporary keypair and the
    lowest free invite-network IP are assigned, and the invite record is
    stored with an expiration.
@@ -76,7 +79,7 @@ network only, fully operational.
 
 ## Peer Visibility
 
-`GET /peers` (or `cord server get-peers`) resolves the requesting peer's
+`GET /peers` (or `cord server peer visible`) resolves the requesting peer's
 most specific CIDR, expands it with associated CIDRs, and returns all
 confirmed, enabled peers in that set (excluding the requester), each with
 its endpoint sightings from the last 24h, newest first. Associations are
@@ -87,6 +90,11 @@ deleting one narrows it.
 
 Rename, enable/disable, grant/revoke admin (`PATCH`), and delete
 (`DELETE`) work locally via `cord server` or remotely via the admin API.
+Read-only inspection is available the same two ways: locally via
+`cord server network|cidr|peer|association|invite list` (plus
+`network show`), remotely via the admin `GET` endpoints
+(`cord client admin ... list`). Local read commands never create
+directories or database files.
 Disabling a peer removes it from other peers' lists and interfaces on
 the next sync (immediately, when done over the API) and revokes its API
 access. Deleting a peer also removes its endpoint history and any invite

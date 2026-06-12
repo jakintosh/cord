@@ -3,6 +3,7 @@ package server_test
 import (
 	"os"
 	"path"
+	"strings"
 	"testing"
 
 	"git.sr.ht/~jakintosh/cord/internal/database"
@@ -16,6 +17,50 @@ func TestCreateNetwork(t *testing.T) {
 	}
 	if !ctx.CheckPeerExists("cord-server") {
 		t.Fatalf("expected cord-server peer to exist after network creation")
+	}
+}
+
+func TestCreateNetwork_RejectsInvalidInterfaceNames(t *testing.T) {
+	tests := []struct {
+		name        string
+		network     string
+		wantErrText string
+	}{
+		{
+			name:        "too long for invite suffix",
+			network:     "12345678901234",
+			wantErrText: "invite interface name",
+		},
+		{
+			name:        "reserved invite suffix",
+			network:     "garden-i",
+			wantErrText: "reserved suffix",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, err := database.OpenServer(database.Options{
+				Name: tt.network,
+				Dir:  ":memory:",
+			})
+			if err != nil {
+				t.Fatalf("failed to open network store: %v", err)
+			}
+			srv, err := server.New(server.Options{
+				Network: tt.network,
+				Config:  server.NewMemConfig(),
+				Store:   store,
+			})
+			if err != nil {
+				t.Fatalf("failed to create server: %v", err)
+			}
+
+			err = addNetwork(srv, testNetwork)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErrText) {
+				t.Fatalf("expected error containing %q, got %v", tt.wantErrText, err)
+			}
+		})
 	}
 }
 

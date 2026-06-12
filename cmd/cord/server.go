@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -26,24 +25,16 @@ var serverCmd = &args.Command{
 	Name: "server",
 	Help: "run and manage a cord coordination server",
 	Subcommands: []*args.Command{
-		serve,
-		addNetwork,
-		deleteNetwork,
-		serverAddCidr,
-		serverRenameCidr,
-		serverDeleteCidr,
-		serverAddPeer,
-		serverRenamePeer,
-		serverEnablePeer,
-		serverDisablePeer,
-		serverDeletePeer,
-		serverGetPeers,
-		serverAddAssociation,
-		serverDeleteAssociation,
+		serverServe,
+		serverNetworkCmd,
+		serverCidrCmd,
+		serverPeerCmd,
+		serverAssociationCmd,
+		serverInviteCmd,
 	},
 }
 
-var serve = &args.Command{
+var serverServe = &args.Command{
 	Name: "serve",
 	Help: "serve a cord coordination server",
 	Operands: []args.Operand{
@@ -120,614 +111,14 @@ var serve = &args.Command{
 	},
 }
 
-var addNetwork = &args.Command{
-	Name: "add-network",
-	Help: "create a new cord",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "name for the new network",
-		},
-		{
-			Name: "cidr",
-			Help: "root CIDR for the new network",
-		},
-		{
-			Name: "external-ip",
-			Help: "external IP the coordination server can be reached at",
-		},
-		{
-			Name: "external-port",
-			Help: "external port the coordination server listens on",
-		},
-	},
-	Options: []args.Option{
-		{
-			Long: "invite-cidr",
-			Type: args.OptionTypeParameter,
-			Help: "CIDR for the invite network (default " + DEFAULT_INVITE_CIDR + ")",
-		},
-		{
-			Long: "invite-port",
-			Type: args.OptionTypeParameter,
-			Help: "external port for the invite network (default: external-port + 1)",
-		},
-		{
-			Long: "api-port",
-			Type: args.OptionTypeParameter,
-			Help: "internal TCP port for the HTTP API (default: external-port)",
-		},
-	},
-	Handler: func(i *args.Input) error {
-
-		// operands
-		network := i.GetOperand("network")
-		cidrValue := i.GetOperand("cidr")
-		ipValue := i.GetOperand("external-ip")
-		portValue := i.GetOperand("external-port")
-
-		// options
-		inviteCidrValue := i.GetParameterOr("invite-cidr", DEFAULT_INVITE_CIDR)
-
-		// parse
-		cidr, err := parseCidr(cidrValue)
-		if err != nil {
-			return fmt.Errorf("failed to parse cidr: %w", err)
-		}
-
-		inviteCidr, err := parseCidr(inviteCidrValue)
-		if err != nil {
-			return fmt.Errorf("failed to parse invite cidr: %w", err)
-		}
-
-		ip, err := parseIp(ipValue)
-		if err != nil {
-			return fmt.Errorf("failed to parse ip: %w", err)
-		}
-
-		port, err := parsePort(portValue)
-		if err != nil {
-			return fmt.Errorf("failed to parse port: %w", err)
-		}
-
-		invitePort := uint16(i.GetIntParameterOr("invite-port", int(port)+1))
-		apiPort := uint16(i.GetIntParameterOr("api-port", int(port)))
-
-		// create server
-		srv, err := newServer(i, network)
-		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
-		}
-
-		err = srv.CreateNetwork(server.CreateNetworkRequest{
-			RootCidr:   cidr,
-			InviteCidr: inviteCidr,
-			ExternalIP: ip,
-			ListenPort: port,
-			InvitePort: invitePort,
-			ApiPort:    apiPort,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to create network: %w", err)
-		}
-
-		fmt.Printf("created network '%s' (%s)\n", network, cidr.String())
-		return nil
-	},
+func serverDirs(i *args.Input) (string, string) {
+	configDir := i.GetParameterOr("config-dir", SERVER_DEFAULT_CFG)
+	dataDir := i.GetParameterOr("data-dir", SERVER_DEFAULT_DATA)
+	return configDir, dataDir
 }
 
-var deleteNetwork = &args.Command{
-	Name: "delete-network",
-	Help: "delete an existing cord",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "name of the network to delete",
-		},
-	},
-	Handler: func(i *args.Input) error {
-
-		// operands
-		network := i.GetOperand("network")
-
-		// create server
-		srv, err := newServer(i, network)
-		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
-		}
-
-		err = srv.DeleteNetwork()
-		if err != nil {
-			return fmt.Errorf("failed to delete network: %w", err)
-		}
-
-		return nil
-	},
-}
-
-var serverAddCidr = &args.Command{
-	Name: "add-cidr",
-	Help: "add a child CIDR to a network",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "network to add a CIDR to",
-		},
-		{
-			Name: "name",
-			Help: "name of the CIDR",
-		},
-		{
-			Name: "cidr",
-			Help: "address range in CIDR notation (i.e. 10.0.0.0/8)",
-		},
-	},
-	Handler: func(i *args.Input) error {
-
-		// operands
-		network := i.GetOperand("network")
-		name := i.GetOperand("name")
-		cidr := i.GetOperand("cidr")
-
-		// create server
-		srv, err := newServer(i, network)
-		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
-		}
-
-		// execute command
-		req := server.CreateCidrRequest{
-			Name: name,
-			Cidr: cidr,
-		}
-		err = srv.CreateCidr(req)
-		if err != nil {
-			return fmt.Errorf("failed to create cidr: %w", err)
-		}
-
-		return nil
-	},
-}
-
-var serverRenameCidr = &args.Command{
-	Name: "rename-cidr",
-	Help: "rename an existing CIDR from a network",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "network to be modified",
-		},
-		{
-			Name: "cidr",
-			Help: "CIDR to rename",
-		},
-		{
-			Name: "new-name",
-			Help: "new name for CIDR",
-		},
-	},
-	Handler: func(i *args.Input) error {
-
-		// operands
-		network := i.GetOperand("network")
-		cidr := i.GetOperand("cidr")
-		newName := i.GetOperand("new-name")
-
-		// create server
-		srv, err := newServer(i, network)
-		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
-		}
-
-		// execute command
-		req := server.UpdateCidrRequest{
-			Name: newName,
-		}
-		err = srv.UpdateCidr(cidr, req)
-		if err != nil {
-			return fmt.Errorf("failed to rename cidr: %w", err)
-		}
-
-		return nil
-	},
-}
-
-var serverDeleteCidr = &args.Command{
-	Name: "delete-cidr",
-	Help: "delete an existing CIDR from a network",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "network to be modified",
-		},
-		{
-			Name: "cidr",
-			Help: "CIDR to delete",
-		},
-	},
-	Handler: func(i *args.Input) error {
-
-		// operands
-		network := i.GetOperand("network")
-		cidr := i.GetOperand("cidr")
-
-		// create server
-		srv, err := newServer(i, network)
-		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
-		}
-
-		err = srv.DeleteCidr(cidr)
-		if err != nil {
-			return fmt.Errorf("failed to delete cidr: %w", err)
-		}
-
-		return nil
-	},
-}
-
-var serverAddPeer = &args.Command{
-	Name: "add-peer",
-	Help: "create a new peer invite",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "network to add peer to",
-		},
-		{
-			Name: "name",
-			Help: "name of the peer",
-		},
-		{
-			Name: "ip",
-			Help: "IP of peer (immutable once created)",
-		},
-	},
-	Options: []args.Option{
-		{
-			Short: 'a',
-			Long:  "admin",
-			Type:  args.OptionTypeFlag,
-			Help:  "make new peer an admin?",
-		},
-		{
-			Long: "save-invite",
-			Type: args.OptionTypeParameter,
-			Help: "directory to write the invite to",
-		},
-		{
-			Long: "invite-expires",
-			Type: args.OptionTypeParameter,
-			Help: "invite expiration period (eg. '30d', '7w', '2h', '1000s')",
-		},
-	},
-	Handler: func(i *args.Input) error {
-
-		// operands
-		network := i.GetOperand("network")
-		name := i.GetOperand("name")
-		ipValue := i.GetOperand("ip")
-
-		// options
-		admin := i.GetFlag("admin")
-		savePath := i.GetParameterOr("save-invite", getPwd())
-		inviteValue := i.GetParameterOr("invite-expires", "7d")
-
-		// parse
-		ip, err := parseIp(ipValue)
-		if err != nil {
-			return fmt.Errorf("failed to parse ip: %w", err)
-		}
-
-		expiration, err := parseExpiration(inviteValue)
-		if err != nil {
-			return fmt.Errorf("failed to parse expiration: %w", err)
-		}
-
-		// make sure we have a file handle before db logic
-		fileName := name + ".invite.toml"
-		savePath = path.Join(savePath, fileName)
-		inviteFile, err := os.OpenFile(savePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		if err != nil {
-			return fmt.Errorf("failed to open file '%s': %w", savePath, err)
-		}
-		defer inviteFile.Close()
-
-		srv, err := newServer(i, network)
-		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
-		}
-
-		req := server.CreateInviteRequest{
-			Name:       name,
-			IP:         ip,
-			Admin:      admin,
-			Expiration: expiration,
-		}
-		invite, err := srv.CreateInvite(req)
-		if err != nil {
-			return fmt.Errorf("failed to create peer: %w", err)
-		}
-
-		err = invite.Write(inviteFile)
-		if err != nil {
-			return fmt.Errorf("failed to write invite: %w", err)
-		}
-
-		fmt.Printf("wrote invite for '%s' to %s\n", name, savePath)
-		return nil
-	},
-}
-
-var serverRenamePeer = &args.Command{
-	Name: "rename-peer",
-	Help: "rename an existing peer",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "network to be modified",
-		},
-		{
-			Name: "peer",
-			Help: "peer to rename",
-		},
-		{
-			Name: "new-name",
-			Help: "new name for peer",
-		},
-	},
-	Handler: func(i *args.Input) error {
-
-		// operands
-		network := i.GetOperand("network")
-		oldName := i.GetOperand("peer")
-		newName := i.GetOperand("new-name")
-
-		// create server
-		srv, err := newServer(i, network)
-		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
-		}
-
-		req := server.UpdatePeerRequest{
-			Name: &newName,
-		}
-		_, err = srv.UpdatePeer(oldName, req)
-		if err != nil {
-			return fmt.Errorf("failed to rename peer: %w", err)
-		}
-
-		return nil
-	},
-}
-
-var serverEnablePeer = &args.Command{
-	Name: "enable-peer",
-	Help: "enable an existing peer",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "network to be modified",
-		},
-		{
-			Name: "peer",
-			Help: "peer to enable",
-		},
-	},
-	Handler: func(i *args.Input) error {
-
-		// operands
-		network := i.GetOperand("network")
-		peerName := i.GetOperand("peer")
-
-		// create server
-		srv, err := newServer(i, network)
-		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
-		}
-
-		req := server.UpdatePeerRequest{
-			Enabled: boolPtr(true),
-		}
-		_, err = srv.UpdatePeer(peerName, req)
-		if err != nil {
-			return fmt.Errorf("failed to enable peer: %w", err)
-		}
-
-		return nil
-	},
-}
-
-var serverDisablePeer = &args.Command{
-	Name: "disable-peer",
-	Help: "disable an existing peer",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "network to be modified",
-		},
-		{
-			Name: "peer",
-			Help: "peer to disable",
-		},
-	},
-	Handler: func(i *args.Input) error {
-
-		// operands
-		network := i.GetOperand("network")
-		peerName := i.GetOperand("peer")
-
-		// create server
-		srv, err := newServer(i, network)
-		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
-		}
-
-		req := server.UpdatePeerRequest{
-			Enabled: boolPtr(false),
-		}
-		_, err = srv.UpdatePeer(peerName, req)
-		if err != nil {
-			return fmt.Errorf("failed to disable peer: %w", err)
-		}
-
-		return nil
-	},
-}
-
-var serverDeletePeer = &args.Command{
-	Name: "delete-peer",
-	Help: "delete an existing peer",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "network to be modified",
-		},
-		{
-			Name: "peer",
-			Help: "peer to delete",
-		},
-	},
-	Handler: func(i *args.Input) error {
-
-		// operands
-		network := i.GetOperand("network")
-		peerName := i.GetOperand("peer")
-
-		// create server
-		srv, err := newServer(i, network)
-		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
-		}
-
-		err = srv.DeletePeer(peerName)
-		if err != nil {
-			return fmt.Errorf("failed to delete peer: %w", err)
-		}
-
-		return nil
-	},
-}
-
-var serverGetPeers = &args.Command{
-	Name: "get-peers",
-	Help: "get peer list for a given peer",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "name of the cord network the server coordinates",
-		},
-		{
-			Name: "peer",
-			Help: "the name of the requesting peer",
-		},
-	},
-	Handler: func(i *args.Input) error {
-
-		// operands
-		network := i.GetOperand("network")
-		peerName := i.GetOperand("peer")
-
-		// create server
-		srv, err := newServer(i, network)
-		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
-		}
-
-		peers, err := srv.GetVisiblePeers(peerName)
-		if err != nil {
-			return fmt.Errorf("failed to get peers for '%s': %w", peerName, err)
-		}
-
-		jsonBytes, err := json.MarshalIndent(peers, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal peers to json: %w", err)
-		}
-
-		fmt.Println(string(jsonBytes))
-
-		return nil
-	},
-}
-
-var serverAddAssociation = &args.Command{
-	Name: "add-association",
-	Help: "create an association between two CIDRs",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "network to add an association to",
-		},
-		{
-			Name: "cidr1",
-			Help: "name of the first CIDR",
-		},
-		{
-			Name: "cidr2",
-			Help: "name of the second CIDR",
-		},
-	},
-	Handler: func(i *args.Input) error {
-
-		// operands
-		network := i.GetOperand("network")
-		cidr1 := i.GetOperand("cidr1")
-		cidr2 := i.GetOperand("cidr2")
-
-		// create server
-		srv, err := newServer(i, network)
-		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
-		}
-
-		err = srv.CreateAssociation(cidr1, cidr2)
-		if err != nil {
-			return fmt.Errorf("failed to create association: %w", err)
-		}
-
-		return nil
-	},
-}
-
-var serverDeleteAssociation = &args.Command{
-	Name: "delete-association",
-	Help: "delete an association between two CIDRs",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "network to delete an association from",
-		},
-		{
-			Name: "cidr1",
-			Help: "name of the first CIDR",
-		},
-		{
-			Name: "cidr2",
-			Help: "name of the second CIDR",
-		},
-	},
-	Handler: func(i *args.Input) error {
-
-		// operands
-		network := i.GetOperand("network")
-		cidr1 := i.GetOperand("cidr1")
-		cidr2 := i.GetOperand("cidr2")
-
-		// create server
-		srv, err := newServer(i, network)
-		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
-		}
-
-		err = srv.DeleteAssociation(cidr1, cidr2)
-		if err != nil {
-			return fmt.Errorf("failed to delete association: %w", err)
-		}
-
-		return nil
-	},
-}
-
+// newServer opens a network for mutation, creating directories and the
+// database as needed.
 func newServer(
 	i *args.Input,
 	network string,
@@ -735,12 +126,62 @@ func newServer(
 	*server.Server,
 	error,
 ) {
-	configDir := i.GetParameterOr("config-dir", CLIENT_DEFAULT_CFG)
-	dataDir := i.GetParameterOr("data-dir", CLIENT_DEFAULT_DATA)
+	configDir, dataDir := serverDirs(i)
+	return openServerWrite(configDir, dataDir, network)
+}
+
+// newServerRead opens an existing network without creating any state;
+// it errors if the network's config or database is missing.
+func newServerRead(
+	i *args.Input,
+	network string,
+) (
+	*server.Server,
+	error,
+) {
+	configDir, dataDir := serverDirs(i)
+	return openServerRead(configDir, dataDir, network)
+}
+
+func openServerWrite(
+	configDir string,
+	dataDir string,
+	network string,
+) (
+	*server.Server,
+	error,
+) {
 	if err := ensureDirs(configDir, dataDir); err != nil {
 		return nil, err
 	}
+	return openServer(configDir, dataDir, network)
+}
 
+func openServerRead(
+	configDir string,
+	dataDir string,
+	network string,
+) (
+	*server.Server,
+	error,
+) {
+	if _, err := os.Stat(path.Join(configDir, network+".toml")); err != nil {
+		return nil, fmt.Errorf("network '%s' not found", network)
+	}
+	if _, err := os.Stat(path.Join(dataDir, network+".db")); err != nil {
+		return nil, fmt.Errorf("network '%s' not found", network)
+	}
+	return openServer(configDir, dataDir, network)
+}
+
+func openServer(
+	configDir string,
+	dataDir string,
+	network string,
+) (
+	*server.Server,
+	error,
+) {
 	dbOpts := database.Options{
 		Name: network,
 		Dir:  dataDir,

@@ -47,6 +47,76 @@ func TestNewInterface(t *testing.T) {
 	}
 }
 
+func TestNetworkInterfaceNames(t *testing.T) {
+	tests := []struct {
+		name        string
+		network     string
+		wantMain    string
+		wantInvite  string
+		wantErrText string
+	}{
+		{
+			name:       "compact invite suffix",
+			network:    "pollinator",
+			wantMain:   "pollinator",
+			wantInvite: "pollinator-i",
+		},
+		{
+			name:       "maximum length",
+			network:    "1234567890123",
+			wantMain:   "1234567890123",
+			wantInvite: "1234567890123-i",
+		},
+		{
+			name:        "too long for invite suffix",
+			network:     "12345678901234",
+			wantErrText: "invite interface name",
+		},
+		{
+			name:        "reserved suffix",
+			network:     "garden-i",
+			wantErrText: "reserved suffix",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			main, invite, err := wireguard.NetworkInterfaceNames(tt.network)
+			if tt.wantErrText != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrText) {
+					t.Fatalf("expected error containing %q, got %v", tt.wantErrText, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if main != tt.wantMain {
+				t.Errorf("main name = %q, want %q", main, tt.wantMain)
+			}
+			if invite != tt.wantInvite {
+				t.Errorf("invite name = %q, want %q", invite, tt.wantInvite)
+			}
+		})
+	}
+}
+
+func TestNewInterface_RejectsLongName(t *testing.T) {
+	privateKey, _ := wgtypes.GeneratePrivateKey()
+	_, address, _ := net.ParseCIDR("10.0.0.1/24")
+
+	_, err := wireguard.NewInterface(
+		"1234567890123456",
+		privateKey,
+		*address,
+		51820,
+		wireguard.BackendAuto,
+	)
+	if err == nil || !strings.Contains(err.Error(), "exceeds 15 bytes") {
+		t.Fatalf("expected interface name length error, got %v", err)
+	}
+}
+
 func TestInterface_AddRemovePeer(t *testing.T) {
 	// Create test interface
 	privateKey, _ := wgtypes.GeneratePrivateKey()

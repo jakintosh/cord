@@ -110,6 +110,58 @@ func (c *apiClient) reportEndpoints(sightings []server.EndpointSighting) error {
 
 // admin operations
 
+func (c *apiClient) adminListPeers() ([]server.Peer, error) {
+	var dtos []api.PeerDTO
+	if err := c.wire.Get("/admin/peers", &dtos); err != nil {
+		return nil, err
+	}
+
+	peers := make([]server.Peer, 0, len(dtos))
+	for _, dto := range dtos {
+		peers = append(peers, dto.ToServer())
+	}
+	return peers, nil
+}
+
+func (c *apiClient) adminListCidrs() ([]server.Cidr, error) {
+	var dtos []api.CidrDTO
+	if err := c.wire.Get("/admin/cidrs", &dtos); err != nil {
+		return nil, err
+	}
+
+	cidrs := make([]server.Cidr, 0, len(dtos))
+	for _, dto := range dtos {
+		cidrs = append(cidrs, dto.ToServer())
+	}
+	return cidrs, nil
+}
+
+func (c *apiClient) adminListAssociations() ([]server.Association, error) {
+	var dtos []api.AssociationDTO
+	if err := c.wire.Get("/admin/associations", &dtos); err != nil {
+		return nil, err
+	}
+
+	associations := make([]server.Association, 0, len(dtos))
+	for _, dto := range dtos {
+		associations = append(associations, dto.ToServer())
+	}
+	return associations, nil
+}
+
+func (c *apiClient) adminListInvites() ([]server.InviteStatus, error) {
+	var dtos []api.InviteDTO
+	if err := c.wire.Get("/admin/invites", &dtos); err != nil {
+		return nil, err
+	}
+
+	invites := make([]server.InviteStatus, 0, len(dtos))
+	for _, dto := range dtos {
+		invites = append(invites, dto.ToServer())
+	}
+	return invites, nil
+}
+
 func (c *apiClient) adminCreatePeer(req api.CreatePeerRequest) (*server.PeerInvite, error) {
 	var dto api.PeerInviteDTO
 	if err := c.postJSON("/admin/peer", req, &dto); err != nil {

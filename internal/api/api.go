@@ -77,6 +77,7 @@ func (a *API) buildAdminRouter() http.Handler {
 	a.addAdminPeerRoutes(mux)
 	a.addAdminCidrRoutes(mux)
 	a.addAdminAssociationRoutes(mux)
+	a.addAdminInviteRoutes(mux)
 	return mux
 }
 

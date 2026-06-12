@@ -408,8 +408,13 @@ func (c *Client) buildInviteInterface(
 		return nil, fmt.Errorf("invalid invite cidr: %w", err)
 	}
 
+	_, inviteName, err := wg.NetworkInterfaceNames(c.Network)
+	if err != nil {
+		return nil, fmt.Errorf("invalid network interface names: %w", err)
+	}
+
 	iface, err := wg.NewInterface(
-		c.Network+"-invite",
+		inviteName,
 		tempKey,
 		net.IPNet{IP: ip, Mask: inviteNet.Mask},
 		0,
@@ -451,7 +456,12 @@ func (c *Client) buildMainInterface(
 		return nil, err
 	}
 
-	iface, err := wg.NewInterface(c.Network, privKey, *address, 0, c.Backend)
+	mainName, _, err := wg.NetworkInterfaceNames(c.Network)
+	if err != nil {
+		return nil, fmt.Errorf("invalid network interface names: %w", err)
+	}
+
+	iface, err := wg.NewInterface(mainName, privKey, *address, 0, c.Backend)
 	if err != nil {
 		return nil, err
 	}

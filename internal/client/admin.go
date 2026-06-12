@@ -40,6 +40,22 @@ func (a *Admin) AddPeer(
 	})
 }
 
+func (a *Admin) ListPeers() ([]server.Peer, error) {
+	return a.api.adminListPeers()
+}
+
+func (a *Admin) ListCidrs() ([]server.Cidr, error) {
+	return a.api.adminListCidrs()
+}
+
+func (a *Admin) ListAssociations() ([]server.Association, error) {
+	return a.api.adminListAssociations()
+}
+
+func (a *Admin) ListInvites() ([]server.InviteStatus, error) {
+	return a.api.adminListInvites()
+}
+
 func (a *Admin) RenamePeer(name string, newName string) (*server.Peer, error) {
 	return a.api.adminUpdatePeer(name, api.UpdatePeerRequest{Name: &newName})
 }

@@ -8,7 +8,9 @@ import (
 	"net"
 	"os"
 	"path"
+	"sort"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/BurntSushi/toml"
@@ -20,6 +22,7 @@ type Config interface {
 	GetConfigWriter(name string) (io.Writer, error)
 	GetConfigReader(name string) (io.Reader, error)
 	DeleteConfig(name string) error
+	ListConfigs() ([]string, error)
 }
 
 // NetworkConfig is the persistent identity of a cord network, written
@@ -119,16 +122,21 @@ func (srv *Server) SaveConfig(cfg *NetworkConfig) error {
 
 // LoadConfig reads the network config from the server's config store.
 func (srv *Server) LoadConfig() (*NetworkConfig, error) {
-	r, err := srv.Config.GetConfigReader(configFileName(srv.Network))
+	return LoadNetworkConfig(srv.Config, srv.Network)
+}
+
+// LoadNetworkConfig reads a named network's config from a config store.
+func LoadNetworkConfig(cfg Config, network string) (*NetworkConfig, error) {
+	r, err := cfg.GetConfigReader(configFileName(network))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open config for reading: %w", err)
 	}
 
-	cfg := &NetworkConfig{}
-	if _, err := toml.NewDecoder(r).Decode(cfg); err != nil {
+	netCfg := &NetworkConfig{}
+	if _, err := toml.NewDecoder(r).Decode(netCfg); err != nil {
 		return nil, fmt.Errorf("failed to parse network config: %w", err)
 	}
-	return cfg, nil
+	return netCfg, nil
 }
 
 // FsConfig
@@ -164,6 +172,31 @@ func (cfg *FsConfig) GetConfigReader(name string) (io.Reader, error) {
 		return nil, fmt.Errorf("failed to open file '%s': %w", filepath, err)
 	}
 	return r, nil
+}
+
+func (cfg *FsConfig) ListConfigs() ([]string, error) {
+
+	entries, err := os.ReadDir(cfg.Directory)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("failed to read config directory '%s': %w", cfg.Directory, err)
+	}
+
+	names := []string{}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name, found := strings.CutSuffix(entry.Name(), ".toml")
+		if !found {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func (cfg *FsConfig) DeleteConfig(name string) error {
@@ -211,6 +244,18 @@ func (cfg *MemConfig) GetConfigReader(name string) (io.Reader, error) {
 		return nil, fmt.Errorf("no config named '%s'", name)
 	}
 	return bytes.NewReader(buf.Bytes()), nil
+}
+
+func (cfg *MemConfig) ListConfigs() ([]string, error) {
+
+	names := []string{}
+	for name := range cfg.Buffers {
+		if stripped, found := strings.CutSuffix(name, ".toml"); found {
+			names = append(names, stripped)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func (cfg *MemConfig) DeleteConfig(name string) error {

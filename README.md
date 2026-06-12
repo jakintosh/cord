@@ -28,16 +28,16 @@ On the coordination host:
 
 ```bash
 # create a network: name, root CIDR, public IP, WireGuard port
-cord server add-network homenet 10.42.0.0/16 198.51.100.7 51820
+cord server network add homenet 10.42.0.0/16 198.51.100.7 51820
 
 # mint an invite for a peer (writes ./alice.invite.toml)
-cord server add-peer homenet alice 10.42.0.10
+cord server peer add homenet alice 10.42.0.10
 
 # serve (foreground): brings up both WireGuard interfaces + the API
 cord server serve homenet
 ```
 
-`add-network` options: `--invite-cidr` (default `172.16.10.0/24`), `--invite-port` (default WireGuard port + 1), `--api-port` (TCP, default same number as the WireGuard port). The network's identity lands in `/etc/cord-server/<name>.toml`; state lives in `/var/lib/cord-server/<name>.db`.
+`network add` options: `--invite-cidr` (default `172.16.10.0/24`), `--invite-port` (default WireGuard port + 1), `--api-port` (TCP, default same number as the WireGuard port). The network's identity lands in `/etc/cord-server/<name>.toml`; state lives in `/var/lib/cord-server/<name>.db`.
 
 Deliver the invite file out-of-band. On the joining machine:
 
@@ -50,18 +50,30 @@ cord client up homenet                  # connect (foreground; ctrl-c disconnect
 
 ### Managing the network
 
-Locally on the server host, `cord server` offers the full set: `add-cidr`, `rename-cidr`, `delete-cidr`, `add-peer`, `rename-peer`, `enable-peer`, `disable-peer`, `delete-peer`, `add-association`, `delete-association`, `get-peers`.
+Locally on the server host, `cord server` groups commands by resource:
+
+```bash
+cord server network  add|delete|list|show
+cord server cidr     add|rename|delete|list
+cord server peer     add|rename|enable|disable|delete|list|visible
+cord server association  add|delete|list
+cord server invite   list
+```
+
+The read commands (`list`, `show`, `visible`) print aligned text by default and take `--json` for scripting; `peer visible <network> <peer>` shows the network from one peer's perspective. None of them create any state — they error cleanly if the network doesn't exist.
 
 Remotely, any *admin* peer can do the same over the API via `cord client admin`:
 
 ```bash
 cord client admin peer add homenet bob 10.42.0.11 --save-invite ~/invites
 cord client admin peer disable homenet bob
+cord client admin peer list homenet
 cord client admin cidr add homenet infra 10.42.1.0/24
 cord client admin association add homenet infra fleet
+cord client admin invite list homenet
 ```
 
-(Create an admin peer with `cord server add-peer ... --admin`.)
+(Create an admin peer with `cord server peer add ... --admin`.)
 
 ## Architecture
 

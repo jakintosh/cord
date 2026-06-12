@@ -21,6 +21,7 @@
 | POST   | /api/v1/admin/association  | Create association         | admin        | yes        |
 | GET    | /api/v1/admin/associations | List associations          | admin        | yes        |
 | DELETE | /api/v1/admin/association/{cidr1}/{cidr2} | Delete association | admin  | yes        |
+| GET    | /api/v1/admin/invites      | List invites               | admin        | yes        |
 
 The server runs two HTTP listeners, one per WireGuard network. The
 **invite network listener serves only `POST /api/v1/invite/redeem`**;
@@ -264,6 +265,25 @@ Delete an association by its CIDR names (order-independent).
 Idempotent: deleting an absent association succeeds.
 
 Status: `204` deleted; `401` not admin.
+
+### GET /api/v1/admin/invites
+
+List all invites: active, redeemed-but-unconfirmed, and expired.
+Confirmation deletes an invite, so confirmed peers never appear here.
+The temporary invite key and invite-network address are not exposed.
+
+Response: `[Invite]`
+```json
+{
+  "name": "string",
+  "networkCidr": "string",
+  "admin": "boolean",
+  "redeemed": "boolean",
+  "expiration": "integer"
+}
+```
+
+Status: `200` OK; `401` not admin.
 
 ## 5) Key Flows
 

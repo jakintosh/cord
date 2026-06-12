@@ -18,6 +18,18 @@ type CreateNetworkRequest struct {
 	ApiPort    uint16
 }
 
+// ValidateNetworkName verifies that a network name is valid for persistent
+// storage and for both of its OS interface names.
+func ValidateNetworkName(name string) error {
+	if err := utils.ValidateHostName(name); err != nil {
+		return fmt.Errorf("failed to validate network name: %w", err)
+	}
+	if _, _, err := wg.NetworkInterfaceNames(name); err != nil {
+		return fmt.Errorf("failed to validate network interface names: %w", err)
+	}
+	return nil
+}
+
 // CreateNetwork initializes a new cord network: it generates the
 // server's WireGuard identity, creates the root CIDR and server peer in
 // the database, and persists the network config file.
@@ -25,8 +37,8 @@ func (srv *Server) CreateNetwork(
 	req CreateNetworkRequest,
 ) error {
 
-	if err := utils.ValidateHostName(srv.Network); err != nil {
-		return fmt.Errorf("failed to validate network name: %w", err)
+	if err := ValidateNetworkName(srv.Network); err != nil {
+		return err
 	}
 
 	if req.RootCidr.Contains(req.InviteCidr.IP) || req.InviteCidr.Contains(req.RootCidr.IP) {

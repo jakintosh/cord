@@ -11,6 +11,11 @@ import (
 
 const defaultMTU = 1420
 
+const (
+	maxInterfaceNameBytes = 15
+	inviteInterfaceSuffix = "-i"
+)
+
 // Peer represents a single peer in a WireGuard configuration.
 type Peer struct {
 	PublicKey           wgtypes.Key
@@ -43,6 +48,10 @@ func NewInterface(
 	listenPort int,
 	backendType BackendType,
 ) (*Interface, error) {
+	if err := validateInterfaceName(name); err != nil {
+		return nil, err
+	}
+
 	backend, err := newBackend(backendType)
 	if err != nil {
 		return nil, err
@@ -57,6 +66,47 @@ func NewInterface(
 		Peers:      make([]Peer, 0),
 		backend:    backend,
 	}, nil
+}
+
+// NetworkInterfaceNames returns the OS interface names for a cord network.
+// Linux limits interface names to 15 bytes, including role suffixes.
+func NetworkInterfaceNames(network string) (string, string, error) {
+	if strings.HasSuffix(network, inviteInterfaceSuffix) {
+		return "", "", fmt.Errorf(
+			"network name '%s' must not end with reserved suffix '%s'",
+			network,
+			inviteInterfaceSuffix,
+		)
+	}
+
+	main := network
+	invite := network + inviteInterfaceSuffix
+	if err := validateInterfaceName(main); err != nil {
+		return "", "", fmt.Errorf("invalid main interface name: %w", err)
+	}
+	if err := validateInterfaceName(invite); err != nil {
+		return "", "", fmt.Errorf(
+			"network name '%s' is too long: invite interface name '%s' exceeds %d bytes",
+			network,
+			invite,
+			maxInterfaceNameBytes,
+		)
+	}
+	return main, invite, nil
+}
+
+func validateInterfaceName(name string) error {
+	if name == "" {
+		return fmt.Errorf("interface name must not be empty")
+	}
+	if len(name) > maxInterfaceNameBytes {
+		return fmt.Errorf(
+			"interface name '%s' exceeds %d bytes",
+			name,
+			maxInterfaceNameBytes,
+		)
+	}
+	return nil
 }
 
 // DeviceName returns the actual OS device name once the interface is up.

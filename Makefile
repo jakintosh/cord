@@ -42,7 +42,7 @@ vet: generate
 lint: fmt vet
 
 install: generate
-	$(GO) install $(CMD)
+	GOBIN=/usr/local/bin $(GO) install $(CMD)
 
 clean:
 	rm -rf $(BIN_DIR)
