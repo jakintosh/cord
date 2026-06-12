@@ -18,6 +18,9 @@ func newClientContext(
 ) {
 	configDir := i.GetParameterOr("config-dir", CLIENT_DEFAULT_CFG)
 	dataDir := i.GetParameterOr("data-dir", CLIENT_DEFAULT_DATA)
+	if err := ensureDirs(configDir, dataDir); err != nil {
+		return nil, err
+	}
 	return client.NewContext(network, configDir, dataDir)
 }
 

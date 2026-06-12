@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"os"
+
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.sr.ht/~jakintosh/command-go/pkg/version"
 )
@@ -17,6 +20,16 @@ const (
 
 func main() {
 	root.Parse()
+}
+
+func ensureDirs(configDir, dataDir string) error {
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory '%s': %w", configDir, err)
+	}
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return fmt.Errorf("failed to create data directory '%s': %w", dataDir, err)
+	}
+	return nil
 }
 
 var root = &args.Command{

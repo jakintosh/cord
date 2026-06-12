@@ -142,7 +142,9 @@ func NewFsConfig(dir string) *FsConfig {
 
 func (cfg *FsConfig) GetConfigWriter(name string) (io.Writer, error) {
 
-	os.MkdirAll(cfg.Directory, 0755)
+	if err := os.MkdirAll(cfg.Directory, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create directory '%s': %w", cfg.Directory, err)
+	}
 	filepath := path.Join(cfg.Directory, name)
 	w, err := os.Create(filepath)
 	if err != nil {

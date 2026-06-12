@@ -783,6 +783,9 @@ func newServerContext(
 	configDir string,
 	dataDir string,
 ) (*server.Context, error) {
+	if err := ensureDirs(configDir, dataDir); err != nil {
+		return nil, err
+	}
 	config := server.NewFsConfig(configDir)
 	store, err := database.Init(network, dataDir, true)
 	if err != nil {

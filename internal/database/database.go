@@ -85,7 +85,9 @@ func (s *SQLiteStore) Open(
 	if s.path == ":memory:" {
 		dbPath = ":memory:"
 	} else {
-		os.MkdirAll(s.path, os.ModePerm)
+		if err := os.MkdirAll(s.path, 0755); err != nil {
+			return fmt.Errorf("failed to create directory '%s': %w", s.path, err)
+		}
 		dbPath = GetPath(name, s.path)
 	}
 
@@ -175,7 +177,9 @@ func Open(
 	if path == ":memory:" {
 		dbPath = ":memory:"
 	} else {
-		os.MkdirAll(path, os.ModePerm)
+		if err := os.MkdirAll(path, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create directory '%s': %w", path, err)
+		}
 		dbPath = GetPath(name, path)
 	}
 
