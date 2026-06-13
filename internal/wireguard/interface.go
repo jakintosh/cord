@@ -141,6 +141,44 @@ func (i *Interface) Status() (*DeviceStatus, error) {
 	return i.backend.Status(i)
 }
 
+// WaitForHandshake waits until the live device reports a completed
+// handshake with the requested peer.
+func (i *Interface) WaitForHandshake(
+	publicKey wgtypes.Key,
+	timeout time.Duration,
+	onStatus func(PeerStatus),
+) error {
+	deadline := time.Now().Add(timeout)
+	var lastStatusErr error
+
+	for {
+		status, err := i.Status()
+		if err != nil {
+			lastStatusErr = err
+		} else {
+			lastStatusErr = nil
+			for _, peer := range status.Peers {
+				if peer.PublicKey == publicKey {
+					if onStatus != nil {
+						onStatus(peer)
+					}
+					if !peer.LastHandshake.IsZero() {
+						return nil
+					}
+				}
+			}
+		}
+
+		if time.Now().After(deadline) {
+			if lastStatusErr != nil {
+				return fmt.Errorf("failed to inspect WireGuard status: %w", lastStatusErr)
+			}
+			return fmt.Errorf("no handshake completed within %s", timeout)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // AddPeer adds a peer to the interface's configuration.
 func (i *Interface) AddPeer(peer Peer) {
 	i.Peers = append(i.Peers, peer)

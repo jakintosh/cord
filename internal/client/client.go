@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	syncInterval   = 25 * time.Second
-	keepalive      = 25 * time.Second
-	handshakeFresh = 3 * time.Minute
+	syncInterval           = 25 * time.Second
+	keepalive              = 25 * time.Second
+	handshakeFresh         = 3 * time.Minute
+	inviteHandshakeTimeout = 20 * time.Second
 )
 
 // Client manages one network on this machine: its identity, its
@@ -27,6 +28,7 @@ type Client struct {
 	ConfigDir string
 	DataDir   string
 	Backend   wg.BackendType
+	Verbose   bool
 
 	store PeerStore
 }
@@ -38,6 +40,7 @@ type Options struct {
 	ConfigDir string
 	DataDir   string
 	Store     PeerStore
+	Verbose   bool
 }
 
 // New prepares a client for a network.
@@ -50,6 +53,7 @@ func New(opts Options) (*Client, error) {
 		ConfigDir: opts.ConfigDir,
 		DataDir:   opts.DataDir,
 		Backend:   wg.BackendAuto,
+		Verbose:   opts.Verbose,
 		store:     opts.Store,
 	}, nil
 }
@@ -78,13 +82,26 @@ func (c *Client) Install(
 		return fmt.Errorf("failed to bring up invite interface: %w", err)
 	}
 	defer func() { _ = inviteIface.Down(true) }()
-	fmt.Printf("invite interface up (%s), redeeming...\n", inviteIface.DeviceName())
+	fmt.Printf("invite interface up (%s), checking WireGuard handshake...\n", inviteIface.DeviceName())
+	c.verbosef("invite address: %s", invite.Interface.AssignedCidr)
+	c.verbosef("invite WireGuard endpoint: %s", invite.Server.ExternalEndpoint)
+	c.verbosef("invite API endpoint through tunnel: %s", invite.Server.InternalEndpoint)
+	started := time.Now()
+	if err := c.probeInviteTunnel(inviteIface, invite); err != nil {
+		return err
+	}
+	c.verbosef("invite handshake completed in %s", time.Since(started).Round(time.Millisecond))
+	fmt.Println("invite WireGuard handshake complete; redeeming...")
 
 	// redeem over the invite network
 	inviteApi := newApiClient(invite.Server.InternalEndpoint)
 	result, err := inviteApi.redeem(cfg.PublicKey)
 	if err != nil {
-		return fmt.Errorf("failed to redeem invite: %w", err)
+		return fmt.Errorf(
+			"invite WireGuard handshake succeeded, but API redemption at %s failed: %w",
+			invite.Server.InternalEndpoint,
+			err,
+		)
 	}
 
 	// persist the permanent network assignment
@@ -104,10 +121,29 @@ func (c *Client) Install(
 		return fmt.Errorf("failed to bring up main interface: %w", err)
 	}
 	defer func() { _ = mainIface.Down(true) }()
+	fmt.Printf("main interface up (%s), checking WireGuard handshake...\n", mainIface.DeviceName())
+	c.verbosef("main address: %s", cfg.AssignedCidr)
+	c.verbosef("main WireGuard endpoint: %s", cfg.Server.ExternalEndpoint)
+	c.verbosef("main API endpoint through tunnel: %s", cfg.Server.InternalEndpoint)
+	started = time.Now()
+	if err := c.probeServerTunnel(
+		mainIface,
+		cfg.Server,
+		"main",
+		"check UDP forwarding/firewall for the main WireGuard port, that the server main interface is running, and that the main CIDR does not conflict with a local network",
+	); err != nil {
+		return err
+	}
+	c.verbosef("main handshake completed in %s", time.Since(started).Round(time.Millisecond))
+	fmt.Println("main WireGuard handshake complete; confirming...")
 
 	mainApi := newApiClient(cfg.Server.InternalEndpoint)
 	if err := mainApi.confirm(cfg.PublicKey); err != nil {
-		return fmt.Errorf("failed to confirm peer: %w", err)
+		return fmt.Errorf(
+			"main WireGuard handshake succeeded, but API confirmation at %s failed: %w",
+			cfg.Server.InternalEndpoint,
+			err,
+		)
 	}
 	fmt.Println("confirmed on main network")
 
@@ -123,6 +159,12 @@ func (c *Client) Install(
 
 	fmt.Printf("installed network '%s'; run 'cord client up %s' to connect\n", c.Network, c.Network)
 	return nil
+}
+
+func (c *Client) verbosef(format string, args ...any) {
+	if c.Verbose {
+		fmt.Printf("verbose: "+format+"\n", args...)
+	}
 }
 
 // installIdentity loads the persisted keypair for this network or
@@ -559,6 +601,95 @@ func LoadInvite(
 		return nil, fmt.Errorf("invite has invalid network name: %w", err)
 	}
 	return invite, nil
+}
+
+// probeInviteTunnel sends traffic toward the private invite API address
+// to trigger WireGuard's lazy handshake, then verifies that the server
+// peer answered before redemption starts.
+func (c *Client) probeInviteTunnel(
+	iface *wg.Interface,
+	invite *server.PeerInvite,
+) error {
+	return c.probeServerTunnel(
+		iface,
+		invite.Server,
+		"invite",
+		"check UDP forwarding/firewall for the invite port, that the server invite interface is running, that this invite is active, and that the invite CIDR does not conflict with a local network",
+	)
+}
+
+func (c *Client) probeServerTunnel(
+	iface *wg.Interface,
+	serverInfo server.ServerInfo,
+	networkRole string,
+	failureAdvice string,
+) error {
+	serverKey, err := wg.ParseKey(serverInfo.PublicKey)
+	if err != nil {
+		return fmt.Errorf("invalid server public key: %w", err)
+	}
+
+	internalAddr, err := net.ResolveUDPAddr("udp", serverInfo.InternalEndpoint)
+	if err != nil {
+		return fmt.Errorf(
+			"invalid %s API endpoint '%s': %w",
+			networkRole,
+			serverInfo.InternalEndpoint,
+			err,
+		)
+	}
+
+	conn, err := net.DialUDP("udp", nil, internalAddr)
+	if err != nil {
+		return fmt.Errorf(
+			"failed to route %s probe to %s: %w",
+			networkRole,
+			serverInfo.InternalEndpoint,
+			err,
+		)
+	}
+	c.verbosef("sending probe through %s tunnel to %s", networkRole, serverInfo.InternalEndpoint)
+	_, writeErr := conn.Write([]byte{0})
+	closeErr := conn.Close()
+	if writeErr != nil {
+		return fmt.Errorf(
+			"failed to send %s probe to %s: %w",
+			networkRole,
+			serverInfo.InternalEndpoint,
+			writeErr,
+		)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("failed to close %s probe: %w", networkRole, closeErr)
+	}
+
+	lastLog := time.Time{}
+	onStatus := func(status wg.PeerStatus) {
+		if !c.Verbose || (!lastLog.IsZero() && time.Since(lastLog) < time.Second) {
+			return
+		}
+		lastLog = time.Now()
+		endpoint := serverInfo.ExternalEndpoint
+		if status.Endpoint != nil {
+			endpoint = status.Endpoint.String()
+		}
+		handshake := "not completed"
+		if !status.LastHandshake.IsZero() {
+			handshake = status.LastHandshake.Format(time.RFC3339)
+		}
+		c.verbosef("%s peer status: endpoint=%s, last handshake=%s", networkRole, endpoint, handshake)
+	}
+
+	if err := iface.WaitForHandshake(serverKey, inviteHandshakeTimeout, onStatus); err != nil {
+		return fmt.Errorf(
+			"%s WireGuard handshake with public endpoint %s failed: %w; %s",
+			networkRole,
+			serverInfo.ExternalEndpoint,
+			err,
+			failureAdvice,
+		)
+	}
+	return nil
 }
 
 // ShowInstalled lists the networks installed under a config directory.

@@ -36,7 +36,8 @@ shared directories containing other networks or files are left intact.
 interrupted:
 
 1. Brings up the **main interface** (`<name>`) with the server's key and
-   address, peers = all confirmed+enabled peers (allowed-ips = their /32).
+   address, peers = all enabled permanent peers, including
+   redeemed-but-unconfirmed peers (allowed-ips = their /32).
 2. Brings up the **invite interface** (`<name>-i`), peers = all
    active invites' temporary keys (allowed-ips = their invite /32).
 3. Starts two HTTP listeners: the full API on the main internal address,
@@ -64,12 +65,14 @@ interrupted:
 4. Server validates the invite by source IP, then atomically marks it
    redeemed and creates the peer record — enabled but **unconfirmed** —
    and returns the main-network assignment (assigned CIDR, server public
-   key and endpoints).
+   key and endpoints). Redemption is the authorization boundary for
+   main-network membership.
 5. The serve loop adds the new peer to the main interface.
 6. Client brings up the main interface and `POST /invite/confirm`s from
    its assigned IP with its key in the body.
-7. Server sets `confirmed=1` and deletes the invite; the serve loop drops
-   the temporary peer from the invite interface.
+7. Server sets `confirmed=1`, marking the installation operational, and
+   deletes the invite; the serve loop drops the temporary peer from the
+   invite interface.
 8. Client tears down the invite interface and fetches an initial peer list.
 
 **Idempotency:** both redeem and confirm can be retried; a redeemed
@@ -77,8 +80,17 @@ invite returns the same configuration for the same key, and confirming a
 confirmed peer succeeds.
 
 **Key states:** invite created → peer exists only on invite network;
-redeemed → on both networks, invisible to other peers; confirmed → main
-network only, fully operational.
+redeemed → permanent peer is authorized on the main WireGuard network but
+normal Cord APIs and peer discovery remain unavailable; confirmed → main
+network only, fully operational in Cord.
+
+**Trust boundaries:** `/invite/redeem` authorizes the permanent key and
+grants main-network packet access. `/invite/confirm` is a retryable
+operational acknowledgment proving that the client received the response and
+successfully configured the main tunnel. Confirmation gates normal Cord API
+access, administration, peer discovery, and endpoint gossip; it is not a
+packet-level firewall boundary. CIDR associations likewise control discovery,
+not packet forwarding.
 
 ## Peer Visibility
 
@@ -110,9 +122,9 @@ reserving its IP.
 ## Installation
 
 `cord client install <invite-file>`: parse invite → persist permanent keypair →
-invite interface up → redeem (with retry/backoff while the tunnel
-handshakes) → persist assignment → main interface up → confirm → seed
-local peer database → tear both interfaces down. The client config lands
+invite interface up → verify invite handshake → redeem → persist assignment →
+main interface up → verify main handshake → confirm → seed local peer
+database → tear both interfaces down. The client config lands
 in `<config-dir>/<network>.toml` (mode 0600 — it holds the private key);
 the local database in `<data-dir>/<network>.db`.
 

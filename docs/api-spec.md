@@ -26,6 +26,9 @@
 The server runs two HTTP listeners, one per WireGuard network. The
 **invite network listener serves only `POST /api/v1/invite/redeem`**;
 everything else lives on the main network listener (see ADR-001).
+Successful redemption authorizes the permanent peer for main WireGuard
+membership. Confirmation records that installation completed and gates the
+remaining Cord API; it is not a second network-membership authorization.
 
 ## 2) Conventions
 
@@ -112,7 +115,9 @@ Status: `200` recorded; `400` malformed; `401` unauthorized.
 Redeem the caller's invite (identified by source IP on the invite
 network) for a permanent peer registration. Idempotent: repeating the
 call with the same key returns the same configuration, so clients can
-retry after network failures.
+retry after network failures. A successful response authorizes the permanent
+key for main-network membership and triggers an immediate server WireGuard
+peer resync. The created peer is enabled but remains unconfirmed.
 
 Request: `{ "publicKey": "string" }` — the permanent key the client generated.
 
@@ -134,8 +139,11 @@ Status: `200` OK; `400` malformed; `401` no active invite for source IP;
 
 ### POST /api/v1/invite/confirm
 
-Finalize redemption from the peer's assigned main-network IP. Marks the
-peer confirmed and deletes the invite. Idempotent.
+Finalize installation from the peer's assigned main-network IP. The peer
+already has main WireGuard membership from redemption. This call proves the
+client received that assignment and successfully configured the main tunnel,
+then marks the peer operational for normal Cord APIs and deletes the invite.
+Idempotent.
 
 Request: `{ "publicKey": "string" }`
 
@@ -288,6 +296,8 @@ Status: `200` OK; `401` not admin.
 ## 5) Key Flows
 
 - **Redemption:** `POST /invite/redeem` (invite net) → `POST /invite/confirm` (main net, assigned IP)
+- **Trust boundary:** redeem authorizes main-network membership; confirm
+  records operational readiness and unlocks normal Cord API access
 - **State sync:** periodic `GET /peers` with WireGuard config updates
 - **Endpoint gossip:** `POST /endpoint` submissions with observed endpoints
 - **Administration:** admin peers use `/admin/*`; every mutation triggers

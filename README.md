@@ -9,8 +9,8 @@ Linux (kernel WireGuard) and macOS (userspace via wireguard-go) are supported.
 ## How it works
 
 - **Networks** are created with a root CIDR. Sub-CIDRs can be carved out and *associated* with each other; peers may only see peers in their own (most specific) CIDR and any associated CIDRs.
-- **The server runs two WireGuard interfaces** ([ADR-001](docs/adrs/001-separate-invite-network-redemption.md)): the main network, and a separate *invite network* used only for redeeming invites. Untrusted invitees never touch the main network.
-- **Peers join via invites.** An admin mints an invite file (a temporary keypair and IP on the invite network). The client connects to the invite network, generates its own permanent keypair, and redeems the invite for its main-network assignment. It then connects to the main network and *confirms*, proving the transition worked, at which point the invite is destroyed and the peer is operational.
+- **The server runs two WireGuard interfaces** ([ADR-001](docs/adrs/001-separate-invite-network-redemption.md)): the main network, and a separate *invite network* used only for redeeming invites. Temporary invite credentials never touch the main network.
+- **Peers join via invites.** An admin mints an invite file (a temporary keypair and IP on the invite network). The client connects to the invite network, generates its own permanent keypair, and redeems the invite. Redemption authorizes that permanent key for the main network. The client then connects to the main network and *confirms*, acknowledging that installation worked; the invite is destroyed and Cord marks the peer operational.
 - **Authentication is WireGuard itself.** The HTTP API is only reachable over the tunnel; the server maps the source IP — cryptographically bound to a peer key by WireGuard — to a peer record. Admin endpoints additionally require the peer's `admin` flag.
 - **Endpoint gossip.** Connected clients watch their live WireGuard sessions; when a peer's endpoint changes (e.g. it roamed networks), they report the sighting. The server folds recent sightings into peer listings so everyone can find roaming peers again. Sightings expire after 24h.
 
@@ -45,6 +45,14 @@ Deliver the invite file out-of-band. On the joining machine:
 cord client install alice.invite.toml   # redeem + confirm, then exits
 cord client up homenet                  # connect (foreground; ctrl-c disconnects)
 ```
+
+During install, the client probes both the invite tunnel before redemption
+and the main tunnel before confirmation. A handshake failure identifies which
+public UDP endpoint is not reaching the server. API requests then target the
+corresponding private API address through the established tunnel. Run
+`cord -v client install <invite-file>` for the invite interface address,
+public WireGuard endpoint, private API endpoint, live handshake state, and
+handshake timing.
 
 `cord client up` stays in the foreground: it periodically fetches peer state, applies changes to the live interface, and reports endpoint sightings. On Linux the interface uses kernel WireGuard; on macOS it is a userspace device that lives and dies with the `cord client up` process. Other commands: `cord client show`, `cord client fetch <net>`, `cord client down <net>`, `cord client uninstall <net>`.
 
@@ -92,6 +100,9 @@ The API surface is described in [docs/api-spec.md](docs/api-spec.md), and the ma
 
 - All cord files on disk are TOML: server network config, invite files, and client config (`/etc/cord/<network>.toml`, which contains the private key). The HTTP API speaks JSON.
 - Peer-to-peer traffic that has no direct path is routed through the server (its allowed-IPs cover the whole network from a client's view); this requires IP forwarding to be enabled on the server host.
+- Redemption grants a permanent peer main-network packet access. Confirmation
+  gates normal Cord APIs and peer discovery, but is not a firewall boundary;
+  CIDR associations control discovery rather than packet forwarding.
 - IPv4 is the well-tested path; IPv6 plumbing exists in the database layer but hasn't been exercised end-to-end.
 
 ## Testing

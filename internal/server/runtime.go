@@ -141,20 +141,26 @@ func (r *Runtime) SyncPeers() error {
 	return nil
 }
 
-// mainPeers converts confirmed, enabled peers into WireGuard peers for
-// the main interface. The server's own record is excluded.
+// mainPeers converts enabled peers into WireGuard peers for the main
+// interface. Redeemed-but-unconfirmed peers must be present so they can
+// reach the confirmation endpoint; normal API routes still reject them.
+// The server's own record is excluded.
 func (r *Runtime) mainPeers() ([]wg.Peer, error) {
 	peers, err := r.Srv.Store.PeerList()
 	if err != nil {
 		return nil, err
 	}
 
+	return mainPeersFromRecords(peers, r.Cfg.PublicKey), nil
+}
+
+func mainPeersFromRecords(peers []*Peer, serverPublicKey string) []wg.Peer {
 	wgPeers := make([]wg.Peer, 0, len(peers))
 	for _, peer := range peers {
-		if !peer.Confirmed || !peer.Enabled {
+		if !peer.Enabled {
 			continue
 		}
-		if peer.PublicKey == r.Cfg.PublicKey {
+		if peer.PublicKey == serverPublicKey {
 			continue
 		}
 		wgPeer, err := peerFromRecord(peer.PublicKey, peer.Cidr)
@@ -165,7 +171,7 @@ func (r *Runtime) mainPeers() ([]wg.Peer, error) {
 		wgPeers = append(wgPeers, *wgPeer)
 	}
 
-	return wgPeers, nil
+	return wgPeers
 }
 
 // invitePeers converts active invites into WireGuard peers for the

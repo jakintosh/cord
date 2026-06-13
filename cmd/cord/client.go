@@ -28,7 +28,7 @@ func newClient(
 	if err := client.RequireInstalled(configDir, network); err != nil {
 		return nil, err
 	}
-	return openClient(configDir, dataDir, network)
+	return openClient(configDir, dataDir, network, i.GetFlag("verbose"))
 }
 
 // newClientCreate opens a network for installation, creating
@@ -41,13 +41,14 @@ func newClientCreate(
 	error,
 ) {
 	configDir, dataDir := clientDirs(i)
-	return openClient(configDir, dataDir, network)
+	return openClient(configDir, dataDir, network, i.GetFlag("verbose"))
 }
 
 func openClient(
 	configDir string,
 	dataDir string,
 	network string,
+	verbose bool,
 ) (
 	*client.Client,
 	error,
@@ -66,6 +67,7 @@ func openClient(
 		ConfigDir: configDir,
 		DataDir:   dataDir,
 		Store:     store,
+		Verbose:   verbose,
 	}
 	return client.New(opts)
 }
