@@ -269,10 +269,16 @@ func (c *Client) Fetch() error {
 	return nil
 }
 
+// UpOptions controls the long-running client connection.
+type UpOptions struct {
+	NoFetch    bool
+	NoPeerSync bool
+}
+
 // Up connects to the network and stays in the foreground: it keeps the
 // local peer set in sync with the server and reports endpoint changes
 // it witnesses (endpoint gossip) until interrupted.
-func (c *Client) Up(noFetch bool) error {
+func (c *Client) Up(opts UpOptions) error {
 	cfg, err := c.LoadConfig()
 	if err != nil {
 		return err
@@ -294,10 +300,13 @@ func (c *Client) Up(noFetch bool) error {
 	}
 	defer func() { _ = iface.Down(true) }()
 	fmt.Printf("interface up: %s (%s)\n", iface.DeviceName(), cfg.AssignedCidr)
+	if opts.NoPeerSync {
+		fmt.Println("diagnostic: periodic peer state will not be applied to WireGuard")
+	}
 
 	// initial fetch now that the network is reachable
-	if !noFetch {
-		if err := c.syncOnce(cfg, apiClient, iface); err != nil {
+	if !opts.NoFetch {
+		if err := c.syncOnce(cfg, apiClient, iface, !opts.NoPeerSync); err != nil {
 			fmt.Printf("warning: sync failed: %v\n", err)
 		}
 	}
@@ -315,7 +324,7 @@ func (c *Client) Up(noFetch bool) error {
 			fmt.Println("\ndisconnecting")
 			return nil
 		case <-ticker.C:
-			if err := c.syncOnce(cfg, apiClient, iface); err != nil {
+			if err := c.syncOnce(cfg, apiClient, iface, !opts.NoPeerSync); err != nil {
 				fmt.Printf("warning: sync failed: %v\n", err)
 			}
 		}
@@ -346,6 +355,7 @@ func (c *Client) syncOnce(
 	cfg *ClientConfig,
 	apiClient *apiClient,
 	iface *wg.Interface,
+	applyPeers bool,
 ) error {
 	// gossip: compare live endpoints against the local peer cache
 	if sightings := c.scanEndpoints(iface); len(sightings) > 0 {
@@ -361,6 +371,10 @@ func (c *Client) syncOnce(
 	}
 	if err := c.store.ReconcilePeers(peers); err != nil {
 		return err
+	}
+	if !applyPeers {
+		c.verbosef("diagnostic: skipped applying %d peer(s) to WireGuard", len(peers))
+		return nil
 	}
 
 	// rebuild and apply the interface peer list

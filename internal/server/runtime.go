@@ -25,8 +25,9 @@ type Runtime struct {
 	Cfg    *NetworkConfig
 	Notify chan struct{} // poke to trigger an immediate peer sync
 
-	main   *wg.Interface
-	invite *wg.Interface
+	main                    *wg.Interface
+	invite                  *wg.Interface
+	disablePeriodicPeerSync bool
 }
 
 // NewRuntime loads the network config and prepares (but does not bring
@@ -106,6 +107,13 @@ func NewRuntime(
 		main:   main,
 		invite: invite,
 	}, nil
+}
+
+// DisablePeriodicPeerSync skips only timer-triggered peer syncs. Initial and
+// mutation-triggered syncs still run. This is a diagnostic control for
+// investigating whether complete peer replacement disrupts live sessions.
+func (r *Runtime) DisablePeriodicPeerSync() {
+	r.disablePeriodicPeerSync = true
 }
 
 // Poke requests an immediate interface sync; safe to call from any
@@ -236,6 +244,9 @@ func (r *Runtime) Run(
 	if err := r.SyncPeers(); err != nil {
 		return err
 	}
+	if r.disablePeriodicPeerSync {
+		log.Printf("diagnostic: periodic WireGuard peer sync disabled")
+	}
 
 	// Start the HTTP APIs on the internal addresses
 	mainAddr, err := r.Cfg.InternalApiEndpoint()
@@ -274,8 +285,10 @@ func (r *Runtime) Run(
 				ticksSinceMaintenance = 0
 				r.maintain()
 			}
-			if err := r.SyncPeers(); err != nil {
-				log.Printf("sync failed: %v", err)
+			if !r.disablePeriodicPeerSync {
+				if err := r.SyncPeers(); err != nil {
+					log.Printf("sync failed: %v", err)
+				}
 			}
 
 		case <-r.Notify:

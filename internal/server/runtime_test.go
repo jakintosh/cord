@@ -6,6 +6,16 @@ import (
 	wg "git.sr.ht/~jakintosh/cord/internal/wireguard"
 )
 
+func TestDisablePeriodicPeerSync(t *testing.T) {
+	runtime := &Runtime{}
+
+	runtime.DisablePeriodicPeerSync()
+
+	if !runtime.disablePeriodicPeerSync {
+		t.Fatal("periodic peer sync still enabled")
+	}
+}
+
 func TestMainPeersIncludesRedeemedUnconfirmedPeer(t *testing.T) {
 	serverKey, err := wg.GeneratePrivateKey()
 	if err != nil {
