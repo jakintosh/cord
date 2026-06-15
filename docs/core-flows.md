@@ -50,6 +50,10 @@ interrupted:
 5. On SIGINT/SIGTERM the HTTP servers shut down and both interfaces are
    destroyed.
 
+Run either `cord server serve` or `cord client up` with `--verbose` to log the
+start of every reconciliation round. Rounds with changes also log their
+targeted add, update, and remove operations and whether application succeeded.
+
 ## Peer Redemption
 
 1. Admin creates an invite (`cord server peer add` or `POST /admin/peer`):

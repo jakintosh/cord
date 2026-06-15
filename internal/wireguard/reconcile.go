@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strings"
 	"time"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -57,6 +58,49 @@ type PeerOperation struct {
 // WireGuard peer configuration match Cord's desired peer configuration.
 type ReconcilePlan struct {
 	Operations []PeerOperation
+}
+
+// OperationCounts returns the number of adds, updates, and removes in the plan.
+func (p ReconcilePlan) OperationCounts() (adds, updates, removes int) {
+	for _, operation := range p.Operations {
+		switch operation.Type {
+		case PeerAdd:
+			adds++
+		case PeerUpdate:
+			updates++
+		case PeerRemove:
+			removes++
+		}
+	}
+	return adds, updates, removes
+}
+
+// Fields summarizes the durable peer fields affected by an operation.
+func (o PeerOperation) Fields() string {
+	switch o.Type {
+	case PeerAdd:
+		fields := []string{"allowed-ips", "keepalive"}
+		if o.Peer.EndpointPolicy != EndpointDynamic && o.Peer.Endpoint != nil {
+			fields = append(fields, "endpoint")
+		}
+		return strings.Join(fields, ",")
+	case PeerRemove:
+		return "peer"
+	case PeerUpdate:
+		var fields []string
+		if o.UpdateAllowedIPs {
+			fields = append(fields, "allowed-ips")
+		}
+		if o.UpdateEndpoint {
+			fields = append(fields, "endpoint")
+		}
+		if o.UpdateKeepalive {
+			fields = append(fields, "keepalive")
+		}
+		return strings.Join(fields, ",")
+	default:
+		return "unknown"
+	}
 }
 
 // ReconcileError records a failed application while preserving the plan for

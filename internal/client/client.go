@@ -464,6 +464,7 @@ func (c *Client) buildInviteInterface(
 	if err != nil {
 		return nil, err
 	}
+	iface.SetReconcileLogger(c.verbosef)
 
 	serverPeer, err := buildServerPeer(
 		invite.Server.PublicKey,
@@ -506,6 +507,7 @@ func (c *Client) buildMainInterface(
 	if err != nil {
 		return nil, err
 	}
+	iface.SetReconcileLogger(c.verbosef)
 
 	wgPeers, err := c.buildPeers(cfg, peers)
 	if err != nil {

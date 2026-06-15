@@ -41,6 +41,7 @@ type Interface struct {
 	backend  Backend
 	realName string // actual OS device name (e.g. utun4 on darwin)
 	status   ReconcileStatus
+	logf     func(format string, args ...any)
 }
 
 // NewInterface creates a new in-memory representation of a WireGuard
@@ -146,6 +147,7 @@ func (i *Interface) Down(delete bool) error {
 // required to match the interface's desired peer list.
 func (i *Interface) Reconcile() error {
 	now := time.Now()
+	i.verbosef("reconciliation started: interface=%s desired=%d", i.DeviceName(), len(i.Peers))
 	status, err := i.Status()
 	if err != nil {
 		i.status.LastAttempt = now
@@ -153,6 +155,7 @@ func (i *Interface) Reconcile() error {
 		i.status.Observed = 0
 		i.status.Pending = nil
 		i.status.Errors = []ReconcileError{{Operation: "observe", Message: err.Error()}}
+		i.verbosef("reconciliation failed: interface=%s stage=observe error=%v", i.DeviceName(), err)
 		return err
 	}
 
@@ -166,18 +169,49 @@ func (i *Interface) Reconcile() error {
 		i.status.LastSuccess = now
 		return nil
 	}
+	adds, updates, removes := plan.OperationCounts()
+	i.verbosef(
+		"reconciliation planned: interface=%s observed=%d add=%d update=%d remove=%d",
+		i.DeviceName(),
+		len(status.Peers),
+		adds,
+		updates,
+		removes,
+	)
+	for _, operation := range plan.Operations {
+		i.verbosef(
+			"reconciliation operation: interface=%s type=%s peer=%s fields=%s",
+			i.DeviceName(),
+			operation.Type,
+			shortKey(operation.Peer.PublicKey),
+			operation.Fields(),
+		)
+	}
 	if err := i.backend.ApplyPeerOperations(i, plan.Operations); err != nil {
 		i.status.Errors = reconciliationError(plan, err)
+		i.verbosef("reconciliation failed: interface=%s stage=apply error=%v", i.DeviceName(), err)
 		return err
 	}
 	i.status.LastSuccess = now
 	i.status.Pending = nil
+	i.verbosef("reconciliation applied: interface=%s operations=%d", i.DeviceName(), len(plan.Operations))
 	return nil
 }
 
 // ReconcileStatus returns the latest reconciliation attempt state.
 func (i *Interface) ReconcileStatus() ReconcileStatus {
 	return i.status
+}
+
+// SetReconcileLogger configures optional logging for reconciliation activity.
+func (i *Interface) SetReconcileLogger(logf func(format string, args ...any)) {
+	i.logf = logf
+}
+
+func (i *Interface) verbosef(format string, args ...any) {
+	if i.logf != nil {
+		i.logf(format, args...)
+	}
 }
 
 // Status reports the live device state (peer endpoints, handshakes).

@@ -23,7 +23,7 @@ const (
 type Runtime struct {
 	Srv    *Server
 	Cfg    *NetworkConfig
-	Notify chan struct{} // poke to trigger an immediate peer sync
+	Notify chan struct{} // poke to trigger an immediate peer reconciliation
 
 	main   *wg.Interface
 	invite *wg.Interface
@@ -36,6 +36,7 @@ func NewRuntime(
 	noRouting bool,
 	mtu int,
 	backend wg.BackendType,
+	verbose bool,
 ) (
 	*Runtime,
 	error,
@@ -98,6 +99,13 @@ func NewRuntime(
 	}
 	invite.MTU = mtu
 	invite.NoRoutes = noRouting
+	if verbose {
+		logf := func(format string, args ...any) {
+			log.Printf("verbose: "+format, args...)
+		}
+		main.SetReconcileLogger(logf)
+		invite.SetReconcileLogger(logf)
+	}
 
 	return &Runtime{
 		Srv:    srv,

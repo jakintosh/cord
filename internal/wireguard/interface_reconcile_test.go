@@ -2,7 +2,9 @@ package wireguard
 
 import (
 	"errors"
+	"fmt"
 	"net"
+	"strings"
 	"testing"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -51,6 +53,47 @@ func TestInterface_ReconcileNoOpDoesNotApply(t *testing.T) {
 	}
 	if iface.ReconcileStatus().LastSuccess.IsZero() {
 		t.Fatal("last success not recorded")
+	}
+}
+
+func TestInterface_ReconcileVerboseLogging(t *testing.T) {
+	key := wgtypes.Key{1}
+	_, allowed, _ := net.ParseCIDR("10.0.0.2/32")
+	backend := &reconcileBackend{}
+	iface := &Interface{
+		Name:    "test0",
+		Peers:   []Peer{{PublicKey: key, AllowedIPs: []net.IPNet{*allowed}}},
+		backend: backend,
+	}
+	var logs []string
+	iface.SetReconcileLogger(func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	})
+
+	if err := iface.Reconcile(); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	joined := strings.Join(logs, "\n")
+	for _, want := range []string{
+		"reconciliation started: interface=test0 desired=1",
+		"reconciliation planned: interface=test0 observed=0 add=1 update=0 remove=0",
+		"reconciliation operation: interface=test0 type=add peer=",
+		"fields=allowed-ips,keepalive",
+		"reconciliation applied: interface=test0 operations=1",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("logs missing %q:\n%s", want, joined)
+		}
+	}
+
+	logs = nil
+	backend.observed = []ObservedPeer{{PublicKey: key, AllowedIPs: []net.IPNet{*allowed}}}
+	if err := iface.Reconcile(); err != nil {
+		t.Fatalf("no-op reconcile: %v", err)
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "reconciliation started") {
+		t.Fatalf("no-op logs = %v, want only start event", logs)
 	}
 }
 
