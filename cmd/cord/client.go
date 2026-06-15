@@ -225,11 +225,6 @@ var clientUp = &args.Command{
 			Type: args.OptionTypeFlag,
 			Help: "do not fetch peer state from the server",
 		},
-		{
-			Long: "no-peer-sync",
-			Type: args.OptionTypeFlag,
-			Help: "diagnostic: fetch peer state without applying it to WireGuard",
-		},
 	},
 	Handler: func(i *args.Input) error {
 
@@ -238,7 +233,6 @@ var clientUp = &args.Command{
 
 		// options
 		noFetch := i.GetFlag("no-fetch")
-		noPeerSync := i.GetFlag("no-peer-sync")
 
 		// create client
 		c, err := newClient(i, network)
@@ -246,10 +240,7 @@ var clientUp = &args.Command{
 			return fmt.Errorf("failed to create client: %w", err)
 		}
 
-		if err := c.Up(client.UpOptions{
-			NoFetch:    noFetch,
-			NoPeerSync: noPeerSync,
-		}); err != nil {
+		if err := c.Up(noFetch); err != nil {
 			return fmt.Errorf("failed to bring cord up: %w", err)
 		}
 

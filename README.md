@@ -91,7 +91,7 @@ The `cord` binary is a thin CLI over packages in `internal/`:
 - `internal/api` — HTTP handlers; the main network serves the full API, the invite network serves *only* the redeem endpoint.
 - `internal/client` — install/up/down/show/fetch/uninstall flows, local peer cache, API client.
 - `internal/database` — SQLite adapters with versioned migrations: the server store (cidr, association, invite, peer, endpoint tables) and the client peer cache.
-- `internal/wireguard` — interface management with two backends: Linux kernel (netlink/wgctrl) and userspace (embedded wireguard-go). On macOS the OS names devices `utunN`; cord tracks the mapping.
+- `internal/wireguard` — live-state peer reconciliation and interface management with two backends: Linux kernel (netlink/wgctrl) and userspace (embedded wireguard-go). On macOS the OS names devices `utunN`; cord tracks the mapping.
 - `internal/utils` — IP/CIDR helpers.
 
 The API surface is described in [docs/api-spec.md](docs/api-spec.md), and the main flows in [docs/core-flows.md](docs/core-flows.md).

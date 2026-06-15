@@ -58,11 +58,6 @@ var serverServe = &args.Command{
 			Type: args.OptionTypeParameter,
 			Help: "WireGuard backend ('auto', 'kernel' or 'userspace')",
 		},
-		{
-			Long: "no-periodic-peer-sync",
-			Type: args.OptionTypeFlag,
-			Help: "diagnostic: skip the periodic WireGuard peer sync",
-		},
 	},
 	Handler: func(i *args.Input) error {
 
@@ -71,7 +66,6 @@ var serverServe = &args.Command{
 
 		// options
 		noRouting := i.GetFlag("no-routing")
-		noPeriodicPeerSync := i.GetFlag("no-periodic-peer-sync")
 		mtu := i.GetIntParameterOr("mtu", 1420)
 		backendValue := i.GetParameterOr("backend", "auto")
 
@@ -93,10 +87,6 @@ var serverServe = &args.Command{
 		if err != nil {
 			return fmt.Errorf("failed to prepare server: %w", err)
 		}
-		if noPeriodicPeerSync {
-			runtime.DisablePeriodicPeerSync()
-		}
-
 		apiServer, err := api.New(api.Options{
 			Service:    srv,
 			OnMutation: runtime.Poke,

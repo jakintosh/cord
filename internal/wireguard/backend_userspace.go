@@ -36,7 +36,7 @@ func (b *UserspaceBackend) Up(
 
 	// Idempotency check: if already running, just re-apply config
 	if b.device != nil {
-		return b.applyConfig(iface)
+		return b.applyDeviceConfig(iface)
 	}
 
 	mtu := iface.MTU
@@ -70,8 +70,8 @@ func (b *UserspaceBackend) Up(
 	b.device = dev
 	b.tunDevice = tunDevice
 
-	// Apply configuration (private key, port, peers)
-	if err := b.applyConfig(iface); err != nil {
+	// Apply device configuration; peers are reconciled after the device is up.
+	if err := b.applyDeviceConfig(iface); err != nil {
 		b.closeLocked()
 		return fmt.Errorf("failed to apply configuration: %w", err)
 	}
@@ -109,8 +109,9 @@ func (b *UserspaceBackend) Down(
 	return nil
 }
 
-func (b *UserspaceBackend) Sync(
+func (b *UserspaceBackend) ApplyPeerOperations(
 	iface *Interface,
+	operations []PeerOperation,
 ) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -119,8 +120,8 @@ func (b *UserspaceBackend) Sync(
 		return fmt.Errorf("cannot sync: WireGuard device is not running")
 	}
 
-	if err := b.applyConfig(iface); err != nil {
-		return fmt.Errorf("failed to sync configuration: %w", err)
+	if err := b.applyPeerOperations(operations); err != nil {
+		return fmt.Errorf("failed to apply peer operations: %w", err)
 	}
 
 	return nil
@@ -157,9 +158,8 @@ func (b *UserspaceBackend) closeLocked() {
 	b.tunDevice = nil
 }
 
-// applyConfig constructs the configuration in the line-based uapi format
-// and sends it to the running device via IpcSet. Callers must hold b.mu.
-func (b *UserspaceBackend) applyConfig(iface *Interface) error {
+// applyDeviceConfig applies only device-level configuration. Callers must hold b.mu.
+func (b *UserspaceBackend) applyDeviceConfig(iface *Interface) error {
 	var sb strings.Builder
 
 	fmt.Fprintf(&sb, "private_key=%s\n", hex.EncodeToString(iface.PrivateKey[:]))
@@ -168,26 +168,51 @@ func (b *UserspaceBackend) applyConfig(iface *Interface) error {
 		fmt.Fprintf(&sb, "listen_port=%d\n", iface.ListenPort)
 	}
 
-	// Clear existing peers first
-	sb.WriteString("replace_peers=true\n")
+	return b.device.IpcSet(sb.String())
+}
 
-	for _, peer := range iface.Peers {
+// applyPeerOperations translates standardized operations into WireGuard UAPI.
+// Callers must hold b.mu.
+func (b *UserspaceBackend) applyPeerOperations(operations []PeerOperation) error {
+	return b.device.IpcSet(peerOperationsUAPI(operations))
+}
+
+func peerOperationsUAPI(operations []PeerOperation) string {
+	var sb strings.Builder
+	for _, operation := range operations {
+		peer := operation.Peer
 		fmt.Fprintf(&sb, "public_key=%s\n", hex.EncodeToString(peer.PublicKey[:]))
-
-		for _, allowedIP := range peer.AllowedIPs {
-			fmt.Fprintf(&sb, "allowed_ip=%s\n", allowedIP.String())
-		}
-
-		if peer.Endpoint != nil {
-			fmt.Fprintf(&sb, "endpoint=%s\n", peer.Endpoint.String())
-		}
-
-		if peer.PersistentKeepalive > 0 {
+		switch operation.Type {
+		case PeerRemove:
+			sb.WriteString("remove=true\n")
+		case PeerAdd:
+			sb.WriteString("replace_allowed_ips=true\n")
+			writeAllowedIPs(&sb, peer.AllowedIPs)
+			if peer.EndpointPolicy != EndpointDynamic && peer.Endpoint != nil {
+				fmt.Fprintf(&sb, "endpoint=%s\n", peer.Endpoint.String())
+			}
 			fmt.Fprintf(&sb, "persistent_keepalive_interval=%d\n", int(peer.PersistentKeepalive.Seconds()))
+		case PeerUpdate:
+			sb.WriteString("update_only=true\n")
+			if operation.UpdateAllowedIPs {
+				sb.WriteString("replace_allowed_ips=true\n")
+				writeAllowedIPs(&sb, peer.AllowedIPs)
+			}
+			if operation.UpdateEndpoint && peer.Endpoint != nil {
+				fmt.Fprintf(&sb, "endpoint=%s\n", peer.Endpoint.String())
+			}
+			if operation.UpdateKeepalive {
+				fmt.Fprintf(&sb, "persistent_keepalive_interval=%d\n", int(peer.PersistentKeepalive.Seconds()))
+			}
 		}
 	}
+	return sb.String()
+}
 
-	return b.device.IpcSet(sb.String())
+func writeAllowedIPs(sb *strings.Builder, allowedIPs []net.IPNet) {
+	for _, allowedIP := range allowedIPs {
+		fmt.Fprintf(sb, "allowed_ip=%s\n", allowedIP.String())
+	}
 }
 
 // parseUapiStatus converts wireguard-go's uapi "get" output into a DeviceStatus.
@@ -196,16 +221,18 @@ func parseUapiStatus(name string, raw string) (*DeviceStatus, error) {
 
 	var peer *PeerStatus
 	var handshakeSec int64
+	var handshakeNsec int64
 
 	flushPeer := func() {
 		if peer != nil {
 			if handshakeSec > 0 {
-				peer.LastHandshake = time.Unix(handshakeSec, 0)
+				peer.LastHandshake = time.Unix(handshakeSec, handshakeNsec)
 			}
 			status.Peers = append(status.Peers, *peer)
 		}
 		peer = nil
 		handshakeSec = 0
+		handshakeNsec = 0
 	}
 
 	scanner := bufio.NewScanner(strings.NewReader(raw))
@@ -239,9 +266,36 @@ func parseUapiStatus(name string, raw string) (*DeviceStatus, error) {
 			if sec, err := strconv.ParseInt(value, 10, 64); err == nil {
 				handshakeSec = sec
 			}
+		case "last_handshake_time_nsec":
+			if nsec, err := strconv.ParseInt(value, 10, 64); err == nil {
+				handshakeNsec = nsec
+			}
+		case "persistent_keepalive_interval":
+			if peer != nil {
+				if seconds, err := strconv.Atoi(value); err == nil {
+					peer.PersistentKeepalive = time.Duration(seconds) * time.Second
+				}
+			}
+		case "allowed_ip":
+			if peer != nil {
+				if _, allowed, err := net.ParseCIDR(value); err == nil {
+					peer.AllowedIPs = append(peer.AllowedIPs, *allowed)
+				}
+			}
+		case "rx_bytes":
+			if peer != nil {
+				peer.ReceiveBytes, _ = strconv.ParseInt(value, 10, 64)
+			}
+		case "tx_bytes":
+			if peer != nil {
+				peer.TransmitBytes, _ = strconv.ParseInt(value, 10, 64)
+			}
 		}
 	}
 	flushPeer()
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan device status: %w", err)
+	}
 
 	return status, nil
 }

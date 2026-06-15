@@ -25,9 +25,8 @@ type Runtime struct {
 	Cfg    *NetworkConfig
 	Notify chan struct{} // poke to trigger an immediate peer sync
 
-	main                    *wg.Interface
-	invite                  *wg.Interface
-	disablePeriodicPeerSync bool
+	main   *wg.Interface
+	invite *wg.Interface
 }
 
 // NewRuntime loads the network config and prepares (but does not bring
@@ -109,14 +108,7 @@ func NewRuntime(
 	}, nil
 }
 
-// DisablePeriodicPeerSync skips only timer-triggered peer syncs. Initial and
-// mutation-triggered syncs still run. This is a diagnostic control for
-// investigating whether complete peer replacement disrupts live sessions.
-func (r *Runtime) DisablePeriodicPeerSync() {
-	r.disablePeriodicPeerSync = true
-}
-
-// Poke requests an immediate interface sync; safe to call from any
+// Poke requests an immediate interface reconciliation; safe to call from any
 // goroutine and never blocks.
 func (r *Runtime) Poke() {
 	select {
@@ -125,28 +117,44 @@ func (r *Runtime) Poke() {
 	}
 }
 
-// SyncPeers rebuilds both interfaces' peer lists from the database and
-// applies them to the live devices.
-func (r *Runtime) SyncPeers() error {
+// ReconcilePeers rebuilds both interfaces' desired peer lists from the database and
+// reconciles them against the live WireGuard devices.
+func (r *Runtime) ReconcilePeers() error {
+	var reconcileErrors []error
+
 	mainPeers, err := r.mainPeers()
 	if err != nil {
-		return fmt.Errorf("failed to build main peers: %w", err)
-	}
-	r.main.SetPeers(mainPeers)
-	if err := r.main.Sync(); err != nil {
-		return fmt.Errorf("failed to sync main interface: %w", err)
+		reconcileErrors = append(reconcileErrors, fmt.Errorf("failed to build main peers: %w", err))
+	} else {
+		r.main.SetPeers(mainPeers)
+		if err := r.main.Reconcile(); err != nil {
+			reconcileErrors = append(
+				reconcileErrors,
+				fmt.Errorf("failed to reconcile main interface: %w", err),
+			)
+		}
 	}
 
 	invitePeers, err := r.invitePeers()
 	if err != nil {
-		return fmt.Errorf("failed to build invite peers: %w", err)
-	}
-	r.invite.SetPeers(invitePeers)
-	if err := r.invite.Sync(); err != nil {
-		return fmt.Errorf("failed to sync invite interface: %w", err)
+		reconcileErrors = append(reconcileErrors, fmt.Errorf("failed to build invite peers: %w", err))
+	} else {
+		r.invite.SetPeers(invitePeers)
+		if err := r.invite.Reconcile(); err != nil {
+			reconcileErrors = append(
+				reconcileErrors,
+				fmt.Errorf("failed to reconcile invite interface: %w", err),
+			)
+		}
 	}
 
-	return nil
+	return errors.Join(reconcileErrors...)
+}
+
+// ReconcileStatus returns structured status for the main and invite devices.
+// Failed plans remain pending until a later reconciliation re-plans and applies.
+func (r *Runtime) ReconcileStatus() (wg.ReconcileStatus, wg.ReconcileStatus) {
+	return r.main.ReconcileStatus(), r.invite.ReconcileStatus()
 }
 
 // mainPeers converts enabled peers into WireGuard peers for the main
@@ -213,8 +221,9 @@ func peerFromRecord(pubKey string, cidr string) (*wg.Peer, error) {
 		return nil, fmt.Errorf("invalid cidr '%s': %w", cidr, err)
 	}
 	return &wg.Peer{
-		PublicKey:  key,
-		AllowedIPs: []net.IPNet{*allowed},
+		PublicKey:      key,
+		AllowedIPs:     []net.IPNet{*allowed},
+		EndpointPolicy: wg.EndpointDynamic,
 	}, nil
 }
 
@@ -227,6 +236,17 @@ func (r *Runtime) Run(
 	mainHandler http.Handler,
 	inviteHandler http.Handler,
 ) error {
+	mainPeers, err := r.mainPeers()
+	if err != nil {
+		return fmt.Errorf("failed to build initial main peers: %w", err)
+	}
+	invitePeers, err := r.invitePeers()
+	if err != nil {
+		return fmt.Errorf("failed to build initial invite peers: %w", err)
+	}
+	r.main.SetPeers(mainPeers)
+	r.invite.SetPeers(invitePeers)
+
 	// Bring up the interfaces
 	if err := r.main.Up(""); err != nil {
 		return fmt.Errorf("failed to bring up main interface: %w", err)
@@ -239,14 +259,6 @@ func (r *Runtime) Run(
 	}
 	defer func() { _ = r.invite.Down(true) }()
 	log.Printf("invite interface up: %s (%s)", r.invite.DeviceName(), r.invite.Address.String())
-
-	// Apply the initial peer lists
-	if err := r.SyncPeers(); err != nil {
-		return err
-	}
-	if r.disablePeriodicPeerSync {
-		log.Printf("diagnostic: periodic WireGuard peer sync disabled")
-	}
 
 	// Start the HTTP APIs on the internal addresses
 	mainAddr, err := r.Cfg.InternalApiEndpoint()
@@ -285,15 +297,13 @@ func (r *Runtime) Run(
 				ticksSinceMaintenance = 0
 				r.maintain()
 			}
-			if !r.disablePeriodicPeerSync {
-				if err := r.SyncPeers(); err != nil {
-					log.Printf("sync failed: %v", err)
-				}
+			if err := r.ReconcilePeers(); err != nil {
+				log.Printf("reconciliation failed: %v", err)
 			}
 
 		case <-r.Notify:
-			if err := r.SyncPeers(); err != nil {
-				log.Printf("sync failed: %v", err)
+			if err := r.ReconcilePeers(); err != nil {
+				log.Printf("reconciliation failed: %v", err)
 			}
 		}
 	}

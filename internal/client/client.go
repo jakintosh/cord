@@ -269,16 +269,10 @@ func (c *Client) Fetch() error {
 	return nil
 }
 
-// UpOptions controls the long-running client connection.
-type UpOptions struct {
-	NoFetch    bool
-	NoPeerSync bool
-}
-
 // Up connects to the network and stays in the foreground: it keeps the
 // local peer set in sync with the server and reports endpoint changes
 // it witnesses (endpoint gossip) until interrupted.
-func (c *Client) Up(opts UpOptions) error {
+func (c *Client) Up(noFetch bool) error {
 	cfg, err := c.LoadConfig()
 	if err != nil {
 		return err
@@ -300,13 +294,10 @@ func (c *Client) Up(opts UpOptions) error {
 	}
 	defer func() { _ = iface.Down(true) }()
 	fmt.Printf("interface up: %s (%s)\n", iface.DeviceName(), cfg.AssignedCidr)
-	if opts.NoPeerSync {
-		fmt.Println("diagnostic: periodic peer state will not be applied to WireGuard")
-	}
 
 	// initial fetch now that the network is reachable
-	if !opts.NoFetch {
-		if err := c.syncOnce(cfg, apiClient, iface, !opts.NoPeerSync); err != nil {
+	if !noFetch {
+		if err := c.syncOnce(cfg, apiClient, iface); err != nil {
 			fmt.Printf("warning: sync failed: %v\n", err)
 		}
 	}
@@ -324,7 +315,7 @@ func (c *Client) Up(opts UpOptions) error {
 			fmt.Println("\ndisconnecting")
 			return nil
 		case <-ticker.C:
-			if err := c.syncOnce(cfg, apiClient, iface, !opts.NoPeerSync); err != nil {
+			if err := c.syncOnce(cfg, apiClient, iface); err != nil {
 				fmt.Printf("warning: sync failed: %v\n", err)
 			}
 		}
@@ -355,7 +346,6 @@ func (c *Client) syncOnce(
 	cfg *ClientConfig,
 	apiClient *apiClient,
 	iface *wg.Interface,
-	applyPeers bool,
 ) error {
 	// gossip: compare live endpoints against the local peer cache
 	if sightings := c.scanEndpoints(iface); len(sightings) > 0 {
@@ -372,11 +362,6 @@ func (c *Client) syncOnce(
 	if err := c.store.ReconcilePeers(peers); err != nil {
 		return err
 	}
-	if !applyPeers {
-		c.verbosef("diagnostic: skipped applying %d peer(s) to WireGuard", len(peers))
-		return nil
-	}
-
 	// rebuild and apply the interface peer list
 	localPeers, err := c.store.ListPeers()
 	if err != nil {
@@ -387,7 +372,7 @@ func (c *Client) syncOnce(
 		return err
 	}
 	iface.SetPeers(wgPeers)
-	return iface.Sync()
+	return iface.Reconcile()
 }
 
 // scanEndpoints inspects the live device for peers whose endpoint
@@ -576,6 +561,7 @@ func (c *Client) buildPeers(
 		wgPeer := wg.Peer{
 			PublicKey:           key,
 			AllowedIPs:          []net.IPNet{*allowed},
+			EndpointPolicy:      wg.EndpointBootstrap,
 			PersistentKeepalive: keepalive,
 		}
 		if peer.Endpoint != "" {
@@ -755,6 +741,7 @@ func buildServerPeer(
 		PublicKey:           key,
 		AllowedIPs:          []net.IPNet{*allowed},
 		Endpoint:            addr,
+		EndpointPolicy:      wg.EndpointFixed,
 		PersistentKeepalive: keepalive,
 	}, nil
 }
