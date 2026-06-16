@@ -153,8 +153,7 @@ func (i *Interface) Reconcile() error {
 		i.status.LastAttempt = now
 		i.status.Desired = len(i.Peers)
 		i.status.Observed = 0
-		i.status.Pending = nil
-		i.status.Errors = []ReconcileError{{Operation: "observe", Message: err.Error()}}
+		i.status.Error = &ReconcileError{Stage: StageObserve, Message: err.Error()}
 		i.verbosef("reconciliation failed: interface=%s stage=observe error=%v", i.DeviceName(), err)
 		return err
 	}
@@ -163,8 +162,7 @@ func (i *Interface) Reconcile() error {
 	i.status.LastAttempt = now
 	i.status.Desired = len(i.Peers)
 	i.status.Observed = len(status.Peers)
-	i.status.Pending = plan.Operations
-	i.status.Errors = nil
+	i.status.Error = nil
 	if len(plan.Operations) == 0 {
 		i.status.LastSuccess = now
 		return nil
@@ -188,12 +186,11 @@ func (i *Interface) Reconcile() error {
 		)
 	}
 	if err := i.backend.ApplyPeerOperations(i, plan.Operations); err != nil {
-		i.status.Errors = reconciliationError(plan, err)
+		i.status.Error = &ReconcileError{Stage: StageApply, Message: err.Error()}
 		i.verbosef("reconciliation failed: interface=%s stage=apply error=%v", i.DeviceName(), err)
 		return err
 	}
 	i.status.LastSuccess = now
-	i.status.Pending = nil
 	i.verbosef("reconciliation applied: interface=%s operations=%d", i.DeviceName(), len(plan.Operations))
 	return nil
 }

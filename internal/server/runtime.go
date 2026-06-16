@@ -285,7 +285,7 @@ func (r *Runtime) Run(
 	go serveHTTP("invite api", inviteSrv, errCh)
 	defer shutdownHTTP(mainSrv, inviteSrv)
 
-	// Sync loop: periodic + poked, with occasional maintenance
+	// Reconciliation loop: periodic + poked, with occasional maintenance
 	ticker := time.NewTicker(syncInterval)
 	defer ticker.Stop()
 	ticksSinceMaintenance := 0

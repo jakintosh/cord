@@ -103,12 +103,19 @@ func (o PeerOperation) Fields() string {
 	}
 }
 
-// ReconcileError records a failed application while preserving the plan for
-// later retry. Reconciliation always re-plans against live state before retry.
+// ReconciliationStage identifies which phase of reconciliation failed.
+type ReconciliationStage int
+
+const (
+	StageObserve ReconciliationStage = iota
+	StageApply
+)
+
+// ReconcileError records the stage that failed and why. WireGuard backends
+// apply peer operations atomically, so errors are always stage-level.
 type ReconcileError struct {
-	Operation string
-	PublicKey string
-	Message   string
+	Stage   ReconciliationStage
+	Message string
 }
 
 // ReconcileStatus is the most recent reconciliation state for an interface.
@@ -117,8 +124,12 @@ type ReconcileStatus struct {
 	LastSuccess time.Time
 	Desired     int
 	Observed    int
-	Pending     []PeerOperation
-	Errors      []ReconcileError
+	Error       *ReconcileError
+}
+
+// Degraded reports whether the last reconciliation attempt did not succeed.
+func (s ReconcileStatus) Degraded() bool {
+	return s.LastSuccess.IsZero() || s.LastSuccess.Before(s.LastAttempt)
 }
 
 // PlanPeerReconciliation compares desired Cord peers with observed WireGuard
@@ -201,18 +212,6 @@ func endpointsEqual(left, right *net.UDPAddr) bool {
 		return left == nil && right == nil
 	}
 	return left.String() == right.String()
-}
-
-func reconciliationError(plan ReconcilePlan, err error) []ReconcileError {
-	errors := make([]ReconcileError, 0, len(plan.Operations))
-	for _, op := range plan.Operations {
-		errors = append(errors, ReconcileError{
-			Operation: op.Type.String(),
-			PublicKey: shortKey(op.Peer.PublicKey),
-			Message:   err.Error(),
-		})
-	}
-	return errors
 }
 
 func shortKey(key wgtypes.Key) string {

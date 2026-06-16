@@ -97,7 +97,7 @@ func TestInterface_ReconcileVerboseLogging(t *testing.T) {
 	}
 }
 
-func TestInterface_ReconcileFailureTracksPendingAndReplans(t *testing.T) {
+func TestInterface_ReconcileFailureMarksDegradedThenReplans(t *testing.T) {
 	key := wgtypes.Key{1}
 	_, allowed, _ := net.ParseCIDR("10.0.0.2/32")
 	backend := &reconcileBackend{applyError: errors.New("device unavailable")}
@@ -110,7 +110,7 @@ func TestInterface_ReconcileFailureTracksPendingAndReplans(t *testing.T) {
 		t.Fatal("expected reconcile failure")
 	}
 	status := iface.ReconcileStatus()
-	if len(status.Pending) != 1 || len(status.Errors) != 1 {
+	if status.Error == nil || !status.Degraded() || status.Error.Stage != StageApply {
 		t.Fatalf("unexpected failed status: %+v", status)
 	}
 
@@ -120,7 +120,7 @@ func TestInterface_ReconcileFailureTracksPendingAndReplans(t *testing.T) {
 		t.Fatalf("retry reconcile: %v", err)
 	}
 	status = iface.ReconcileStatus()
-	if len(status.Pending) != 0 || len(status.Errors) != 0 {
+	if status.Error != nil || status.Degraded() {
 		t.Fatalf("unexpected recovered status: %+v", status)
 	}
 	if len(backend.applied) != 1 {
