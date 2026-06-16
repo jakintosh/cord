@@ -30,25 +30,32 @@ type Backend interface {
 	// Down brings the interface down and, optionally, deletes it.
 	Down(iface *Interface, delete bool) error
 
-	// Sync applies only the changes to the peer list to a live interface
-	// without tearing it down. This is more efficient for updates.
-	Sync(iface *Interface) error
-
 	// Status reports the live device state, including observed peer
 	// endpoints and handshake times. Used for endpoint gossip.
 	Status(iface *Interface) (*DeviceStatus, error)
+
+	// ApplyPeerOperations applies targeted peer changes without disturbing
+	// peers absent from operations.
+	ApplyPeerOperations(iface *Interface, operations []PeerOperation) error
 }
 
-// PeerStatus is the observed state of a single peer on a live device.
-type PeerStatus struct {
-	PublicKey     wgtypes.Key
-	Endpoint      *net.UDPAddr
-	LastHandshake time.Time
+// ObservedPeer is the configuration and runtime state reported by WireGuard.
+type ObservedPeer struct {
+	PublicKey           wgtypes.Key
+	AllowedIPs          []net.IPNet
+	Endpoint            *net.UDPAddr
+	PersistentKeepalive time.Duration
+	LastHandshake       time.Time
+	ReceiveBytes        int64
+	TransmitBytes       int64
 }
+
+// PeerStatus is retained as the status-facing name used by client callbacks.
+type PeerStatus = ObservedPeer
 
 // DeviceStatus is the observed state of a live WireGuard device.
 type DeviceStatus struct {
 	Name       string
 	ListenPort int
-	Peers      []PeerStatus
+	Peers      []ObservedPeer
 }

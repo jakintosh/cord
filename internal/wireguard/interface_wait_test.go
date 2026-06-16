@@ -23,7 +23,7 @@ func (b *handshakeStatusBackend) Down(*Interface, bool) error {
 	return nil
 }
 
-func (b *handshakeStatusBackend) Sync(*Interface) error {
+func (b *handshakeStatusBackend) ApplyPeerOperations(*Interface, []PeerOperation) error {
 	return nil
 }
 

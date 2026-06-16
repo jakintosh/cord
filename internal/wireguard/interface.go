@@ -16,13 +16,17 @@ const (
 	inviteInterfaceSuffix = "-i"
 )
 
-// Peer represents a single peer in a WireGuard configuration.
+// Peer represents Cord's desired durable configuration for one WireGuard peer.
 type Peer struct {
 	PublicKey           wgtypes.Key
 	AllowedIPs          []net.IPNet
 	Endpoint            *net.UDPAddr
+	EndpointPolicy      EndpointPolicy
 	PersistentKeepalive time.Duration
 }
+
+// DesiredPeer names Peer by its role in reconciliation.
+type DesiredPeer = Peer
 
 // Interface represents the complete configuration for a WireGuard network interface.
 type Interface struct {
@@ -36,6 +40,8 @@ type Interface struct {
 
 	backend  Backend
 	realName string // actual OS device name (e.g. utun4 on darwin)
+	status   ReconcileStatus
+	logf     func(format string, args ...any)
 }
 
 // NewInterface creates a new in-memory representation of a WireGuard
@@ -122,7 +128,14 @@ func (i *Interface) DeviceName() string {
 // current state of the Interface object, and brings it up.
 // It also writes the native .conf file to configPath when non-empty.
 func (i *Interface) Up(configPath string) error {
-	return i.backend.Up(i, configPath)
+	if err := i.backend.Up(i, configPath); err != nil {
+		return err
+	}
+	if err := i.Reconcile(); err != nil {
+		_ = i.backend.Down(i, true)
+		return err
+	}
+	return nil
 }
 
 // Down brings the interface down and, optionally, deletes it.
@@ -130,10 +143,72 @@ func (i *Interface) Down(delete bool) error {
 	return i.backend.Down(i, delete)
 }
 
-// Sync applies only the changes to the peer list to a live interface
-// without tearing it down. This is more efficient for updates.
-func (i *Interface) Sync() error {
-	return i.backend.Sync(i)
+// Reconcile observes the live WireGuard device and applies only peer changes
+// required to match the interface's desired peer list.
+func (i *Interface) Reconcile() error {
+	now := time.Now()
+	i.verbosef("reconciliation started: interface=%s desired=%d", i.DeviceName(), len(i.Peers))
+	status, err := i.Status()
+	if err != nil {
+		i.status.LastAttempt = now
+		i.status.Desired = len(i.Peers)
+		i.status.Observed = 0
+		i.status.Error = &ReconcileError{Stage: StageObserve, Message: err.Error()}
+		i.verbosef("reconciliation failed: interface=%s stage=observe error=%v", i.DeviceName(), err)
+		return err
+	}
+
+	plan := PlanPeerReconciliation(i.Peers, status.Peers)
+	i.status.LastAttempt = now
+	i.status.Desired = len(i.Peers)
+	i.status.Observed = len(status.Peers)
+	i.status.Error = nil
+	if len(plan.Operations) == 0 {
+		i.status.LastSuccess = now
+		return nil
+	}
+	adds, updates, removes := plan.OperationCounts()
+	i.verbosef(
+		"reconciliation planned: interface=%s observed=%d add=%d update=%d remove=%d",
+		i.DeviceName(),
+		len(status.Peers),
+		adds,
+		updates,
+		removes,
+	)
+	for _, operation := range plan.Operations {
+		i.verbosef(
+			"reconciliation operation: interface=%s type=%s peer=%s fields=%s",
+			i.DeviceName(),
+			operation.Type,
+			shortKey(operation.Peer.PublicKey),
+			operation.Fields(),
+		)
+	}
+	if err := i.backend.ApplyPeerOperations(i, plan.Operations); err != nil {
+		i.status.Error = &ReconcileError{Stage: StageApply, Message: err.Error()}
+		i.verbosef("reconciliation failed: interface=%s stage=apply error=%v", i.DeviceName(), err)
+		return err
+	}
+	i.status.LastSuccess = now
+	i.verbosef("reconciliation applied: interface=%s operations=%d", i.DeviceName(), len(plan.Operations))
+	return nil
+}
+
+// ReconcileStatus returns the latest reconciliation attempt state.
+func (i *Interface) ReconcileStatus() ReconcileStatus {
+	return i.status
+}
+
+// SetReconcileLogger configures optional logging for reconciliation activity.
+func (i *Interface) SetReconcileLogger(logf func(format string, args ...any)) {
+	i.logf = logf
+}
+
+func (i *Interface) verbosef(format string, args ...any) {
+	if i.logf != nil {
+		i.logf(format, args...)
+	}
 }
 
 // Status reports the live device state (peer endpoints, handshakes).

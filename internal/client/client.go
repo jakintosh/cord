@@ -362,7 +362,6 @@ func (c *Client) syncOnce(
 	if err := c.store.ReconcilePeers(peers); err != nil {
 		return err
 	}
-
 	// rebuild and apply the interface peer list
 	localPeers, err := c.store.ListPeers()
 	if err != nil {
@@ -373,7 +372,7 @@ func (c *Client) syncOnce(
 		return err
 	}
 	iface.SetPeers(wgPeers)
-	return iface.Sync()
+	return iface.Reconcile()
 }
 
 // scanEndpoints inspects the live device for peers whose endpoint
@@ -465,6 +464,7 @@ func (c *Client) buildInviteInterface(
 	if err != nil {
 		return nil, err
 	}
+	iface.SetReconcileLogger(c.verbosef)
 
 	serverPeer, err := buildServerPeer(
 		invite.Server.PublicKey,
@@ -507,6 +507,7 @@ func (c *Client) buildMainInterface(
 	if err != nil {
 		return nil, err
 	}
+	iface.SetReconcileLogger(c.verbosef)
 
 	wgPeers, err := c.buildPeers(cfg, peers)
 	if err != nil {
@@ -562,6 +563,7 @@ func (c *Client) buildPeers(
 		wgPeer := wg.Peer{
 			PublicKey:           key,
 			AllowedIPs:          []net.IPNet{*allowed},
+			EndpointPolicy:      wg.EndpointBootstrap,
 			PersistentKeepalive: keepalive,
 		}
 		if peer.Endpoint != "" {
@@ -741,6 +743,7 @@ func buildServerPeer(
 		PublicKey:           key,
 		AllowedIPs:          []net.IPNet{*allowed},
 		Endpoint:            addr,
+		EndpointPolicy:      wg.EndpointFixed,
 		PersistentKeepalive: keepalive,
 	}, nil
 }

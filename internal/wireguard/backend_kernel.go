@@ -49,12 +49,6 @@ func (b *KernelBackend) Up(
 		return err
 	}
 
-	// Apply peers
-	err = applyPeers(iface.Name, iface.Peers)
-	if err != nil {
-		return err
-	}
-
 	// Bring the link up
 	err = netlink.LinkSetUp(link)
 	if err != nil {
@@ -104,8 +98,9 @@ func (b *KernelBackend) Down(
 	return nil
 }
 
-func (b *KernelBackend) Sync(
+func (b *KernelBackend) ApplyPeerOperations(
 	iface *Interface,
+	operations []PeerOperation,
 ) error {
 	link, err := netlink.LinkByName(iface.Name)
 	if err != nil {
@@ -117,13 +112,7 @@ func (b *KernelBackend) Sync(
 		return fmt.Errorf("interface %s is not up", iface.Name)
 	}
 
-	// Apply only the peers
-	err = applyPeers(iface.Name, iface.Peers)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return applyPeerOperations(iface.Name, operations)
 }
 
 func (b *KernelBackend) Status(
@@ -149,9 +138,13 @@ func (b *KernelBackend) Status(
 	}
 	for _, peer := range device.Peers {
 		status.Peers = append(status.Peers, PeerStatus{
-			PublicKey:     peer.PublicKey,
-			Endpoint:      peer.Endpoint,
-			LastHandshake: peer.LastHandshakeTime,
+			PublicKey:           peer.PublicKey,
+			AllowedIPs:          peer.AllowedIPs,
+			Endpoint:            peer.Endpoint,
+			PersistentKeepalive: peer.PersistentKeepaliveInterval,
+			LastHandshake:       peer.LastHandshakeTime,
+			ReceiveBytes:        peer.ReceiveBytes,
+			TransmitBytes:       peer.TransmitBytes,
 		})
 	}
 
@@ -257,9 +250,9 @@ func applyDeviceConfig(
 	return nil
 }
 
-func applyPeers(
+func applyPeerOperations(
 	name string,
-	peers []Peer,
+	operations []PeerOperation,
 ) error {
 	client, err := wgctrl.New()
 	if err != nil {
@@ -267,28 +260,14 @@ func applyPeers(
 	}
 	defer client.Close()
 
-	// Convert our Peer structs to wgtypes.PeerConfig
-	var peerConfigs []wgtypes.PeerConfig
-	for _, peer := range peers {
-		peerConfig := wgtypes.PeerConfig{
-			PublicKey:  peer.PublicKey,
-			AllowedIPs: peer.AllowedIPs,
-		}
-
-		if peer.Endpoint != nil {
-			peerConfig.Endpoint = peer.Endpoint
-		}
-
-		if peer.PersistentKeepalive > 0 {
-			peerConfig.PersistentKeepaliveInterval = &peer.PersistentKeepalive
-		}
-
+	peerConfigs := make([]wgtypes.PeerConfig, 0, len(operations))
+	for _, operation := range operations {
+		peerConfig := wgPeerConfig(operation)
 		peerConfigs = append(peerConfigs, peerConfig)
 	}
 
 	cfg := wgtypes.Config{
-		ReplacePeers: true,
-		Peers:        peerConfigs,
+		Peers: peerConfigs,
 	}
 
 	err = client.ConfigureDevice(name, cfg)

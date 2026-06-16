@@ -66,6 +66,7 @@ var serverServe = &args.Command{
 
 		// options
 		noRouting := i.GetFlag("no-routing")
+		verbose := i.GetFlag("verbose")
 		mtu := i.GetIntParameterOr("mtu", 1420)
 		backendValue := i.GetParameterOr("backend", "auto")
 
@@ -82,12 +83,11 @@ var serverServe = &args.Command{
 		}
 
 		// build the runtime and the two API routers; mutations made
-		// over the API poke the runtime for an immediate resync
-		runtime, err := server.NewRuntime(srv, noRouting, mtu, backend)
+		// over the API poke the runtime for immediate reconciliation
+		runtime, err := server.NewRuntime(srv, noRouting, mtu, backend, verbose)
 		if err != nil {
 			return fmt.Errorf("failed to prepare server: %w", err)
 		}
-
 		apiServer, err := api.New(api.Options{
 			Service:    srv,
 			OnMutation: runtime.Poke,

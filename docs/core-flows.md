@@ -42,12 +42,17 @@ interrupted:
    active invites' temporary keys (allowed-ips = their invite /32).
 3. Starts two HTTP listeners: the full API on the main internal address,
    and a redeem-only API on the invite internal address.
-4. Sync loop: every 10s — and immediately after any API mutation — both
-   interfaces' peer lists are rebuilt from the database and synced in
-   place. Periodically, expired invites and endpoint sightings older
-   than 24h are pruned.
+4. Reconciliation loop: every 10s — and immediately after any API mutation —
+   both interfaces' desired peer lists are rebuilt from the database, compared
+   with live WireGuard state, and reconciled using targeted peer operations.
+   Unchanged peers and their runtime state are preserved. Periodically, expired
+   invites and endpoint sightings older than 24h are pruned.
 5. On SIGINT/SIGTERM the HTTP servers shut down and both interfaces are
    destroyed.
+
+Run either `cord server serve` or `cord client up` with `--verbose` to log the
+start of every reconciliation round. Rounds with changes also log their
+targeted add, update, and remove operations and whether application succeeded.
 
 ## Peer Redemption
 
@@ -149,7 +154,8 @@ recreatable cache and is rebuilt as needed for installed networks.
    direct path exists.
 2. Writes `<data-dir>/<network>.conf` (wg-quick format, for reference).
 3. Every 25s: report witnessed endpoint changes, fetch the peer list,
-   reconcile the local database, and sync the interface in place.
+   reconcile the local database, and reconcile desired peers against the live
+   WireGuard interface using targeted operations.
 4. Ctrl-C tears the interface down and exits.
 
 On Linux the device is kernel WireGuard; on macOS it is a userspace

@@ -126,7 +126,7 @@ func TestIntegration_InterfaceLifecycle(t *testing.T) {
 		PublicKey:  peerKey.PublicKey(),
 		AllowedIPs: []net.IPNet{*allowed},
 	})
-	if err := iface.Sync(); err != nil {
+	if err := iface.Reconcile(); err != nil {
 		t.Fatalf("failed to sync peer: %v", err)
 	}
 	status, err = iface.Status()
@@ -139,7 +139,7 @@ func TestIntegration_InterfaceLifecycle(t *testing.T) {
 
 	// removing the peer should be visible too
 	iface.SetPeers(nil)
-	if err := iface.Sync(); err != nil {
+	if err := iface.Reconcile(); err != nil {
 		t.Fatalf("failed to sync peer removal: %v", err)
 	}
 	status, _ = iface.Status()
@@ -249,6 +249,20 @@ func TestIntegration_TwoInterfacesHandshake(t *testing.T) {
 		dialerStatus, err2 := dialer.Status()
 		if err1 == nil && err2 == nil &&
 			handshakeComplete(listenerStatus) && handshakeComplete(dialerStatus) {
+			before := listenerStatus.Peers[0].LastHandshake
+			if err := listener.Reconcile(); err != nil {
+				t.Fatalf("no-op listener reconcile failed: %v", err)
+			}
+			after, err := listener.Status()
+			if err != nil {
+				t.Fatalf("listener status after reconcile: %v", err)
+			}
+			if len(after.Peers) != 1 || after.Peers[0].LastHandshake.Before(before) {
+				t.Fatalf(
+					"no-op reconcile disturbed handshake: before=%s after=%v",
+					before, after.Peers,
+				)
+			}
 			return // success
 		}
 		time.Sleep(500 * time.Millisecond)
