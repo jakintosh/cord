@@ -104,7 +104,7 @@ func TestListNetworksOmitsPrivateKey(t *testing.T) {
 	cfg := server.NewMemConfig()
 	srv := createNetworkOn(t, cfg, testNetwork)
 
-	netCfg, err := srv.LoadConfig()
+	netCfg, err := srv.LoadNetwork()
 	if err != nil {
 		t.Fatalf("failed to load config: %v", err)
 	}

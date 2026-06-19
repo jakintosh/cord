@@ -82,15 +82,15 @@ var serverServe = &args.Command{
 			return fmt.Errorf("failed to create server: %w", err)
 		}
 
-		// build the runtime and the two API routers; mutations made
-		// over the API poke the runtime for immediate reconciliation
-		runtime, err := server.NewRuntime(srv, noRouting, mtu, backend, verbose)
+		// build the service and the two API routers; mutations made
+		// over the API poke the service for immediate reconciliation
+		svc, err := server.NewService(srv, noRouting, mtu, backend, verbose)
 		if err != nil {
 			return fmt.Errorf("failed to prepare server: %w", err)
 		}
 		apiServer, err := api.New(api.Options{
 			Service:    srv,
-			OnMutation: runtime.Poke,
+			OnMutation: svc.Poke,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create api: %w", err)
@@ -101,7 +101,7 @@ var serverServe = &args.Command{
 		)
 		defer cancel()
 
-		err = runtime.Run(sigCtx, apiServer.Router(), apiServer.InviteRouter())
+		err = svc.Run(sigCtx, apiServer.Router(), apiServer.InviteRouter())
 		if err != nil {
 			return fmt.Errorf("failed to serve network '%s': %w", network, err)
 		}

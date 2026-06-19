@@ -26,9 +26,9 @@ type Config interface {
 	ListConfigs() ([]string, error)
 }
 
-// NetworkConfig is the persistent identity of a cord network, written
+// Network is the persistent identity of a cord network, written
 // once at network creation and read by serve/invite operations.
-type NetworkConfig struct {
+type Network struct {
 	Name             string `toml:"name"`
 	PrivateKey       string `toml:"private_key"`
 	PublicKey        string `toml:"public_key"`
@@ -41,7 +41,7 @@ type NetworkConfig struct {
 }
 
 // RootNet parses the main network CIDR.
-func (cfg *NetworkConfig) RootNet() (*net.IPNet, error) {
+func (cfg *Network) RootNet() (*net.IPNet, error) {
 	_, cidr, err := net.ParseCIDR(cfg.RootCidr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid root cidr in config: %w", err)
@@ -50,7 +50,7 @@ func (cfg *NetworkConfig) RootNet() (*net.IPNet, error) {
 }
 
 // InviteNet parses the invite network CIDR.
-func (cfg *NetworkConfig) InviteNet() (*net.IPNet, error) {
+func (cfg *Network) InviteNet() (*net.IPNet, error) {
 	_, cidr, err := net.ParseCIDR(cfg.InviteCidr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid invite cidr in config: %w", err)
@@ -59,7 +59,7 @@ func (cfg *NetworkConfig) InviteNet() (*net.IPNet, error) {
 }
 
 // ServerIP is the server's address on the main network (first assignable).
-func (cfg *NetworkConfig) ServerIP() (net.IP, error) {
+func (cfg *Network) ServerIP() (net.IP, error) {
 	cidr, err := cfg.RootNet()
 	if err != nil {
 		return nil, err
@@ -68,7 +68,7 @@ func (cfg *NetworkConfig) ServerIP() (net.IP, error) {
 }
 
 // InviteServerIP is the server's address on the invite network.
-func (cfg *NetworkConfig) InviteServerIP() (net.IP, error) {
+func (cfg *Network) InviteServerIP() (net.IP, error) {
 	cidr, err := cfg.InviteNet()
 	if err != nil {
 		return nil, err
@@ -77,17 +77,17 @@ func (cfg *NetworkConfig) InviteServerIP() (net.IP, error) {
 }
 
 // ExternalEndpoint is the public WireGuard endpoint of the main network.
-func (cfg *NetworkConfig) ExternalEndpoint() string {
+func (cfg *Network) ExternalEndpoint() string {
 	return net.JoinHostPort(cfg.ExternalIP, strconv.Itoa(int(cfg.ListenPort)))
 }
 
 // ExternalInviteEndpoint is the public WireGuard endpoint of the invite network.
-func (cfg *NetworkConfig) ExternalInviteEndpoint() string {
+func (cfg *Network) ExternalInviteEndpoint() string {
 	return net.JoinHostPort(cfg.ExternalIP, strconv.Itoa(int(cfg.InviteListenPort)))
 }
 
 // InternalApiEndpoint is the HTTP API address reachable over the main network.
-func (cfg *NetworkConfig) InternalApiEndpoint() (string, error) {
+func (cfg *Network) InternalApiEndpoint() (string, error) {
 	ip, err := cfg.ServerIP()
 	if err != nil {
 		return "", err
@@ -96,7 +96,7 @@ func (cfg *NetworkConfig) InternalApiEndpoint() (string, error) {
 }
 
 // InviteApiEndpoint is the HTTP API address reachable over the invite network.
-func (cfg *NetworkConfig) InviteApiEndpoint() (string, error) {
+func (cfg *Network) InviteApiEndpoint() (string, error) {
 	ip, err := cfg.InviteServerIP()
 	if err != nil {
 		return "", err
@@ -108,8 +108,8 @@ func configFileName(network string) string {
 	return network + ".toml"
 }
 
-// SaveConfig persists the network config through the server's config store.
-func (srv *Server) SaveConfig(cfg *NetworkConfig) error {
+// SaveNetwork persists the network config through the server's config store.
+func (srv *Server) SaveNetwork(cfg *Network) error {
 	w, err := srv.Config.GetConfigWriter(configFileName(srv.Network))
 	if err != nil {
 		return fmt.Errorf("failed to open config for writing: %w", err)
@@ -121,19 +121,19 @@ func (srv *Server) SaveConfig(cfg *NetworkConfig) error {
 	return nil
 }
 
-// LoadConfig reads the network config from the server's config store.
-func (srv *Server) LoadConfig() (*NetworkConfig, error) {
-	return LoadNetworkConfig(srv.Config, srv.Network)
+// LoadNetwork reads the network config from the server's config store.
+func (srv *Server) LoadNetwork() (*Network, error) {
+	return LoadNetwork(srv.Config, srv.Network)
 }
 
-// LoadNetworkConfig reads a named network's config from a config store.
-func LoadNetworkConfig(cfg Config, network string) (*NetworkConfig, error) {
+// LoadNetwork reads a named network's config from a config store.
+func LoadNetwork(cfg Config, network string) (*Network, error) {
 	r, err := cfg.GetConfigReader(configFileName(network))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open config for reading: %w", err)
 	}
 
-	netCfg := &NetworkConfig{}
+	netCfg := &Network{}
 	if _, err := toml.NewDecoder(r).Decode(netCfg); err != nil {
 		return nil, fmt.Errorf("failed to parse network config: %w", err)
 	}

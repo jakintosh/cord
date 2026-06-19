@@ -92,7 +92,7 @@ func (srv *Server) CreateInvite(
 	*PeerInvite,
 	error,
 ) {
-	cfg, err := srv.LoadConfig()
+	cfg, err := srv.LoadNetwork()
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +218,7 @@ func (srv *Server) redeemResultForPeer(
 	*RedeemResult,
 	error,
 ) {
-	cfg, err := srv.LoadConfig()
+	cfg, err := srv.LoadNetwork()
 	if err != nil {
 		return nil, err
 	}

@@ -70,7 +70,7 @@ func (srv *Server) CreateNetwork(
 	}
 
 	// Persist the network identity
-	cfg := &NetworkConfig{
+	cfg := &Network{
 		Name:             srv.Network,
 		PrivateKey:       privKey.String(),
 		PublicKey:        pubKey.String(),
@@ -81,7 +81,7 @@ func (srv *Server) CreateNetwork(
 		InviteListenPort: req.InvitePort,
 		ApiPort:          req.ApiPort,
 	}
-	if err := srv.SaveConfig(cfg); err != nil {
+	if err := srv.SaveNetwork(cfg); err != nil {
 		return fmt.Errorf("failed to write network config: %w", err)
 	}
 

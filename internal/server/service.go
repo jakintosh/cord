@@ -18,30 +18,30 @@ const (
 	maintenanceEvery = 6 // sync ticks between maintenance passes
 )
 
-// Runtime owns the live state of a serving cord network: the main and
+// Service owns the live state of a serving cord network: the main and
 // invite WireGuard interfaces and the listeners for the HTTP API.
-type Runtime struct {
-	Srv    *Server
-	Cfg    *NetworkConfig
-	Notify chan struct{} // poke to trigger an immediate peer reconciliation
+type Service struct {
+	Srv     *Server
+	Network *Network
+	Notify  chan struct{} // poke to trigger an immediate peer reconciliation
 
 	main   *wg.Interface
 	invite *wg.Interface
 }
 
-// NewRuntime loads the network config and prepares (but does not bring
+// NewService loads the network config and prepares (but does not bring
 // up) both WireGuard interfaces.
-func NewRuntime(
+func NewService(
 	srv *Server,
 	noRouting bool,
 	mtu int,
 	backend wg.BackendType,
 	verbose bool,
 ) (
-	*Runtime,
+	*Service,
 	error,
 ) {
-	cfg, err := srv.LoadConfig()
+	cfg, err := srv.LoadNetwork()
 	if err != nil {
 		return nil, err
 	}
@@ -107,35 +107,35 @@ func NewRuntime(
 		invite.SetReconcileLogger(logf)
 	}
 
-	return &Runtime{
-		Srv:    srv,
-		Cfg:    cfg,
-		Notify: make(chan struct{}, 1),
-		main:   main,
-		invite: invite,
+	return &Service{
+		Srv:     srv,
+		Network: cfg,
+		Notify:  make(chan struct{}, 1),
+		main:    main,
+		invite:  invite,
 	}, nil
 }
 
 // Poke requests an immediate interface reconciliation; safe to call from any
 // goroutine and never blocks.
-func (r *Runtime) Poke() {
+func (s *Service) Poke() {
 	select {
-	case r.Notify <- struct{}{}:
+	case s.Notify <- struct{}{}:
 	default:
 	}
 }
 
 // ReconcilePeers rebuilds both interfaces' desired peer lists from the database and
 // reconciles them against the live WireGuard devices.
-func (r *Runtime) ReconcilePeers() error {
+func (s *Service) ReconcilePeers() error {
 	var reconcileErrors []error
 
-	mainPeers, err := r.mainPeers()
+	mainPeers, err := s.mainPeers()
 	if err != nil {
 		reconcileErrors = append(reconcileErrors, fmt.Errorf("failed to build main peers: %w", err))
 	} else {
-		r.main.SetPeers(mainPeers)
-		if err := r.main.Reconcile(); err != nil {
+		s.main.SetPeers(mainPeers)
+		if err := s.main.Reconcile(); err != nil {
 			reconcileErrors = append(
 				reconcileErrors,
 				fmt.Errorf("failed to reconcile main interface: %w", err),
@@ -143,12 +143,12 @@ func (r *Runtime) ReconcilePeers() error {
 		}
 	}
 
-	invitePeers, err := r.invitePeers()
+	invitePeers, err := s.invitePeers()
 	if err != nil {
 		reconcileErrors = append(reconcileErrors, fmt.Errorf("failed to build invite peers: %w", err))
 	} else {
-		r.invite.SetPeers(invitePeers)
-		if err := r.invite.Reconcile(); err != nil {
+		s.invite.SetPeers(invitePeers)
+		if err := s.invite.Reconcile(); err != nil {
 			reconcileErrors = append(
 				reconcileErrors,
 				fmt.Errorf("failed to reconcile invite interface: %w", err),
@@ -161,21 +161,21 @@ func (r *Runtime) ReconcilePeers() error {
 
 // ReconcileStatus returns structured status for the main and invite devices.
 // Failed plans remain pending until a later reconciliation re-plans and applies.
-func (r *Runtime) ReconcileStatus() (wg.ReconcileStatus, wg.ReconcileStatus) {
-	return r.main.ReconcileStatus(), r.invite.ReconcileStatus()
+func (s *Service) ReconcileStatus() (wg.ReconcileStatus, wg.ReconcileStatus) {
+	return s.main.ReconcileStatus(), s.invite.ReconcileStatus()
 }
 
 // mainPeers converts enabled peers into WireGuard peers for the main
 // interface. Redeemed-but-unconfirmed peers must be present so they can
 // reach the confirmation endpoint; normal API routes still reject them.
 // The server's own record is excluded.
-func (r *Runtime) mainPeers() ([]wg.Peer, error) {
-	peers, err := r.Srv.Store.PeerList()
+func (s *Service) mainPeers() ([]wg.Peer, error) {
+	peers, err := s.Srv.Store.PeerList()
 	if err != nil {
 		return nil, err
 	}
 
-	return mainPeersFromRecords(peers, r.Cfg.PublicKey), nil
+	return mainPeersFromRecords(peers, s.Network.PublicKey), nil
 }
 
 func mainPeersFromRecords(peers []*Peer, serverPublicKey string) []wg.Peer {
@@ -200,8 +200,8 @@ func mainPeersFromRecords(peers []*Peer, serverPublicKey string) []wg.Peer {
 
 // invitePeers converts active invites into WireGuard peers for the
 // invite interface.
-func (r *Runtime) invitePeers() ([]wg.Peer, error) {
-	invites, err := r.Srv.Store.InviteListActive()
+func (s *Service) invitePeers() ([]wg.Peer, error) {
+	invites, err := s.Srv.Store.InviteListActive()
 	if err != nil {
 		return nil, err
 	}
@@ -239,41 +239,41 @@ func peerFromRecord(pubKey string, cidr string) (*wg.Peer, error) {
 // keeps interface peer lists in sync with the database until the
 // context is cancelled. The invite handler should only expose the
 // redemption endpoint (see ADR-001).
-func (r *Runtime) Run(
+func (s *Service) Run(
 	ctx context.Context,
 	mainHandler http.Handler,
 	inviteHandler http.Handler,
 ) error {
-	mainPeers, err := r.mainPeers()
+	mainPeers, err := s.mainPeers()
 	if err != nil {
 		return fmt.Errorf("failed to build initial main peers: %w", err)
 	}
-	invitePeers, err := r.invitePeers()
+	invitePeers, err := s.invitePeers()
 	if err != nil {
 		return fmt.Errorf("failed to build initial invite peers: %w", err)
 	}
-	r.main.SetPeers(mainPeers)
-	r.invite.SetPeers(invitePeers)
+	s.main.SetPeers(mainPeers)
+	s.invite.SetPeers(invitePeers)
 
 	// Bring up the interfaces
-	if err := r.main.Up(""); err != nil {
+	if err := s.main.Up(""); err != nil {
 		return fmt.Errorf("failed to bring up main interface: %w", err)
 	}
-	defer func() { _ = r.main.Down(true) }()
-	log.Printf("main interface up: %s (%s)", r.main.DeviceName(), r.main.Address.String())
+	defer func() { _ = s.main.Down(true) }()
+	log.Printf("main interface up: %s (%s)", s.main.DeviceName(), s.main.Address.String())
 
-	if err := r.invite.Up(""); err != nil {
+	if err := s.invite.Up(""); err != nil {
 		return fmt.Errorf("failed to bring up invite interface: %w", err)
 	}
-	defer func() { _ = r.invite.Down(true) }()
-	log.Printf("invite interface up: %s (%s)", r.invite.DeviceName(), r.invite.Address.String())
+	defer func() { _ = s.invite.Down(true) }()
+	log.Printf("invite interface up: %s (%s)", s.invite.DeviceName(), s.invite.Address.String())
 
 	// Start the HTTP APIs on the internal addresses
-	mainAddr, err := r.Cfg.InternalApiEndpoint()
+	mainAddr, err := s.Network.InternalApiEndpoint()
 	if err != nil {
 		return err
 	}
-	inviteAddr, err := r.Cfg.InviteApiEndpoint()
+	inviteAddr, err := s.Network.InviteApiEndpoint()
 	if err != nil {
 		return err
 	}
@@ -303,14 +303,14 @@ func (r *Runtime) Run(
 			ticksSinceMaintenance++
 			if ticksSinceMaintenance >= maintenanceEvery {
 				ticksSinceMaintenance = 0
-				r.maintain()
+				s.maintain()
 			}
-			if err := r.ReconcilePeers(); err != nil {
+			if err := s.ReconcilePeers(); err != nil {
 				log.Printf("reconciliation failed: %v", err)
 			}
 
-		case <-r.Notify:
-			if err := r.ReconcilePeers(); err != nil {
+		case <-s.Notify:
+			if err := s.ReconcilePeers(); err != nil {
 				log.Printf("reconciliation failed: %v", err)
 			}
 		}
@@ -318,12 +318,12 @@ func (r *Runtime) Run(
 }
 
 // maintain prunes expired invites and stale endpoint sightings.
-func (r *Runtime) maintain() {
+func (s *Service) maintain() {
 	now := time.Now()
-	if err := r.Srv.Store.InvitesPruneExpired(now.Unix()); err != nil {
+	if err := s.Srv.Store.InvitesPruneExpired(now.Unix()); err != nil {
 		log.Printf("invite pruning failed: %v", err)
 	}
-	if err := r.Srv.Store.EndpointsPrune(now.Add(-endpointTTL).Unix()); err != nil {
+	if err := s.Srv.Store.EndpointsPrune(now.Add(-endpointTTL).Unix()); err != nil {
 		log.Printf("endpoint pruning failed: %v", err)
 	}
 }

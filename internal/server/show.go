@@ -68,7 +68,7 @@ func ListNetworks(cfg Config) ([]NetworkSummary, error) {
 
 	summaries := make([]NetworkSummary, 0, len(names))
 	for _, name := range names {
-		netCfg, err := LoadNetworkConfig(cfg, name)
+		netCfg, err := LoadNetwork(cfg, name)
 		if err != nil {
 			// a stray or malformed toml shouldn't break the listing
 			continue
@@ -84,7 +84,7 @@ func ListNetworks(cfg Config) ([]NetworkSummary, error) {
 
 // GetNetworkOverview reports the network's public config and resource counts.
 func (srv *Server) GetNetworkOverview() (*NetworkOverview, error) {
-	cfg, err := srv.LoadConfig()
+	cfg, err := srv.LoadNetwork()
 	if err != nil {
 		return nil, err
 	}
