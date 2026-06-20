@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/control"
 	"git.studiopollinator.com/pollinator/cord/internal/serverd"
 )
 
@@ -25,6 +24,11 @@ var serverCmd = &args.Command{
 	Subcommands: []*args.Command{
 		serverDaemonCmd,
 		serverStatusCmd,
+		serverNetworkCmd,
+		serverPeerCmd,
+		serverCidrCmd,
+		serverAssociationCmd,
+		serverInviteCmd,
 	},
 }
 
@@ -49,8 +53,8 @@ var serverStatusCmd = &args.Command{
 	Handler: func(i *args.Input) error {
 		socketPath := i.GetParameterOr("socket-path", serverd.DefaultSocketPath)
 
-		client := control.NewClient(socketPath)
-		if err := client.Ping(context.Background()); err != nil {
+		client := serverd.NewClient(socketPath)
+		if err := client.Status(context.Background()); err != nil {
 			return err
 		}
 

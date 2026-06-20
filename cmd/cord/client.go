@@ -9,7 +9,6 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/clientd"
-	"git.studiopollinator.com/pollinator/cord/internal/control"
 )
 
 var clientCmd = &args.Command{
@@ -49,8 +48,8 @@ var clientStatusCmd = &args.Command{
 	Handler: func(i *args.Input) error {
 		socketPath := i.GetParameterOr("socket-path", clientd.DefaultSocketPath)
 
-		client := control.NewClient(socketPath)
-		if err := client.Ping(context.Background()); err != nil {
+		client := clientd.NewClient(socketPath)
+		if err := client.Status(context.Background()); err != nil {
 			return err
 		}
 
