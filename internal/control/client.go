@@ -12,7 +12,9 @@ type Client struct {
 	http       *http.Client
 }
 
-func NewClient(socketPath string) *Client {
+func NewClient(
+	socketPath string,
+) *Client {
 	return &Client{
 		socketPath: socketPath,
 		http: &http.Client{
@@ -26,7 +28,9 @@ func NewClient(socketPath string) *Client {
 	}
 }
 
-func (c *Client) Ping(ctx context.Context) error {
+func (c *Client) Ping(
+	ctx context.Context,
+) error {
 	resp, err := c.http.Get("http://unix/ping")
 	if err != nil {
 		return fmt.Errorf("ping: %w", err)

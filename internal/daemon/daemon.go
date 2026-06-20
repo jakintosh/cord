@@ -13,7 +13,13 @@ type Daemon struct {
 	listener net.Listener
 }
 
-func New(socketPath string, handler http.Handler) (*Daemon, error) {
+func New(
+	socketPath string,
+	handler http.Handler,
+) (
+	*Daemon,
+	error,
+) {
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
@@ -35,7 +41,9 @@ func New(socketPath string, handler http.Handler) (*Daemon, error) {
 	}, nil
 }
 
-func (d *Daemon) Run(ctx context.Context) error {
+func (d *Daemon) Run(
+	ctx context.Context,
+) error {
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- d.server.Serve(d.listener)

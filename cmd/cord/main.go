@@ -6,9 +6,8 @@ import (
 )
 
 const (
-	BIN_NAME     = "cord"
-	AUTHOR       = "jakintosh"
-	DEFAULT_SOCK = "/tmp/cord.sock"
+	BIN_NAME = "cord"
+	AUTHOR   = "jakintosh"
 )
 
 func main() {
@@ -26,16 +25,9 @@ var root = &args.Command{
 			Long:  "help",
 		},
 	},
-	Options: []args.Option{
-		{
-			Long: "socket-path",
-			Type: args.OptionTypeParameter,
-			Help: "path to the daemon unix socket",
-		},
-	},
 	Subcommands: []*args.Command{
 		version.Command(VersionInfo),
-		daemonCmd,
-		statusCmd,
+		serverCmd,
+		clientCmd,
 	},
 }
