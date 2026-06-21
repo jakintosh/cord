@@ -35,8 +35,8 @@ type Store interface {
 	ListInvites(network string) ([]*Invite, error)
 	ListActiveInvites(network string) ([]*Invite, error)
 	InsertInvite(network string, invite *Invite) error
+	RedeemInvite(network string, tempPubKey, permPubKey string) error
 	DeleteInvite(network, name string) error
-	UpdateInviteRedemption(network string, tempPubKey, permPubKey string) error
 	DeleteExpiredInvites(network string, before time.Time) error
 
 	GetRecentEndpoints(network string, since time.Time) (map[string][]EndpointWitness, error)

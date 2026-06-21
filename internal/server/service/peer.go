@@ -34,9 +34,10 @@ type VisiblePeer struct {
 }
 
 type EndpointSighting struct {
-	PeerKey   string
-	Endpoint  string
-	Timestamp time.Time
+	WitnessKey string
+	PeerKey    string
+	Endpoint   string
+	Timestamp  time.Time
 }
 
 type EndpointWitness struct {
