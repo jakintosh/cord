@@ -22,6 +22,19 @@ func Run(
 
 func newHandler() http.Handler {
 	mux := http.NewServeMux()
+
 	mux.HandleFunc("GET /status", handleStatus)
+
+	mux.HandleFunc("GET /networks", handleNetworkList)
+	mux.HandleFunc("GET /networks/{name}", handleNetworkShow)
+	mux.HandleFunc("POST /networks", handleNetworkInstall)
+	mux.HandleFunc("DELETE /networks/{name}", handleNetworkUninstall)
+
+	mux.HandleFunc("POST /networks/{name}/enable", handleNetworkEnable)
+	mux.HandleFunc("POST /networks/{name}/disable", handleNetworkDisable)
+	mux.HandleFunc("POST /networks/{name}/up", handleNetworkUp)
+	mux.HandleFunc("POST /networks/{name}/down", handleNetworkDown)
+	mux.HandleFunc("POST /networks/{name}/fetch", handleNetworkFetch)
+
 	return mux
 }

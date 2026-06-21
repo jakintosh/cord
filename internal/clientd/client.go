@@ -2,8 +2,6 @@ package clientd
 
 import (
 	"context"
-	"fmt"
-	"net/http"
 
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 )
@@ -25,11 +23,8 @@ func (c *Client) Status(
 ) error {
 	resp, err := c.t.Get(ctx, "/status")
 	if err != nil {
-		return fmt.Errorf("ping: %w", err)
+		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ping: unexpected status %s", resp.Status)
-	}
-	return nil
+	_, err = daemon.DecodeResponse[StatusResponse](resp)
+	return err
 }

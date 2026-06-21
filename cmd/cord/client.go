@@ -24,6 +24,7 @@ var clientCmd = &args.Command{
 	Subcommands: []*args.Command{
 		clientDaemonCmd,
 		clientStatusCmd,
+		clientNetworkCmd,
 	},
 }
 
