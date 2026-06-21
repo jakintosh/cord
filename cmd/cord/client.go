@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/clientd"
+	"git.studiopollinator.com/pollinator/cord/internal/client/api"
 )
 
 var clientCmd = &args.Command{
@@ -32,14 +32,14 @@ var clientDaemonCmd = &args.Command{
 	Name: "daemon",
 	Help: "run the cord client daemon",
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", clientd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 
 		ctx, cancel := signal.NotifyContext(
 			context.Background(), os.Interrupt, syscall.SIGTERM,
 		)
 		defer cancel()
 
-		return clientd.Run(ctx, socketPath)
+		return api.Run(ctx, socketPath)
 	},
 }
 
@@ -47,9 +47,9 @@ var clientStatusCmd = &args.Command{
 	Name: "status",
 	Help: "check if the cord client daemon is running",
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", clientd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 
-		client := clientd.NewClient(socketPath)
+		client := api.NewClient(socketPath)
 		if err := client.Status(context.Background()); err != nil {
 			return err
 		}

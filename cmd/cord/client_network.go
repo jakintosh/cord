@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/clientd"
+	"git.studiopollinator.com/pollinator/cord/internal/client/api"
 )
 
 var clientNetworkCmd = &args.Command{
@@ -18,20 +18,18 @@ var clientNetworkCmd = &args.Command{
 		clientNetworkUninstall,
 		clientNetworkEnable,
 		clientNetworkDisable,
-		clientNetworkUp,
-		clientNetworkDown,
 		clientNetworkFetch,
 	},
 }
 
 var clientNetworkList = &args.Command{
-	Name: "list",
-	Help: "list installed networks",
+	Name:    "list",
+	Help:    "list installed networks",
 	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", clientd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 
-		client := clientd.NewClient(socketPath)
+		client := api.NewClient(socketPath)
 		networks, err := client.ListNetworks(context.Background())
 		if err != nil {
 			return err
@@ -58,10 +56,10 @@ var clientNetworkShow = &args.Command{
 	},
 	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", clientd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 		network := i.GetOperand("network")
 
-		client := clientd.NewClient(socketPath)
+		client := api.NewClient(socketPath)
 		result, err := client.ShowNetwork(context.Background(), network)
 		if err != nil {
 			return err
@@ -81,11 +79,11 @@ var clientNetworkInstall = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", clientd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 		invite := i.GetOperand("invite")
 
-		client := clientd.NewClient(socketPath)
-		result, err := client.InstallNetwork(context.Background(), clientd.InstallNetworkRequest{
+		client := api.NewClient(socketPath)
+		result, err := client.InstallNetwork(context.Background(), api.InstallNetworkRequest{
 			InvitePath: invite,
 		})
 		if err != nil {
@@ -106,15 +104,15 @@ var clientNetworkUninstall = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", clientd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 		network := i.GetOperand("network")
 
-		client := clientd.NewClient(socketPath)
+		client := api.NewClient(socketPath)
 		if err := client.UninstallNetwork(context.Background(), network); err != nil {
 			return err
 		}
 
-		return printJSON(clientd.DeleteResponse{
+		return printJSON(api.DeleteResponse{
 			Status: "deleted",
 			ID:     network,
 		})
@@ -131,10 +129,10 @@ var clientNetworkEnable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", clientd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 		network := i.GetOperand("network")
 
-		client := clientd.NewClient(socketPath)
+		client := api.NewClient(socketPath)
 		result, err := client.EnableNetwork(context.Background(), network)
 		if err != nil {
 			return err
@@ -154,57 +152,11 @@ var clientNetworkDisable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", clientd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 		network := i.GetOperand("network")
 
-		client := clientd.NewClient(socketPath)
+		client := api.NewClient(socketPath)
 		result, err := client.DisableNetwork(context.Background(), network)
-		if err != nil {
-			return err
-		}
-
-		return printJSON(result)
-	},
-}
-
-var clientNetworkUp = &args.Command{
-	Name: "up",
-	Help: "connect a network interface",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "network name",
-		},
-	},
-	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", clientd.DefaultSocketPath)
-		network := i.GetOperand("network")
-
-		client := clientd.NewClient(socketPath)
-		result, err := client.NetworkUp(context.Background(), network)
-		if err != nil {
-			return err
-		}
-
-		return printJSON(result)
-	},
-}
-
-var clientNetworkDown = &args.Command{
-	Name: "down",
-	Help: "disconnect a network interface",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "network name",
-		},
-	},
-	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", clientd.DefaultSocketPath)
-		network := i.GetOperand("network")
-
-		client := clientd.NewClient(socketPath)
-		result, err := client.NetworkDown(context.Background(), network)
 		if err != nil {
 			return err
 		}
@@ -223,10 +175,10 @@ var clientNetworkFetch = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", clientd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 		network := i.GetOperand("network")
 
-		client := clientd.NewClient(socketPath)
+		client := api.NewClient(socketPath)
 		result, err := client.FetchNetwork(context.Background(), network)
 		if err != nil {
 			return err
