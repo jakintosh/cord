@@ -1,4 +1,4 @@
-package serverd
+package api
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
+	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
 type InviteDTO struct {
@@ -14,7 +15,30 @@ type InviteDTO struct {
 	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
-func handleInviteList(
+func InviteDTOFromService(
+	inv service.Invite,
+) InviteDTO {
+	return InviteDTO{
+		Name:      inv.Name,
+		Redeemed:  inv.Redeemed,
+		ExpiresAt: inv.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+}
+
+func InviteDTOsFromService(
+	invites []*service.Invite,
+) []InviteDTO {
+	if invites == nil {
+		return nil
+	}
+	result := make([]InviteDTO, len(invites))
+	for i, inv := range invites {
+		result[i] = InviteDTOFromService(*inv)
+	}
+	return result
+}
+
+func (a *API) handleInviteList(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {

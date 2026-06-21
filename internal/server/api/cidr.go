@@ -1,4 +1,4 @@
-package serverd
+package api
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
+	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
 type CidrDTO struct {
@@ -23,14 +24,36 @@ type RenameCidrRequest struct {
 	Name string `json:"name"`
 }
 
-func handleCidrList(
+func CidrDTOFromService(
+	c service.Cidr,
+) CidrDTO {
+	return CidrDTO{
+		Name: c.Name,
+		Cidr: c.Cidr,
+	}
+}
+
+func CidrDTOsFromService(
+	cidrs []*service.Cidr,
+) []CidrDTO {
+	if cidrs == nil {
+		return nil
+	}
+	result := make([]CidrDTO, len(cidrs))
+	for i, c := range cidrs {
+		result[i] = CidrDTOFromService(*c)
+	}
+	return result
+}
+
+func (a *API) handleCidrList(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
 	wire.WriteData(w, http.StatusOK, []CidrDTO{})
 }
 
-func handleCidrAdd(
+func (a *API) handleCidrAdd(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -46,7 +69,7 @@ func handleCidrAdd(
 	})
 }
 
-func handleCidrRename(
+func (a *API) handleCidrRename(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -64,7 +87,7 @@ func handleCidrRename(
 	})
 }
 
-func handleCidrDelete(
+func (a *API) handleCidrDelete(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/serverd"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 )
 
 var serverInviteCmd = &args.Command{
@@ -26,10 +26,10 @@ var serverInviteList = &args.Command{
 	},
 	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", serverd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 		network := i.GetOperand("network")
 
-		client := serverd.NewClient(socketPath)
+		client := api.NewClient(socketPath)
 		invites, err := client.ListInvites(context.Background(), network)
 		if err != nil {
 			return err

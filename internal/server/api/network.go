@@ -1,4 +1,4 @@
-package serverd
+package api
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
+	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
 type NetworkDTO struct {
@@ -24,14 +25,26 @@ type AddNetworkRequest struct {
 	Port       uint16 `json:"port"`
 }
 
-func handleNetworkList(
+func NetworkDTOFromService(
+	n service.Network,
+) NetworkDTO {
+	return NetworkDTO{
+		Name:       n.Name,
+		Cidr:       n.RootCidr,
+		ExternalIP: n.ExternalIP,
+		Port:       n.ListenPort,
+		InviteCidr: n.InviteCidr,
+	}
+}
+
+func (a *API) handleNetworkList(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
 	wire.WriteData(w, http.StatusOK, []NetworkDTO{})
 }
 
-func handleNetworkShow(
+func (a *API) handleNetworkShow(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -41,7 +54,7 @@ func handleNetworkShow(
 	})
 }
 
-func handleNetworkAdd(
+func (a *API) handleNetworkAdd(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -59,7 +72,7 @@ func handleNetworkAdd(
 	})
 }
 
-func handleNetworkDelete(
+func (a *API) handleNetworkDelete(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {

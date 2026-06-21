@@ -1,4 +1,4 @@
-package serverd
+package api
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
+	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
 type AssociationDTO struct {
@@ -24,14 +25,36 @@ type DeleteAssociationRequest struct {
 	Cidr2 string `json:"cidr2"`
 }
 
-func handleAssociationList(
+func AssociationDTOFromService(
+	a service.Association,
+) AssociationDTO {
+	return AssociationDTO{
+		Cidr1: a.Cidr1,
+		Cidr2: a.Cidr2,
+	}
+}
+
+func AssociationDTOsFromService(
+	assocs []*service.Association,
+) []AssociationDTO {
+	if assocs == nil {
+		return nil
+	}
+	result := make([]AssociationDTO, len(assocs))
+	for i, a := range assocs {
+		result[i] = AssociationDTOFromService(*a)
+	}
+	return result
+}
+
+func (a *API) handleAssociationList(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
 	wire.WriteData(w, http.StatusOK, []AssociationDTO{})
 }
 
-func handleAssociationAdd(
+func (a *API) handleAssociationAdd(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -47,7 +70,7 @@ func handleAssociationAdd(
 	})
 }
 
-func handleAssociationDelete(
+func (a *API) handleAssociationDelete(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {

@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/serverd"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 )
 
 var serverNetworkCmd = &args.Command{
@@ -42,7 +42,7 @@ var serverNetworkAdd = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", serverd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 		name := i.GetOperand("name")
 		cidr := i.GetOperand("cidr")
 		externalIP := i.GetOperand("external-ip")
@@ -53,8 +53,8 @@ var serverNetworkAdd = &args.Command{
 			return fmt.Errorf("invalid port: %w", err)
 		}
 
-		client := serverd.NewClient(socketPath)
-		network, err := client.AddNetwork(context.Background(), serverd.AddNetworkRequest{
+		client := api.NewClient(socketPath)
+		network, err := client.AddNetwork(context.Background(), api.AddNetworkRequest{
 			Name:       name,
 			Cidr:       cidr,
 			ExternalIP: externalIP,
@@ -78,10 +78,10 @@ var serverNetworkDelete = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", serverd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 		name := i.GetOperand("name")
 
-		client := serverd.NewClient(socketPath)
+		client := api.NewClient(socketPath)
 		if err := client.DeleteNetwork(context.Background(), name); err != nil {
 			return err
 		}
@@ -96,9 +96,9 @@ var serverNetworkList = &args.Command{
 	Help: "list server networks",
 	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", serverd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 
-		client := serverd.NewClient(socketPath)
+		client := api.NewClient(socketPath)
 		networks, err := client.ListNetworks(context.Background())
 		if err != nil {
 			return err
@@ -125,10 +125,10 @@ var serverNetworkShow = &args.Command{
 	},
 	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", serverd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 		name := i.GetOperand("name")
 
-		client := serverd.NewClient(socketPath)
+		client := api.NewClient(socketPath)
 		network, err := client.ShowNetwork(context.Background(), name)
 		if err != nil {
 			return err

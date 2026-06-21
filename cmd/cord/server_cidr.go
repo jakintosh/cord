@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/serverd"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 )
 
 var serverCidrCmd = &args.Command{
@@ -36,13 +36,13 @@ var serverCidrAdd = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", serverd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 		network := i.GetOperand("network")
 		name := i.GetOperand("name")
 		cidr := i.GetOperand("cidr")
 
-		client := serverd.NewClient(socketPath)
-		result, err := client.AddCidr(context.Background(), network, serverd.AddCidrRequest{
+		client := api.NewClient(socketPath)
+		result, err := client.AddCidr(context.Background(), network, api.AddCidrRequest{
 			Name: name,
 			Cidr: cidr,
 		})
@@ -72,12 +72,12 @@ var serverCidrRename = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", serverd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 		network := i.GetOperand("network")
 		cidr := i.GetOperand("cidr")
 		newName := i.GetOperand("new-name")
 
-		client := serverd.NewClient(socketPath)
+		client := api.NewClient(socketPath)
 		result, err := client.RenameCidr(context.Background(), network, cidr, newName)
 		if err != nil {
 			return err
@@ -101,16 +101,16 @@ var serverCidrDelete = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", serverd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 		network := i.GetOperand("network")
 		cidr := i.GetOperand("cidr")
 
-		client := serverd.NewClient(socketPath)
+		client := api.NewClient(socketPath)
 		if err := client.DeleteCidr(context.Background(), network, cidr); err != nil {
 			return err
 		}
 
-		return printJSON(serverd.DeleteResponse{
+		return printJSON(api.DeleteResponse{
 			Status: "deleted",
 			ID:     cidr,
 		})
@@ -128,10 +128,10 @@ var serverCidrList = &args.Command{
 	},
 	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", serverd.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
 		network := i.GetOperand("network")
 
-		client := serverd.NewClient(socketPath)
+		client := api.NewClient(socketPath)
 		cidrs, err := client.ListCidrs(context.Background(), network)
 		if err != nil {
 			return err

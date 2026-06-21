@@ -1,4 +1,4 @@
-package serverd
+package api
 
 import (
 	"context"
@@ -17,7 +17,10 @@ type DeleteResponse struct {
 	ID     string `json:"id"`
 }
 
-func handleStatus(w http.ResponseWriter, r *http.Request) {
+func (a *API) handleStatus(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
 	wire.WriteData(w, http.StatusOK, StatusResponse{
 		Status: "ok",
 	})

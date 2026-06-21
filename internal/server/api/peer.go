@@ -1,4 +1,4 @@
-package serverd
+package api
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
+	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
 type PeerDTO struct {
@@ -27,14 +28,39 @@ type RenamePeerRequest struct {
 	Name string `json:"name"`
 }
 
-func handlePeerList(
+func PeerDTOFromService(
+	p service.Peer,
+) PeerDTO {
+	return PeerDTO{
+		Name:      p.Name,
+		PublicKey: p.PublicKey,
+		Ip:        p.Cidr,
+		Admin:     p.Admin,
+		Enabled:   p.Enabled,
+	}
+}
+
+func PeerDTOsFromService(
+	peers []*service.Peer,
+) []PeerDTO {
+	if peers == nil {
+		return nil
+	}
+	result := make([]PeerDTO, len(peers))
+	for i, p := range peers {
+		result[i] = PeerDTOFromService(*p)
+	}
+	return result
+}
+
+func (a *API) handlePeerList(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
 	wire.WriteData(w, http.StatusOK, []PeerDTO{})
 }
 
-func handlePeerAdd(
+func (a *API) handlePeerAdd(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -51,7 +77,7 @@ func handlePeerAdd(
 	})
 }
 
-func handlePeerRename(
+func (a *API) handlePeerRename(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -69,7 +95,7 @@ func handlePeerRename(
 	})
 }
 
-func handlePeerDelete(
+func (a *API) handlePeerDelete(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -80,7 +106,7 @@ func handlePeerDelete(
 	})
 }
 
-func handlePeerEnable(
+func (a *API) handlePeerEnable(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -91,7 +117,7 @@ func handlePeerEnable(
 	})
 }
 
-func handlePeerDisable(
+func (a *API) handlePeerDisable(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -102,7 +128,7 @@ func handlePeerDisable(
 	})
 }
 
-func handlePeerVisible(
+func (a *API) handlePeerVisible(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
