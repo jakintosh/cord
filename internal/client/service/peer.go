@@ -11,3 +11,16 @@ type Peer struct {
 	Endpoint     string // last known public UDP endpoint, "host:port"
 	EndpointTime int64  // unix timestamp of the last endpoint observation
 }
+
+// ListPeers returns all cached peers for the named network.
+func (s *Service) ListPeers(
+	network string,
+) (
+	[]*Peer,
+	error,
+) {
+	if s.store == nil {
+		return nil, ErrNotImplemented
+	}
+	return s.store.ListPeers(network)
+}

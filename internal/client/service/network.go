@@ -96,43 +96,65 @@ func (s *Service) Status() (
 	}
 
 	s.mu.Lock()
-	running := make(map[string]bool, len(s.running))
-	for name := range s.running {
-		running[name] = true
-	}
-	s.mu.Unlock()
+	defer s.mu.Unlock()
 
 	statuses := make([]NetworkStatus, 0, len(names))
 	for _, name := range names {
-		statuses = append(statuses, NetworkStatus{
-			Name:    name,
-			Running: running[name],
-		})
+		nw, err := s.store.GetNetwork(name)
+		if err != nil {
+			continue
+		}
+		peers, _ := s.store.ListPeers(name)
+
+		status := NetworkStatus{
+			Name:      name,
+			Enabled:   nw.Enabled,
+			PeerCount: len(peers),
+		}
+
+		if rn, ok := s.running[name]; ok {
+			status.Running = true
+			status.LastSync = rn.lastSync
+			status.LastError = rn.lastErr
+		}
+
+		statuses = append(statuses, status)
 	}
 	return statuses, nil
 }
 
-// InstallNetwork reads an invite file from invitePath, validates it,
-// generates a permanent keypair, redeems the invite with the server,
+// Invite carries the parsed contents of a server-issued invite file.
+// It is the caller's responsibility to read and parse the invite
+// payload from whatever format it arrives in (JSON file, clipboard,
+// etc.).
+type Invite struct {
+	NetworkName    string
+	AssignedCidr   string // temp address on the invite subnet (placeholder until server redemption)
+	ServerPubkey   string
+	ServerEndpoint string // e.g. "1.2.3.4:51820"
+	ServerApiAddr  string // e.g. "10.42.0.1:8443"
+}
+
+// InstallNetwork validates an invite, generates a permanent keypair,
 // and persists the resulting network membership record. The new network
 // is left in the disabled state — the caller must enable it separately.
 //
 // This is the full install flow:
-//  1. parse and validate the invite file
-//  2. generate (or reuse, if retrying) a permanent keypair
-//  3. bring up a temporary invite interface
-//  4. prove reachability (handshake probe)
-//  5. redeem the invite via the server API through the tunnel
-//  6. persist the permanent network record
-//  7. bring up the main interface, confirm with server
-//  8. fetch initial peer list into local cache
-//  9. tear down the main interface (caller enables it later)
+//  1. validate the invite fields
+//  2. generate a permanent keypair
+//  3. persist the permanent network record
+//  4. bring up a temporary invite interface       ← FUTURE (requires WG)
+//  5. prove reachability (handshake probe)         ← FUTURE (requires WG)
+//  6. redeem the invite via the server API tunnel   ← FUTURE (requires WG + server comm)
+//  7. bring up the main interface, confirm w/server ← FUTURE (requires WG + server comm)
+//  8. fetch initial peer list into local cache      ← FUTURE (requires server comm)
+//  9. tear down the main interface                  ← FUTURE (requires WG)
 //
-// Steps 3–9 depend on WG and server communication. When those
-// dependencies are nil, the method stores the generated keypair and
-// returns ErrNotImplemented after step 2.
+// Steps 4–9 depend on a real WG implementation and server communication.
+// When those are available, the AssignedCidr will be updated from the
+// server's RedeemResult (rather than the invite's temporary address).
 func (s *Service) InstallNetwork(
-	invitePath string,
+	invite Invite,
 ) (
 	*Network,
 	error,
@@ -140,10 +162,54 @@ func (s *Service) InstallNetwork(
 	if s.store == nil {
 		return nil, ErrNotImplemented
 	}
-	if s.wg == nil {
-		return nil, ErrNotImplemented
+
+	if invite.NetworkName == "" {
+		return nil, ErrInvalidInput
 	}
-	return nil, ErrNotImplemented
+	if invite.ServerPubkey == "" {
+		return nil, ErrInvalidInput
+	}
+	if invite.ServerEndpoint == "" {
+		return nil, ErrInvalidInput
+	}
+	if invite.ServerApiAddr == "" {
+		return nil, ErrInvalidInput
+	}
+	if invite.AssignedCidr == "" {
+		return nil, ErrInvalidInput
+	}
+
+	_, err := s.store.GetNetwork(invite.NetworkName)
+	if err == nil {
+		return nil, ErrNetworkExists
+	}
+
+	privateKey, err := s.wg.GenerateKey()
+	if err != nil {
+		return nil, err
+	}
+	publicKey, err := s.wg.PublicKey(privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	nw := &Network{
+		Name:           invite.NetworkName,
+		PrivateKey:     privateKey,
+		PublicKey:      publicKey,
+		AssignedCidr:   invite.AssignedCidr, // placeholder; overwritten on server redemption
+		ServerPubkey:   invite.ServerPubkey,
+		ServerEndpoint: invite.ServerEndpoint,
+		ServerApiAddr:  invite.ServerApiAddr,
+		Enabled:        false,
+		CreatedAt:      s.clock(),
+	}
+
+	if err := s.store.InsertNetwork(nw); err != nil {
+		return nil, err
+	}
+
+	return nw, nil
 }
 
 // UninstallNetwork removes a network and all its local state. If the
@@ -167,15 +233,12 @@ func (s *Service) UninstallNetwork(
 // store. If the interface fails to come up, the state stays disabled
 // and an error is returned.
 //
-// Idempotent: enabling an already-enabled network is a no-op.
+// Idempotent: enabling an already-running network is a no-op.
 func (s *Service) EnableNetwork(
 	ctx context.Context,
 	name string,
 ) error {
 	if s.store == nil {
-		return ErrNotImplemented
-	}
-	if s.wg == nil {
 		return ErrNotImplemented
 	}
 
@@ -189,9 +252,6 @@ func (s *Service) EnableNetwork(
 	nw, err := s.store.GetNetwork(name)
 	if err != nil {
 		return err
-	}
-	if nw.Enabled {
-		return nil
 	}
 
 	if err := s.enableLocked(ctx, nw); err != nil {
@@ -223,10 +283,6 @@ func (s *Service) DisableNetwork(
 	s.disableLocked(name)
 	s.mu.Unlock()
 
-	if s.wg == nil {
-		return nil
-	}
-
 	no := false
 	_, err := s.store.UpdateNetwork(name, UpdateNetworkRequest{Enabled: &no})
 	return err
@@ -240,12 +296,22 @@ func (s *Service) DisableNetwork(
 //
 // When the network is not enabled, FetchNetwork only updates the cache
 // and does not touch the WireGuard interface.
+//
+// FUTURE: This method requires a server API client to communicate
+// through the WireGuard tunnel. Currently returns ErrNotImplemented
+// until the server communication layer is implemented. When available,
+// the flow will be:
+//  1. Call the server's peers endpoint through the tunnel
+//  2. Reconcile the returned peers into the local cache
+//  3. If the network is running, apply the updated peer set to the
+//     live WireGuard device.
 func (s *Service) FetchNetwork(
 	name string,
 ) error {
 	if s.store == nil {
 		return ErrNotImplemented
 	}
+	// FUTURE: requires server API client through the tunnel.
 	return ErrNotImplemented
 }
 
@@ -313,12 +379,59 @@ func (s *Service) disableLocked(
 // reconciling into the local cache, scanning for endpoint changes on
 // the live device, reporting sightings, and applying the updated peer
 // set to the WireGuard device.
+//
+// Sync status (lastSync, lastErr) is recorded on the runningNetwork.
 func (s *Service) syncLoop(
 	ctx context.Context,
 	name string,
 ) {
-	<-ctx.Done()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.doSync(ctx, name)
+		}
+	}
 }
+
+// doSync performs one round of sync for a network and records the
+// outcome on the runningNetwork entry.
+func (s *Service) doSync(
+	ctx context.Context,
+	name string,
+) {
+	s.mu.Lock()
+	rn, ok := s.running[name]
+	s.mu.Unlock()
+	if !ok {
+		return
+	}
+
+	err := s.FetchNetwork(name)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rn, ok = s.running[name]
+	if !ok {
+		return
+	}
+
+	rn.lastSync = s.clock()
+	if err != nil {
+		rn.lastErr = err.Error()
+	} else {
+		rn.lastErr = ""
+	}
+}
+
+// syncInterval is the period between background peer syncs. Exported
+// so tests can assert against it.
+const SyncInterval = 30 * time.Second
 
 // buildPeers converts the local peer cache for a network into a slice
 // of WGPeer values suitable for ApplyPeers. The server peer is always

@@ -19,7 +19,21 @@ type NetworkDTO struct {
 }
 
 type InstallNetworkRequest struct {
-	InvitePath string `json:"invite_path"`
+	NetworkName    string `json:"network_name"`
+	AssignedCidr   string `json:"assigned_cidr"`
+	ServerPubkey   string `json:"server_pubkey"`
+	ServerEndpoint string `json:"server_endpoint"`
+	ServerApiAddr  string `json:"server_api_addr"`
+}
+
+func installRequestToInvite(req InstallNetworkRequest) service.Invite {
+	return service.Invite{
+		NetworkName:    req.NetworkName,
+		AssignedCidr:   req.AssignedCidr,
+		ServerPubkey:   req.ServerPubkey,
+		ServerEndpoint: req.ServerEndpoint,
+		ServerApiAddr:  req.ServerApiAddr,
+	}
 }
 
 func NetworkDTOFromService(
@@ -103,12 +117,13 @@ func (a *API) handleNetworkInstall(
 		wire.WriteError(w, http.StatusBadRequest, "malformed json")
 		return
 	}
-	if req.InvitePath == "" {
-		wire.WriteError(w, http.StatusBadRequest, "invite_path is required")
+	if req.NetworkName == "" {
+		wire.WriteError(w, http.StatusBadRequest, "network_name is required")
 		return
 	}
 
-	nw, err := a.service.InstallNetwork(req.InvitePath)
+	invite := installRequestToInvite(req)
+	nw, err := a.service.InstallNetwork(invite)
 	if err != nil {
 		writeServiceError(w, err)
 		return

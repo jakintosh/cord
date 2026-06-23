@@ -45,15 +45,18 @@ type Service struct {
 
 // runningNetwork holds the live state for one enabled client network:
 // the WireGuard device plus a cancel function that stops the
-// background sync loop.
+// background sync loop, and sync status tracking.
 type runningNetwork struct {
-	device WGDevice
-	cancel context.CancelFunc
+	device   WGDevice
+	cancel   context.CancelFunc
+	lastSync time.Time
+	lastErr  string
 }
 
 // New returns a ready-to-use Service. Store and WG may be nil during
 // early development — methods that depend on them will return
-// ErrNotImplemented.
+// ErrNotImplemented. When WG is nil, a stub that generates random
+// keys is used so that domain flows like InstallNetwork can proceed.
 func New(
 	opts Options,
 ) (
@@ -63,9 +66,13 @@ func New(
 	if opts.Clock == nil {
 		opts.Clock = time.Now
 	}
+	wg := opts.WG
+	if wg == nil {
+		wg = stubWG{}
+	}
 	return &Service{
 		store:   opts.Store,
-		wg:      opts.WG,
+		wg:      wg,
 		clock:   opts.Clock,
 		log:     opts.Logger,
 		running: make(map[string]*runningNetwork),
@@ -76,13 +83,16 @@ func New(
 // enabled=true from the store and enables each one (brings up
 // interfaces, starts sync loops). Networks that fail to start are
 // logged and left disabled.
+//
+// When the WG implementation is not available (stub), Start returns
+// ErrNotImplemented since it cannot bring up real interfaces.
 func (s *Service) Start(
 	ctx context.Context,
 ) error {
 	if s.store == nil {
 		return ErrNotImplemented
 	}
-	if s.wg == nil {
+	if _, ok := s.wg.(stubWG); ok {
 		return ErrNotImplemented
 	}
 

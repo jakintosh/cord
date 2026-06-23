@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/client"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
+	server "git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
 var clientNetworkCmd = &args.Command{
@@ -81,12 +84,15 @@ var clientNetworkInstall = &args.Command{
 	},
 	Handler: func(i *args.Input) error {
 		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
-		invite := i.GetOperand("invite")
+		invitePath := i.GetOperand("invite")
+
+		req, err := parseInviteFile(invitePath)
+		if err != nil {
+			return fmt.Errorf("parse invite: %w", err)
+		}
 
 		client := api.NewClient(socketPath)
-		result, err := client.InstallNetwork(context.Background(), api.InstallNetworkRequest{
-			InvitePath: invite,
-		})
+		result, err := client.InstallNetwork(context.Background(), req)
 		if err != nil {
 			return err
 		}
@@ -187,4 +193,28 @@ var clientNetworkFetch = &args.Command{
 
 		return printJSON(result)
 	},
+}
+
+func parseInviteFile(
+	path string) (
+	api.InstallNetworkRequest,
+	error,
+) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return api.InstallNetworkRequest{}, err
+	}
+
+	var payload server.PeerInvite
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return api.InstallNetworkRequest{}, err
+	}
+
+	return api.InstallNetworkRequest{
+		NetworkName:    payload.Interface.NetworkName,
+		AssignedCidr:   payload.Interface.AssignedCidr,
+		ServerPubkey:   payload.Server.PublicKey,
+		ServerEndpoint: payload.Server.ExternalEndpoint,
+		ServerApiAddr:  payload.Server.InternalEndpoint,
+	}, nil
 }
