@@ -44,7 +44,7 @@ func PeerDTOsFromService(
 	peers []*service.Peer,
 ) []PeerDTO {
 	if peers == nil {
-		return nil
+		return []PeerDTO{}
 	}
 	result := make([]PeerDTO, len(peers))
 	for i, p := range peers {
@@ -57,30 +57,49 @@ func (a *API) handlePeerList(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	wire.WriteData(w, http.StatusOK, []PeerDTO{})
+	network := r.PathValue("name")
+
+	peers, err := a.service.ListPeers(network)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, PeerDTOsFromService(peers))
 }
 
 func (a *API) handlePeerAdd(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
+	network := r.PathValue("name")
+
 	var req AddPeerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		wire.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	wire.WriteData(w, http.StatusCreated, PeerDTO{
+	cfg := service.PeerConfig{
 		Name:  req.Name,
-		Ip:    req.Ip,
+		IP:    req.Ip,
 		Admin: req.Admin,
-	})
+	}
+
+	invite, err := a.service.AddPeer(network, cfg)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusCreated, invite)
 }
 
 func (a *API) handlePeerRename(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
+	network := r.PathValue("name")
 	peer := r.PathValue("peer")
 
 	var req RenamePeerRequest
@@ -89,17 +108,29 @@ func (a *API) handlePeerRename(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, PeerDTO{
-		Name: req.Name,
-		Ip:   peer,
+	updated, err := a.service.UpdatePeer(network, peer, service.UpdatePeerRequest{
+		Name: &req.Name,
 	})
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, PeerDTOFromService(*updated))
 }
 
 func (a *API) handlePeerDelete(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
+	network := r.PathValue("name")
 	peer := r.PathValue("peer")
+
+	if err := a.service.RemovePeer(network, peer); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
 	wire.WriteData(w, http.StatusOK, DeleteResponse{
 		Status: "deleted",
 		ID:     peer,
@@ -110,29 +141,49 @@ func (a *API) handlePeerEnable(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
+	network := r.PathValue("name")
 	peer := r.PathValue("peer")
-	wire.WriteData(w, http.StatusOK, PeerDTO{
-		Name:    peer,
-		Enabled: true,
-	})
+
+	if err := a.service.EnablePeer(network, peer); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	updated, err := a.service.GetPeer(network, peer)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, PeerDTOFromService(*updated))
 }
 
 func (a *API) handlePeerDisable(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
+	network := r.PathValue("name")
 	peer := r.PathValue("peer")
-	wire.WriteData(w, http.StatusOK, PeerDTO{
-		Name:    peer,
-		Enabled: false,
-	})
+
+	if err := a.service.DisablePeer(network, peer); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	updated, err := a.service.GetPeer(network, peer)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, PeerDTOFromService(*updated))
 }
 
 func (a *API) handlePeerVisible(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	wire.WriteData(w, http.StatusOK, []PeerDTO{})
+	wire.WriteError(w, http.StatusNotImplemented, "peer visibility requires WireGuard identity resolution (not yet implemented)")
 }
 
 func (c *Client) ListPeers(
@@ -154,14 +205,14 @@ func (c *Client) AddPeer(
 	network string,
 	req AddPeerRequest,
 ) (
-	PeerDTO,
+	*service.PeerInvite,
 	error,
 ) {
 	resp, err := c.t.Post(ctx, "/networks/"+network+"/peers", req)
 	if err != nil {
-		return PeerDTO{}, err
+		return nil, err
 	}
-	return daemon.DecodeResponse[PeerDTO](resp)
+	return daemon.DecodeResponse[*service.PeerInvite](resp)
 }
 
 func (c *Client) RenamePeer(

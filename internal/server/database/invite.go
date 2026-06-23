@@ -39,6 +39,7 @@ func (db *DB) GetInvite(
 func (db *DB) GetInviteByIP(
 	network string,
 	ip net.IP,
+	now time.Time,
 ) (
 	*service.Invite,
 	error,
@@ -62,7 +63,7 @@ func (db *DB) GetInviteByIP(
 			AND expires_at_unix > ?3`,
 		network,
 		ip,
-		time.Now().Unix(),
+		now.Unix(),
 	)
 
 	return scanInvite(row)
@@ -113,6 +114,7 @@ func (db *DB) ListInvites(
 
 func (db *DB) ListActiveInvites(
 	network string,
+	now time.Time,
 ) (
 	[]*service.Invite,
 	error,
@@ -134,7 +136,7 @@ func (db *DB) ListActiveInvites(
 			AND expires_at_unix > ?2
 		ORDER BY created_at_unix DESC`,
 		network,
-		time.Now().Unix(),
+		now.Unix(),
 	)
 	if err != nil {
 		return nil, CheckSqliteErr("list active invites", err)
@@ -196,6 +198,7 @@ func (db *DB) RedeemInvite(
 	network string,
 	tempPubKey string,
 	permPubKey string,
+	now time.Time,
 ) error {
 	tx, err := db.Conn.Begin()
 	if err != nil {
@@ -234,7 +237,7 @@ func (db *DB) RedeemInvite(
 		network,
 		tempPubKey,
 		permPubKey,
-		time.Now().Unix(),
+		now.Unix(),
 	)
 	if err != nil {
 		return CheckSqliteErr("redeem create peer", err)

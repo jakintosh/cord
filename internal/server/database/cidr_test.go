@@ -6,13 +6,13 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
-	"git.studiopollinator.com/pollinator/cord/internal/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
 func seedNetworkForCidr(t *testing.T, db *database.DB) {
 	t.Helper()
 	now := time.Now()
-	if err := db.InsertNetwork(&service.Network{
+	if err := db.BootstrapNetwork(&service.Network{
 		Name:             "cidrnet",
 		PrivateKey:       "priv",
 		PublicKey:        "pub",
@@ -23,13 +23,13 @@ func seedNetworkForCidr(t *testing.T, db *database.DB) {
 		InviteListenPort: 51821,
 		ApiPort:          8080,
 		CreatedAt:        now,
-	}); err != nil {
+	}, &service.Cidr{Name: "cidrnet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
 }
 
 func TestInsertAndGetCidr(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
 	cidr := &service.Cidr{
@@ -63,7 +63,7 @@ func TestInsertAndGetCidr(t *testing.T) {
 }
 
 func TestGetCidr_NotFound(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
 	_, err := db.GetCidr("cidrnet", "nope")
@@ -73,7 +73,7 @@ func TestGetCidr_NotFound(t *testing.T) {
 }
 
 func TestListCidrs(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
 	if err := db.InsertCidr("cidrnet", &service.Cidr{
@@ -91,8 +91,8 @@ func TestListCidrs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list cidrs: %v", err)
 	}
-	if len(cidrs) != 2 {
-		t.Fatalf("expected 2 cidrs, got %d", len(cidrs))
+	if len(cidrs) != 3 {
+		t.Fatalf("expected 3 cidrs, got %d", len(cidrs))
 	}
 	if cidrs[0].Name != "aaa" || cidrs[1].Name != "ccc" {
 		t.Errorf("unexpected order: %v, %v", cidrs[0].Name, cidrs[1].Name)
@@ -100,7 +100,7 @@ func TestListCidrs(t *testing.T) {
 }
 
 func TestInsertCidr_DuplicateName(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
 	cidr := &service.Cidr{Name: "dup", Cidr: "10.0.1.0/24", Length: 24, Prefix: 32}
@@ -116,7 +116,7 @@ func TestInsertCidr_DuplicateName(t *testing.T) {
 }
 
 func TestInsertCidr_DuplicateCidr(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
 	if err := db.InsertCidr("cidrnet", &service.Cidr{
@@ -134,7 +134,7 @@ func TestInsertCidr_DuplicateCidr(t *testing.T) {
 }
 
 func TestDeleteCidr(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
 	if err := db.InsertCidr("cidrnet", &service.Cidr{
@@ -154,7 +154,7 @@ func TestDeleteCidr(t *testing.T) {
 }
 
 func TestDeleteCidr_NotFound(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
 	err := db.DeleteCidr("cidrnet", "ghost")
@@ -164,7 +164,7 @@ func TestDeleteCidr_NotFound(t *testing.T) {
 }
 
 func TestUpdateCidr_Rename(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
 	if err := db.InsertCidr("cidrnet", &service.Cidr{
@@ -190,7 +190,7 @@ func TestUpdateCidr_Rename(t *testing.T) {
 }
 
 func TestIPv6Cidr(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
 	cidr := &service.Cidr{

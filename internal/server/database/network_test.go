@@ -6,11 +6,11 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
-	"git.studiopollinator.com/pollinator/cord/internal/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
 func TestGetNetwork_NotFound(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 
 	_, err := db.GetNetwork("nonexistent")
 	if err == nil {
@@ -19,7 +19,7 @@ func TestGetNetwork_NotFound(t *testing.T) {
 }
 
 func TestInsertAndGetNetwork(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 
 	createdAt := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
 	net := &service.Network{
@@ -35,7 +35,7 @@ func TestInsertAndGetNetwork(t *testing.T) {
 		CreatedAt:        createdAt,
 	}
 
-	if err := db.InsertNetwork(net); err != nil {
+	if err := db.BootstrapNetwork(net, &service.Cidr{Name: "homenet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub-key-123", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("insert network: %v", err)
 	}
 
@@ -77,7 +77,7 @@ func TestInsertAndGetNetwork(t *testing.T) {
 }
 
 func TestInsertNetwork_Duplicate(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 
 	net := &service.Network{
 		Name:             "homenet",
@@ -92,18 +92,18 @@ func TestInsertNetwork_Duplicate(t *testing.T) {
 		CreatedAt:        time.Now(),
 	}
 
-	if err := db.InsertNetwork(net); err != nil {
+	if err := db.BootstrapNetwork(net, &service.Cidr{Name: "homenet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub-a", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("first insert: %v", err)
 	}
 
-	err := db.InsertNetwork(net)
+	err := db.BootstrapNetwork(net, &service.Cidr{Name: "homenet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub-a", Admin: true, Enabled: true, Confirmed: true})
 	if err == nil {
 		t.Fatal("expected error for duplicate network")
 	}
 }
 
 func TestListNetworkNames(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 
 	names, err := db.ListNetworkNames()
 	if err != nil {
@@ -116,7 +116,7 @@ func TestListNetworkNames(t *testing.T) {
 	now := time.Now()
 	mustInsert := func(name string) {
 		t.Helper()
-		err := db.InsertNetwork(&service.Network{
+		err := db.BootstrapNetwork(&service.Network{
 			Name:             name,
 			PrivateKey:       "priv-" + name,
 			PublicKey:        "pub-" + name,
@@ -127,7 +127,7 @@ func TestListNetworkNames(t *testing.T) {
 			InviteListenPort: 51821,
 			ApiPort:          8080,
 			CreatedAt:        now,
-		})
+		}, &service.Cidr{Name: name, Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub-" + name, Admin: true, Enabled: true, Confirmed: true})
 		if err != nil {
 			t.Fatalf("insert %s: %v", name, err)
 		}
@@ -150,10 +150,10 @@ func TestListNetworkNames(t *testing.T) {
 }
 
 func TestDeleteNetwork(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 
 	now := time.Now()
-	if err := db.InsertNetwork(&service.Network{
+	if err := db.BootstrapNetwork(&service.Network{
 		Name:             "deleteme",
 		PrivateKey:       "priv",
 		PublicKey:        "pub",
@@ -164,7 +164,7 @@ func TestDeleteNetwork(t *testing.T) {
 		InviteListenPort: 51821,
 		ApiPort:          8080,
 		CreatedAt:        now,
-	}); err != nil {
+	}, &service.Cidr{Name: "deleteme", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 
@@ -179,7 +179,7 @@ func TestDeleteNetwork(t *testing.T) {
 }
 
 func TestDeleteNetwork_NotFound(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 
 	err := db.DeleteNetwork("ghost")
 	if err == nil {
@@ -188,10 +188,10 @@ func TestDeleteNetwork_NotFound(t *testing.T) {
 }
 
 func TestDeleteNetwork_Cascade(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 
 	now := time.Now()
-	if err := db.InsertNetwork(&service.Network{
+	if err := db.BootstrapNetwork(&service.Network{
 		Name:             "cascadenet",
 		PrivateKey:       "priv",
 		PublicKey:        "pub",
@@ -202,7 +202,7 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 		InviteListenPort: 51821,
 		ApiPort:          8080,
 		CreatedAt:        now,
-	}); err != nil {
+	}, &service.Cidr{Name: "cascadenet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("insert network: %v", err)
 	}
 
@@ -261,7 +261,7 @@ func TestOpenDatabase(t *testing.T) {
 }
 
 func TestOpenDatabase_UserVersionSet(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 
 	var version int
 	if err := db.Conn.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
@@ -273,7 +273,7 @@ func TestOpenDatabase_UserVersionSet(t *testing.T) {
 }
 
 func TestOpenDatabase_TablesExist(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 
 	for _, table := range []string{
 		"network",

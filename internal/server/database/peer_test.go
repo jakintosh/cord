@@ -7,13 +7,13 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
-	"git.studiopollinator.com/pollinator/cord/internal/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
 func seedNetwork(t *testing.T, db *database.DB) {
 	t.Helper()
 	now := time.Now()
-	if err := db.InsertNetwork(&service.Network{
+	if err := db.BootstrapNetwork(&service.Network{
 		Name:             "testnet",
 		PrivateKey:       "priv-test",
 		PublicKey:        "pub-test",
@@ -24,13 +24,13 @@ func seedNetwork(t *testing.T, db *database.DB) {
 		InviteListenPort: 51821,
 		ApiPort:          8080,
 		CreatedAt:        now,
-	}); err != nil {
+	}, &service.Cidr{Name: "testnet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub-test", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
 }
 
 func TestInsertAndGetPeer(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	peer := &service.Peer{
@@ -72,7 +72,7 @@ func TestInsertAndGetPeer(t *testing.T) {
 }
 
 func TestGetPeer_NotFound(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	_, err := db.GetPeer("testnet", "nobody")
@@ -82,7 +82,7 @@ func TestGetPeer_NotFound(t *testing.T) {
 }
 
 func TestGetPeer_WrongNetwork(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.InsertPeer("testnet", &service.Peer{
@@ -100,7 +100,7 @@ func TestGetPeer_WrongNetwork(t *testing.T) {
 }
 
 func TestGetPeerByIP(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.InsertPeer("testnet", &service.Peer{
@@ -123,7 +123,7 @@ func TestGetPeerByIP(t *testing.T) {
 }
 
 func TestGetPeerByIP_NotConfirmed(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.InsertPeer("testnet", &service.Peer{
@@ -143,7 +143,7 @@ func TestGetPeerByIP_NotConfirmed(t *testing.T) {
 }
 
 func TestGetPeerByKey(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.InsertPeer("testnet", &service.Peer{
@@ -164,7 +164,7 @@ func TestGetPeerByKey(t *testing.T) {
 }
 
 func TestGetPeerByKey_NotFound(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	_, err := db.GetPeerByKey("testnet", "unknown-key")
@@ -174,7 +174,7 @@ func TestGetPeerByKey_NotFound(t *testing.T) {
 }
 
 func TestListPeers(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.InsertPeer("testnet", &service.Peer{
@@ -196,29 +196,29 @@ func TestListPeers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list peers: %v", err)
 	}
-	if len(peers) != 2 {
-		t.Fatalf("expected 2 peers, got %d", len(peers))
+	if len(peers) != 3 {
+		t.Fatalf("expected 3 peers, got %d", len(peers))
 	}
-	if peers[0].Name != "aaa" || peers[1].Name != "ddd" {
-		t.Errorf("unexpected order: %v, %v", peers[0].Name, peers[1].Name)
+	if peers[0].Name != "aaa" || peers[1].Name != "cord-server" || peers[2].Name != "ddd" {
+		t.Errorf("unexpected order: %v, %v, %v", peers[0].Name, peers[1].Name, peers[2].Name)
 	}
 }
 
 func TestListPeers_EmptyNetwork(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	peers, err := db.ListPeers("testnet")
 	if err != nil {
 		t.Fatalf("list peers: %v", err)
 	}
-	if len(peers) != 0 {
-		t.Fatalf("expected 0 peers, got %d", len(peers))
+	if len(peers) != 1 {
+		t.Fatalf("expected 1 peer, got %d", len(peers))
 	}
 }
 
 func TestInsertPeer_DuplicateName(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	peer := &service.Peer{
@@ -239,7 +239,7 @@ func TestInsertPeer_DuplicateName(t *testing.T) {
 }
 
 func TestInsertPeer_DuplicateIP(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.InsertPeer("testnet", &service.Peer{
@@ -261,11 +261,11 @@ func TestInsertPeer_DuplicateIP(t *testing.T) {
 }
 
 func TestInsertPeer_SameNameDifferentNetwork(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	now := time.Now()
-	if err := db.InsertNetwork(&service.Network{
+	if err := db.BootstrapNetwork(&service.Network{
 		Name:             "net2",
 		PrivateKey:       "priv2",
 		PublicKey:        "pub2",
@@ -276,7 +276,7 @@ func TestInsertPeer_SameNameDifferentNetwork(t *testing.T) {
 		InviteListenPort: 51823,
 		ApiPort:          8081,
 		CreatedAt:        now,
-	}); err != nil {
+	}, &service.Cidr{Name: "net2", Cidr: "172.16.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "172.16.0.1/32", PublicKey: "pub2", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("insert net2: %v", err)
 	}
 
@@ -306,7 +306,7 @@ func TestInsertPeer_SameNameDifferentNetwork(t *testing.T) {
 }
 
 func TestDeletePeer(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.InsertPeer("testnet", &service.Peer{
@@ -328,7 +328,7 @@ func TestDeletePeer(t *testing.T) {
 }
 
 func TestDeletePeer_NotFound(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	err := db.DeletePeer("testnet", "ghost")
@@ -338,7 +338,7 @@ func TestDeletePeer_NotFound(t *testing.T) {
 }
 
 func TestUpdatePeer_Rename(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.InsertPeer("testnet", &service.Peer{
@@ -370,7 +370,7 @@ func TestUpdatePeer_Rename(t *testing.T) {
 }
 
 func TestUpdatePeer_ToggleAdmin(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.InsertPeer("testnet", &service.Peer{
@@ -395,7 +395,7 @@ func TestUpdatePeer_ToggleAdmin(t *testing.T) {
 }
 
 func TestPeerExists(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.InsertPeer("testnet", &service.Peer{
@@ -424,7 +424,7 @@ func TestPeerExists(t *testing.T) {
 }
 
 func TestIPv6Peer(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	peer := &service.Peer{

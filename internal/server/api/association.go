@@ -38,7 +38,7 @@ func AssociationDTOsFromService(
 	assocs []*service.Association,
 ) []AssociationDTO {
 	if assocs == nil {
-		return nil
+		return []AssociationDTO{}
 	}
 	result := make([]AssociationDTO, len(assocs))
 	for i, a := range assocs {
@@ -51,16 +51,31 @@ func (a *API) handleAssociationList(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	wire.WriteData(w, http.StatusOK, []AssociationDTO{})
+	network := r.PathValue("name")
+
+	assocs, err := a.service.ListAssociations(network)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, AssociationDTOsFromService(assocs))
 }
 
 func (a *API) handleAssociationAdd(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
+	network := r.PathValue("name")
+
 	var req AddAssociationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		wire.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := a.service.AddAssociation(network, req.Cidr1, req.Cidr2); err != nil {
+		writeServiceError(w, err)
 		return
 	}
 
@@ -74,9 +89,16 @@ func (a *API) handleAssociationDelete(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
+	network := r.PathValue("name")
+
 	var req DeleteAssociationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		wire.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := a.service.RemoveAssociation(network, req.Cidr1, req.Cidr2); err != nil {
+		writeServiceError(w, err)
 		return
 	}
 

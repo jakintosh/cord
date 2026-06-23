@@ -37,7 +37,7 @@ func CidrDTOsFromService(
 	cidrs []*service.Cidr,
 ) []CidrDTO {
 	if cidrs == nil {
-		return nil
+		return []CidrDTO{}
 	}
 	result := make([]CidrDTO, len(cidrs))
 	for i, c := range cidrs {
@@ -50,16 +50,34 @@ func (a *API) handleCidrList(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	wire.WriteData(w, http.StatusOK, []CidrDTO{})
+	network := r.PathValue("name")
+
+	cidrs, err := a.service.ListCidrs(network)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, CidrDTOsFromService(cidrs))
 }
 
 func (a *API) handleCidrAdd(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
+	network := r.PathValue("name")
+
 	var req AddCidrRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		wire.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := a.service.AddCidr(network, service.CreateCidrRequest{
+		Name: req.Name,
+		Cidr: req.Cidr,
+	}); err != nil {
+		writeServiceError(w, err)
 		return
 	}
 
@@ -73,6 +91,7 @@ func (a *API) handleCidrRename(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
+	network := r.PathValue("name")
 	cidr := r.PathValue("cidr")
 
 	var req RenameCidrRequest
@@ -81,9 +100,15 @@ func (a *API) handleCidrRename(
 		return
 	}
 
+	if err := a.service.UpdateCidr(network, cidr, service.UpdateCidrRequest{
+		Name: req.Name,
+	}); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
 	wire.WriteData(w, http.StatusOK, CidrDTO{
 		Name: req.Name,
-		Cidr: cidr,
 	})
 }
 
@@ -91,7 +116,14 @@ func (a *API) handleCidrDelete(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
+	network := r.PathValue("name")
 	cidr := r.PathValue("cidr")
+
+	if err := a.service.RemoveCidr(network, cidr); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
 	wire.WriteData(w, http.StatusOK, DeleteResponse{
 		Status: "deleted",
 		ID:     cidr,

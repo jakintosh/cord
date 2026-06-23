@@ -5,11 +5,11 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
-	"git.studiopollinator.com/pollinator/cord/internal/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 )
 
 func TestGetNetwork_NotFound(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 
 	_, err := db.GetNetwork("nonexistent")
 	if err == nil {
@@ -18,7 +18,7 @@ func TestGetNetwork_NotFound(t *testing.T) {
 }
 
 func TestInsertAndGetNetwork(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 
 	createdAt := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
 	net := &service.Network{
@@ -72,7 +72,7 @@ func TestInsertAndGetNetwork(t *testing.T) {
 }
 
 func TestInsertAndGetNetwork_Disabled(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 
 	net := &service.Network{
 		Name:           "offnet",
@@ -100,7 +100,7 @@ func TestInsertAndGetNetwork_Disabled(t *testing.T) {
 }
 
 func TestInsertNetwork_Duplicate(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 
 	net := &service.Network{
 		Name:           "homenet",
@@ -124,7 +124,7 @@ func TestInsertNetwork_Duplicate(t *testing.T) {
 }
 
 func TestListNetworkNames_Empty(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 
 	names, err := db.ListNetworkNames()
 	if err != nil {
@@ -136,7 +136,7 @@ func TestListNetworkNames_Empty(t *testing.T) {
 }
 
 func TestListNetworkNames_Ordered(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 
 	now := time.Now()
 	mustInsert := func(name string) {
@@ -173,7 +173,7 @@ func TestListNetworkNames_Ordered(t *testing.T) {
 }
 
 func TestDeleteNetwork(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 
 	now := time.Now()
 	if err := db.InsertNetwork(&service.Network{
@@ -200,7 +200,7 @@ func TestDeleteNetwork(t *testing.T) {
 }
 
 func TestDeleteNetwork_NotFound(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 
 	err := db.DeleteNetwork("ghost")
 	if err == nil {
@@ -209,7 +209,7 @@ func TestDeleteNetwork_NotFound(t *testing.T) {
 }
 
 func TestDeleteNetwork_Cascade(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 
 	now := time.Now()
 	if err := db.InsertNetwork(&service.Network{
@@ -246,7 +246,7 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 }
 
 func TestUpdateNetwork_EnableDisable(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 
 	net := &service.Network{
 		Name:           "toggle",
@@ -283,7 +283,7 @@ func TestUpdateNetwork_EnableDisable(t *testing.T) {
 }
 
 func TestUpdateNetwork_NilRequest(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 
 	createdAt := time.Date(2026, 6, 21, 0, 0, 0, 0, time.UTC)
 	net := &service.Network{

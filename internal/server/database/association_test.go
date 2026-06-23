@@ -6,13 +6,13 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
-	"git.studiopollinator.com/pollinator/cord/internal/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
 func seedNetworkForAssoc(t *testing.T, db *database.DB) {
 	t.Helper()
 	now := time.Now()
-	if err := db.InsertNetwork(&service.Network{
+	if err := db.BootstrapNetwork(&service.Network{
 		Name:             "assocnet",
 		PrivateKey:       "priv",
 		PublicKey:        "pub",
@@ -23,7 +23,7 @@ func seedNetworkForAssoc(t *testing.T, db *database.DB) {
 		InviteListenPort: 51821,
 		ApiPort:          8080,
 		CreatedAt:        now,
-	}); err != nil {
+	}, &service.Cidr{Name: "assocnet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
 	for _, c := range []service.Cidr{
@@ -39,7 +39,7 @@ func seedNetworkForAssoc(t *testing.T, db *database.DB) {
 }
 
 func TestInsertAndListAssociation(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
 	if err := db.InsertAssociation("assocnet", &service.Association{
@@ -62,7 +62,7 @@ func TestInsertAndListAssociation(t *testing.T) {
 }
 
 func TestInsertAssociation_ReversedOrderNormalized(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
 	if err := db.InsertAssociation("assocnet", &service.Association{
@@ -85,7 +85,7 @@ func TestInsertAssociation_ReversedOrderNormalized(t *testing.T) {
 }
 
 func TestInsertAssociation_Duplicate(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
 	a := &service.Association{Cidr1: "subnet-a", Cidr2: "subnet-b"}
@@ -103,7 +103,7 @@ func TestInsertAssociation_Duplicate(t *testing.T) {
 }
 
 func TestInsertAssociation_UnknownCidr(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
 	err := db.InsertAssociation("assocnet", &service.Association{
@@ -116,7 +116,7 @@ func TestInsertAssociation_UnknownCidr(t *testing.T) {
 }
 
 func TestDeleteAssociation(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
 	if err := db.InsertAssociation("assocnet", &service.Association{
@@ -140,7 +140,7 @@ func TestDeleteAssociation(t *testing.T) {
 }
 
 func TestDeleteAssociation_ReversedOrder(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
 	if err := db.InsertAssociation("assocnet", &service.Association{
@@ -164,7 +164,7 @@ func TestDeleteAssociation_ReversedOrder(t *testing.T) {
 }
 
 func TestListMultipleAssociations(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
 	for _, pair := range [][2]string{
@@ -190,7 +190,7 @@ func TestListMultipleAssociations(t *testing.T) {
 }
 
 func TestDeleteAssociation_NotFound(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
 	err := db.DeleteAssociation("assocnet", "subnet-a", "subnet-b")
@@ -200,7 +200,7 @@ func TestDeleteAssociation_NotFound(t *testing.T) {
 }
 
 func TestAssociation_CascadeOnCidrDelete(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
 	if err := db.InsertAssociation("assocnet", &service.Association{

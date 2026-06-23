@@ -151,8 +151,15 @@ func (db *DB) InsertPeer(
 		return fmt.Errorf("insert peer %q: parse cidr: %w", peer.Name, err)
 	}
 
+	ones, bits := cidr.Mask.Size()
+	if ones != bits {
+		return fmt.Errorf(
+			"%w: peer CIDR %q must be a terminal prefix (/%d)",
+			service.ErrInvalidInput, peer.Cidr, bits,
+		)
+	}
+
 	ip := normalizeIP(cidr.IP)
-	ones, _ := cidr.Mask.Size()
 
 	_, err = db.Conn.Exec(`
 		INSERT INTO peer (
@@ -199,6 +206,10 @@ func (db *DB) UpdatePeer(
 			enabled = CASE
 				WHEN ?5 IS NOT NULL THEN ?5
 				ELSE enabled
+			END,
+			confirmed = CASE
+				WHEN ?6 IS NOT NULL THEN ?6
+				ELSE confirmed
 			END
 		WHERE network_name = ?1
 			AND name = ?2
@@ -215,6 +226,7 @@ func (db *DB) UpdatePeer(
 		req.Name,
 		validOptBool(req.Admin),
 		validOptBool(req.Enabled),
+		validOptBool(req.Confirmed),
 	)
 
 	peer, err := scanPeer(row)

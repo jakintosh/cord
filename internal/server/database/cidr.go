@@ -78,8 +78,8 @@ func (db *DB) InsertCidr(
 		network,
 		cidr.Name,
 		cidr.Cidr,
-		ones,
 		bits,
+		ones,
 		first,
 		last,
 	)
@@ -177,8 +177,8 @@ func scanCidr(
 	return &service.Cidr{
 		Name:   name,
 		Cidr:   cidrStr,
-		Length: length,
-		Prefix: prefix,
+		Length: prefix,
+		Prefix: length,
 	}, nil
 }
 func cidrFirstAndLast(

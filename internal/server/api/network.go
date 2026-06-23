@@ -21,8 +21,11 @@ type NetworkDTO struct {
 type AddNetworkRequest struct {
 	Name       string `json:"name"`
 	Cidr       string `json:"cidr"`
+	InviteCidr string `json:"invite_cidr"`
 	ExternalIP string `json:"external_ip"`
 	Port       uint16 `json:"port"`
+	InvitePort uint16 `json:"invite_port"`
+	ApiPort    uint16 `json:"api_port"`
 }
 
 func NetworkDTOFromService(
@@ -41,7 +44,16 @@ func (a *API) handleNetworkList(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	wire.WriteData(w, http.StatusOK, []NetworkDTO{})
+	names, err := a.service.ListNetworks()
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	if names == nil {
+		names = []string{}
+	}
+
+	wire.WriteData(w, http.StatusOK, names)
 }
 
 func (a *API) handleNetworkShow(
@@ -49,9 +61,14 @@ func (a *API) handleNetworkShow(
 	r *http.Request,
 ) {
 	name := r.PathValue("name")
-	wire.WriteData(w, http.StatusOK, NetworkDTO{
-		Name: name,
-	})
+
+	nw, err := a.service.GetNetwork(name)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*nw))
 }
 
 func (a *API) handleNetworkAdd(
@@ -64,12 +81,23 @@ func (a *API) handleNetworkAdd(
 		return
 	}
 
-	wire.WriteData(w, http.StatusCreated, NetworkDTO{
-		Name:       req.Name,
-		Cidr:       req.Cidr,
-		ExternalIP: req.ExternalIP,
-		Port:       req.Port,
-	})
+	cfg := service.Network{
+		Name:             req.Name,
+		RootCidr:         req.Cidr,
+		InviteCidr:       req.InviteCidr,
+		ExternalIP:       req.ExternalIP,
+		ListenPort:       req.Port,
+		InviteListenPort: req.InvitePort,
+		ApiPort:          req.ApiPort,
+	}
+
+	nw, err := a.service.CreateNetwork(cfg)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusCreated, NetworkDTOFromService(*nw))
 }
 
 func (a *API) handleNetworkDelete(
@@ -77,6 +105,12 @@ func (a *API) handleNetworkDelete(
 	r *http.Request,
 ) {
 	name := r.PathValue("name")
+
+	if err := a.service.DeleteNetwork(name); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
 	wire.WriteData(w, http.StatusOK, DeleteResponse{
 		Status: "deleted",
 		ID:     name,
@@ -86,14 +120,14 @@ func (a *API) handleNetworkDelete(
 func (c *Client) ListNetworks(
 	ctx context.Context,
 ) (
-	[]NetworkDTO,
+	[]string,
 	error,
 ) {
 	resp, err := c.t.Get(ctx, "/networks")
 	if err != nil {
 		return nil, err
 	}
-	return daemon.DecodeResponse[[]NetworkDTO](resp)
+	return daemon.DecodeResponse[[]string](resp)
 }
 
 func (c *Client) ShowNetwork(

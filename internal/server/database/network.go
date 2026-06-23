@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"net"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
@@ -81,10 +82,32 @@ func (db *DB) ListNetworkNames() (
 	return names, nil
 }
 
-func (db *DB) InsertNetwork(
+func (db *DB) BootstrapNetwork(
 	network *service.Network,
+	rootCidr *service.Cidr,
+	serverPeer *service.Peer,
 ) error {
-	_, err := db.Conn.Exec(`
+	_, rootIPNet, err := net.ParseCIDR(rootCidr.Cidr)
+	if err != nil {
+		return fmt.Errorf("parse root cidr: %w", err)
+	}
+	rootOnes, rootBits := rootIPNet.Mask.Size()
+	rootFirst, rootLast := cidrFirstAndLast(rootIPNet)
+
+	_, peerIPNet, err := net.ParseCIDR(serverPeer.Cidr)
+	if err != nil {
+		return fmt.Errorf("parse server peer cidr: %w", err)
+	}
+	peerIP := normalizeIP(peerIPNet.IP)
+	peerOnes, _ := peerIPNet.Mask.Size()
+
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		return fmt.Errorf("begin bootstrap tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
 		INSERT INTO network (
 			name,
 			private_key,
@@ -109,7 +132,55 @@ func (db *DB) InsertNetwork(
 		network.ApiPort,
 		network.CreatedAt.Unix(),
 	)
-	return CheckSqliteErr("insert network", err)
+	if err != nil {
+		return CheckSqliteErr("insert network", err)
+	}
+
+	_, err = tx.Exec(`
+		INSERT INTO cidr (network_name, name, cidr, length, prefix, base, last)
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+		network.Name,
+		rootCidr.Name,
+		rootCidr.Cidr,
+		rootBits,
+		rootOnes,
+		rootFirst,
+		rootLast,
+	)
+	if err != nil {
+		return CheckSqliteErr("insert root cidr", err)
+	}
+
+	_, err = tx.Exec(`
+		INSERT INTO peer (
+			network_name,
+			name,
+			public_key,
+			ip,
+			prefix,
+			admin,
+			enabled,
+			confirmed
+		)
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+		network.Name,
+		serverPeer.Name,
+		serverPeer.PublicKey,
+		peerIP,
+		peerOnes,
+		boolToInt(serverPeer.Admin),
+		boolToInt(serverPeer.Enabled),
+		boolToInt(serverPeer.Confirmed),
+	)
+	if err != nil {
+		return CheckSqliteErr("insert server peer", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit bootstrap tx: %w", err)
+	}
+
+	return nil
 }
 
 func (db *DB) DeleteNetwork(

@@ -6,7 +6,7 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
-	"git.studiopollinator.com/pollinator/cord/internal/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 )
 
 func seedNetwork(t *testing.T, db *database.DB) {
@@ -27,7 +27,7 @@ func seedNetwork(t *testing.T, db *database.DB) {
 }
 
 func TestReconcilePeers_Insert(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	peers := []service.Peer{
@@ -61,7 +61,7 @@ func TestReconcilePeers_Insert(t *testing.T) {
 }
 
 func TestReconcilePeers_Upsert(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.ReconcilePeers("testnet", []service.Peer{
@@ -95,7 +95,7 @@ func TestReconcilePeers_Upsert(t *testing.T) {
 }
 
 func TestReconcilePeers_Prune(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.ReconcilePeers("testnet", []service.Peer{
@@ -124,7 +124,7 @@ func TestReconcilePeers_Prune(t *testing.T) {
 }
 
 func TestReconcilePeers_ClearAll(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.ReconcilePeers("testnet", []service.Peer{
@@ -148,7 +148,7 @@ func TestReconcilePeers_ClearAll(t *testing.T) {
 }
 
 func TestReconcilePeers_EndpointPreserved(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.ReconcilePeers("testnet", []service.Peer{
@@ -191,7 +191,7 @@ func TestReconcilePeers_EndpointPreserved(t *testing.T) {
 }
 
 func TestReconcilePeers_EndpointOverwritten(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.ReconcilePeers("testnet", []service.Peer{
@@ -231,7 +231,7 @@ func TestReconcilePeers_EndpointOverwritten(t *testing.T) {
 }
 
 func TestReconcilePeers_NetworkIsolation(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	now := time.Now()
@@ -272,7 +272,7 @@ func TestReconcilePeers_NetworkIsolation(t *testing.T) {
 }
 
 func TestListPeers_Ordered(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.ReconcilePeers("testnet", []service.Peer{
@@ -296,7 +296,7 @@ func TestListPeers_Ordered(t *testing.T) {
 }
 
 func TestListPeers_EmptyNetwork(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	got, err := db.ListPeers("testnet")
@@ -309,7 +309,7 @@ func TestListPeers_EmptyNetwork(t *testing.T) {
 }
 
 func TestUpdatePeerEndpoint(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	if err := db.ReconcilePeers("testnet", []service.Peer{
@@ -338,7 +338,7 @@ func TestUpdatePeerEndpoint(t *testing.T) {
 }
 
 func TestUpdatePeerEndpoint_Nonexistent(t *testing.T) {
-	db := testutil.SetupClientTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
 	err := db.UpdatePeerEndpoint("testnet", "nobody-key", "1.2.3.4:51820", 100)

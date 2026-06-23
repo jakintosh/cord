@@ -7,13 +7,13 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
-	"git.studiopollinator.com/pollinator/cord/internal/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
 func seedNetworkForInvite(t *testing.T, db *database.DB) {
 	t.Helper()
 	now := time.Now()
-	if err := db.InsertNetwork(&service.Network{
+	if err := db.BootstrapNetwork(&service.Network{
 		Name:             "invitenet",
 		PrivateKey:       "priv",
 		PublicKey:        "pub",
@@ -24,13 +24,13 @@ func seedNetworkForInvite(t *testing.T, db *database.DB) {
 		InviteListenPort: 51821,
 		ApiPort:          8080,
 		CreatedAt:        now,
-	}); err != nil {
+	}, &service.Cidr{Name: "invitenet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
 }
 
 func TestInsertAndGetInvite(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
 
 	now := time.Now()
@@ -83,7 +83,7 @@ func TestInsertAndGetInvite(t *testing.T) {
 }
 
 func TestGetInvite_NotFound(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
 
 	_, err := db.GetInvite("invitenet", "nobody")
@@ -93,7 +93,7 @@ func TestGetInvite_NotFound(t *testing.T) {
 }
 
 func TestGetInviteByIP(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
 
 	now := time.Now()
@@ -110,7 +110,7 @@ func TestGetInviteByIP(t *testing.T) {
 		t.Fatalf("insert invite: %v", err)
 	}
 
-	got, err := db.GetInviteByIP("invitenet", net.IPv4(10, 1, 0, 10))
+	got, err := db.GetInviteByIP("invitenet", net.IPv4(10, 1, 0, 10), now)
 	if err != nil {
 		t.Fatalf("get invite by IP: %v", err)
 	}
@@ -120,17 +120,18 @@ func TestGetInviteByIP(t *testing.T) {
 }
 
 func TestGetInviteByIP_NotFound(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
+	now := time.Now()
 
-	_, err := db.GetInviteByIP("invitenet", net.IPv4(10, 1, 0, 99))
+	_, err := db.GetInviteByIP("invitenet", net.IPv4(10, 1, 0, 99), now)
 	if err == nil {
 		t.Fatal("expected error for unknown IP")
 	}
 }
 
 func TestListInvites(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
 
 	now := time.Now()
@@ -162,7 +163,7 @@ func TestListInvites(t *testing.T) {
 }
 
 func TestListActiveInvites(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
 
 	now := time.Now()
@@ -179,7 +180,7 @@ func TestListActiveInvites(t *testing.T) {
 		t.Fatalf("insert expired: %v", err)
 	}
 
-	active, err := db.ListActiveInvites("invitenet")
+	active, err := db.ListActiveInvites("invitenet", now)
 	if err != nil {
 		t.Fatalf("list active invites: %v", err)
 	}
@@ -192,7 +193,7 @@ func TestListActiveInvites(t *testing.T) {
 }
 
 func TestListActiveInvites_ExcludesRedeemed(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
 
 	now := time.Now()
@@ -204,7 +205,7 @@ func TestListActiveInvites_ExcludesRedeemed(t *testing.T) {
 		t.Fatalf("insert redeemed: %v", err)
 	}
 
-	active, err := db.ListActiveInvites("invitenet")
+	active, err := db.ListActiveInvites("invitenet", now)
 	if err != nil {
 		t.Fatalf("list active invites: %v", err)
 	}
@@ -214,7 +215,7 @@ func TestListActiveInvites_ExcludesRedeemed(t *testing.T) {
 }
 
 func TestDeleteInvite(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
 
 	now := time.Now()
@@ -236,7 +237,7 @@ func TestDeleteInvite(t *testing.T) {
 }
 
 func TestDeleteInvite_NotFound(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
 
 	err := db.DeleteInvite("invitenet", "ghost")
@@ -246,7 +247,7 @@ func TestDeleteInvite_NotFound(t *testing.T) {
 }
 
 func TestDeleteExpiredInvites(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
 
 	now := time.Now()
@@ -280,7 +281,7 @@ func TestDeleteExpiredInvites(t *testing.T) {
 }
 
 func TestUpdateInviteRedemption(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
 
 	now := time.Now()
@@ -291,7 +292,7 @@ func TestUpdateInviteRedemption(t *testing.T) {
 		t.Fatalf("insert invite: %v", err)
 	}
 
-	if err := db.RedeemInvite("invitenet", "temp-invite-key", "perm-peer-key"); err != nil {
+	if err := db.RedeemInvite("invitenet", "temp-invite-key", "perm-peer-key", now); err != nil {
 		t.Fatalf("redeem invite: %v", err)
 	}
 
@@ -322,17 +323,18 @@ func TestUpdateInviteRedemption(t *testing.T) {
 }
 
 func TestUpdateInviteRedemption_NotFound(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
+	now := time.Now()
 
-	err := db.RedeemInvite("invitenet", "unknown-key", "perm-key")
+	err := db.RedeemInvite("invitenet", "unknown-key", "perm-key", now)
 	if err == nil {
 		t.Fatal("expected error for unknown invite key")
 	}
 }
 
 func TestUpdateInviteRedemption_DoubleRedeem(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
 
 	now := time.Now()
@@ -343,18 +345,18 @@ func TestUpdateInviteRedemption_DoubleRedeem(t *testing.T) {
 		t.Fatalf("insert invite: %v", err)
 	}
 
-	if err := db.RedeemInvite("invitenet", "twice-key", "perm-key-1"); err != nil {
+	if err := db.RedeemInvite("invitenet", "twice-key", "perm-key-1", now); err != nil {
 		t.Fatalf("first redeem: %v", err)
 	}
 
-	err := db.RedeemInvite("invitenet", "twice-key", "perm-key-2")
+	err := db.RedeemInvite("invitenet", "twice-key", "perm-key-2", now)
 	if err == nil {
 		t.Fatal("expected error for double redeem")
 	}
 }
 
 func TestInsertInvite_DuplicateName(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
 
 	now := time.Now()

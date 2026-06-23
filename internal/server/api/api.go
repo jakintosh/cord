@@ -1,12 +1,9 @@
 package api
 
 import (
-	"context"
 	"log"
 	"net/http"
-	"time"
 
-	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -64,27 +61,4 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("GET /networks/{name}/invites", a.handleInviteList)
 
 	return mux
-}
-
-func Run(
-	ctx context.Context,
-	socketPath string,
-) error {
-	svcOpts := service.Options{
-		Store:  nil,
-		WG:     nil,
-		Clock:  time.Now,
-		Logger: log.Default(),
-	}
-	svc, _ := service.New(svcOpts)
-
-	apiOpts := Options{
-		Service: svc,
-	}
-	api, _ := New(apiOpts)
-	d, err := daemon.New(socketPath, api.Router())
-	if err != nil {
-		return err
-	}
-	return d.Run(ctx)
 }

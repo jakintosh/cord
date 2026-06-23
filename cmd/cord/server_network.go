@@ -92,8 +92,8 @@ var serverNetworkDelete = &args.Command{
 }
 
 var serverNetworkList = &args.Command{
-	Name: "list",
-	Help: "list server networks",
+	Name:    "list",
+	Help:    "list server networks",
 	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
 		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
@@ -108,7 +108,7 @@ var serverNetworkList = &args.Command{
 			return printJSON(networks)
 		}
 		for _, n := range networks {
-			fmt.Println(n.Name)
+			fmt.Println(n)
 		}
 		return nil
 	},

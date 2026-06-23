@@ -29,7 +29,7 @@ func InviteDTOsFromService(
 	invites []*service.Invite,
 ) []InviteDTO {
 	if invites == nil {
-		return nil
+		return []InviteDTO{}
 	}
 	result := make([]InviteDTO, len(invites))
 	for i, inv := range invites {
@@ -42,7 +42,15 @@ func (a *API) handleInviteList(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	wire.WriteData(w, http.StatusOK, []InviteDTO{})
+	network := r.PathValue("name")
+
+	invites, err := a.service.ListInvites(network)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, InviteDTOsFromService(invites))
 }
 
 func (c *Client) ListInvites(

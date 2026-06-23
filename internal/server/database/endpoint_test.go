@@ -6,13 +6,13 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
-	"git.studiopollinator.com/pollinator/cord/internal/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
 func seedNetworkForEndpoint(t *testing.T, db *database.DB) {
 	t.Helper()
 	now := time.Now()
-	if err := db.InsertNetwork(&service.Network{
+	if err := db.BootstrapNetwork(&service.Network{
 		Name:             "epnet",
 		PrivateKey:       "priv",
 		PublicKey:        "pub",
@@ -23,14 +23,13 @@ func seedNetworkForEndpoint(t *testing.T, db *database.DB) {
 		InviteListenPort: 51821,
 		ApiPort:          8080,
 		CreatedAt:        now,
-	}); err != nil {
+	}, &service.Cidr{Name: "epnet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
 	for _, p := range []service.Peer{
 		{Name: "peer-a", PublicKey: "pub-a", Cidr: "10.0.1.1/32", Confirmed: true, Enabled: true},
 		{Name: "peer-b", PublicKey: "pub-b", Cidr: "10.0.1.2/32", Confirmed: true, Enabled: true},
 	} {
-		p := p
 		if err := db.InsertPeer("epnet", &p); err != nil {
 			t.Fatalf("seed peer %s: %v", p.Name, err)
 		}
@@ -38,7 +37,7 @@ func seedNetworkForEndpoint(t *testing.T, db *database.DB) {
 }
 
 func TestInsertAndGetEndpoints(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)
 
 	now := time.Now()
@@ -85,7 +84,7 @@ func TestInsertAndGetEndpoints(t *testing.T) {
 }
 
 func TestGetRecentEndpoints_SinceFilter(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)
 
 	oldTime := time.Now().Add(-2 * time.Hour)
@@ -118,7 +117,7 @@ func TestGetRecentEndpoints_SinceFilter(t *testing.T) {
 }
 
 func TestDeleteEndpointsBefore(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)
 
 	cutoff := time.Now().Add(-1 * time.Hour)
@@ -151,7 +150,7 @@ func TestDeleteEndpointsBefore(t *testing.T) {
 }
 
 func TestInsertEndpointSightings_UnknownPeerSkipped(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)
 
 	err := db.InsertEndpointSightings("epnet", []service.EndpointSighting{
@@ -171,7 +170,7 @@ func TestInsertEndpointSightings_UnknownPeerSkipped(t *testing.T) {
 }
 
 func TestEmptyEndpoints(t *testing.T) {
-	db := testutil.SetupTestDB(t)
+	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)
 
 	endpoints, err := db.GetRecentEndpoints("epnet", time.Now().Add(-24*time.Hour))

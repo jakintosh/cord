@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
+	"git.studiopollinator.com/pollinator/cord/internal/server"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 )
 
@@ -43,7 +44,9 @@ var serverDaemonCmd = &args.Command{
 		)
 		defer cancel()
 
-		return api.Run(ctx, socketPath)
+		return server.Serve(ctx, server.Options{
+			SocketPath: socketPath,
+		})
 	},
 }
 
