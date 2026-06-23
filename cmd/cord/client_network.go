@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
+	"git.studiopollinator.com/pollinator/cord/internal/client"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
 )
 
@@ -27,7 +28,7 @@ var clientNetworkList = &args.Command{
 	Help:    "list installed networks",
 	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
 
 		client := api.NewClient(socketPath)
 		networks, err := client.ListNetworks(context.Background())
@@ -56,7 +57,7 @@ var clientNetworkShow = &args.Command{
 	},
 	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
@@ -79,7 +80,7 @@ var clientNetworkInstall = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
 		invite := i.GetOperand("invite")
 
 		client := api.NewClient(socketPath)
@@ -104,7 +105,7 @@ var clientNetworkUninstall = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
@@ -129,7 +130,7 @@ var clientNetworkEnable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
@@ -152,7 +153,7 @@ var clientNetworkDisable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
@@ -175,7 +176,7 @@ var clientNetworkFetch = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
