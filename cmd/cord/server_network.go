@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
+	"git.studiopollinator.com/pollinator/cord/internal/server"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 )
 
@@ -42,7 +43,7 @@ var serverNetworkAdd = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		name := i.GetOperand("name")
 		cidr := i.GetOperand("cidr")
 		externalIP := i.GetOperand("external-ip")
@@ -78,7 +79,7 @@ var serverNetworkDelete = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		name := i.GetOperand("name")
 
 		client := api.NewClient(socketPath)
@@ -96,7 +97,7 @@ var serverNetworkList = &args.Command{
 	Help:    "list server networks",
 	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 
 		client := api.NewClient(socketPath)
 		networks, err := client.ListNetworks(context.Background())
@@ -125,7 +126,7 @@ var serverNetworkShow = &args.Command{
 	},
 	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		name := i.GetOperand("name")
 
 		client := api.NewClient(socketPath)

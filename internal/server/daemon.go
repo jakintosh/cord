@@ -22,6 +22,10 @@ type Options struct {
 	DBPath string
 }
 
+// DefaultSocketPath is the default Unix socket path used when none is
+// provided.
+const DefaultSocketPath = "/tmp/cord-server.sock"
+
 // DefaultDBPath is the default database path used when none is provided.
 const DefaultDBPath = "data/server.db"
 

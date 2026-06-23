@@ -37,7 +37,7 @@ var serverDaemonCmd = &args.Command{
 	Name: "daemon",
 	Help: "run the cord server daemon",
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 
 		ctx, cancel := signal.NotifyContext(
 			context.Background(), os.Interrupt, syscall.SIGTERM,
@@ -54,7 +54,7 @@ var serverStatusCmd = &args.Command{
 	Name: "status",
 	Help: "check if the cord server daemon is running",
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 
 		client := api.NewClient(socketPath)
 		if err := client.Status(context.Background()); err != nil {

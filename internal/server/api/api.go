@@ -7,8 +7,6 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
-const DefaultSocketPath = "/tmp/cord-server.sock"
-
 type Options struct {
 	Service *service.Service
 	Logger  *log.Logger

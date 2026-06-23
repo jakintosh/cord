@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
+	"git.studiopollinator.com/pollinator/cord/internal/server"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 )
 
@@ -47,7 +48,7 @@ var serverPeerAdd = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		network := i.GetOperand("network")
 		name := i.GetOperand("name")
 		ip := i.GetOperand("ip")
@@ -85,7 +86,7 @@ var serverPeerRename = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 		newName := i.GetOperand("new-name")
@@ -114,7 +115,7 @@ var serverPeerEnable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
@@ -142,7 +143,7 @@ var serverPeerDisable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
@@ -170,7 +171,7 @@ var serverPeerDelete = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
@@ -197,7 +198,7 @@ var serverPeerList = &args.Command{
 	},
 	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
@@ -221,7 +222,7 @@ var serverPeerVisible = &args.Command{
 	},
 	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)

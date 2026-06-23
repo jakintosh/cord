@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
+	"git.studiopollinator.com/pollinator/cord/internal/server"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 )
 
@@ -36,7 +37,7 @@ var serverCidrAdd = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		network := i.GetOperand("network")
 		name := i.GetOperand("name")
 		cidr := i.GetOperand("cidr")
@@ -72,7 +73,7 @@ var serverCidrRename = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		network := i.GetOperand("network")
 		cidr := i.GetOperand("cidr")
 		newName := i.GetOperand("new-name")
@@ -101,7 +102,7 @@ var serverCidrDelete = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		network := i.GetOperand("network")
 		cidr := i.GetOperand("cidr")
 
@@ -128,7 +129,7 @@ var serverCidrList = &args.Command{
 	},
 	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", api.DefaultSocketPath)
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
