@@ -86,6 +86,10 @@ func Serve(
 		return fmt.Errorf("server: new service: %w", err)
 	}
 
+	if err := startEnabledNetworks(ctx, svc); err != nil {
+		return fmt.Errorf("server: start networks: %w", err)
+	}
+
 	apiOpts := api.Options{
 		Service: svc,
 	}
@@ -100,4 +104,35 @@ func Serve(
 	}
 
 	return d.Run(ctx)
+}
+
+// startEnabledNetworks iterates all persisted networks and starts
+// those marked as enabled. Non-fatal: a single network failure is
+// logged but does not prevent others from starting.
+func startEnabledNetworks(
+	ctx context.Context,
+	svc *service.Service,
+) error {
+	names, err := svc.ListNetworks()
+	if err != nil {
+		return fmt.Errorf("list networks: %w", err)
+	}
+
+	var lastErr error
+	for _, name := range names {
+		nw, err := svc.GetNetwork(name)
+		if err != nil {
+			log.Printf("start networks: get %q: %v", name, err)
+			lastErr = err
+			continue
+		}
+		if !nw.Enabled {
+			continue
+		}
+		if err := svc.StartNetwork(ctx, name); err != nil {
+			log.Printf("start networks: start %q: %v", name, err)
+			lastErr = err
+		}
+	}
+	return lastErr
 }

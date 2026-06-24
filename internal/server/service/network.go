@@ -23,6 +23,7 @@ type Network struct {
 	ListenPort       uint16    // WireGuard listen port for the main interface
 	InviteListenPort uint16    // WireGuard listen port for the invite interface
 	ApiPort          uint16    // the internal API port served over the tunnel
+	Enabled          bool      // whether the network's WireGuard devices are running
 	CreatedAt        time.Time // when the network was created
 }
 
@@ -146,6 +147,7 @@ func (s *Service) CreateNetwork(
 		ListenPort:       cfg.ListenPort,
 		InviteListenPort: cfg.InviteListenPort,
 		ApiPort:          cfg.ApiPort,
+		Enabled:          false,
 		CreatedAt:        s.clock(),
 	}
 
@@ -172,6 +174,34 @@ func (s *Service) DeleteNetwork(
 
 	if err := s.store.DeleteNetwork(name); err != nil {
 		return fmt.Errorf("delete network %q: %w", name, mapStoreError(err))
+	}
+	return nil
+}
+
+// EnableNetwork persists the enabled flag and starts the network's
+// WireGuard devices. Idempotent: if the network is already running
+// this is a no-op.
+func (s *Service) EnableNetwork(
+	ctx context.Context,
+	name string,
+) error {
+	if err := s.store.SetNetworkEnabled(name, true); err != nil {
+		return fmt.Errorf("enable network %q: %w", name, mapStoreError(err))
+	}
+	return s.StartNetwork(ctx, name)
+}
+
+// DisableNetwork stops the network's WireGuard devices and persists
+// the disabled flag. Idempotent: if the network is already stopped
+// this is a no-op.
+func (s *Service) DisableNetwork(
+	name string,
+) error {
+	if err := s.StopNetwork(name); err != nil {
+		return fmt.Errorf("disable network %q: %w", name, err)
+	}
+	if err := s.store.SetNetworkEnabled(name, false); err != nil {
+		return fmt.Errorf("disable network %q: %w", name, mapStoreError(err))
 	}
 	return nil
 }
@@ -242,15 +272,15 @@ func (s *Service) StartNetwork(
 		_ = s.wg.RemoveDevice(mainName)
 	})
 
+	if err := main.Up(); err != nil {
+		undo()
+		return fmt.Errorf("start network: main up: %w", err)
+	}
+
 	mainPeers := s.buildMainPeers(peers)
 	if err := main.ApplyPeers(mainPeers); err != nil {
 		undo()
 		return fmt.Errorf("start network: apply main peers: %w", err)
-	}
-
-	if err := main.Up(); err != nil {
-		undo()
-		return fmt.Errorf("start network: main up: %w", err)
 	}
 
 	invites, err := s.store.ListActiveInvites(name, s.clock())
@@ -274,15 +304,15 @@ func (s *Service) StartNetwork(
 		_ = s.wg.RemoveDevice(inviteName)
 	})
 
+	if err := invite.Up(); err != nil {
+		undo()
+		return fmt.Errorf("start network: invite up: %w", err)
+	}
+
 	invitePeers := s.buildInvitePeers(inviteNet, invites)
 	if err := invite.ApplyPeers(invitePeers); err != nil {
 		undo()
 		return fmt.Errorf("start network: apply invite peers: %w", err)
-	}
-
-	if err := invite.Up(); err != nil {
-		undo()
-		return fmt.Errorf("start network: invite up: %w", err)
 	}
 
 	loopCtx, cancel := context.WithCancel(ctx)

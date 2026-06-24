@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
@@ -18,6 +19,8 @@ var serverNetworkCmd = &args.Command{
 		serverNetworkDelete,
 		serverNetworkList,
 		serverNetworkShow,
+		serverNetworkEnable,
+		serverNetworkDisable,
 	},
 }
 
@@ -65,7 +68,11 @@ var serverNetworkAdd = &args.Command{
 			return err
 		}
 
-		return printJSON(network)
+		if err := printJSON(network); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "Network created and disabled. Use 'cord server network enable %s' to start it.\n", name)
+		return nil
 	},
 }
 
@@ -136,5 +143,51 @@ var serverNetworkShow = &args.Command{
 		}
 
 		return printJSON(network)
+	},
+}
+
+var serverNetworkEnable = &args.Command{
+	Name: "enable",
+	Help: "start a server network's WireGuard devices",
+	Operands: []args.Operand{
+		{
+			Name: "name",
+			Help: "network name",
+		},
+	},
+	Handler: func(i *args.Input) error {
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		name := i.GetOperand("name")
+
+		client := api.NewClient(socketPath)
+		if err := client.EnableNetwork(context.Background(), name); err != nil {
+			return err
+		}
+
+		fmt.Println("enabled")
+		return nil
+	},
+}
+
+var serverNetworkDisable = &args.Command{
+	Name: "disable",
+	Help: "stop a server network's WireGuard devices",
+	Operands: []args.Operand{
+		{
+			Name: "name",
+			Help: "network name",
+		},
+	},
+	Handler: func(i *args.Input) error {
+		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		name := i.GetOperand("name")
+
+		client := api.NewClient(socketPath)
+		if err := client.DisableNetwork(context.Background(), name); err != nil {
+			return err
+		}
+
+		fmt.Println("disabled")
+		return nil
 	},
 }

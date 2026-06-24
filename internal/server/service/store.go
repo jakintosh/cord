@@ -25,6 +25,11 @@ type Store interface {
 	// when a network with this name already exists.
 	BootstrapNetwork(network *Network, rootCidr *Cidr, serverPeer *Peer) error
 
+	// SetNetworkEnabled updates the enabled flag for a network.
+	// When enabled, the daemon starts the network's WireGuard devices
+	// and reconciliation loop on boot.
+	SetNetworkEnabled(name string, enabled bool) error
+
 	// DeleteNetwork removes the named network and all of its
 	// resources via foreign-key cascades.
 	DeleteNetwork(name string) error

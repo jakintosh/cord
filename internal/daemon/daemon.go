@@ -28,7 +28,7 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(socketPath, 0700); err != nil {
+	if err := os.Chmod(socketPath, 0666); err != nil {
 		listener.Close()
 		return nil, err
 	}

@@ -25,6 +25,7 @@ CREATE TABLE network (
     listen_port         INTEGER NOT NULL,
     invite_listen_port  INTEGER NOT NULL,
     api_port            INTEGER NOT NULL,
+    enabled             INTEGER DEFAULT 0 NOT NULL,
     created_at_unix     INTEGER NOT NULL
 );
 

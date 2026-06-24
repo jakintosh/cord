@@ -25,6 +25,7 @@ func (db *DB) GetNetwork(
 			listen_port,
 			invite_listen_port,
 			api_port,
+			enabled,
 			created_at_unix
 		FROM network
 		WHERE name = ?1`,
@@ -43,6 +44,7 @@ func (db *DB) GetNetwork(
 		&net.ListenPort,
 		&net.InviteListenPort,
 		&net.ApiPort,
+		&net.Enabled,
 		&createdUnix,
 	); err != nil {
 		return nil, CheckSqliteErr("get network", err)
@@ -118,9 +120,10 @@ func (db *DB) BootstrapNetwork(
 			listen_port,
 			invite_listen_port,
 			api_port,
+			enabled,
 			created_at_unix
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
 		network.Name,
 		network.PrivateKey,
 		network.PublicKey,
@@ -130,6 +133,7 @@ func (db *DB) BootstrapNetwork(
 		network.ListenPort,
 		network.InviteListenPort,
 		network.ApiPort,
+		boolToInt(network.Enabled),
 		network.CreatedAt.Unix(),
 	)
 	if err != nil {
@@ -180,6 +184,30 @@ func (db *DB) BootstrapNetwork(
 		return fmt.Errorf("commit bootstrap tx: %w", err)
 	}
 
+	return nil
+}
+
+func (db *DB) SetNetworkEnabled(
+	name string,
+	enabled bool,
+) error {
+	result, err := db.Conn.Exec(`
+		UPDATE network
+		SET enabled = ?1
+		WHERE name = ?2`,
+		boolToInt(enabled),
+		name,
+	)
+	if err != nil {
+		return CheckSqliteErr("set network enabled", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set network enabled: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("%w: network %q not found", service.ErrNotFound, name)
+	}
 	return nil
 }
 

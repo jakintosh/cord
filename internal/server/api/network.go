@@ -16,6 +16,7 @@ type NetworkDTO struct {
 	ExternalIP string `json:"external_ip"`
 	Port       uint16 `json:"port"`
 	InviteCidr string `json:"invite_cidr,omitempty"`
+	Enabled    bool   `json:"enabled"`
 }
 
 type AddNetworkRequest struct {
@@ -37,6 +38,7 @@ func NetworkDTOFromService(
 		ExternalIP: n.ExternalIP,
 		Port:       n.ListenPort,
 		InviteCidr: n.InviteCidr,
+		Enabled:    n.Enabled,
 	}
 }
 
@@ -117,6 +119,34 @@ func (a *API) handleNetworkDelete(
 	})
 }
 
+func (a *API) handleNetworkEnable(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	name := r.PathValue("name")
+
+	if err := a.service.EnableNetwork(r.Context(), name); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, StatusResponse{Status: "enabled"})
+}
+
+func (a *API) handleNetworkDisable(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	name := r.PathValue("name")
+
+	if err := a.service.DisableNetwork(name); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, StatusResponse{Status: "disabled"})
+}
+
 func (c *Client) ListNetworks(
 	ctx context.Context,
 ) (
@@ -167,5 +197,29 @@ func (c *Client) DeleteNetwork(
 		return err
 	}
 	_, err = daemon.DecodeResponse[struct{}](resp)
+	return err
+}
+
+func (c *Client) EnableNetwork(
+	ctx context.Context,
+	name string,
+) error {
+	resp, err := c.t.Post(ctx, "/networks/"+name+"/enable", nil)
+	if err != nil {
+		return err
+	}
+	_, err = daemon.DecodeResponse[StatusResponse](resp)
+	return err
+}
+
+func (c *Client) DisableNetwork(
+	ctx context.Context,
+	name string,
+) error {
+	resp, err := c.t.Post(ctx, "/networks/"+name+"/disable", nil)
+	if err != nil {
+		return err
+	}
+	_, err = daemon.DecodeResponse[StatusResponse](resp)
 	return err
 }
