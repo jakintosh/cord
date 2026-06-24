@@ -1,9 +1,13 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"time"
+
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 // Network is the persistent identity of a server network. It holds the
@@ -172,8 +176,299 @@ func (s *Service) DeleteNetwork(
 	return nil
 }
 
+// StartNetwork brings up both WireGuard devices (main and invite) for
+// the named network and starts the reconciliation loop in the
+// background. Non-blocking. Idempotent: starting an already-running
+// network is a no-op.
+func (s *Service) StartNetwork(
+	ctx context.Context,
+	name string,
+) error {
+	s.mu.Lock()
+	if _, exists := s.running[name]; exists {
+		s.mu.Unlock()
+		return nil
+	}
+	s.mu.Unlock()
+
+	network, err := s.store.GetNetwork(name)
+	if err != nil {
+		return fmt.Errorf("start network: %w", mapStoreError(err))
+	}
+
+	peers, err := s.store.ListPeers(name)
+	if err != nil {
+		return fmt.Errorf("start network: %w", err)
+	}
+
+	mainName, inviteName, err := deviceNames(name)
+	if err != nil {
+		return fmt.Errorf("start network: %w", err)
+	}
+
+	_, rootNet, err := net.ParseCIDR(network.RootCidr)
+	if err != nil {
+		return fmt.Errorf("start network: parse root cidr: %w", err)
+	}
+	serverAddress := cidrAddress(rootNet)
+
+	_, inviteNet, err := net.ParseCIDR(network.InviteCidr)
+	if err != nil {
+		return fmt.Errorf("start network: parse invite cidr: %w", err)
+	}
+	inviteAddress := cidrAddress(inviteNet)
+
+	// Cleanup stack: each successful creation pushes a teardown
+	// function. If anything fails during setup, we unwind the
+	// whole stack.
+	var cleanups []func()
+	undo := func() {
+		for i := len(cleanups) - 1; i >= 0; i-- {
+			cleanups[i]()
+		}
+	}
+
+	main, err := s.wg.NewDevice(
+		mainName,
+		network.PrivateKey,
+		serverAddress,
+		network.ListenPort,
+	)
+	if err != nil {
+		return fmt.Errorf("start network: main device: %w", err)
+	}
+	cleanups = append(cleanups, func() {
+		_ = main.Down()
+		_ = s.wg.RemoveDevice(mainName)
+	})
+
+	mainPeers := s.buildMainPeers(peers)
+	if err := main.ApplyPeers(mainPeers); err != nil {
+		undo()
+		return fmt.Errorf("start network: apply main peers: %w", err)
+	}
+
+	if err := main.Up(); err != nil {
+		undo()
+		return fmt.Errorf("start network: main up: %w", err)
+	}
+
+	invites, err := s.store.ListActiveInvites(name, s.clock())
+	if err != nil {
+		undo()
+		return fmt.Errorf("start network: list invites: %w", err)
+	}
+
+	invite, err := s.wg.NewDevice(
+		inviteName,
+		network.PrivateKey,
+		inviteAddress,
+		network.InviteListenPort,
+	)
+	if err != nil {
+		undo()
+		return fmt.Errorf("start network: invite device: %w", err)
+	}
+	cleanups = append(cleanups, func() {
+		_ = invite.Down()
+		_ = s.wg.RemoveDevice(inviteName)
+	})
+
+	invitePeers := s.buildInvitePeers(inviteNet, invites)
+	if err := invite.ApplyPeers(invitePeers); err != nil {
+		undo()
+		return fmt.Errorf("start network: apply invite peers: %w", err)
+	}
+
+	if err := invite.Up(); err != nil {
+		undo()
+		return fmt.Errorf("start network: invite up: %w", err)
+	}
+
+	loopCtx, cancel := context.WithCancel(ctx)
+	s.mu.Lock()
+	s.running[name] = &NetworkDevices{
+		Main:       main,
+		Invite:     invite,
+		MainName:   mainName,
+		InviteName: inviteName,
+		Cancel:     cancel,
+	}
+	s.mu.Unlock()
+
+	go s.reconcileLoop(loopCtx, name)
+
+	return nil
+}
+
+// StopNetwork brings down both WireGuard devices for the named network
+// and stops the reconciliation loop. Idempotent.
+func (s *Service) StopNetwork(
+	name string,
+) error {
+	s.mu.Lock()
+	devices, exists := s.running[name]
+	if !exists {
+		s.mu.Unlock()
+		return nil
+	}
+	delete(s.running, name)
+	s.mu.Unlock()
+
+	devices.Cancel()
+
+	var errs []error
+
+	if err := devices.Main.Down(); err != nil {
+		errs = append(errs, fmt.Errorf("main down: %w", err))
+	}
+	if err := s.wg.RemoveDevice(devices.MainName); err != nil {
+		errs = append(errs, fmt.Errorf("remove main: %w", err))
+	}
+
+	if err := devices.Invite.Down(); err != nil {
+		errs = append(errs, fmt.Errorf("invite down: %w", err))
+	}
+	if err := s.wg.RemoveDevice(devices.InviteName); err != nil {
+		errs = append(errs, fmt.Errorf("remove invite: %w", err))
+	}
+
+	return errors.Join(errs...)
+}
+
 // defaultInviteCidr is the invite subnet used when CreateNetwork is
 // called without an explicit InviteCidr. It lives in the 172.16/12
 // private range, which is unlikely to overlap with typical root CIDRs
 // in the 10/8 range.
 const defaultInviteCidr = "172.16.10.0/24"
+
+// inviteSuffix is the suffix appended to the network name for the invite device
+const inviteSuffix = "-i"
+
+// reconcileLoop runs the periodic reconciliation for a started network
+// until the context is cancelled.
+func (s *Service) reconcileLoop(
+	ctx context.Context,
+	name string,
+) {
+	ticker := time.NewTicker(s.reconcileInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.reconcileOnce(name)
+		}
+	}
+}
+
+// reconcileOnce performs a single reconciliation pass for a network,
+// applying the current peer set to both devices.
+func (s *Service) reconcileOnce(
+	name string,
+) {
+	s.mu.Lock()
+	devices, exists := s.running[name]
+	s.mu.Unlock()
+	if !exists {
+		return
+	}
+
+	network, err := s.store.GetNetwork(name)
+	if err != nil {
+		s.logf("reconcile %s: get network: %v", name, err)
+		return
+	}
+
+	peers, err := s.store.ListPeers(name)
+	if err != nil {
+		s.logf("reconcile %s: list peers: %v", name, err)
+		return
+	}
+
+	mainPeers := s.buildMainPeers(peers)
+	if err := devices.Main.ApplyPeers(mainPeers); err != nil {
+		s.logf("reconcile %s: apply main peers: %v", name, err)
+	}
+
+	_, inviteNet, err := net.ParseCIDR(network.InviteCidr)
+	if err != nil {
+		s.logf("reconcile %s: parse invite cidr: %v", name, err)
+		return
+	}
+
+	invites, err := s.store.ListActiveInvites(name, s.clock())
+	if err != nil {
+		s.logf("reconcile %s: list invites: %v", name, err)
+		return
+	}
+
+	invitePeers := s.buildInvitePeers(inviteNet, invites)
+	if err := devices.Invite.ApplyPeers(invitePeers); err != nil {
+		s.logf("reconcile %s: apply invite peers: %v", name, err)
+	}
+}
+
+// buildMainPeers converts the peer list into WireGuard peer
+// configuration for the main device. Only enabled peers are included.
+func (s *Service) buildMainPeers(
+	peers []*Peer,
+) []wireguard.WGPeer {
+	var wgpeers []wireguard.WGPeer
+	for _, peer := range peers {
+		if !peer.Enabled {
+			continue
+		}
+		wgpeers = append(wgpeers, wireguard.WGPeer{
+			PublicKey:      peer.PublicKey,
+			AllowedIPs:     []string{peer.Cidr},
+			EndpointPolicy: wireguard.EndpointDynamic,
+		})
+	}
+	return wgpeers
+}
+
+// buildInvitePeers converts active invites into WireGuard peer
+// configuration for the invite device.
+func (s *Service) buildInvitePeers(
+	inviteNet *net.IPNet,
+	invites []*Invite,
+) []wireguard.WGPeer {
+	prefix, _ := inviteNet.Mask.Size()
+
+	var wgpeers []wireguard.WGPeer
+	for _, invite := range invites {
+		cidr := fmt.Sprintf("%s/%d", invite.TempIP.String(), prefix)
+		wgpeers = append(wgpeers, wireguard.WGPeer{
+			PublicKey:      invite.TempPubKey,
+			AllowedIPs:     []string{cidr},
+			EndpointPolicy: wireguard.EndpointDynamic,
+		})
+	}
+	return wgpeers
+}
+
+// deviceNames returns the WireGuard interface names for a network's
+// main and invite devices. Both names are validated against the
+// kernel interface name length limit.
+func deviceNames(
+	network string,
+) (
+	main string,
+	invite string,
+	err error,
+) {
+	main = network
+	invite = network + inviteSuffix
+
+	if err := wireguard.ValidateDeviceName(main); err != nil {
+		return "", "", fmt.Errorf("main device: %w", err)
+	}
+	if err := wireguard.ValidateDeviceName(invite); err != nil {
+		return "", "", fmt.Errorf("invite device: %w", err)
+	}
+
+	return main, invite, nil
+}

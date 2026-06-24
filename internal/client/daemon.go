@@ -10,6 +10,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 // Options configures the client daemon composition root. Both fields are
@@ -20,6 +21,14 @@ type Options struct {
 
 	// DBPath is the filesystem path to the SQLite database file.
 	DBPath string
+
+	// Backend selects the WireGuard implementation: "auto" (default),
+	// "kernel", or "userspace".
+	Backend string
+
+	// SyncInterval controls the client sync interval. Defaults to 30s
+	// when zero.
+	SyncInterval time.Duration
 }
 
 // DefaultSocketPath is the default Unix socket path used when none is
@@ -29,18 +38,22 @@ const DefaultSocketPath = "/tmp/cord-client.sock"
 // DefaultDBPath is the default database path used when none is provided.
 const DefaultDBPath = "data/client.db"
 
-// Run is the production composition root for the cord client daemon.
+// Serve is the production composition root for the cord client daemon.
 // It opens dependencies, constructs the service and API, starts the
 // daemon on a Unix socket, and blocks until the context is cancelled.
-func Run(
+func Serve(
 	ctx context.Context,
 	opts Options,
 ) error {
+	if opts.DBPath == "" {
+		opts.DBPath = DefaultDBPath
+	}
 	if opts.SocketPath == "" {
 		return fmt.Errorf("client: socket path required")
 	}
-	if opts.DBPath == "" {
-		opts.DBPath = DefaultDBPath
+	backend, err := wireguard.ParseBackendType(opts.Backend)
+	if err != nil {
+		return fmt.Errorf("client: %w", err)
 	}
 
 	dbOpts := database.Options{
@@ -53,11 +66,20 @@ func Run(
 	}
 	defer db.Close()
 
+	wgOpts := wireguard.Options{
+		Backend: backend,
+	}
+	wg, err := wireguard.New(wgOpts)
+	if err != nil {
+		return fmt.Errorf("client: new wireguard: %w", err)
+	}
+
 	svcOpts := service.Options{
-		Store:  db,
-		WG:     nil,
-		Clock:  time.Now,
-		Logger: log.Default(),
+		Store:        db,
+		WG:           wg,
+		Clock:        time.Now,
+		Logger:       log.Default(),
+		SyncInterval: opts.SyncInterval,
 	}
 	svc, err := service.New(svcOpts)
 	if err != nil {

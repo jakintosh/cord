@@ -7,6 +7,7 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 func SetupDB(t *testing.T) *database.DB {
@@ -31,7 +32,7 @@ type Env struct {
 	Service *service.Service
 }
 
-func SetupService(t *testing.T, wg service.WG) *Env {
+func SetupService(t *testing.T, wg wireguard.WG) *Env {
 	t.Helper()
 
 	db := SetupDB(t)

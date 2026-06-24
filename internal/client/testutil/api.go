@@ -2,52 +2,16 @@ package testutil
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
-	"sync"
 	"testing"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
-
-type mockWG struct {
-	mu     sync.Mutex
-	seq    int
-	devErr error
-}
-
-func (m *mockWG) GenerateKey() (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.seq++
-	return fmt.Sprintf("mock-priv-key-%d", m.seq), nil
-}
-
-func (m *mockWG) PublicKey(privateKey string) (string, error) {
-	return privateKey + "-pub", nil
-}
-
-func (m *mockWG) NewDevice(name, privateKey, address string, port uint16) (service.WGDevice, error) {
-	if m.devErr != nil {
-		return nil, m.devErr
-	}
-	return &mockDevice{}, nil
-}
-
-func (m *mockWG) RemoveDevice(name string) error {
-	return nil
-}
-
-type mockDevice struct{}
-
-func (d *mockDevice) ApplyPeers(peers []service.WGPeer) error { return nil }
-func (d *mockDevice) Up() error                               { return nil }
-func (d *mockDevice) Down(remove bool) error                  { return nil }
-func (d *mockDevice) DeviceName() string                      { return "mock" }
 
 type APIEnv struct {
 	DB      *database.DB
@@ -62,7 +26,7 @@ func Setup(t *testing.T) *APIEnv {
 
 	db := SetupDB(t)
 
-	wg := &mockWG{}
+	wg := wireguardtest.NewMockWG()
 
 	svc, err := service.New(service.Options{
 		Store:  db,

@@ -1,48 +1,23 @@
 package service_test
 
 import (
-	"fmt"
-	"sync"
 	"testing"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
-
-type mockWG struct {
-	mu  sync.Mutex
-	seq int
-}
-
-func (m *mockWG) GenerateKey() (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.seq++
-	return fmt.Sprintf("mock-priv-key-%d", m.seq), nil
-}
-
-func (m *mockWG) PublicKey(privateKey string) (string, error) {
-	return privateKey + "-pub", nil
-}
-
-func (m *mockWG) NewDevice(name, privateKey, address string, port uint16) (service.WGDevice, error) {
-	return nil, nil
-}
-
-func (m *mockWG) RemoveDevice(name string) error {
-	return nil
-}
 
 type testEnv struct {
 	svc *service.Service
 	db  *testutil.Env
-	wg  *mockWG
+	wg  *wireguardtest.MockWG
 }
 
 func setupTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	wg := &mockWG{}
+	wg := wireguardtest.NewMockWG()
 	env := testutil.SetupService(t, wg)
 	return &testEnv{svc: env.Service, db: env, wg: wg}
 }

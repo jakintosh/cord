@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 )
 
@@ -20,11 +21,24 @@ func TestStart_NoStore(t *testing.T) {
 	}
 }
 
-func TestStart_WithStubWG(t *testing.T) {
-	// Start requires a real WG, so with stubWG it returns ErrNotImplemented
-	env := setupTestEnv(t)
-	// setupTestEnv uses mockWG, not stubWG. Let's test with stubWG.
-	_ = env
+func TestStart_NoWG(t *testing.T) {
+	db, err := database.Open(database.Options{Path: ":memory:"})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	svc, err := service.New(service.Options{
+		Store: db,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+
+	err = svc.Start(context.Background())
+	if !errors.Is(err, service.ErrWireGuardUnavailable) {
+		t.Errorf("err = %v, want ErrWireGuardUnavailable", err)
+	}
 }
 
 func TestClose_StopsRunningNetworks(t *testing.T) {
@@ -41,15 +55,12 @@ func TestClose_StopsRunningNetworks(t *testing.T) {
 	}
 
 	// Device should have been cleaned up
-	d, ok := env.wg.devices["close-me"]
+	d, ok := env.wg.Devices["close-me"]
 	if !ok {
 		t.Fatal("expected device was created")
 	}
-	if d.DownCalls() != 1 {
-		t.Errorf("down calls = %d, want 1", d.DownCalls())
-	}
-	if !d.LastDownRemove() {
-		t.Error("down should have been called with remove=true")
+	if d.DownCalls != 1 {
+		t.Errorf("down calls = %d, want 1", d.DownCalls)
 	}
 
 	// Status should show not running

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"time"
+
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 // Network is the persistent record of a client-side network membership.
@@ -162,6 +164,9 @@ func (s *Service) InstallNetwork(
 	if s.store == nil {
 		return nil, ErrNotImplemented
 	}
+	if s.wg == nil {
+		return nil, ErrWireGuardUnavailable
+	}
 
 	if invite.NetworkName == "" {
 		return nil, ErrInvalidInput
@@ -240,6 +245,9 @@ func (s *Service) EnableNetwork(
 ) error {
 	if s.store == nil {
 		return ErrNotImplemented
+	}
+	if s.wg == nil {
+		return ErrWireGuardUnavailable
 	}
 
 	s.mu.Lock()
@@ -334,17 +342,20 @@ func (s *Service) enableLocked(
 
 	peers, err := s.store.ListPeers(nw.Name)
 	if err != nil {
-		_ = device.Down(true)
+		_ = device.Down()
+		_ = s.wg.RemoveDevice(nw.Name)
 		return err
 	}
 
 	if err := device.ApplyPeers(s.buildPeers(nw, peers)); err != nil {
-		_ = device.Down(true)
+		_ = device.Down()
+		_ = s.wg.RemoveDevice(nw.Name)
 		return err
 	}
 
 	if err := device.Up(); err != nil {
-		_ = device.Down(true)
+		_ = device.Down()
+		_ = s.wg.RemoveDevice(nw.Name)
 		return err
 	}
 
@@ -370,7 +381,8 @@ func (s *Service) disableLocked(
 	}
 
 	rn.cancel()
-	_ = rn.device.Down(true)
+	_ = rn.device.Down()
+	_ = s.wg.RemoveDevice(name)
 	delete(s.running, name)
 }
 
@@ -385,7 +397,7 @@ func (s *Service) syncLoop(
 	ctx context.Context,
 	name string,
 ) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(s.syncInterval)
 	defer ticker.Stop()
 
 	for {
@@ -440,20 +452,22 @@ const SyncInterval = 30 * time.Second
 func (s *Service) buildPeers(
 	nw *Network,
 	peers []*Peer,
-) []WGPeer {
-	wgPeers := make([]WGPeer, 0, len(peers)+1)
+) []wireguard.WGPeer {
+	wgPeers := make([]wireguard.WGPeer, 0, len(peers)+1)
 
-	wgPeers = append(wgPeers, WGPeer{
-		PublicKey:  nw.ServerPubkey,
-		AllowedIPs: []string{nw.AssignedCidr},
-		Endpoint:   nw.ServerEndpoint,
+	wgPeers = append(wgPeers, wireguard.WGPeer{
+		PublicKey:      nw.ServerPubkey,
+		AllowedIPs:     []string{nw.AssignedCidr},
+		Endpoint:       nw.ServerEndpoint,
+		EndpointPolicy: wireguard.EndpointFixed,
 	})
 
 	for _, p := range peers {
-		wgPeers = append(wgPeers, WGPeer{
-			PublicKey:  p.PublicKey,
-			AllowedIPs: []string{p.Cidr},
-			Endpoint:   p.Endpoint,
+		wgPeers = append(wgPeers, wireguard.WGPeer{
+			PublicKey:      p.PublicKey,
+			AllowedIPs:     []string{p.Cidr},
+			Endpoint:       p.Endpoint,
+			EndpointPolicy: wireguard.EndpointBootstrap,
 		})
 	}
 

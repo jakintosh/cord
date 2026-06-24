@@ -288,16 +288,13 @@ func TestUninstallNetwork_DisablesFirst(t *testing.T) {
 		t.Fatalf("uninstall: %v", err)
 	}
 
-	// Verify the device was cleaned up (Down called with remove=true)
-	d, ok := env.wg.devices["enabled-net"]
+	// Verify the device was cleaned up
+	d, ok := env.wg.Devices["enabled-net"]
 	if !ok {
 		t.Fatal("expected device was created during enable")
 	}
-	if d.DownCalls() != 1 {
-		t.Errorf("down calls = %d, want 1", d.DownCalls())
-	}
-	if !d.LastDownRemove() {
-		t.Error("down should have been called with remove=true")
+	if d.DownCalls != 1 {
+		t.Errorf("down calls = %d, want 1", d.DownCalls)
 	}
 }
 
@@ -320,12 +317,12 @@ func TestEnableNetwork_Success(t *testing.T) {
 	}
 
 	// Verify device was created
-	d, ok := env.wg.devices["enable-me"]
+	d, ok := env.wg.Devices["enable-me"]
 	if !ok {
 		t.Fatal("expected device was created")
 	}
-	if d.UpCalls() != 1 {
-		t.Errorf("up calls = %d, want 1", d.UpCalls())
+	if d.UpCalls != 1 {
+		t.Errorf("up calls = %d, want 1", d.UpCalls)
 	}
 }
 
@@ -343,12 +340,12 @@ func TestEnableNetwork_AlreadyRunning(t *testing.T) {
 		t.Fatalf("second enable: %v", err)
 	}
 
-	d, ok := env.wg.devices["running"]
+	d, ok := env.wg.Devices["running"]
 	if !ok {
 		t.Fatal("expected device was created")
 	}
-	if d.UpCalls() != 1 {
-		t.Errorf("up calls = %d, want 1 (idempotent)", d.UpCalls())
+	if d.UpCalls != 1 {
+		t.Errorf("up calls = %d, want 1 (idempotent)", d.UpCalls)
 	}
 }
 
@@ -365,7 +362,7 @@ func TestEnableNetwork_DeviceError(t *testing.T) {
 	env := setupTestEnv(t)
 	seedNetwork(t, env.svc, "bad-device")
 
-	env.wg.newErr = errors.New("device create failed")
+	env.wg.NewErr = errors.New("device create failed")
 
 	err := env.svc.EnableNetwork(context.Background(), "bad-device")
 	if err == nil {
@@ -405,15 +402,12 @@ func TestDisableNetwork_Success(t *testing.T) {
 	}
 
 	// Device should have been cleaned up
-	d, ok := env.wg.devices["disable-me"]
+	d, ok := env.wg.Devices["disable-me"]
 	if !ok {
 		t.Fatal("expected device was created")
 	}
-	if d.DownCalls() != 1 {
-		t.Errorf("down calls = %d, want 1", d.DownCalls())
-	}
-	if !d.LastDownRemove() {
-		t.Error("down should have been called with remove=true")
+	if d.DownCalls != 1 {
+		t.Errorf("down calls = %d, want 1", d.DownCalls)
 	}
 }
 

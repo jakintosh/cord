@@ -16,7 +16,7 @@ func TestBuildPeers_IncludesServer(t *testing.T) {
 		t.Fatalf("enable: %v", err)
 	}
 
-	d, ok := env.wg.devices["peer-test"]
+	d, ok := env.wg.Devices["peer-test"]
 	if !ok {
 		t.Fatal("expected device was created")
 	}
@@ -51,7 +51,7 @@ func TestBuildPeers_DoesNotIncludeSelf(t *testing.T) {
 		t.Fatalf("enable: %v", err)
 	}
 
-	d, ok := env.wg.devices["self-test"]
+	d, ok := env.wg.Devices["self-test"]
 	if !ok {
 		t.Fatal("expected device was created")
 	}

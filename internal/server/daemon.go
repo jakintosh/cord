@@ -10,7 +10,15 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
+
+// DefaultSocketPath is the default Unix socket path used when none is
+// provided.
+const DefaultSocketPath = "/tmp/cord-server.sock"
+
+// DefaultDBPath is the default database path used when none is provided.
+const DefaultDBPath = "data/server.db"
 
 // Options configures the server composition root. Both fields are
 // required for full operation.
@@ -20,14 +28,15 @@ type Options struct {
 
 	// DBPath is the filesystem path to the SQLite database file.
 	DBPath string
+
+	// Backend selects the WireGuard implementation: "auto" (default),
+	// "kernel", or "userspace".
+	Backend string
+
+	// ReconcileInterval controls the server reconciliation interval.
+	// Defaults to 10s when zero.
+	ReconcileInterval time.Duration
 }
-
-// DefaultSocketPath is the default Unix socket path used when none is
-// provided.
-const DefaultSocketPath = "/tmp/cord-server.sock"
-
-// DefaultDBPath is the default database path used when none is provided.
-const DefaultDBPath = "data/server.db"
 
 // Serve is the production composition root for the cord server daemon.
 // It opens dependencies, constructs the service and API, starts the
@@ -36,11 +45,15 @@ func Serve(
 	ctx context.Context,
 	opts Options,
 ) error {
+	if opts.DBPath == "" {
+		opts.DBPath = DefaultDBPath
+	}
 	if opts.SocketPath == "" {
 		return fmt.Errorf("server: socket path required")
 	}
-	if opts.DBPath == "" {
-		opts.DBPath = DefaultDBPath
+	backend, err := wireguard.ParseBackendType(opts.Backend)
+	if err != nil {
+		return fmt.Errorf("server: %w", err)
 	}
 
 	dbOpts := database.Options{
@@ -53,11 +66,20 @@ func Serve(
 	}
 	defer db.Close()
 
+	wgOpts := wireguard.Options{
+		Backend: backend,
+	}
+	wg, err := wireguard.New(wgOpts)
+	if err != nil {
+		return fmt.Errorf("server: new wireguard: %w", err)
+	}
+
 	svcOpts := service.Options{
-		Store:  db,
-		WG:     nil,
-		Clock:  time.Now,
-		Logger: log.Default(),
+		Store:              db,
+		WG:                 wg,
+		Clock:              time.Now,
+		Logger:             log.Default(),
+		ReconcileInterval:  opts.ReconcileInterval,
 	}
 	svc, err := service.New(svcOpts)
 	if err != nil {

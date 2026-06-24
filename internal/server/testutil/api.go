@@ -1,47 +1,22 @@
 package testutil
 
 import (
-	"fmt"
 	"log"
 	"net/http"
-	"sync"
 	"testing"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
-
-type MockWG struct {
-	mu  sync.Mutex
-	seq int
-}
-
-func (m *MockWG) GenerateKey() (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.seq++
-	return fmt.Sprintf("mock-priv-key-%d", m.seq), nil
-}
-
-func (m *MockWG) PublicKey(privateKey string) (string, error) {
-	return privateKey + "-pub", nil
-}
-
-func (m *MockWG) NewDevice(name, privateKey, address string, port uint16) (service.WGDevice, error) {
-	return nil, nil
-}
-
-func (m *MockWG) RemoveDevice(name string) error {
-	return nil
-}
 
 type APIEnv struct {
 	DB      *database.DB
 	Service *service.Service
 	Router  http.Handler
-	WG      *MockWG
+	WG      *wireguardtest.MockWG
 }
 
 func Setup(t *testing.T) *APIEnv {
@@ -49,7 +24,7 @@ func Setup(t *testing.T) *APIEnv {
 
 	db := SetupDB(t)
 
-	wg := &MockWG{}
+	wg := wireguardtest.NewMockWG()
 
 	svcOpts := service.Options{
 		Store:  db,
