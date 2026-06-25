@@ -5,7 +5,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/server"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 )
 
 var serverInviteCmd = &args.Command{
@@ -30,7 +30,7 @@ var serverInviteList = &args.Command{
 		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		network := i.GetOperand("network")
 
-		client := api.NewClient(socketPath)
+		client := admin.NewClient(socketPath)
 		invites, err := client.ListInvites(context.Background(), network)
 		if err != nil {
 			return err

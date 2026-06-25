@@ -1,4 +1,4 @@
-package api
+package admin
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -113,7 +114,7 @@ func (a *API) handleNetworkDelete(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, DeleteResponse{
+	wire.WriteData(w, http.StatusOK, api.DeleteResponse{
 		Status: "deleted",
 		ID:     name,
 	})
@@ -130,7 +131,7 @@ func (a *API) handleNetworkEnable(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, StatusResponse{Status: "enabled"})
+	wire.WriteData(w, http.StatusOK, api.StatusResponse{Status: "enabled"})
 }
 
 func (a *API) handleNetworkDisable(
@@ -144,7 +145,7 @@ func (a *API) handleNetworkDisable(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, StatusResponse{Status: "disabled"})
+	wire.WriteData(w, http.StatusOK, api.StatusResponse{Status: "disabled"})
 }
 
 func (c *Client) ListNetworks(
@@ -208,7 +209,7 @@ func (c *Client) EnableNetwork(
 	if err != nil {
 		return err
 	}
-	_, err = daemon.DecodeResponse[StatusResponse](resp)
+	_, err = daemon.DecodeResponse[api.StatusResponse](resp)
 	return err
 }
 
@@ -220,6 +221,6 @@ func (c *Client) DisableNetwork(
 	if err != nil {
 		return err
 	}
-	_, err = daemon.DecodeResponse[StatusResponse](resp)
+	_, err = daemon.DecodeResponse[api.StatusResponse](resp)
 	return err
 }

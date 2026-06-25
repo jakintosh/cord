@@ -60,6 +60,17 @@ type EndpointWitness struct {
 	Timestamp time.Time
 }
 
+// ResolvePeerIdentity looks up a confirmed peer by IP address within
+// the network. Used by the identity middleware to authenticate incoming
+// peer requests by their WireGuard source IP.
+func (s *Service) ResolvePeerIdentity(network string, ip net.IP) (*Peer, error) {
+	p, err := s.store.GetPeerByIP(network, ip)
+	if err != nil {
+		return nil, fmt.Errorf("resolve peer identity: %w", mapStoreError(err))
+	}
+	return p, nil
+}
+
 // GetPeer returns a peer by name within the given network.
 func (s *Service) GetPeer(
 	network string,
@@ -265,37 +276,18 @@ func (s *Service) DisablePeer(
 // temporary invite record is removed on first confirmation.
 func (s *Service) ConfirmPeer(
 	network string,
-	pubKey string,
-	ip net.IP,
+	name string,
 ) error {
-	p, err := s.store.GetPeerByKey(network, pubKey)
-	if err != nil {
-		return fmt.Errorf("get peer by key: %w", mapStoreError(err))
-	}
-
-	if ip != nil {
-		peerIP, _, err := net.ParseCIDR(p.Cidr)
-		if err != nil {
-			return fmt.Errorf("parse peer CIDR: %w", err)
-		}
-		if !peerIP.Equal(ip) {
-			return fmt.Errorf(
-				"%w: IP mismatch for peer %q",
-				ErrInvalidInput, p.Name,
-			)
-		}
-	}
-
 	confirmed := true
-	_, err = s.store.UpdatePeer(network, p.Name, UpdatePeerRequest{
+	_, err := s.store.UpdatePeer(network, name, UpdatePeerRequest{
 		Enabled:   &confirmed,
 		Confirmed: &confirmed,
 	})
 	if err != nil {
-		return fmt.Errorf("confirm peer %q: %w", p.Name, mapStoreError(err))
+		return fmt.Errorf("confirm peer %q: %w", name, mapStoreError(err))
 	}
 
-	_ = s.store.DeleteInvite(network, p.Name)
+	_ = s.store.DeleteInvite(network, name)
 
 	return nil
 }

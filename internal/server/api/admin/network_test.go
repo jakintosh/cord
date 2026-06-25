@@ -1,4 +1,4 @@
-package api_test
+package admin_test
 
 import (
 	"net/http"
@@ -6,6 +6,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
@@ -23,7 +24,7 @@ func TestAPICreateNetwork_Success(
 		"external_ip": "1.2.3.4",
 		"port": 51820
 	}`
-	result := wire.TestPost[api.NetworkDTO](env.Router, url, body)
+	result := wire.TestPost[admin.NetworkDTO](env.Router, url, body)
 
 	// verify result
 	data := result.ExpectStatusOK(t, http.StatusCreated)
@@ -70,7 +71,7 @@ func TestAPICreateNetwork_WithAllFields(
 		"invite_port": 51821,
 		"api_port": 8080
 	}`
-	result := wire.TestPost[api.NetworkDTO](env.Router, url, body)
+	result := wire.TestPost[admin.NetworkDTO](env.Router, url, body)
 
 	// verify result
 	data := result.ExpectStatusOK(t, http.StatusCreated)
@@ -239,7 +240,7 @@ func TestAPIShowNetwork_Success(
 
 	// get network
 	url := "/networks/testnet"
-	result := wire.TestGet[api.NetworkDTO](env.Router, url)
+	result := wire.TestGet[admin.NetworkDTO](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)

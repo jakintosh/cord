@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 )
 
 func TestGetNetwork_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "mynet")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "mynet")
 
-	nw, err := env.svc.GetNetwork("mynet")
+	nw, err := env.Service.GetNetwork("mynet")
 	if err != nil {
 		t.Fatalf("get network: %v", err)
 	}
@@ -37,24 +38,24 @@ func TestGetNetwork_Success(t *testing.T) {
 	if nw.Enabled {
 		t.Error("new network should be disabled")
 	}
-	if nw.CreatedAt.Unix() != fixedTime.Unix() {
-		t.Errorf("created_at = %v, want %v", nw.CreatedAt, fixedTime)
+	if nw.CreatedAt.Unix() != testutil.FixedTime.Unix() {
+		t.Errorf("created_at = %v, want %v", nw.CreatedAt, testutil.FixedTime)
 	}
 }
 
 func TestGetNetwork_NotFound(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.GetNetwork("nonexistent")
+	_, err := env.Service.GetNetwork("nonexistent")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestListNetworks_Empty(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	names, err := env.svc.ListNetworks()
+	names, err := env.Service.ListNetworks()
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -64,11 +65,11 @@ func TestListNetworks_Empty(t *testing.T) {
 }
 
 func TestListNetworks_WithNetworks(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "alpha")
-	seedNetwork(t, env.svc, "beta")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "alpha")
+	testutil.SeedNetworkWithName(t, env.Service, "beta")
 
-	names, err := env.svc.ListNetworks()
+	names, err := env.Service.ListNetworks()
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -78,10 +79,10 @@ func TestListNetworks_WithNetworks(t *testing.T) {
 }
 
 func TestShowNetwork_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "shownet")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "shownet")
 
-	nw, err := env.svc.ShowNetwork("shownet")
+	nw, err := env.Service.ShowNetwork("shownet")
 	if err != nil {
 		t.Fatalf("show: %v", err)
 	}
@@ -91,16 +92,16 @@ func TestShowNetwork_Success(t *testing.T) {
 }
 
 func TestShowNetwork_NotFound(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.ShowNetwork("ghost")
+	_, err := env.Service.ShowNetwork("ghost")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestInstallNetwork_Success(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
 	invite := service.Invite{
 		NetworkName:    "testnet",
@@ -110,7 +111,7 @@ func TestInstallNetwork_Success(t *testing.T) {
 		ServerApiAddr:  "10.42.0.1:8443",
 	}
 
-	nw, err := env.svc.InstallNetwork(invite)
+	nw, err := env.Service.InstallNetwork(invite)
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -138,13 +139,13 @@ func TestInstallNetwork_Success(t *testing.T) {
 	if nw.Enabled {
 		t.Error("new network should be disabled")
 	}
-	if nw.CreatedAt.Unix() != fixedTime.Unix() {
-		t.Errorf("created_at = %v, want %v", nw.CreatedAt, fixedTime)
+	if nw.CreatedAt.Unix() != testutil.FixedTime.Unix() {
+		t.Errorf("created_at = %v, want %v", nw.CreatedAt, testutil.FixedTime)
 	}
 }
 
 func TestInstallNetwork_Duplicate(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
 	invite := service.Invite{
 		NetworkName:    "dup",
@@ -154,21 +155,21 @@ func TestInstallNetwork_Duplicate(t *testing.T) {
 		ServerApiAddr:  "10.42.0.1:8443",
 	}
 
-	_, err := env.svc.InstallNetwork(invite)
+	_, err := env.Service.InstallNetwork(invite)
 	if err != nil {
 		t.Fatalf("first install: %v", err)
 	}
 
-	_, err = env.svc.InstallNetwork(invite)
+	_, err = env.Service.InstallNetwork(invite)
 	if !errors.Is(err, service.ErrNetworkExists) {
 		t.Errorf("err = %v, want ErrNetworkExists", err)
 	}
 }
 
 func TestInstallNetwork_MissingNetworkName(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.InstallNetwork(service.Invite{
+	_, err := env.Service.InstallNetwork(service.Invite{
 		AssignedCidr:   "10.42.0.5/16",
 		ServerPubkey:   "srv",
 		ServerEndpoint: "1.2.3.4:51820",
@@ -180,9 +181,9 @@ func TestInstallNetwork_MissingNetworkName(t *testing.T) {
 }
 
 func TestInstallNetwork_MissingServerPubkey(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.InstallNetwork(service.Invite{
+	_, err := env.Service.InstallNetwork(service.Invite{
 		NetworkName:    "noname",
 		AssignedCidr:   "10.42.0.5/16",
 		ServerEndpoint: "1.2.3.4:51820",
@@ -194,9 +195,9 @@ func TestInstallNetwork_MissingServerPubkey(t *testing.T) {
 }
 
 func TestInstallNetwork_MissingServerEndpoint(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.InstallNetwork(service.Invite{
+	_, err := env.Service.InstallNetwork(service.Invite{
 		NetworkName:   "noname",
 		AssignedCidr:  "10.42.0.5/16",
 		ServerPubkey:  "srv",
@@ -208,9 +209,9 @@ func TestInstallNetwork_MissingServerEndpoint(t *testing.T) {
 }
 
 func TestInstallNetwork_MissingServerApiAddr(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.InstallNetwork(service.Invite{
+	_, err := env.Service.InstallNetwork(service.Invite{
 		NetworkName:    "noname",
 		AssignedCidr:   "10.42.0.5/16",
 		ServerPubkey:   "srv",
@@ -222,9 +223,9 @@ func TestInstallNetwork_MissingServerApiAddr(t *testing.T) {
 }
 
 func TestInstallNetwork_MissingAssignedCidr(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.InstallNetwork(service.Invite{
+	_, err := env.Service.InstallNetwork(service.Invite{
 		NetworkName:    "noname",
 		ServerPubkey:   "srv",
 		ServerEndpoint: "1.2.3.4:51820",
@@ -236,9 +237,9 @@ func TestInstallNetwork_MissingAssignedCidr(t *testing.T) {
 }
 
 func TestInstallNetwork_PersistsKeys(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	nw, err := env.svc.InstallNetwork(service.Invite{
+	nw, err := env.Service.InstallNetwork(service.Invite{
 		NetworkName:    "keys",
 		AssignedCidr:   "10.42.0.5/16",
 		ServerPubkey:   "srv-pub",
@@ -249,7 +250,7 @@ func TestInstallNetwork_PersistsKeys(t *testing.T) {
 		t.Fatalf("install: %v", err)
 	}
 
-	got, err := env.svc.GetNetwork("keys")
+	got, err := env.Service.GetNetwork("keys")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -262,34 +263,34 @@ func TestInstallNetwork_PersistsKeys(t *testing.T) {
 }
 
 func TestUninstallNetwork_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "to-delete")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "to-delete")
 
-	if err := env.svc.UninstallNetwork("to-delete"); err != nil {
+	if err := env.Service.UninstallNetwork("to-delete"); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
 
-	_, err := env.svc.GetNetwork("to-delete")
+	_, err := env.Service.GetNetwork("to-delete")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("after uninstall: err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestUninstallNetwork_DisablesFirst(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "enabled-net")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "enabled-net")
 
 	ctx := context.Background()
-	if err := env.svc.EnableNetwork(ctx, "enabled-net"); err != nil {
+	if err := env.Service.EnableNetwork(ctx, "enabled-net"); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
-	if err := env.svc.UninstallNetwork("enabled-net"); err != nil {
+	if err := env.Service.UninstallNetwork("enabled-net"); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
 
 	// Verify the device was cleaned up
-	d, ok := env.wg.Devices["enabled-net"]
+	d, ok := env.WireGuard.Devices["enabled-net"]
 	if !ok {
 		t.Fatal("expected device was created during enable")
 	}
@@ -299,16 +300,16 @@ func TestUninstallNetwork_DisablesFirst(t *testing.T) {
 }
 
 func TestEnableNetwork_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "enable-me")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "enable-me")
 
 	ctx := context.Background()
-	if err := env.svc.EnableNetwork(ctx, "enable-me"); err != nil {
+	if err := env.Service.EnableNetwork(ctx, "enable-me"); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
 	// Verify network is now enabled in store
-	nw, err := env.svc.GetNetwork("enable-me")
+	nw, err := env.Service.GetNetwork("enable-me")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -317,7 +318,7 @@ func TestEnableNetwork_Success(t *testing.T) {
 	}
 
 	// Verify device was created
-	d, ok := env.wg.Devices["enable-me"]
+	d, ok := env.WireGuard.Devices["enable-me"]
 	if !ok {
 		t.Fatal("expected device was created")
 	}
@@ -327,20 +328,20 @@ func TestEnableNetwork_Success(t *testing.T) {
 }
 
 func TestEnableNetwork_AlreadyRunning(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "running")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "running")
 
 	ctx := context.Background()
-	if err := env.svc.EnableNetwork(ctx, "running"); err != nil {
+	if err := env.Service.EnableNetwork(ctx, "running"); err != nil {
 		t.Fatalf("first enable: %v", err)
 	}
 
 	// Second enable should be idempotent
-	if err := env.svc.EnableNetwork(ctx, "running"); err != nil {
+	if err := env.Service.EnableNetwork(ctx, "running"); err != nil {
 		t.Fatalf("second enable: %v", err)
 	}
 
-	d, ok := env.wg.Devices["running"]
+	d, ok := env.WireGuard.Devices["running"]
 	if !ok {
 		t.Fatal("expected device was created")
 	}
@@ -350,27 +351,27 @@ func TestEnableNetwork_AlreadyRunning(t *testing.T) {
 }
 
 func TestEnableNetwork_NotFound(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	err := env.svc.EnableNetwork(context.Background(), "ghost")
+	err := env.Service.EnableNetwork(context.Background(), "ghost")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestEnableNetwork_DeviceError(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "bad-device")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "bad-device")
 
-	env.wg.NewErr = errors.New("device create failed")
+	env.WireGuard.NewErr = errors.New("device create failed")
 
-	err := env.svc.EnableNetwork(context.Background(), "bad-device")
+	err := env.Service.EnableNetwork(context.Background(), "bad-device")
 	if err == nil {
 		t.Fatal("expected error")
 	}
 
 	// Network should remain disabled in store
-	nw, err := env.svc.GetNetwork("bad-device")
+	nw, err := env.Service.GetNetwork("bad-device")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -380,20 +381,20 @@ func TestEnableNetwork_DeviceError(t *testing.T) {
 }
 
 func TestDisableNetwork_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "disable-me")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "disable-me")
 
 	ctx := context.Background()
-	if err := env.svc.EnableNetwork(ctx, "disable-me"); err != nil {
+	if err := env.Service.EnableNetwork(ctx, "disable-me"); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
-	if err := env.svc.DisableNetwork("disable-me"); err != nil {
+	if err := env.Service.DisableNetwork("disable-me"); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 
 	// Network should be disabled in store
-	nw, err := env.svc.GetNetwork("disable-me")
+	nw, err := env.Service.GetNetwork("disable-me")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -402,7 +403,7 @@ func TestDisableNetwork_Success(t *testing.T) {
 	}
 
 	// Device should have been cleaned up
-	d, ok := env.wg.Devices["disable-me"]
+	d, ok := env.WireGuard.Devices["disable-me"]
 	if !ok {
 		t.Fatal("expected device was created")
 	}
@@ -412,14 +413,14 @@ func TestDisableNetwork_Success(t *testing.T) {
 }
 
 func TestDisableNetwork_NotEnabled(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "not-enabled")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "not-enabled")
 
-	if err := env.svc.DisableNetwork("not-enabled"); err != nil {
+	if err := env.Service.DisableNetwork("not-enabled"); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 
-	nw, err := env.svc.GetNetwork("not-enabled")
+	nw, err := env.Service.GetNetwork("not-enabled")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -429,9 +430,9 @@ func TestDisableNetwork_NotEnabled(t *testing.T) {
 }
 
 func TestStatus_Empty(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	statuses, err := env.svc.Status()
+	statuses, err := env.Service.Status()
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -441,11 +442,11 @@ func TestStatus_Empty(t *testing.T) {
 }
 
 func TestStatus_WithInstalledNetworks(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "net-a")
-	seedNetwork(t, env.svc, "net-b")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "net-a")
+	testutil.SeedNetworkWithName(t, env.Service, "net-b")
 
-	statuses, err := env.svc.Status()
+	statuses, err := env.Service.Status()
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -467,15 +468,15 @@ func TestStatus_WithInstalledNetworks(t *testing.T) {
 }
 
 func TestStatus_WithRunningNetworks(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "running-net")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "running-net")
 
 	ctx := context.Background()
-	if err := env.svc.EnableNetwork(ctx, "running-net"); err != nil {
+	if err := env.Service.EnableNetwork(ctx, "running-net"); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
-	statuses, err := env.svc.Status()
+	statuses, err := env.Service.Status()
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -496,9 +497,9 @@ func TestStatus_WithRunningNetworks(t *testing.T) {
 }
 
 func TestFetchNetwork_NotImplemented(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	err := env.svc.FetchNetwork("any")
+	err := env.Service.FetchNetwork("any")
 	if !errors.Is(err, service.ErrNotImplemented) {
 		t.Errorf("err = %v, want ErrNotImplemented", err)
 	}

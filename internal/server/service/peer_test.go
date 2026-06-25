@@ -2,17 +2,17 @@ package service_test
 
 import (
 	"errors"
-	"net"
 	"testing"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
 func TestAddPeer_AutoAssignsIP(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	invite, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	invite, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		Name:  "alice",
 		Admin: false,
 	})
@@ -36,10 +36,10 @@ func TestAddPeer_AutoAssignsIP(t *testing.T) {
 }
 
 func TestAddPeer_SpecifiedIP(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	invite, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	invite, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		Name:  "bob",
 		IP:    "10.0.5.10",
 		Admin: true,
@@ -57,10 +57,10 @@ func TestAddPeer_SpecifiedIP(t *testing.T) {
 }
 
 func TestAddPeer_InvalidIP(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		Name: "badip",
 		IP:   "not-an-ip",
 	})
@@ -70,10 +70,10 @@ func TestAddPeer_InvalidIP(t *testing.T) {
 }
 
 func TestAddPeer_IPOutsideRootCIDR(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		Name: "outside",
 		IP:   "192.168.1.1",
 	})
@@ -83,10 +83,10 @@ func TestAddPeer_IPOutsideRootCIDR(t *testing.T) {
 }
 
 func TestAddPeer_EmptyName(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		IP: "10.0.0.5",
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
@@ -95,10 +95,10 @@ func TestAddPeer_EmptyName(t *testing.T) {
 }
 
 func TestGetPeer_ViaRedeem(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		Name:  "carol",
 		IP:    "10.0.0.50",
 		Admin: false,
@@ -107,8 +107,8 @@ func TestGetPeer_ViaRedeem(t *testing.T) {
 		t.Fatalf("add peer: %v", err)
 	}
 
-	tempKey := lastTempKey(t, env.svc, "testnet")
-	result, err := env.svc.RedeemInvite("testnet", tempKey, "carol-perm-key")
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	result, err := env.Service.RedeemInvite("testnet", tempKey, "carol-perm-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestGetPeer_ViaRedeem(t *testing.T) {
 		t.Errorf("result network = %q, want testnet", result.NetworkName)
 	}
 
-	peer, err := env.svc.GetPeer("testnet", "carol")
+	peer, err := env.Service.GetPeer("testnet", "carol")
 	if err != nil {
 		t.Fatalf("get peer: %v", err)
 	}
@@ -132,20 +132,20 @@ func TestGetPeer_ViaRedeem(t *testing.T) {
 }
 
 func TestGetPeer_NotFound(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.GetPeer("testnet", "nonexistent")
+	_, err := env.Service.GetPeer("testnet", "nonexistent")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestListPeers_Empty(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	peers, err := env.svc.ListPeers("testnet")
+	peers, err := env.Service.ListPeers("testnet")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -155,33 +155,33 @@ func TestListPeers_Empty(t *testing.T) {
 }
 
 func TestListPeers_AfterRedeem(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		Name: "peer1",
 		IP:   "10.0.0.10",
 	})
 	if err != nil {
 		t.Fatalf("add peer1: %v", err)
 	}
-	tempKey1 := lastTempKey(t, env.svc, "testnet")
+	tempKey1 := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err = env.Service.AddPeer("testnet", service.PeerConfig{
 		Name: "peer2",
 		IP:   "10.0.0.11",
 	})
 	if err != nil {
 		t.Fatalf("add peer2: %v", err)
 	}
-	tempKey2 := lastTempKey(t, env.svc, "testnet")
+	tempKey2 := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.svc.RedeemInvite("testnet", tempKey1, "key1")
+	_, err = env.Service.RedeemInvite("testnet", tempKey1, "key1")
 	if err != nil {
 		t.Fatalf("redeem peer1: %v", err)
 	}
 
-	peers, err := env.svc.ListPeers("testnet")
+	peers, err := env.Service.ListPeers("testnet")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -199,10 +199,10 @@ func TestListPeers_AfterRedeem(t *testing.T) {
 }
 
 func TestRemovePeer_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		Name: "removeme",
 		IP:   "10.0.0.20",
 	})
@@ -210,51 +210,51 @@ func TestRemovePeer_Success(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 
-	tempKey := lastTempKey(t, env.svc, "testnet")
-	_, err = env.svc.RedeemInvite("testnet", tempKey, "removeme-key")
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	_, err = env.Service.RedeemInvite("testnet", tempKey, "removeme-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
-	if err := env.svc.RemovePeer("testnet", "removeme"); err != nil {
+	if err := env.Service.RemovePeer("testnet", "removeme"); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 
-	_, err = env.svc.GetPeer("testnet", "removeme")
+	_, err = env.Service.GetPeer("testnet", "removeme")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("after remove: err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestRemovePeer_NotFound(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	err := env.svc.RemovePeer("testnet", "ghost")
+	err := env.Service.RemovePeer("testnet", "ghost")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestUpdatePeer_Rename(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		Name: "old-name",
 		IP:   "10.0.0.30",
 	})
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	tempKey := lastTempKey(t, env.svc, "testnet")
-	_, err = env.svc.RedeemInvite("testnet", tempKey, "rename-key")
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	_, err = env.Service.RedeemInvite("testnet", tempKey, "rename-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
 	newName := "new-name"
-	peer, err := env.svc.UpdatePeer("testnet", "old-name", service.UpdatePeerRequest{
+	peer, err := env.Service.UpdatePeer("testnet", "old-name", service.UpdatePeerRequest{
 		Name: &newName,
 	})
 	if err != nil {
@@ -266,10 +266,10 @@ func TestUpdatePeer_Rename(t *testing.T) {
 }
 
 func TestUpdatePeer_ToggleAdmin(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		Name:  "toggle",
 		IP:    "10.0.0.31",
 		Admin: false,
@@ -277,14 +277,14 @@ func TestUpdatePeer_ToggleAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	tempKey := lastTempKey(t, env.svc, "testnet")
-	_, err = env.svc.RedeemInvite("testnet", tempKey, "toggle-key")
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	_, err = env.Service.RedeemInvite("testnet", tempKey, "toggle-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
 	adminTrue := true
-	peer, err := env.svc.UpdatePeer("testnet", "toggle", service.UpdatePeerRequest{
+	peer, err := env.Service.UpdatePeer("testnet", "toggle", service.UpdatePeerRequest{
 		Admin: &adminTrue,
 	})
 	if err != nil {
@@ -296,11 +296,11 @@ func TestUpdatePeer_ToggleAdmin(t *testing.T) {
 }
 
 func TestUpdatePeer_NotFound(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
 	newName := "x"
-	_, err := env.svc.UpdatePeer("testnet", "nonexistent", service.UpdatePeerRequest{
+	_, err := env.Service.UpdatePeer("testnet", "nonexistent", service.UpdatePeerRequest{
 		Name: &newName,
 	})
 	if !errors.Is(err, service.ErrNotFound) {
@@ -309,35 +309,35 @@ func TestUpdatePeer_NotFound(t *testing.T) {
 }
 
 func TestEnablePeer_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		Name: "enableme",
 		IP:   "10.0.0.40",
 	})
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	tempKey := lastTempKey(t, env.svc, "testnet")
-	_, err = env.svc.RedeemInvite("testnet", tempKey, "enable-key")
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	_, err = env.Service.RedeemInvite("testnet", tempKey, "enable-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
 	disabled := false
-	_, err = env.svc.UpdatePeer("testnet", "enableme", service.UpdatePeerRequest{
+	_, err = env.Service.UpdatePeer("testnet", "enableme", service.UpdatePeerRequest{
 		Enabled: &disabled,
 	})
 	if err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 
-	if err := env.svc.EnablePeer("testnet", "enableme"); err != nil {
+	if err := env.Service.EnablePeer("testnet", "enableme"); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
-	peer, err := env.svc.GetPeer("testnet", "enableme")
+	peer, err := env.Service.GetPeer("testnet", "enableme")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -347,27 +347,27 @@ func TestEnablePeer_Success(t *testing.T) {
 }
 
 func TestDisablePeer_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		Name: "disableme",
 		IP:   "10.0.0.41",
 	})
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	tempKey := lastTempKey(t, env.svc, "testnet")
-	_, err = env.svc.RedeemInvite("testnet", tempKey, "disable-key")
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	_, err = env.Service.RedeemInvite("testnet", tempKey, "disable-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
-	if err := env.svc.DisablePeer("testnet", "disableme"); err != nil {
+	if err := env.Service.DisablePeer("testnet", "disableme"); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 
-	peer, err := env.svc.GetPeer("testnet", "disableme")
+	peer, err := env.Service.GetPeer("testnet", "disableme")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -377,10 +377,10 @@ func TestDisablePeer_Success(t *testing.T) {
 }
 
 func TestConfirmPeer_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		Name: "confirmme",
 		IP:   "10.0.0.50",
 	})
@@ -388,13 +388,13 @@ func TestConfirmPeer_Success(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 
-	tempKey := lastTempKey(t, env.svc, "testnet")
-	_, err = env.svc.RedeemInvite("testnet", tempKey, "confirm-key")
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	_, err = env.Service.RedeemInvite("testnet", tempKey, "confirm-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
-	peer, err := env.svc.GetPeer("testnet", "confirmme")
+	peer, err := env.Service.GetPeer("testnet", "confirmme")
 	if err != nil {
 		t.Fatalf("get before confirm: %v", err)
 	}
@@ -402,12 +402,12 @@ func TestConfirmPeer_Success(t *testing.T) {
 		t.Error("peer should not be confirmed yet")
 	}
 
-	err = env.svc.ConfirmPeer("testnet", "confirm-key", net.IPv4(10, 0, 0, 50))
+	err = env.Service.ConfirmPeer("testnet", "confirmme")
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
 
-	peer, err = env.svc.GetPeer("testnet", "confirmme")
+	peer, err = env.Service.GetPeer("testnet", "confirmme")
 	if err != nil {
 		t.Fatalf("get after confirm: %v", err)
 	}
@@ -416,71 +416,47 @@ func TestConfirmPeer_Success(t *testing.T) {
 	}
 }
 
-func TestConfirmPeer_IPMismatch(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+func TestConfirmPeer_UnknownPeer(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.AddPeer("testnet", service.PeerConfig{
-		Name: "mismatch",
-		IP:   "10.0.0.60",
-	})
-	if err != nil {
-		t.Fatalf("add: %v", err)
-	}
-
-	tempKey := lastTempKey(t, env.svc, "testnet")
-	_, err = env.svc.RedeemInvite("testnet", tempKey, "mismatch-key")
-	if err != nil {
-		t.Fatalf("redeem: %v", err)
-	}
-
-	err = env.svc.ConfirmPeer("testnet", "mismatch-key", net.IPv4(10, 0, 0, 99))
-	if !errors.Is(err, service.ErrInvalidInput) {
-		t.Errorf("err = %v, want ErrInvalidInput", err)
-	}
-}
-
-func TestConfirmPeer_UnknownKey(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
-
-	err := env.svc.ConfirmPeer("testnet", "unknown-key", net.IPv4(10, 0, 0, 1))
+	err := env.Service.ConfirmPeer("testnet", "nonexistent")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestListVisiblePeers_ExcludesSelf(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		Name: "self",
 		IP:   "10.0.0.10",
 	})
 	if err != nil {
 		t.Fatalf("add self: %v", err)
 	}
-	tempKey1 := lastTempKey(t, env.svc, "testnet")
-	_, err = env.svc.RedeemInvite("testnet", tempKey1, "self-key")
+	tempKey1 := lastTempKey(t, env.Service, "testnet")
+	_, err = env.Service.RedeemInvite("testnet", tempKey1, "self-key")
 	if err != nil {
 		t.Fatalf("redeem self: %v", err)
 	}
 
-	_, err = env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err = env.Service.AddPeer("testnet", service.PeerConfig{
 		Name: "other",
 		IP:   "10.0.0.11",
 	})
 	if err != nil {
 		t.Fatalf("add other: %v", err)
 	}
-	tempKey2 := lastTempKey(t, env.svc, "testnet")
-	_, err = env.svc.RedeemInvite("testnet", tempKey2, "other-key")
+	tempKey2 := lastTempKey(t, env.Service, "testnet")
+	_, err = env.Service.RedeemInvite("testnet", tempKey2, "other-key")
 	if err != nil {
 		t.Fatalf("redeem other: %v", err)
 	}
 
-	visible, err := env.svc.ListVisiblePeers("testnet", "self")
+	visible, err := env.Service.ListVisiblePeers("testnet", "self")
 	if err != nil {
 		t.Fatalf("list visible: %v", err)
 	}
@@ -500,28 +476,28 @@ func TestListVisiblePeers_ExcludesSelf(t *testing.T) {
 }
 
 func TestReportEndpoints_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
 	sightings := []service.EndpointSighting{
 		{
 			WitnessKey: "witness-key",
 			PeerKey:    "peer-key",
 			Endpoint:   "1.2.3.4:51820",
-			Timestamp:  fixedTime,
+			Timestamp:  testutil.FixedTime,
 		},
 	}
 
-	err := env.svc.ReportEndpoints("testnet", sightings)
+	err := env.Service.ReportEndpoints("testnet", sightings)
 	if err != nil {
 		t.Fatalf("report: %v", err)
 	}
 }
 
 func TestReportEndpoints_NonexistentNetwork(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	err := env.svc.ReportEndpoints("nonexistent", nil)
+	err := env.Service.ReportEndpoints("nonexistent", nil)
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}

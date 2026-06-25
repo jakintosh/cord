@@ -1,4 +1,4 @@
-package api_test
+package admin_test
 
 import (
 	"net/http"
@@ -6,6 +6,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
@@ -148,7 +149,7 @@ func TestAPIListPeers_Empty(
 
 	// list peers — should include the server peer
 	url := "/networks/testnet/peers"
-	result := wire.TestGet[[]api.PeerDTO](env.Router, url)
+	result := wire.TestGet[[]admin.PeerDTO](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)
@@ -168,7 +169,7 @@ func TestAPIListPeers_WithData(
 	env.SeedNetwork(t)
 
 	// seed a peer through the database
-	if err := env.DB.InsertPeer("testnet", &service.Peer{
+	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
 		Cidr:      "10.0.0.5/32",
@@ -181,7 +182,7 @@ func TestAPIListPeers_WithData(
 
 	// list peers
 	url := "/networks/testnet/peers"
-	result := wire.TestGet[[]api.PeerDTO](env.Router, url)
+	result := wire.TestGet[[]admin.PeerDTO](env.Router, url)
 
 	// verify result — cord-server + alice
 	data := result.ExpectOK(t)
@@ -214,7 +215,7 @@ func TestAPIRenamePeer_Success(
 	env.SeedNetwork(t)
 
 	// seed a peer
-	if err := env.DB.InsertPeer("testnet", &service.Peer{
+	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
 		Cidr:      "10.0.0.5/32",
@@ -228,7 +229,7 @@ func TestAPIRenamePeer_Success(
 	// rename peer
 	url := "/networks/testnet/peers/alice"
 	body := `{"name": "alicia"}`
-	result := wire.TestPatch[api.PeerDTO](env.Router, url, body)
+	result := wire.TestPatch[admin.PeerDTO](env.Router, url, body)
 
 	// verify result
 	data := result.ExpectOK(t)
@@ -267,7 +268,7 @@ func TestAPIDeletePeer_Success(
 	env.SeedNetwork(t)
 
 	// seed a peer
-	if err := env.DB.InsertPeer("testnet", &service.Peer{
+	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
 		Cidr:      "10.0.0.5/32",
@@ -321,7 +322,7 @@ func TestAPIEnablePeer_Success(
 	env.SeedNetwork(t)
 
 	// seed a disabled peer
-	if err := env.DB.InsertPeer("testnet", &service.Peer{
+	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
 		Cidr:      "10.0.0.5/32",
@@ -334,7 +335,7 @@ func TestAPIEnablePeer_Success(
 
 	// enable peer
 	url := "/networks/testnet/peers/alice/enable"
-	result := wire.TestPost[api.PeerDTO](env.Router, url, "")
+	result := wire.TestPost[admin.PeerDTO](env.Router, url, "")
 
 	// verify result
 	data := result.ExpectOK(t)
@@ -363,7 +364,7 @@ func TestAPIDisablePeer_Success(
 	env.SeedNetwork(t)
 
 	// seed an enabled peer
-	if err := env.DB.InsertPeer("testnet", &service.Peer{
+	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
 		Cidr:      "10.0.0.5/32",
@@ -376,7 +377,7 @@ func TestAPIDisablePeer_Success(
 
 	// disable peer
 	url := "/networks/testnet/peers/alice/disable"
-	result := wire.TestPost[api.PeerDTO](env.Router, url, "")
+	result := wire.TestPost[admin.PeerDTO](env.Router, url, "")
 
 	// verify result
 	data := result.ExpectOK(t)

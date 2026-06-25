@@ -5,9 +5,13 @@ import (
 	"testing"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
-func seedTwoCIDRs(t *testing.T, svc *service.Service) {
+func seedTwoCIDRs(
+	t *testing.T,
+	svc *service.Service,
+) {
 	t.Helper()
 	if err := svc.AddCidr("testnet", service.CreateCidrRequest{
 		Name: "cidr-a",
@@ -24,16 +28,16 @@ func seedTwoCIDRs(t *testing.T, svc *service.Service) {
 }
 
 func TestAddAssociation_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
-	seedTwoCIDRs(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+	seedTwoCIDRs(t, env.Service)
 
-	err := env.svc.AddAssociation("testnet", "cidr-a", "cidr-b")
+	err := env.Service.AddAssociation("testnet", "cidr-a", "cidr-b")
 	if err != nil {
 		t.Fatalf("add association: %v", err)
 	}
 
-	assocs, err := env.svc.ListAssociations("testnet")
+	assocs, err := env.Service.ListAssociations("testnet")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -46,59 +50,59 @@ func TestAddAssociation_Success(t *testing.T) {
 }
 
 func TestAddAssociation_SameCIDR(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.svc.AddCidr("testnet", service.CreateCidrRequest{
+	if err := env.Service.AddCidr("testnet", service.CreateCidrRequest{
 		Name: "solo",
 		Cidr: "10.0.1.0/24",
 	}); err != nil {
 		t.Fatalf("add cidr: %v", err)
 	}
 
-	err := env.svc.AddAssociation("testnet", "solo", "solo")
+	err := env.Service.AddAssociation("testnet", "solo", "solo")
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
 }
 
 func TestAddAssociation_EmptyCIDR(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	err := env.svc.AddAssociation("testnet", "", "cidr-b")
+	err := env.Service.AddAssociation("testnet", "", "cidr-b")
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("empty cidr1: err = %v, want ErrInvalidInput", err)
 	}
 
-	err = env.svc.AddAssociation("testnet", "cidr-a", "")
+	err = env.Service.AddAssociation("testnet", "cidr-a", "")
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("empty cidr2: err = %v, want ErrInvalidInput", err)
 	}
 }
 
 func TestAddAssociation_UnknownCIDR(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.svc.AddCidr("testnet", service.CreateCidrRequest{
+	if err := env.Service.AddCidr("testnet", service.CreateCidrRequest{
 		Name: "known",
 		Cidr: "10.0.1.0/24",
 	}); err != nil {
 		t.Fatalf("add cidr: %v", err)
 	}
 
-	err := env.svc.AddAssociation("testnet", "known", "unknown")
+	err := env.Service.AddAssociation("testnet", "known", "unknown")
 	if !errors.Is(err, service.ErrConflict) {
 		t.Errorf("err = %v, want ErrConflict", err)
 	}
 }
 
 func TestListAssociations_Empty(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	assocs, err := env.svc.ListAssociations("testnet")
+	assocs, err := env.Service.ListAssociations("testnet")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -108,19 +112,19 @@ func TestListAssociations_Empty(t *testing.T) {
 }
 
 func TestRemoveAssociation_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
-	seedTwoCIDRs(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+	seedTwoCIDRs(t, env.Service)
 
-	if err := env.svc.AddAssociation("testnet", "cidr-a", "cidr-b"); err != nil {
+	if err := env.Service.AddAssociation("testnet", "cidr-a", "cidr-b"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 
-	if err := env.svc.RemoveAssociation("testnet", "cidr-a", "cidr-b"); err != nil {
+	if err := env.Service.RemoveAssociation("testnet", "cidr-a", "cidr-b"); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 
-	assocs, err := env.svc.ListAssociations("testnet")
+	assocs, err := env.Service.ListAssociations("testnet")
 	if err != nil {
 		t.Fatalf("list after remove: %v", err)
 	}
@@ -130,12 +134,12 @@ func TestRemoveAssociation_Success(t *testing.T) {
 }
 
 func TestRemoveAssociation_NotFound(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
 	// DeleteAssociation does not error when the association doesn't exist
 	// (0 rows affected is not an error for deletes in the current store).
-	err := env.svc.RemoveAssociation("testnet", "a", "b")
+	err := env.Service.RemoveAssociation("testnet", "a", "b")
 	if err != nil {
 		t.Fatalf("remove nonexistent: %v", err)
 	}

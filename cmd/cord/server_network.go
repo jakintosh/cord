@@ -8,7 +8,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/server"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 )
 
 var serverNetworkCmd = &args.Command{
@@ -57,8 +57,8 @@ var serverNetworkAdd = &args.Command{
 			return fmt.Errorf("invalid port: %w", err)
 		}
 
-		client := api.NewClient(socketPath)
-		network, err := client.AddNetwork(context.Background(), api.AddNetworkRequest{
+		client := admin.NewClient(socketPath)
+		network, err := client.AddNetwork(context.Background(), admin.AddNetworkRequest{
 			Name:       name,
 			Cidr:       cidr,
 			ExternalIP: externalIP,
@@ -89,7 +89,7 @@ var serverNetworkDelete = &args.Command{
 		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		name := i.GetOperand("name")
 
-		client := api.NewClient(socketPath)
+		client := admin.NewClient(socketPath)
 		if err := client.DeleteNetwork(context.Background(), name); err != nil {
 			return err
 		}
@@ -106,7 +106,7 @@ var serverNetworkList = &args.Command{
 	Handler: func(i *args.Input) error {
 		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 
-		client := api.NewClient(socketPath)
+		client := admin.NewClient(socketPath)
 		networks, err := client.ListNetworks(context.Background())
 		if err != nil {
 			return err
@@ -136,7 +136,7 @@ var serverNetworkShow = &args.Command{
 		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		name := i.GetOperand("name")
 
-		client := api.NewClient(socketPath)
+		client := admin.NewClient(socketPath)
 		network, err := client.ShowNetwork(context.Background(), name)
 		if err != nil {
 			return err
@@ -159,7 +159,7 @@ var serverNetworkEnable = &args.Command{
 		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		name := i.GetOperand("name")
 
-		client := api.NewClient(socketPath)
+		client := admin.NewClient(socketPath)
 		if err := client.EnableNetwork(context.Background(), name); err != nil {
 			return err
 		}
@@ -182,7 +182,7 @@ var serverNetworkDisable = &args.Command{
 		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		name := i.GetOperand("name")
 
-		client := api.NewClient(socketPath)
+		client := admin.NewClient(socketPath)
 		if err := client.DisableNetwork(context.Background(), name); err != nil {
 			return err
 		}

@@ -2,21 +2,23 @@ package service_test
 
 import (
 	"testing"
+
+	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 )
 
 func TestBuildPeers_IncludesServer(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
 	// buildPeers is unexported, but we can test it indirectly by
 	// enabling a network and inspecting the device's applied peers.
-	seedNetwork(t, env.svc, "peer-test")
+	testutil.SeedNetworkWithName(t, env.Service, "peer-test")
 
-	err := env.svc.EnableNetwork(t.Context(), "peer-test")
+	err := env.Service.EnableNetwork(t.Context(), "peer-test")
 	if err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
-	d, ok := env.wg.Devices["peer-test"]
+	d, ok := env.WireGuard.Devices["peer-test"]
 	if !ok {
 		t.Fatal("expected device was created")
 	}
@@ -42,16 +44,16 @@ func TestBuildPeers_IncludesServer(t *testing.T) {
 }
 
 func TestBuildPeers_DoesNotIncludeSelf(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	seedNetwork(t, env.svc, "self-test")
+	testutil.SeedNetworkWithName(t, env.Service, "self-test")
 
-	err := env.svc.EnableNetwork(t.Context(), "self-test")
+	err := env.Service.EnableNetwork(t.Context(), "self-test")
 	if err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
-	d, ok := env.wg.Devices["self-test"]
+	d, ok := env.WireGuard.Devices["self-test"]
 	if !ok {
 		t.Fatal("expected device was created")
 	}
@@ -63,10 +65,10 @@ func TestBuildPeers_DoesNotIncludeSelf(t *testing.T) {
 }
 
 func TestListPeers_Empty(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "empty-peers")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "empty-peers")
 
-	peers, err := env.svc.ListPeers("empty-peers")
+	peers, err := env.Service.ListPeers("empty-peers")
 	if err != nil {
 		t.Fatalf("list peers: %v", err)
 	}
@@ -76,9 +78,9 @@ func TestListPeers_Empty(t *testing.T) {
 }
 
 func TestListPeers_NetworkNotFound(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	peers, err := env.svc.ListPeers("nonexistent")
+	peers, err := env.Service.ListPeers("nonexistent")
 	if err != nil {
 		t.Fatalf("list peers for nonexistent network: %v", err)
 	}
@@ -88,10 +90,10 @@ func TestListPeers_NetworkNotFound(t *testing.T) {
 }
 
 func TestNetworkStatus_HasPeerCount(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "count-test")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "count-test")
 
-	statuses, err := env.svc.Status()
+	statuses, err := env.Service.Status()
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}

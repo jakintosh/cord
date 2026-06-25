@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/invite"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/peer"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
@@ -74,14 +76,24 @@ func Serve(
 		return fmt.Errorf("server: new wireguard: %w", err)
 	}
 
+	var svc *service.Service
 	svcOpts := service.Options{
-		Store:              db,
-		WG:                 wg,
-		Clock:              time.Now,
-		Logger:             log.Default(),
-		ReconcileInterval:  opts.ReconcileInterval,
+		Store:             db,
+		WG:                wg,
+		Clock:             time.Now,
+		Logger:            log.Default(),
+		ReconcileInterval: opts.ReconcileInterval,
+		APIFactory: func(network string) service.APIHandlers {
+			peerAPI := peer.New(svc, network, log.Default())
+			inviteAPI := invite.New(svc, network, log.Default())
+
+			return service.APIHandlers{
+				Main:   peerAPI.Router(),
+				Invite: inviteAPI.Router(),
+			}
+		},
 	}
-	svc, err := service.New(svcOpts)
+	svc, err = service.New(svcOpts)
 	if err != nil {
 		return fmt.Errorf("server: new service: %w", err)
 	}
@@ -90,10 +102,10 @@ func Serve(
 		return fmt.Errorf("server: start networks: %w", err)
 	}
 
-	apiOpts := api.Options{
+	apiOpts := admin.Options{
 		Service: svc,
 	}
-	apiServer, err := api.New(apiOpts)
+	apiServer, err := admin.New(apiOpts)
 	if err != nil {
 		return fmt.Errorf("server: new api: %w", err)
 	}

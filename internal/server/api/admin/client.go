@@ -1,4 +1,4 @@
-package api
+package admin
 
 import (
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"

@@ -8,13 +8,14 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
 func TestCreateInvite_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	invite, err := env.svc.CreateInvite("testnet", service.CreateInviteRequest{
+	invite, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name:      "new-peer",
 		IP:        "10.0.0.5",
 		Admin:     false,
@@ -42,10 +43,10 @@ func TestCreateInvite_Success(t *testing.T) {
 }
 
 func TestCreateInvite_DefaultExpiration(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.CreateInvite("testnet", service.CreateInviteRequest{
+	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "default-exp",
 		IP:   "10.0.0.6",
 	})
@@ -53,7 +54,7 @@ func TestCreateInvite_DefaultExpiration(t *testing.T) {
 		t.Fatalf("create invite: %v", err)
 	}
 
-	invites, err := env.svc.ListInvites("testnet")
+	invites, err := env.Service.ListInvites("testnet")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -61,17 +62,17 @@ func TestCreateInvite_DefaultExpiration(t *testing.T) {
 		t.Fatalf("expected 1 invite, got %d", len(invites))
 	}
 
-	expectedExpiry := fixedTime.Add(24 * time.Hour)
+	expectedExpiry := testutil.FixedTime.Add(24 * time.Hour)
 	if !invites[0].ExpiresAt.Equal(expectedExpiry) {
 		t.Errorf("expires_at = %v, want %v", invites[0].ExpiresAt, expectedExpiry)
 	}
 }
 
 func TestCreateInvite_AutoAssignsIP(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	invite, err := env.svc.CreateInvite("testnet", service.CreateInviteRequest{
+	invite, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "auto-ip",
 	})
 	if err != nil {
@@ -85,10 +86,10 @@ func TestCreateInvite_AutoAssignsIP(t *testing.T) {
 }
 
 func TestCreateInvite_EmptyName(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.CreateInvite("testnet", service.CreateInviteRequest{
+	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		IP: "10.0.0.5",
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
@@ -97,9 +98,9 @@ func TestCreateInvite_EmptyName(t *testing.T) {
 }
 
 func TestCreateInvite_NonexistentNetwork(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.CreateInvite("nonexistent", service.CreateInviteRequest{
+	_, err := env.Service.CreateInvite("nonexistent", service.CreateInviteRequest{
 		Name: "peer",
 		IP:   "10.0.0.5",
 	})
@@ -109,10 +110,10 @@ func TestCreateInvite_NonexistentNetwork(t *testing.T) {
 }
 
 func TestRedeemInvite_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.CreateInvite("testnet", service.CreateInviteRequest{
+	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "redeemer",
 		IP:   "10.0.0.5",
 	})
@@ -120,8 +121,8 @@ func TestRedeemInvite_Success(t *testing.T) {
 		t.Fatalf("create invite: %v", err)
 	}
 
-	tempKey := lastTempKey(t, env.svc, "testnet")
-	result, err := env.svc.RedeemInvite("testnet", tempKey, "perm-key-1")
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	result, err := env.Service.RedeemInvite("testnet", tempKey, "perm-key-1")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -136,7 +137,7 @@ func TestRedeemInvite_Success(t *testing.T) {
 		t.Error("server public_key should not be empty")
 	}
 
-	peer, err := env.svc.GetPeer("testnet", "redeemer")
+	peer, err := env.Service.GetPeer("testnet", "redeemer")
 	if err != nil {
 		t.Fatalf("get redeemed peer: %v", err)
 	}
@@ -149,10 +150,10 @@ func TestRedeemInvite_Success(t *testing.T) {
 }
 
 func TestRedeemInvite_Idempotent_SameKey(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.CreateInvite("testnet", service.CreateInviteRequest{
+	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "idempotent",
 		IP:   "10.0.0.6",
 	})
@@ -160,13 +161,13 @@ func TestRedeemInvite_Idempotent_SameKey(t *testing.T) {
 		t.Fatalf("create invite: %v", err)
 	}
 
-	tempKey := lastTempKey(t, env.svc, "testnet")
-	result1, err := env.svc.RedeemInvite("testnet", tempKey, "perm-key-2")
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	result1, err := env.Service.RedeemInvite("testnet", tempKey, "perm-key-2")
 	if err != nil {
 		t.Fatalf("first redeem: %v", err)
 	}
 
-	result2, err := env.svc.RedeemInvite("testnet", tempKey, "perm-key-2")
+	result2, err := env.Service.RedeemInvite("testnet", tempKey, "perm-key-2")
 	if err != nil {
 		t.Fatalf("second redeem: %v", err)
 	}
@@ -177,10 +178,10 @@ func TestRedeemInvite_Idempotent_SameKey(t *testing.T) {
 }
 
 func TestRedeemInvite_UnknownKey(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.CreateInvite("testnet", service.CreateInviteRequest{
+	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "peer",
 		IP:   "10.0.0.5",
 	})
@@ -188,45 +189,45 @@ func TestRedeemInvite_UnknownKey(t *testing.T) {
 		t.Fatalf("create invite: %v", err)
 	}
 
-	_, err = env.svc.RedeemInvite("testnet", "unknown-temp-key", "perm-key")
+	_, err = env.Service.RedeemInvite("testnet", "unknown-temp-key", "perm-key")
 	if err == nil {
 		t.Fatal("expected error for unknown temp key")
 	}
 }
 
 func TestRedeemInvite_MultipleInvites(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.CreateInvite("testnet", service.CreateInviteRequest{
+	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "peer-a",
 		IP:   "10.0.0.10",
 	})
 	if err != nil {
 		t.Fatalf("create invite a: %v", err)
 	}
-	tempKey1 := lastTempKey(t, env.svc, "testnet")
+	tempKey1 := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.svc.CreateInvite("testnet", service.CreateInviteRequest{
+	_, err = env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "peer-b",
 		IP:   "10.0.0.11",
 	})
 	if err != nil {
 		t.Fatalf("create invite b: %v", err)
 	}
-	tempKey2 := lastTempKey(t, env.svc, "testnet")
+	tempKey2 := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.svc.RedeemInvite("testnet", tempKey1, "key-a")
+	_, err = env.Service.RedeemInvite("testnet", tempKey1, "key-a")
 	if err != nil {
 		t.Fatalf("redeem a: %v", err)
 	}
 
-	_, err = env.svc.RedeemInvite("testnet", tempKey2, "key-b")
+	_, err = env.Service.RedeemInvite("testnet", tempKey2, "key-b")
 	if err != nil {
 		t.Fatalf("redeem b: %v", err)
 	}
 
-	peers, err := env.svc.ListPeers("testnet")
+	peers, err := env.Service.ListPeers("testnet")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -236,10 +237,10 @@ func TestRedeemInvite_MultipleInvites(t *testing.T) {
 }
 
 func TestListInvites_Mixed(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.CreateInvite("testnet", service.CreateInviteRequest{
+	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "active",
 		IP:   "10.0.0.20",
 	})
@@ -247,7 +248,7 @@ func TestListInvites_Mixed(t *testing.T) {
 		t.Fatalf("create active: %v", err)
 	}
 
-	_, err = env.svc.CreateInvite("testnet", service.CreateInviteRequest{
+	_, err = env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "to-redeem",
 		IP:   "10.0.0.21",
 	})
@@ -255,13 +256,13 @@ func TestListInvites_Mixed(t *testing.T) {
 		t.Fatalf("create to-redeem: %v", err)
 	}
 
-	tempKey := lastTempKey(t, env.svc, "testnet")
-	_, err = env.svc.RedeemInvite("testnet", tempKey, "redeemed-key")
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	_, err = env.Service.RedeemInvite("testnet", tempKey, "redeemed-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
-	invites, err := env.svc.ListInvites("testnet")
+	invites, err := env.Service.ListInvites("testnet")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -286,10 +287,10 @@ func TestListInvites_Mixed(t *testing.T) {
 }
 
 func TestRevokeInvite_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.CreateInvite("testnet", service.CreateInviteRequest{
+	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "revoke-me",
 		IP:   "10.0.0.30",
 	})
@@ -297,11 +298,11 @@ func TestRevokeInvite_Success(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	if err := env.svc.RevokeInvite("testnet", "revoke-me"); err != nil {
+	if err := env.Service.RevokeInvite("testnet", "revoke-me"); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 
-	invites, err := env.svc.ListInvites("testnet")
+	invites, err := env.Service.ListInvites("testnet")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -311,10 +312,10 @@ func TestRevokeInvite_Success(t *testing.T) {
 }
 
 func TestRevokeInvite_NotFound(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	err := env.svc.RevokeInvite("testnet", "ghost")
+	err := env.Service.RevokeInvite("testnet", "ghost")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
@@ -401,10 +402,10 @@ func TestPeerInvite_Write(t *testing.T) {
 }
 
 func TestInvite_Persistence(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.CreateInvite("testnet", service.CreateInviteRequest{
+	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name:      "persist-test",
 		IP:        "10.0.0.5",
 		Admin:     true,
@@ -414,7 +415,7 @@ func TestInvite_Persistence(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	invites, err := env.svc.ListInvites("testnet")
+	invites, err := env.Service.ListInvites("testnet")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

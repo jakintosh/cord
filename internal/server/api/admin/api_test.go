@@ -1,4 +1,4 @@
-package api_test
+package admin_test
 
 import (
 	"net/http"
@@ -6,6 +6,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
@@ -49,7 +50,7 @@ func TestAPIRouter_ExposesPeerRoutes(
 	env.SeedNetwork(t)
 
 	// list peers on empty network should return 200
-	result := wire.TestGet[[]api.PeerDTO](env.Router, "/networks/testnet/peers")
+	result := wire.TestGet[[]admin.PeerDTO](env.Router, "/networks/testnet/peers")
 	result.ExpectOK(t)
 }
 
@@ -61,7 +62,7 @@ func TestAPIRouter_ExposesCidrRoutes(
 	env.SeedNetwork(t)
 
 	// list cidrs on empty network should return 200
-	result := wire.TestGet[[]api.CidrDTO](env.Router, "/networks/testnet/cidrs")
+	result := wire.TestGet[[]admin.CidrDTO](env.Router, "/networks/testnet/cidrs")
 	result.ExpectOK(t)
 }
 
@@ -73,7 +74,7 @@ func TestAPIRouter_ExposesAssociationRoutes(
 	env.SeedNetwork(t)
 
 	// list associations on empty network should return 200
-	result := wire.TestGet[[]api.AssociationDTO](env.Router, "/networks/testnet/associations")
+	result := wire.TestGet[[]admin.AssociationDTO](env.Router, "/networks/testnet/associations")
 	result.ExpectOK(t)
 }
 
@@ -85,6 +86,6 @@ func TestAPIRouter_ExposesInviteRoutes(
 	env.SeedNetwork(t)
 
 	// list invites on empty network should return 200
-	result := wire.TestGet[[]api.InviteDTO](env.Router, "/networks/testnet/invites")
+	result := wire.TestGet[[]admin.InviteDTO](env.Router, "/networks/testnet/invites")
 	result.ExpectOK(t)
 }

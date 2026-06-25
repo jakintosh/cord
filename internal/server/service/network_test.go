@@ -5,12 +5,13 @@ import (
 	"testing"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
 func TestCreateNetwork_Success(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	net, err := env.svc.CreateNetwork(service.Network{
+	net, err := env.Service.CreateNetwork(service.Network{
 		Name:             "mynet",
 		RootCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
@@ -56,9 +57,9 @@ func TestCreateNetwork_Success(t *testing.T) {
 }
 
 func TestCreateNetwork_StoresKeyPair(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	net, err := env.svc.CreateNetwork(service.Network{
+	net, err := env.Service.CreateNetwork(service.Network{
 		Name:             "keytest",
 		RootCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
@@ -71,7 +72,7 @@ func TestCreateNetwork_StoresKeyPair(t *testing.T) {
 		t.Fatalf("create network: %v", err)
 	}
 
-	got, err := env.svc.GetNetwork("keytest")
+	got, err := env.Service.GetNetwork("keytest")
 	if err != nil {
 		t.Fatalf("get network: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestCreateNetwork_StoresKeyPair(t *testing.T) {
 }
 
 func TestCreateNetwork_DuplicateName(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
 	cfg := service.Network{
 		Name:             "dup",
@@ -97,20 +98,20 @@ func TestCreateNetwork_DuplicateName(t *testing.T) {
 		ApiPort:          8080,
 	}
 
-	if _, err := env.svc.CreateNetwork(cfg); err != nil {
+	if _, err := env.Service.CreateNetwork(cfg); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
 
-	_, err := env.svc.CreateNetwork(cfg)
+	_, err := env.Service.CreateNetwork(cfg)
 	if !errors.Is(err, service.ErrNetworkExists) {
 		t.Errorf("err = %v, want ErrNetworkExists", err)
 	}
 }
 
 func TestCreateNetwork_EmptyName(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.CreateNetwork(service.Network{
+	_, err := env.Service.CreateNetwork(service.Network{
 		RootCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
 		ExternalIP:       "1.2.3.4",
@@ -124,9 +125,9 @@ func TestCreateNetwork_EmptyName(t *testing.T) {
 }
 
 func TestCreateNetwork_InvalidRootCIDR(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.CreateNetwork(service.Network{
+	_, err := env.Service.CreateNetwork(service.Network{
 		Name:             "badcidr",
 		RootCidr:         "not-a-cidr",
 		InviteCidr:       "10.1.0.0/24",
@@ -141,9 +142,9 @@ func TestCreateNetwork_InvalidRootCIDR(t *testing.T) {
 }
 
 func TestCreateNetwork_InvalidInviteCIDR(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.CreateNetwork(service.Network{
+	_, err := env.Service.CreateNetwork(service.Network{
 		Name:             "badinvite",
 		RootCidr:         "10.0.0.0/16",
 		InviteCidr:       "not-a-cidr",
@@ -158,9 +159,9 @@ func TestCreateNetwork_InvalidInviteCIDR(t *testing.T) {
 }
 
 func TestCreateNetwork_MissingExternalIP(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.CreateNetwork(service.Network{
+	_, err := env.Service.CreateNetwork(service.Network{
 		Name:             "noip",
 		RootCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
@@ -174,9 +175,9 @@ func TestCreateNetwork_MissingExternalIP(t *testing.T) {
 }
 
 func TestCreateNetwork_MissingPorts(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.CreateNetwork(service.Network{
+	_, err := env.Service.CreateNetwork(service.Network{
 		Name:             "noports",
 		RootCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
@@ -190,9 +191,9 @@ func TestCreateNetwork_MissingPorts(t *testing.T) {
 }
 
 func TestCreateNetwork_DefaultPorts(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	nw, err := env.svc.CreateNetwork(service.Network{
+	nw, err := env.Service.CreateNetwork(service.Network{
 		Name:       "defaults",
 		RootCidr:   "10.0.0.0/16",
 		InviteCidr: "10.1.0.0/24",
@@ -211,9 +212,9 @@ func TestCreateNetwork_DefaultPorts(t *testing.T) {
 }
 
 func TestCreateNetwork_DefaultInviteCidr(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	nw, err := env.svc.CreateNetwork(service.Network{
+	nw, err := env.Service.CreateNetwork(service.Network{
 		Name:       "auto-invite",
 		RootCidr:   "10.27.0.0/16",
 		ExternalIP: "1.2.3.4",
@@ -228,9 +229,9 @@ func TestCreateNetwork_DefaultInviteCidr(t *testing.T) {
 }
 
 func TestCreateNetwork_OverlappingCIDRs(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.CreateNetwork(service.Network{
+	_, err := env.Service.CreateNetwork(service.Network{
 		Name:             "overlap",
 		RootCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.0.1.0/24",
@@ -245,10 +246,10 @@ func TestCreateNetwork_OverlappingCIDRs(t *testing.T) {
 }
 
 func TestGetNetwork_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	net, err := env.svc.GetNetwork("testnet")
+	net, err := env.Service.GetNetwork("testnet")
 	if err != nil {
 		t.Fatalf("get network: %v", err)
 	}
@@ -261,18 +262,18 @@ func TestGetNetwork_Success(t *testing.T) {
 }
 
 func TestGetNetwork_NotFound(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	_, err := env.svc.GetNetwork("nonexistent")
+	_, err := env.Service.GetNetwork("nonexistent")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestListNetworks_Success(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	names, err := env.svc.ListNetworks()
+	names, err := env.Service.ListNetworks()
 	if err != nil {
 		t.Fatalf("list empty: %v", err)
 	}
@@ -280,9 +281,9 @@ func TestListNetworks_Success(t *testing.T) {
 		t.Fatalf("expected 0 names, got %d", len(names))
 	}
 
-	seedNetwork(t, env.svc)
+	testutil.SeedNetwork(t, env.Service)
 
-	names, err = env.svc.ListNetworks()
+	names, err = env.Service.ListNetworks()
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -292,33 +293,33 @@ func TestListNetworks_Success(t *testing.T) {
 }
 
 func TestDeleteNetwork_Success(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.svc.DeleteNetwork("testnet"); err != nil {
+	if err := env.Service.DeleteNetwork("testnet"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
-	_, err := env.svc.GetNetwork("testnet")
+	_, err := env.Service.GetNetwork("testnet")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("after delete: err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestDeleteNetwork_NotFound(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	err := env.svc.DeleteNetwork("ghost")
+	err := env.Service.DeleteNetwork("ghost")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestDeleteNetwork_CascadesResources(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.svc.AddPeer("testnet", service.PeerConfig{
+	_, err := env.Service.AddPeer("testnet", service.PeerConfig{
 		Name:  "alice",
 		IP:    "10.0.0.5",
 		Admin: false,
@@ -327,11 +328,11 @@ func TestDeleteNetwork_CascadesResources(t *testing.T) {
 		t.Fatalf("add peer: %v", err)
 	}
 
-	if err := env.svc.DeleteNetwork("testnet"); err != nil {
+	if err := env.Service.DeleteNetwork("testnet"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
-	peers, err := env.svc.ListPeers("testnet")
+	peers, err := env.Service.ListPeers("testnet")
 	if err != nil {
 		t.Fatalf("list peers after delete: %v", err)
 	}

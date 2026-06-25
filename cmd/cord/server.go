@@ -9,7 +9,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/server"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 )
 
 var serverCmd = &args.Command{
@@ -76,7 +76,7 @@ var serverStatusCmd = &args.Command{
 	Handler: func(i *args.Input) error {
 		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 
-		client := api.NewClient(socketPath)
+		client := admin.NewClient(socketPath)
 		if err := client.Status(context.Background()); err != nil {
 			return err
 		}

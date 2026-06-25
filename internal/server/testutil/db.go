@@ -1,13 +1,9 @@
 package testutil
 
 import (
-	"log"
 	"testing"
-	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
-	"git.studiopollinator.com/pollinator/cord/internal/server/service"
-	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 func SetupDB(t *testing.T) *database.DB {
@@ -25,31 +21,4 @@ func SetupDB(t *testing.T) *database.DB {
 	})
 
 	return db
-}
-
-type Env struct {
-	DB      *database.DB
-	Service *service.Service
-}
-
-func SetupService(t *testing.T, wg wireguard.WG) *Env {
-	t.Helper()
-
-	db := SetupDB(t)
-
-	svcOpts := service.Options{
-		Store:  db,
-		WG:     wg,
-		Clock:  func() time.Time { return time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC) },
-		Logger: log.Default(),
-	}
-	svc, err := service.New(svcOpts)
-	if err != nil {
-		t.Fatalf("new service: %v", err)
-	}
-
-	return &Env{
-		DB:      db,
-		Service: svc,
-	}
 }

@@ -6,6 +6,7 @@ import (
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/server"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 )
 
 var serverPeerCmd = &args.Command{
@@ -18,7 +19,6 @@ var serverPeerCmd = &args.Command{
 		serverPeerDisable,
 		serverPeerDelete,
 		serverPeerList,
-		serverPeerVisible,
 	},
 }
 
@@ -52,13 +52,13 @@ var serverPeerAdd = &args.Command{
 		network := i.GetOperand("network")
 		name := i.GetOperand("name")
 		ip := i.GetOperand("ip")
-		admin := i.GetFlag("admin")
+		adminFlag := i.GetFlag("admin")
 
-		client := api.NewClient(socketPath)
-		peer, err := client.AddPeer(context.Background(), network, api.AddPeerRequest{
+		client := admin.NewClient(socketPath)
+		peer, err := client.AddPeer(context.Background(), network, admin.AddPeerRequest{
 			Name:  name,
 			Ip:    ip,
-			Admin: admin,
+			Admin: adminFlag,
 		})
 		if err != nil {
 			return err
@@ -91,7 +91,7 @@ var serverPeerRename = &args.Command{
 		peer := i.GetOperand("peer")
 		newName := i.GetOperand("new-name")
 
-		client := api.NewClient(socketPath)
+		client := admin.NewClient(socketPath)
 		result, err := client.RenamePeer(context.Background(), network, peer, newName)
 		if err != nil {
 			return err
@@ -119,7 +119,7 @@ var serverPeerEnable = &args.Command{
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
-		client := api.NewClient(socketPath)
+		client := admin.NewClient(socketPath)
 		result, err := client.EnablePeer(context.Background(), network, peer)
 		if err != nil {
 			return err
@@ -147,7 +147,7 @@ var serverPeerDisable = &args.Command{
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
-		client := api.NewClient(socketPath)
+		client := admin.NewClient(socketPath)
 		result, err := client.DisablePeer(context.Background(), network, peer)
 		if err != nil {
 			return err
@@ -175,7 +175,7 @@ var serverPeerDelete = &args.Command{
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
-		client := api.NewClient(socketPath)
+		client := admin.NewClient(socketPath)
 		if err := client.DeletePeer(context.Background(), network, peer); err != nil {
 			return err
 		}
@@ -201,32 +201,8 @@ var serverPeerList = &args.Command{
 		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		network := i.GetOperand("network")
 
-		client := api.NewClient(socketPath)
+		client := admin.NewClient(socketPath)
 		peers, err := client.ListPeers(context.Background(), network)
-		if err != nil {
-			return err
-		}
-
-		return printJSON(peers)
-	},
-}
-
-var serverPeerVisible = &args.Command{
-	Name: "visible",
-	Help: "list peers visible to a peer",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "network name",
-		},
-	},
-	Options: []args.Option{jsonOption},
-	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
-		network := i.GetOperand("network")
-
-		client := api.NewClient(socketPath)
-		peers, err := client.ListPeersVisible(context.Background(), network)
 		if err != nil {
 			return err
 		}

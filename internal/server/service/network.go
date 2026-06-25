@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
@@ -326,6 +327,42 @@ func (s *Service) StartNetwork(
 	}
 	s.mu.Unlock()
 
+	// Start HTTP API listeners if factory is configured.
+	if s.apiFactory != nil {
+		handlers := s.apiFactory(name)
+
+		// serve main network api
+		rootIP := firstAssignableIP(rootNet)
+		mainAddr := fmt.Sprintf("%s:%d", rootIP.String(), network.ApiPort)
+		mainServer := &http.Server{
+			Addr:    mainAddr,
+			Handler: handlers.Main,
+		}
+		go func() {
+			if err := mainServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				s.logf("main HTTP server for %s: %v", name, err)
+			}
+		}()
+
+		// serve invite network api
+		inviteIP := firstAssignableIP(inviteNet)
+		inviteAddr := fmt.Sprintf("%s:%d", inviteIP.String(), network.ApiPort)
+		inviteServer := &http.Server{
+			Addr:    inviteAddr,
+			Handler: handlers.Invite,
+		}
+		go func() {
+			if err := inviteServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				s.logf("invite HTTP server for %s: %v", name, err)
+			}
+		}()
+
+		s.mu.Lock()
+		s.running[name].MainServer = mainServer
+		s.running[name].InviteServer = inviteServer
+		s.mu.Unlock()
+	}
+
 	go s.reconcileLoop(loopCtx, name)
 
 	return nil
@@ -348,6 +385,22 @@ func (s *Service) StopNetwork(
 	devices.Cancel()
 
 	var errs []error
+
+	// Shut down HTTP servers first (short timeout).
+	if devices.MainServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := devices.MainServer.Shutdown(shutdownCtx); err != nil {
+			errs = append(errs, fmt.Errorf("main server shutdown: %w", err))
+		}
+		cancel()
+	}
+	if devices.InviteServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := devices.InviteServer.Shutdown(shutdownCtx); err != nil {
+			errs = append(errs, fmt.Errorf("invite server shutdown: %w", err))
+		}
+		cancel()
+	}
 
 	if err := devices.Main.Down(); err != nil {
 		errs = append(errs, fmt.Errorf("main down: %w", err))

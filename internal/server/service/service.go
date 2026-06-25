@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -30,18 +31,31 @@ type Options struct {
 	// ReconcileInterval controls how often the reconciliation loop runs
 	// for each started network. Defaults to 10s when zero.
 	ReconcileInterval time.Duration
+
+	// APIFactory creates per-network HTTP handlers. Called by
+	// StartNetwork. Nil means no API listeners are started.
+	APIFactory func(network string) APIHandlers
+}
+
+// APIHandlers holds the HTTP handlers for a single network's main-facing
+// and invite-facing APIs. Created by APIFactory and used internally by
+// StartNetwork to start HTTP listeners.
+type APIHandlers struct {
+	Main   http.Handler
+	Invite http.Handler
 }
 
 // Service is the domain core for the cord server. All domain operations
 // are methods on Service, scoped by a network name parameter. It owns
 // durable state through the Store and live WireGuard state through WG.
 type Service struct {
-	store              Store
-	wg                 wireguard.WG
-	clock              func() time.Time
-	log                *log.Logger
-	mu                 sync.Mutex
-	reconcileInterval  time.Duration
+	store             Store
+	wg                wireguard.WG
+	clock             func() time.Time
+	log               *log.Logger
+	mu                sync.Mutex
+	reconcileInterval time.Duration
+	apiFactory        func(network string) APIHandlers
 
 	// running tracks networks that have been started (WG devices up).
 	running map[string]*NetworkDevices
@@ -51,11 +65,13 @@ type Service struct {
 // network: both devices, their interface names, and a cancel function
 // that stops the reconciliation loop.
 type NetworkDevices struct {
-	MainName   string
-	Main       wireguard.WGDevice
-	InviteName string
-	Invite     wireguard.WGDevice
-	Cancel     context.CancelFunc
+	MainName     string
+	Main         wireguard.WGDevice
+	InviteName   string
+	Invite       wireguard.WGDevice
+	Cancel       context.CancelFunc
+	MainServer   *http.Server
+	InviteServer *http.Server
 }
 
 // New returns a ready-to-use Service. All Options fields are required
@@ -82,12 +98,13 @@ func New(
 	}
 
 	return &Service{
-		store:              opts.Store,
-		wg:                 opts.WG,
-		clock:              clock,
-		log:                opts.Logger,
-		running:            make(map[string]*NetworkDevices),
-		reconcileInterval:  reconcileInterval,
+		store:             opts.Store,
+		wg:                opts.WG,
+		clock:             clock,
+		log:               opts.Logger,
+		running:           make(map[string]*NetworkDevices),
+		reconcileInterval: reconcileInterval,
+		apiFactory:        opts.APIFactory,
 	}, nil
 }
 

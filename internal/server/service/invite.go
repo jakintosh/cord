@@ -93,6 +93,17 @@ type RedeemResult struct {
 // endpointTTL is how long an endpoint sighting is considered current.
 const endpointTTL = 24 * time.Hour
 
+// ResolveInviteIdentity looks up an unredeemed, unexpired invite by
+// temporary IP within the invite network. Used by the identity middleware
+// to authenticate incoming invite-redemption requests.
+func (s *Service) ResolveInviteIdentity(network string, ip net.IP) (*Invite, error) {
+	inv, err := s.store.GetInviteByIP(network, ip, s.clock())
+	if err != nil {
+		return nil, fmt.Errorf("resolve invite identity: %w", mapStoreError(err))
+	}
+	return inv, nil
+}
+
 // CreateInvite reserves an IP on the main network, allocates a
 // temporary IP on the invite network, generates a temporary keypair,
 // persists the invite record, and returns the PeerInvite payload to

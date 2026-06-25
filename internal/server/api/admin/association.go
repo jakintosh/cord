@@ -1,4 +1,4 @@
-package api
+package admin
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -102,7 +103,7 @@ func (a *API) handleAssociationDelete(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, DeleteResponse{
+	wire.WriteData(w, http.StatusOK, api.DeleteResponse{
 		Status: "deleted",
 		ID:     req.Cidr1 + "/" + req.Cidr2,
 	})

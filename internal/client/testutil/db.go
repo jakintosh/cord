@@ -6,7 +6,9 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 )
 
-func SetupDB(t *testing.T) *database.DB {
+func SetupDB(
+	t *testing.T,
+) *database.DB {
 	t.Helper()
 
 	opts := database.Options{

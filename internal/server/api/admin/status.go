@@ -1,4 +1,4 @@
-package api
+package admin
 
 import (
 	"context"
@@ -6,22 +6,14 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 )
-
-type StatusResponse struct {
-	Status string `json:"status"`
-}
-
-type DeleteResponse struct {
-	Status string `json:"status"`
-	ID     string `json:"id"`
-}
 
 func (a *API) handleStatus(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	wire.WriteData(w, http.StatusOK, StatusResponse{
+	wire.WriteData(w, http.StatusOK, api.StatusResponse{
 		Status: "ok",
 	})
 }
@@ -33,6 +25,6 @@ func (c *Client) Status(
 	if err != nil {
 		return err
 	}
-	_, err = daemon.DecodeResponse[StatusResponse](resp)
+	_, err = daemon.DecodeResponse[api.StatusResponse](resp)
 	return err
 }

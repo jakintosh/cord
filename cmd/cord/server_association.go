@@ -6,6 +6,7 @@ import (
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/server"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 )
 
 var serverAssociationCmd = &args.Command{
@@ -41,8 +42,8 @@ var serverAssociationAdd = &args.Command{
 		cidr1 := i.GetOperand("cidr1")
 		cidr2 := i.GetOperand("cidr2")
 
-		client := api.NewClient(socketPath)
-		result, err := client.AddAssociation(context.Background(), network, api.AddAssociationRequest{
+		client := admin.NewClient(socketPath)
+		result, err := client.AddAssociation(context.Background(), network, admin.AddAssociationRequest{
 			Cidr1: cidr1,
 			Cidr2: cidr2,
 		})
@@ -77,8 +78,8 @@ var serverAssociationDelete = &args.Command{
 		cidr1 := i.GetOperand("cidr1")
 		cidr2 := i.GetOperand("cidr2")
 
-		client := api.NewClient(socketPath)
-		if err := client.DeleteAssociation(context.Background(), network, api.DeleteAssociationRequest{
+		client := admin.NewClient(socketPath)
+		if err := client.DeleteAssociation(context.Background(), network, admin.DeleteAssociationRequest{
 			Cidr1: cidr1,
 			Cidr2: cidr2,
 		}); err != nil {
@@ -106,7 +107,7 @@ var serverAssociationList = &args.Command{
 		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		network := i.GetOperand("network")
 
-		client := api.NewClient(socketPath)
+		client := admin.NewClient(socketPath)
 		associations, err := client.ListAssociations(context.Background(), network)
 		if err != nil {
 			return err

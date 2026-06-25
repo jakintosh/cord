@@ -36,6 +36,18 @@ type NetworkStatus struct {
 	PeerCount int
 }
 
+// Invite carries the parsed contents of a server-issued invite file.
+// It is the caller's responsibility to read and parse the invite
+// payload from whatever format it arrives in (JSON file, clipboard,
+// etc.).
+type Invite struct {
+	NetworkName    string
+	AssignedCidr   string // temp address on the invite subnet (placeholder until server redemption)
+	ServerPubkey   string
+	ServerEndpoint string // e.g. "1.2.3.4:51820"
+	ServerApiAddr  string // e.g. "10.42.0.1:8443"
+}
+
 // UpdateNetworkRequest carries the fields that can be changed on an
 // installed network. Nil pointer means "no change."
 type UpdateNetworkRequest struct {
@@ -123,18 +135,6 @@ func (s *Service) Status() (
 		statuses = append(statuses, status)
 	}
 	return statuses, nil
-}
-
-// Invite carries the parsed contents of a server-issued invite file.
-// It is the caller's responsibility to read and parse the invite
-// payload from whatever format it arrives in (JSON file, clipboard,
-// etc.).
-type Invite struct {
-	NetworkName    string
-	AssignedCidr   string // temp address on the invite subnet (placeholder until server redemption)
-	ServerPubkey   string
-	ServerEndpoint string // e.g. "1.2.3.4:51820"
-	ServerApiAddr  string // e.g. "10.42.0.1:8443"
 }
 
 // InstallNetwork validates an invite, generates a permanent keypair,

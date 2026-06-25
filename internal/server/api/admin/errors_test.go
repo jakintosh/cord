@@ -1,4 +1,4 @@
-package api_test
+package admin_test
 
 import (
 	"net/http"
@@ -62,24 +62,6 @@ func TestAPIError_BadRequest(
 
 	// verify result
 	apiErr := result.ExpectStatusError(t, http.StatusBadRequest)
-	if apiErr.Message == "" {
-		t.Fatal("error message should not be empty")
-	}
-}
-
-func TestAPIError_NotImplemented(
-	t *testing.T,
-) {
-	// setup env and seed network
-	env := testutil.Setup(t)
-	env.SeedNetwork(t)
-
-	// get visible peers (not yet implemented)
-	url := "/networks/testnet/peers/visible"
-	result := wire.TestGet[any](env.Router, url)
-
-	// verify result
-	apiErr := result.ExpectStatusError(t, http.StatusNotImplemented)
 	if apiErr.Message == "" {
 		t.Fatal("error message should not be empty")
 	}

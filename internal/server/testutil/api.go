@@ -6,20 +6,24 @@ import (
 	"testing"
 	"time"
 
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
 
+var FixedTime = time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+
 type APIEnv struct {
-	DB      *database.DB
-	Service *service.Service
-	Router  http.Handler
-	WG      *wireguardtest.MockWG
+	Database  *database.DB
+	Service   *service.Service
+	Router    http.Handler
+	WireGuard *wireguardtest.MockWG
 }
 
-func Setup(t *testing.T) *APIEnv {
+func Setup(
+	t *testing.T,
+) *APIEnv {
 	t.Helper()
 
 	db := SetupDB(t)
@@ -29,7 +33,7 @@ func Setup(t *testing.T) *APIEnv {
 	svcOpts := service.Options{
 		Store:  db,
 		WG:     wg,
-		Clock:  func() time.Time { return time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC) },
+		Clock:  func() time.Time { return FixedTime },
 		Logger: log.Default(),
 	}
 	svc, err := service.New(svcOpts)
@@ -37,42 +41,35 @@ func Setup(t *testing.T) *APIEnv {
 		t.Fatalf("new service: %v", err)
 	}
 
-	apiOpts := api.Options{
+	apiOpts := admin.Options{
 		Service: svc,
 		Logger:  log.Default(),
 	}
-	apiServer, err := api.New(apiOpts)
+	apiServer, err := admin.New(apiOpts)
 	if err != nil {
 		t.Fatalf("new api: %v", err)
 	}
 
 	return &APIEnv{
-		DB:      db,
-		Service: svc,
-		Router:  apiServer.Router(),
-		WG:      wg,
+		Database:  db,
+		Service:   svc,
+		Router:    apiServer.Router(),
+		WireGuard: wg,
 	}
 }
 
-func (e *APIEnv) SeedNetwork(t *testing.T) *service.Network {
-	t.Helper()
-
-	net, err := e.Service.CreateNetwork(service.Network{
-		Name:             "testnet",
-		RootCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.1.0.0/24",
-		ExternalIP:       "192.168.1.1",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-	})
-	if err != nil {
-		t.Fatalf("seed network: %v", err)
-	}
-	return net
+func (e *APIEnv) SeedNetwork(
+	t *testing.T,
+) *service.Network {
+	return SeedNetwork(t, e.Service)
 }
 
-func (e *APIEnv) SeedCIDR(t *testing.T, network string, name string, cidr string) *service.Cidr {
+func (e *APIEnv) SeedCIDR(
+	t *testing.T,
+	network string,
+	name string,
+	cidr string,
+) *service.Cidr {
 	t.Helper()
 
 	if err := e.Service.AddCidr(network, service.CreateCidrRequest{

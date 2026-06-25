@@ -1,4 +1,4 @@
-package api
+package admin
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -131,7 +132,7 @@ func (a *API) handlePeerDelete(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, DeleteResponse{
+	wire.WriteData(w, http.StatusOK, api.DeleteResponse{
 		Status: "deleted",
 		ID:     peer,
 	})
@@ -177,13 +178,6 @@ func (a *API) handlePeerDisable(
 	}
 
 	wire.WriteData(w, http.StatusOK, PeerDTOFromService(*updated))
-}
-
-func (a *API) handlePeerVisible(
-	w http.ResponseWriter,
-	r *http.Request,
-) {
-	wire.WriteError(w, http.StatusNotImplemented, "peer visibility requires WireGuard identity resolution (not yet implemented)")
 }
 
 func (c *Client) ListPeers(
@@ -273,18 +267,4 @@ func (c *Client) DisablePeer(
 		return PeerDTO{}, err
 	}
 	return daemon.DecodeResponse[PeerDTO](resp)
-}
-
-func (c *Client) ListPeersVisible(
-	ctx context.Context,
-	network string,
-) (
-	[]PeerDTO,
-	error,
-) {
-	resp, err := c.t.Get(ctx, "/networks/"+network+"/peers/visible")
-	if err != nil {
-		return nil, err
-	}
-	return daemon.DecodeResponse[[]PeerDTO](resp)
 }

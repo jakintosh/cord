@@ -1,4 +1,4 @@
-package api_test
+package admin_test
 
 import (
 	"net/http"
@@ -6,6 +6,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
@@ -24,7 +25,7 @@ func TestAPIAddAssociation_Success(
 		"cidr1": "engineering",
 		"cidr2": "marketing"
 	}`
-	result := wire.TestPost[api.AssociationDTO](env.Router, url, body)
+	result := wire.TestPost[admin.AssociationDTO](env.Router, url, body)
 
 	// verify result
 	data := result.ExpectStatusOK(t, http.StatusCreated)
@@ -90,7 +91,7 @@ func TestAPIListAssociations_Empty(
 
 	// list associations
 	url := "/networks/testnet/associations"
-	result := wire.TestGet[[]api.AssociationDTO](env.Router, url)
+	result := wire.TestGet[[]admin.AssociationDTO](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)
@@ -113,7 +114,7 @@ func TestAPIListAssociations_WithData(
 
 	// list associations
 	url := "/networks/testnet/associations"
-	result := wire.TestGet[[]api.AssociationDTO](env.Router, url)
+	result := wire.TestGet[[]admin.AssociationDTO](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)

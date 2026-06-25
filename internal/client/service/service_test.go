@@ -7,6 +7,7 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 )
 
 func TestStart_NoStore(t *testing.T) {
@@ -42,20 +43,20 @@ func TestStart_NoWG(t *testing.T) {
 }
 
 func TestClose_StopsRunningNetworks(t *testing.T) {
-	env := setupTestEnv(t)
-	seedNetwork(t, env.svc, "close-me")
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkWithName(t, env.Service, "close-me")
 
 	ctx := context.Background()
-	if err := env.svc.EnableNetwork(ctx, "close-me"); err != nil {
+	if err := env.Service.EnableNetwork(ctx, "close-me"); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
-	if err := env.svc.Close(); err != nil {
+	if err := env.Service.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
 	// Device should have been cleaned up
-	d, ok := env.wg.Devices["close-me"]
+	d, ok := env.WireGuard.Devices["close-me"]
 	if !ok {
 		t.Fatal("expected device was created")
 	}
@@ -64,7 +65,7 @@ func TestClose_StopsRunningNetworks(t *testing.T) {
 	}
 
 	// Status should show not running
-	statuses, err := env.svc.Status()
+	statuses, err := env.Service.Status()
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -76,9 +77,9 @@ func TestClose_StopsRunningNetworks(t *testing.T) {
 }
 
 func TestClose_NoRunningNetworks(t *testing.T) {
-	env := setupTestEnv(t)
+	env := testutil.SetupService(t)
 
-	if err := env.svc.Close(); err != nil {
+	if err := env.Service.Close(); err != nil {
 		t.Fatalf("close with nothing running: %v", err)
 	}
 }

@@ -1,4 +1,4 @@
-package api_test
+package admin_test
 
 import (
 	"net/http"
@@ -6,6 +6,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
@@ -22,7 +23,7 @@ func TestAPIAddCidr_Success(
 		"name": "engineering",
 		"cidr": "10.0.1.0/24"
 	}`
-	result := wire.TestPost[api.CidrDTO](env.Router, url, body)
+	result := wire.TestPost[admin.CidrDTO](env.Router, url, body)
 
 	// verify result
 	data := result.ExpectStatusOK(t, http.StatusCreated)
@@ -127,7 +128,7 @@ func TestAPIListCidrs_Empty(
 
 	// list cidrs
 	url := "/networks/testnet/cidrs"
-	result := wire.TestGet[[]api.CidrDTO](env.Router, url)
+	result := wire.TestGet[[]admin.CidrDTO](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)
@@ -146,7 +147,7 @@ func TestAPIListCidrs_WithData(
 
 	// list cidrs
 	url := "/networks/testnet/cidrs"
-	result := wire.TestGet[[]api.CidrDTO](env.Router, url)
+	result := wire.TestGet[[]admin.CidrDTO](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)
@@ -179,7 +180,7 @@ func TestAPIRenameCidr_Success(
 	// rename cidr
 	url := "/networks/testnet/cidrs/engineering"
 	body := `{"name": "eng"}`
-	result := wire.TestPatch[api.CidrDTO](env.Router, url, body)
+	result := wire.TestPatch[admin.CidrDTO](env.Router, url, body)
 
 	// verify result
 	data := result.ExpectOK(t)

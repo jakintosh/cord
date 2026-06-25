@@ -1,11 +1,11 @@
-package api_test
+package admin_test
 
 import (
 	"net/http"
 	"testing"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
@@ -18,7 +18,7 @@ func TestAPIListInvites_Empty(
 
 	// list invites
 	url := "/networks/testnet/invites"
-	result := wire.TestGet[[]api.InviteDTO](env.Router, url)
+	result := wire.TestGet[[]admin.InviteDTO](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)
@@ -45,7 +45,7 @@ func TestAPIListInvites_WithData(
 
 	// list invites
 	url = "/networks/testnet/invites"
-	listResult := wire.TestGet[[]api.InviteDTO](env.Router, url)
+	listResult := wire.TestGet[[]admin.InviteDTO](env.Router, url)
 
 	// verify result
 	data := listResult.ExpectOK(t)
@@ -71,7 +71,7 @@ func TestAPIListInvites_NetworkNotFound(
 
 	// list invites for nonexistent network — returns empty list
 	url := "/networks/ghost/invites"
-	result := wire.TestGet[[]api.InviteDTO](env.Router, url)
+	result := wire.TestGet[[]admin.InviteDTO](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)
