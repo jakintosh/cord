@@ -191,7 +191,7 @@ func (s *Service) CreateInvite(
 		Server: ServerInfo{
 			PublicKey:        nw.PublicKey,
 			ExternalEndpoint: fmt.Sprintf("%s:%d", nw.ExternalIP, nw.ListenPort),
-			InternalEndpoint: fmt.Sprintf("%s:%d", firstAssignableIP(parseCIDROrPanic(nw.RootCidr)).String(), nw.ApiPort),
+			InternalEndpoint: fmt.Sprintf("%s:%d", firstAssignableIP(inviteNet).String(), nw.ApiPort),
 		},
 	}
 
@@ -321,14 +321,4 @@ func (s *Service) nextFreeInviteIP(
 	}
 
 	return nil, fmt.Errorf("%w: no free addresses in invite CIDR %s", ErrInvalidInput, inviteCidr)
-}
-
-// parseCIDROrPanic parses a CIDR string or panics. Used for internal
-// constants where the CIDR has already been validated.
-func parseCIDROrPanic(cidr string) *net.IPNet {
-	_, n, err := net.ParseCIDR(cidr)
-	if err != nil {
-		panic("invalid CIDR: " + cidr)
-	}
-	return n
 }

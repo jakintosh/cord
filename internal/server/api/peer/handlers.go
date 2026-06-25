@@ -28,20 +28,7 @@ func (a *API) handleVisiblePeers(
 
 	dtos := make([]VisiblePeerDTO, len(peers))
 	for i, p := range peers {
-		endpoints := make([]EndpointWitnessDTO, len(p.Endpoints))
-		for j, e := range p.Endpoints {
-			endpoints[j] = EndpointWitnessDTO{
-				Witness:   e.Witness,
-				Endpoint:  e.Endpoint,
-				Timestamp: e.Timestamp,
-			}
-		}
-		dtos[i] = VisiblePeerDTO{
-			Name:      p.Name,
-			Cidr:      p.Cidr,
-			PublicKey: p.PublicKey,
-			Endpoints: endpoints,
-		}
+		dtos[i] = toVisiblePeerDTO(p)
 	}
 
 	wire.WriteData(w, http.StatusOK, dtos)
