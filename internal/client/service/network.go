@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
@@ -39,15 +40,20 @@ type NetworkStatus struct {
 }
 
 // Invite carries the parsed contents of a server-issued invite file.
+// Fields prefixed with "Temp" describe the invite network; they are used
+// only during installation and discarded once the permanent identity is
+// assigned.
+//
 // It is the caller's responsibility to read and parse the invite
 // payload from whatever format it arrives in (JSON file, clipboard,
 // etc.).
 type Invite struct {
 	NetworkName    string
-	AssignedCidr   string // temp address on the invite subnet (placeholder until server redemption)
 	ServerPubkey   string
-	ServerEndpoint string // e.g. "1.2.3.4:51820"
-	ServerApiAddr  string // e.g. "10.42.0.1:8443"
+	ServerEndpoint string // server's external WG endpoint, e.g. "1.2.3.4:51820"
+	TempCidr       string // temp address on the invite subnet (step 4)
+	TempApiAddr    string // invite API listener, e.g. "10.43.0.1:8443" (step 6 only)
+	TempPrivKey    string // invite WG private key (step 4–6)
 }
 
 // UpdateNetworkRequest carries the fields that can be changed on an
@@ -140,23 +146,12 @@ func (s *Service) Status() (
 }
 
 // InstallNetwork validates an invite, generates a permanent keypair,
-// and persists the resulting network membership record. The new network
-// is left in the disabled state — the caller must enable it separately.
+// brings up temporary and permanent WireGuard interfaces to communicate
+// with the server, redeems the invite, confirms the peer, tears down
+// both interfaces, and persists the complete network record.
 //
-// This is the full install flow:
-//  1. validate the invite fields
-//  2. generate a permanent keypair
-//  3. persist the permanent network record
-//  4. bring up a temporary invite interface       ← FUTURE (requires WG)
-//  5. prove reachability (handshake probe)         ← FUTURE (requires WG)
-//  6. redeem the invite via the server API tunnel   ← FUTURE (requires WG + server comm)
-//  7. bring up the main interface, confirm w/server ← FUTURE (requires WG + server comm)
-//  8. fetch initial peer list into local cache      ← FUTURE (requires server comm)
-//  9. tear down the main interface                  ← FUTURE (requires WG)
-//
-// Steps 4–9 depend on a real WG implementation and server communication.
-// When those are available, the AssignedCidr will be updated from the
-// server's RedeemResult (rather than the invite's temporary address).
+// The new network is left in the disabled state — the caller must call
+// EnableNetwork to bring it up. No partial state persists on failure.
 func (s *Service) InstallNetwork(
 	invite Invite,
 ) (
@@ -173,16 +168,19 @@ func (s *Service) InstallNetwork(
 	if invite.NetworkName == "" {
 		return nil, ErrInvalidInput
 	}
+	if invite.TempPrivKey == "" {
+		return nil, ErrInvalidInput
+	}
+	if invite.TempCidr == "" {
+		return nil, ErrInvalidInput
+	}
 	if invite.ServerPubkey == "" {
 		return nil, ErrInvalidInput
 	}
 	if invite.ServerEndpoint == "" {
 		return nil, ErrInvalidInput
 	}
-	if invite.ServerApiAddr == "" {
-		return nil, ErrInvalidInput
-	}
-	if invite.AssignedCidr == "" {
+	if invite.TempApiAddr == "" {
 		return nil, ErrInvalidInput
 	}
 
@@ -191,32 +189,143 @@ func (s *Service) InstallNetwork(
 		return nil, ErrNetworkExists
 	}
 
-	privateKey, err := s.wg.GenerateKey()
+	// Validate device names
+	mainName := invite.NetworkName
+	if err := wireguard.ValidateDeviceName(mainName); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+	inviteName := mainName + "-i"
+	if err := wireguard.ValidateDeviceName(inviteName); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+
+	// Generate permanent key pair
+	permPrivKey, err := s.wg.GenerateKey()
 	if err != nil {
 		return nil, err
 	}
-	publicKey, err := s.wg.PublicKey(privateKey)
+	permPubKey, err := s.wg.PublicKey(permPrivKey)
 	if err != nil {
 		return nil, err
 	}
 
-	nw := &Network{
-		Name:           invite.NetworkName,
-		PrivateKey:     privateKey,
-		PublicKey:      publicKey,
-		AssignedCidr:   invite.AssignedCidr, // placeholder; overwritten on server redemption
+	_, inviteCidr, err := net.ParseCIDR(invite.TempCidr)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid temp CIDR %q", ErrInvalidInput, invite.TempCidr)
+	}
+
+	// Create invite device
+	inviteDev, err := s.wg.NewDevice(inviteName, invite.TempPrivKey, invite.TempCidr, 0)
+	if err != nil {
+		return nil, fmt.Errorf("create invite device: %w", err)
+	}
+	defer func() {
+		_ = inviteDev.Down()
+		_ = s.wg.RemoveDevice(inviteName)
+	}()
+
+	// Add invite server peer
+	inviteServerPeer := wireguard.WGPeer{
+		PublicKey:      invite.ServerPubkey,
+		AllowedIPs:     []string{inviteCidr.String()},
+		Endpoint:       invite.ServerEndpoint,
+		EndpointPolicy: wireguard.EndpointFixed,
+	}
+	if err := inviteDev.ApplyPeers([]wireguard.WGPeer{inviteServerPeer}); err != nil {
+		return nil, fmt.Errorf("apply invite peers: %w", err)
+	}
+
+	// Bring up invite device
+	if err := inviteDev.Up(); err != nil {
+		return nil, fmt.Errorf("bring up invite device: %w", err)
+	}
+	if err := inviteDev.WaitForHandshake(invite.ServerPubkey, 10*time.Second, nil); err != nil {
+		return nil, fmt.Errorf("invite handshake: %w", err)
+	}
+
+	// Redeem invite
+	tempPubKey, err := s.wg.PublicKey(invite.TempPrivKey)
+	if err != nil {
+		return nil, err
+	}
+	inviteAPI := serverapi.NewClient("", invite.TempApiAddr, s.httpClient)
+	redeemResult, err := inviteAPI.RedeemInvite(serverapi.RedeemInviteRequest{
+		TempPubKey: tempPubKey,
+		PermPubKey: permPubKey,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("redeem invite: %w", err)
+	}
+
+	// Create main interface
+	mainDev, err := s.wg.NewDevice(mainName, permPrivKey, redeemResult.AssignedCidr, 0)
+	if err != nil {
+		return nil, fmt.Errorf("create main device: %w", err)
+	}
+	defer func() {
+		_ = mainDev.Down()
+		_ = s.wg.RemoveDevice(mainName)
+	}()
+
+	// Add server peer to main interface
+	mainServerPeer := wireguard.WGPeer{
+		PublicKey:      invite.ServerPubkey,
+		AllowedIPs:     []string{redeemResult.AssignedCidr},
+		Endpoint:       invite.ServerEndpoint,
+		EndpointPolicy: wireguard.EndpointFixed,
+	}
+	if err := mainDev.ApplyPeers([]wireguard.WGPeer{mainServerPeer}); err != nil {
+		return nil, fmt.Errorf("apply main peers: %w", err)
+	}
+
+	// Bring up main interface and wait for handshake
+	if err := mainDev.Up(); err != nil {
+		return nil, fmt.Errorf("bring up main device: %w", err)
+	}
+	if err := mainDev.WaitForHandshake(invite.ServerPubkey, 10*time.Second, nil); err != nil {
+		return nil, fmt.Errorf("main handshake: %w", err)
+	}
+
+	// Confirm peer with server API
+	mainAPI := serverapi.NewClient(redeemResult.Server.InternalEndpoint, "", s.httpClient)
+	if err := mainAPI.ConfirmPeer(); err != nil {
+		return nil, fmt.Errorf("confirm peer: %w", err)
+	}
+
+	// Tear down both interfaces
+	_ = mainDev.Down()
+	_ = s.wg.RemoveDevice(mainName)
+	_ = inviteDev.Down()
+	_ = s.wg.RemoveDevice(inviteName)
+
+	// Persist the main network
+	network := &Network{
+		Name:           mainName,
+		PrivateKey:     permPrivKey,
+		PublicKey:      permPubKey,
+		AssignedCidr:   redeemResult.AssignedCidr,
 		ServerPubkey:   invite.ServerPubkey,
 		ServerEndpoint: invite.ServerEndpoint,
-		ServerApiAddr:  invite.ServerApiAddr,
+		ServerApiAddr:  redeemResult.Server.InternalEndpoint,
 		Enabled:        false,
 		CreatedAt:      s.clock(),
 	}
-
-	if err := s.store.InsertNetwork(nw); err != nil {
+	if err := s.store.InsertNetwork(network); err != nil {
 		return nil, err
 	}
 
-	return nw, nil
+	return network, nil
+}
+
+// InsertNetworkDirect persists a pre-built Network record. Exported for
+// test seeding.
+func (s *Service) InsertNetworkDirect(
+	nw *Network,
+) error {
+	if s.store == nil {
+		return ErrNotImplemented
+	}
+	return s.store.InsertNetwork(nw)
 }
 
 // UninstallNetwork removes a network and all its local state. If the

@@ -2,6 +2,8 @@ package testutil
 
 import (
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -15,21 +17,39 @@ type ServiceEnv struct {
 	Database  *database.DB
 	WireGuard *wireguardtest.MockWG
 	Service   *service.Service
+	Server    *httptest.Server
 }
 
 func SetupService(
 	t *testing.T,
 ) *ServiceEnv {
 	t.Helper()
+	return SetupServiceWithServer(t, nil)
+}
+
+func SetupServiceWithServer(
+	t *testing.T,
+	handler http.Handler,
+) *ServiceEnv {
+	t.Helper()
 
 	db := SetupDB(t)
 	wg := wireguardtest.NewMockWG()
 
+	var httpClient *http.Client
+	var server *httptest.Server
+	if handler != nil {
+		server = httptest.NewServer(handler)
+		httpClient = server.Client()
+	}
+
 	svc, err := service.New(service.Options{
-		Store:  db,
-		WG:     wg,
-		Clock:  func() time.Time { return FixedTime },
-		Logger: log.Default(),
+		Store:        db,
+		WG:           wg,
+		Clock:        func() time.Time { return FixedTime },
+		Logger:       log.Default(),
+		HTTPClient:   httpClient,
+		SyncInterval: 30 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -39,6 +59,7 @@ func SetupService(
 		Database:  db,
 		WireGuard: wg,
 		Service:   svc,
+		Server:    server,
 	}
 }
 
@@ -51,10 +72,11 @@ func SetupServiceWithWG(
 	db := SetupDB(t)
 
 	svc, err := service.New(service.Options{
-		Store:  db,
-		WG:     wg,
-		Clock:  func() time.Time { return FixedTime },
-		Logger: log.Default(),
+		Store:        db,
+		WG:           wg,
+		Clock:        func() time.Time { return FixedTime },
+		Logger:       log.Default(),
+		SyncInterval: 30 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)

@@ -20,19 +20,21 @@ type NetworkDTO struct {
 
 type InstallNetworkRequest struct {
 	NetworkName    string `json:"network_name"`
-	AssignedCidr   string `json:"assigned_cidr"`
+	TempPrivKey    string `json:"temp_private_key"`
+	TempCidr       string `json:"temp_cidr"`
 	ServerPubkey   string `json:"server_pubkey"`
 	ServerEndpoint string `json:"server_endpoint"`
-	ServerApiAddr  string `json:"server_api_addr"`
+	TempApiAddr    string `json:"temp_api_addr"`
 }
 
 func installRequestToInvite(req InstallNetworkRequest) service.Invite {
 	return service.Invite{
 		NetworkName:    req.NetworkName,
-		AssignedCidr:   req.AssignedCidr,
+		TempPrivKey:    req.TempPrivKey,
+		TempCidr:       req.TempCidr,
 		ServerPubkey:   req.ServerPubkey,
 		ServerEndpoint: req.ServerEndpoint,
-		ServerApiAddr:  req.ServerApiAddr,
+		TempApiAddr:    req.TempApiAddr,
 	}
 }
 

@@ -44,7 +44,7 @@ func TestStart_NoWG(t *testing.T) {
 
 func TestClose_StopsRunningNetworks(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkWithName(t, env.Service, "close-me")
+	testutil.SeedNetworkDirect(t, env.Service, "close-me")
 
 	ctx := context.Background()
 	if err := env.Service.EnableNetwork(ctx, "close-me"); err != nil {

@@ -111,21 +111,20 @@ func TestAPIShowNetwork_NotFound(
 func TestAPIInstallNetwork_Success(
 	t *testing.T,
 ) {
-	// setup env
-	env := testutil.Setup(t)
+	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
+	apiAddr := env.Server.Listener.Addr().String()
 
-	// install network
 	url := "/networks"
 	body := `{
 		"network_name": "mynet",
-		"assigned_cidr": "10.42.0.5/16",
+		"temp_private_key": "test-temp-key",
+		"temp_cidr": "10.42.0.5/16",
 		"server_pubkey": "srv-pub",
 		"server_endpoint": "1.2.3.4:51820",
-		"server_api_addr": "10.42.0.1:8443"
+		"temp_api_addr": "` + apiAddr + `"
 	}`
 	result := wire.TestPost[api.NetworkDTO](env.Router, url, body)
 
-	// verify result
 	data := result.ExpectStatusOK(t, http.StatusCreated)
 	if data.Name != "mynet" {
 		t.Fatalf("name = %q, want mynet", data.Name)
@@ -140,7 +139,6 @@ func TestAPIInstallNetwork_Success(
 		t.Fatal("expected connected=false for new network")
 	}
 
-	// verify network exists in store
 	nw, err := env.Service.GetNetwork("mynet")
 	if err != nil {
 		t.Fatalf("get network: %v", err)
@@ -154,8 +152,8 @@ func TestAPIInstallNetwork_Success(
 	if nw.ServerEndpoint != "1.2.3.4:51820" {
 		t.Fatalf("server_endpoint = %q, want 1.2.3.4:51820", nw.ServerEndpoint)
 	}
-	if nw.ServerApiAddr != "10.42.0.1:8443" {
-		t.Fatalf("server_api_addr = %q, want 10.42.0.1:8443", nw.ServerApiAddr)
+	if nw.ServerApiAddr != apiAddr {
+		t.Fatalf("server_api_addr = %q, want %q", nw.ServerApiAddr, apiAddr)
 	}
 	if nw.PrivateKey == "" {
 		t.Fatal("private_key should not be empty")
@@ -183,42 +181,38 @@ func TestAPIInstallNetwork_InvalidJSON(
 func TestAPIInstallNetwork_MissingName(
 	t *testing.T,
 ) {
-	// setup env
 	env := testutil.Setup(t)
 
-	// post without network_name
 	url := "/networks"
 	body := `{
-		"assigned_cidr": "10.42.0.5/16",
+		"temp_private_key": "test-temp-key",
+		"temp_cidr": "10.42.0.5/16",
 		"server_pubkey": "srv-pub",
 		"server_endpoint": "1.2.3.4:51820",
-		"server_api_addr": "10.42.0.1:8443"
+		"temp_api_addr": "10.42.0.1:8443"
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 
-	// verify result
 	result.ExpectStatusError(t, http.StatusBadRequest)
 }
 
 func TestAPIInstallNetwork_Duplicate(
 	t *testing.T,
 ) {
-	// setup env
-	env := testutil.Setup(t)
+	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
 	env.SeedNetwork(t, "dupnet")
 
-	// post duplicate
 	url := "/networks"
 	body := `{
 		"network_name": "dupnet",
-		"assigned_cidr": "10.42.0.5/16",
+		"temp_private_key": "test-temp-key",
+		"temp_cidr": "10.42.0.5/16",
 		"server_pubkey": "srv-pub",
 		"server_endpoint": "1.2.3.4:51820",
-		"server_api_addr": "10.42.0.1:8443"
+		"temp_api_addr": "10.42.0.1:8443"
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 
-	// verify result
 	result.ExpectStatusError(t, http.StatusConflict)
 }
 
