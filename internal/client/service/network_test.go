@@ -78,28 +78,6 @@ func TestListNetworks_WithNetworks(t *testing.T) {
 	}
 }
 
-func TestShowNetwork_Success(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "shownet")
-
-	nw, err := env.Service.ShowNetwork("shownet")
-	if err != nil {
-		t.Fatalf("show: %v", err)
-	}
-	if nw.Name != "shownet" {
-		t.Errorf("name = %q, want shownet", nw.Name)
-	}
-}
-
-func TestShowNetwork_NotFound(t *testing.T) {
-	env := testutil.SetupService(t)
-
-	_, err := env.Service.ShowNetwork("ghost")
-	if !errors.Is(err, service.ErrNotFound) {
-		t.Errorf("err = %v, want ErrNotFound", err)
-	}
-}
-
 func TestInstallNetwork_Success(t *testing.T) {
 	// Full flow requires a mock HTTP server. Tested in serverapi package
 	// and will be covered by integration tests.

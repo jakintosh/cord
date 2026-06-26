@@ -7,7 +7,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 )
 
-func (db *DB) ReconcilePeers(
+func (db *DB) SetPeers(
 	network string,
 	peers []service.Peer,
 ) error {

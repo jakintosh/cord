@@ -45,7 +45,7 @@ func TestHandleReportEndpoints_Success(t *testing.T) {
 	_, api := setupPeerTest(t)
 
 	body := `[
-		{"witness_key": "", "peer_key": "peer-key-1", "endpoint": "1.2.3.4:51820", "timestamp": 1718956800}
+		{"peer_key": "peer-key-1", "endpoint": "1.2.3.4:51820"}
 	]`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/endpoints", strings.NewReader(body))

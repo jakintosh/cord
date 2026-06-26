@@ -21,12 +21,11 @@ type EndpointWitnessDTO struct {
 }
 
 // EndpointSightingDTO reports a locally-observed peer endpoint to the
-// server for gossip. The server resolves the witness identity from the
-// WireGuard source IP.
+// server for gossip. The server timestamps the sighting on receipt and
+// resolves the witness identity from the WireGuard source IP.
 type EndpointSightingDTO struct {
-	PeerKey   string `json:"peer_key"`
-	Endpoint  string `json:"endpoint"`
-	Timestamp int64  `json:"timestamp"`
+	PeerKey  string `json:"peer_key"`
+	Endpoint string `json:"endpoint"`
 }
 
 // --- Invite API (invite network) ---

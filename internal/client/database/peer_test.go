@@ -26,7 +26,7 @@ func seedNetwork(t *testing.T, db *database.DB) {
 	}
 }
 
-func TestReconcilePeers_Insert(t *testing.T) {
+func TestSetPeers_Insert(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
@@ -36,7 +36,7 @@ func TestReconcilePeers_Insert(t *testing.T) {
 		{Name: "charlie", PublicKey: "charlie-key", Cidr: "10.42.1.7/32"},
 	}
 
-	if err := db.ReconcilePeers("testnet", peers); err != nil {
+	if err := db.SetPeers("testnet", peers); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 
@@ -60,17 +60,17 @@ func TestReconcilePeers_Insert(t *testing.T) {
 	}
 }
 
-func TestReconcilePeers_Upsert(t *testing.T) {
+func TestSetPeers_Upsert(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
-	if err := db.ReconcilePeers("testnet", []service.Peer{
+	if err := db.SetPeers("testnet", []service.Peer{
 		{Name: "original", PublicKey: "peer-key", Cidr: "10.42.1.10/32"},
 	}); err != nil {
 		t.Fatalf("first reconcile: %v", err)
 	}
 
-	if err := db.ReconcilePeers("testnet", []service.Peer{
+	if err := db.SetPeers("testnet", []service.Peer{
 		{Name: "renamed", PublicKey: "peer-key", Cidr: "10.42.1.20/32"},
 	}); err != nil {
 		t.Fatalf("second reconcile: %v", err)
@@ -94,18 +94,18 @@ func TestReconcilePeers_Upsert(t *testing.T) {
 	}
 }
 
-func TestReconcilePeers_Prune(t *testing.T) {
+func TestSetPeers_Prune(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
-	if err := db.ReconcilePeers("testnet", []service.Peer{
+	if err := db.SetPeers("testnet", []service.Peer{
 		{Name: "keep", PublicKey: "keep-key", Cidr: "10.42.1.1/32"},
 		{Name: "remove", PublicKey: "remove-key", Cidr: "10.42.1.2/32"},
 	}); err != nil {
 		t.Fatalf("first reconcile: %v", err)
 	}
 
-	if err := db.ReconcilePeers("testnet", []service.Peer{
+	if err := db.SetPeers("testnet", []service.Peer{
 		{Name: "keep", PublicKey: "keep-key", Cidr: "10.42.1.1/32"},
 	}); err != nil {
 		t.Fatalf("second reconcile: %v", err)
@@ -123,18 +123,18 @@ func TestReconcilePeers_Prune(t *testing.T) {
 	}
 }
 
-func TestReconcilePeers_ClearAll(t *testing.T) {
+func TestSetPeers_ClearAll(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
-	if err := db.ReconcilePeers("testnet", []service.Peer{
+	if err := db.SetPeers("testnet", []service.Peer{
 		{Name: "alice", PublicKey: "alice-key", Cidr: "10.42.1.1/32"},
 		{Name: "bob", PublicKey: "bob-key", Cidr: "10.42.1.2/32"},
 	}); err != nil {
 		t.Fatalf("initial reconcile: %v", err)
 	}
 
-	if err := db.ReconcilePeers("testnet", nil); err != nil {
+	if err := db.SetPeers("testnet", nil); err != nil {
 		t.Fatalf("clear reconcile: %v", err)
 	}
 
@@ -147,11 +147,11 @@ func TestReconcilePeers_ClearAll(t *testing.T) {
 	}
 }
 
-func TestReconcilePeers_EndpointPreserved(t *testing.T) {
+func TestSetPeers_EndpointPreserved(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
-	if err := db.ReconcilePeers("testnet", []service.Peer{
+	if err := db.SetPeers("testnet", []service.Peer{
 		{
 			Name:         "alice",
 			PublicKey:    "alice-key",
@@ -163,7 +163,7 @@ func TestReconcilePeers_EndpointPreserved(t *testing.T) {
 		t.Fatalf("first reconcile: %v", err)
 	}
 
-	if err := db.ReconcilePeers("testnet", []service.Peer{
+	if err := db.SetPeers("testnet", []service.Peer{
 		{
 			Name:         "alice",
 			PublicKey:    "alice-key",
@@ -190,11 +190,11 @@ func TestReconcilePeers_EndpointPreserved(t *testing.T) {
 	}
 }
 
-func TestReconcilePeers_EndpointOverwritten(t *testing.T) {
+func TestSetPeers_EndpointOverwritten(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
-	if err := db.ReconcilePeers("testnet", []service.Peer{
+	if err := db.SetPeers("testnet", []service.Peer{
 		{
 			Name:         "bob",
 			PublicKey:    "bob-key",
@@ -206,7 +206,7 @@ func TestReconcilePeers_EndpointOverwritten(t *testing.T) {
 		t.Fatalf("first reconcile: %v", err)
 	}
 
-	if err := db.ReconcilePeers("testnet", []service.Peer{
+	if err := db.SetPeers("testnet", []service.Peer{
 		{
 			Name:         "bob",
 			PublicKey:    "bob-key",
@@ -230,7 +230,7 @@ func TestReconcilePeers_EndpointOverwritten(t *testing.T) {
 	}
 }
 
-func TestReconcilePeers_NetworkIsolation(t *testing.T) {
+func TestSetPeers_NetworkIsolation(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
@@ -248,7 +248,7 @@ func TestReconcilePeers_NetworkIsolation(t *testing.T) {
 		t.Fatalf("insert other network: %v", err)
 	}
 
-	if err := db.ReconcilePeers("testnet", []service.Peer{
+	if err := db.SetPeers("testnet", []service.Peer{
 		{Name: "alice", PublicKey: "alice-key", Cidr: "10.42.1.5/32"},
 	}); err != nil {
 		t.Fatalf("reconcile testnet: %v", err)
@@ -275,7 +275,7 @@ func TestListPeers_Ordered(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
-	if err := db.ReconcilePeers("testnet", []service.Peer{
+	if err := db.SetPeers("testnet", []service.Peer{
 		{Name: "ccc", PublicKey: "ccc-key", Cidr: "10.42.1.3/32"},
 		{Name: "aaa", PublicKey: "aaa-key", Cidr: "10.42.1.1/32"},
 		{Name: "bbb", PublicKey: "bbb-key", Cidr: "10.42.1.2/32"},
@@ -312,7 +312,7 @@ func TestUpdatePeerEndpoint(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
-	if err := db.ReconcilePeers("testnet", []service.Peer{
+	if err := db.SetPeers("testnet", []service.Peer{
 		{Name: "alice", PublicKey: "alice-key", Cidr: "10.42.1.5/32"},
 	}); err != nil {
 		t.Fatalf("reconcile: %v", err)

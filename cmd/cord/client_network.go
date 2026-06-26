@@ -64,7 +64,7 @@ var clientNetworkShow = &args.Command{
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
-		result, err := client.ShowNetwork(context.Background(), network)
+		result, err := client.GetNetwork(context.Background(), network)
 		if err != nil {
 			return err
 		}
@@ -196,7 +196,8 @@ var clientNetworkFetch = &args.Command{
 }
 
 func parseInviteFile(
-	path string) (
+	path string,
+) (
 	api.InstallNetworkRequest,
 	error,
 ) {
@@ -212,9 +213,10 @@ func parseInviteFile(
 
 	return api.InstallNetworkRequest{
 		NetworkName:    payload.Interface.NetworkName,
-		AssignedCidr:   payload.Interface.AssignedCidr,
+		TempPrivKey:    payload.Interface.PrivateKey,
+		TempCidr:       payload.Interface.AssignedCidr,
 		ServerPubkey:   payload.Server.PublicKey,
 		ServerEndpoint: payload.Server.ExternalEndpoint,
-		ServerApiAddr:  payload.Server.InternalEndpoint,
+		TempApiAddr:    payload.Server.InternalEndpoint,
 	}, nil
 }

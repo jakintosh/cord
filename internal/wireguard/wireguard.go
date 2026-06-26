@@ -106,6 +106,10 @@ type WGDevice interface {
 	// until the timeout expires. The optional onStatus callback is
 	// invoked with the live peer status each time it is observed.
 	WaitForHandshake(pubKey string, timeout time.Duration, onStatus func(PeerStatus)) error
+
+	// Status returns the live WireGuard device state, including
+	// observed peer endpoints, handshake times, and byte counts.
+	Status() ([]PeerStatus, error)
 }
 
 // EndpointPolicy controls how Cord manages a peer's endpoint.
@@ -146,7 +150,12 @@ type PeerStatus struct {
 // implementation. On macOS only BackendUserspace is available; on
 // Linux BackendKernel is the default (BackendAuto). The manager is
 // safe for concurrent use.
-func New(opts Options) (WG, error) {
+func New(
+	opts Options,
+) (
+	WG,
+	error,
+) {
 	backend, err := newBackend(opts.Backend)
 	if err != nil {
 		return nil, fmt.Errorf("wireguard: new backend: %w", err)
@@ -164,15 +173,31 @@ type manager struct {
 	mu      sync.Mutex
 }
 
-func (m *manager) GenerateKey() (string, error) {
+func (m *manager) GenerateKey() (
+	string,
+	error,
+) {
 	return GenerateKey()
 }
 
-func (m *manager) PublicKey(privateKey string) (string, error) {
+func (m *manager) PublicKey(
+	privateKey string,
+) (
+	string,
+	error,
+) {
 	return PublicKey(privateKey)
 }
 
-func (m *manager) NewDevice(name, privateKey, address string, port uint16) (WGDevice, error) {
+func (m *manager) NewDevice(
+	name string,
+	privateKey string,
+	address string,
+	port uint16,
+) (
+	WGDevice,
+	error,
+) {
 	if len(name) > maxInterfaceNameBytes {
 		return nil, fmt.Errorf(
 			"wireguard: interface name %q exceeds %d byte limit",
@@ -200,7 +225,9 @@ func (m *manager) NewDevice(name, privateKey, address string, port uint16) (WGDe
 	return d, nil
 }
 
-func (m *manager) RemoveDevice(name string) error {
+func (m *manager) RemoveDevice(
+	name string,
+) error {
 	m.mu.Lock()
 	_, ok := m.devices[name]
 	delete(m.devices, name)

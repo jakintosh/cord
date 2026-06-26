@@ -112,7 +112,7 @@ func TestReportEndpoints_Success(t *testing.T) {
 	defer teardown()
 
 	err := c.ReportEndpoints([]EndpointSightingDTO{
-		{PeerKey: "peer-a", Endpoint: "5.6.7.8:51820", Timestamp: 1718956800},
+		{PeerKey: "peer-a", Endpoint: "5.6.7.8:51820"},
 	})
 	if err != nil {
 		t.Fatalf("ReportEndpoints: %v", err)

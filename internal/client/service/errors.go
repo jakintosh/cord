@@ -10,6 +10,5 @@ var (
 	ErrNetworkEnabled       = errors.New("network already enabled")
 	ErrNetworkNotEnabled    = errors.New("network not enabled")
 	ErrInvalidInput         = errors.New("invalid input")
-	ErrNotImplemented       = errors.New("not implemented")
 	ErrWireGuardUnavailable = errors.New("wireguard backend not configured")
 )

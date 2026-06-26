@@ -22,7 +22,6 @@ type EndpointSightingDTO struct {
 	WitnessKey string `json:"witness_key"`
 	PeerKey    string `json:"peer_key"`
 	Endpoint   string `json:"endpoint"`
-	Timestamp  int64  `json:"timestamp"`
 }
 
 func toVisiblePeerDTO(p *service.VisiblePeer) VisiblePeerDTO {

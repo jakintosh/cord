@@ -10,6 +10,14 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
+// syncInterval is the period between background peer syncs. Exported
+// so tests can assert against it.
+const SyncInterval = 30 * time.Second
+
+// ScanInterval is the default period between peer endpoint scans for
+// each enabled network.
+const ScanInterval = 5 * time.Minute
+
 // Network is the persistent record of a client-side network membership.
 // It holds the local identity, the assigned address, the server peer
 // reference, and the user's enable/disable policy. It is inert domain
@@ -65,15 +73,12 @@ type UpdateNetworkRequest struct {
 // GetNetwork returns the persisted network record by name.
 // Returns ErrNotFound if the network is not installed.
 func (s *Service) GetNetwork(
-	name string,
+	networkName string,
 ) (
 	*Network,
 	error,
 ) {
-	if s.store == nil {
-		return nil, ErrNotImplemented
-	}
-	return s.store.GetNetwork(name)
+	return s.store.GetNetwork(networkName)
 }
 
 // ListNetworks returns the names of all installed networks.
@@ -81,68 +86,7 @@ func (s *Service) ListNetworks() (
 	[]string,
 	error,
 ) {
-	if s.store == nil {
-		return nil, ErrNotImplemented
-	}
 	return s.store.ListNetworkNames()
-}
-
-// ShowNetwork returns the full Network record for a single installed
-// network.
-func (s *Service) ShowNetwork(
-	name string,
-) (
-	*Network,
-	error,
-) {
-	if s.store == nil {
-		return nil, ErrNotImplemented
-	}
-	return s.store.GetNetwork(name)
-}
-
-// Status returns the current runtime status for every installed
-// network: enabled flag, whether the interface is running, last sync
-// time, last error, and peer count.
-func (s *Service) Status() (
-	[]NetworkStatus,
-	error,
-) {
-	if s.store == nil {
-		return nil, ErrNotImplemented
-	}
-
-	names, err := s.store.ListNetworkNames()
-	if err != nil {
-		return nil, err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	statuses := make([]NetworkStatus, 0, len(names))
-	for _, name := range names {
-		nw, err := s.store.GetNetwork(name)
-		if err != nil {
-			continue
-		}
-		peers, _ := s.store.ListPeers(name)
-
-		status := NetworkStatus{
-			Name:      name,
-			Enabled:   nw.Enabled,
-			PeerCount: len(peers),
-		}
-
-		if liveNet, ok := s.running[name]; ok {
-			status.Running = true
-			status.LastSync = liveNet.LastSync
-			status.LastError = liveNet.LastErr
-		}
-
-		statuses = append(statuses, status)
-	}
-	return statuses, nil
 }
 
 // InstallNetwork validates an invite, generates a permanent keypair,
@@ -158,13 +102,6 @@ func (s *Service) InstallNetwork(
 	*Network,
 	error,
 ) {
-	if s.store == nil {
-		return nil, ErrNotImplemented
-	}
-	if s.wg == nil {
-		return nil, ErrWireGuardUnavailable
-	}
-
 	if invite.NetworkName == "" {
 		return nil, ErrInvalidInput
 	}
@@ -320,12 +257,9 @@ func (s *Service) InstallNetwork(
 // InsertNetworkDirect persists a pre-built Network record. Exported for
 // test seeding.
 func (s *Service) InsertNetworkDirect(
-	nw *Network,
+	network *Network,
 ) error {
-	if s.store == nil {
-		return ErrNotImplemented
-	}
-	return s.store.InsertNetwork(nw)
+	return s.store.InsertNetwork(network)
 }
 
 // UninstallNetwork removes a network and all its local state. If the
@@ -333,15 +267,11 @@ func (s *Service) InsertNetworkDirect(
 // sync loop stopped), then the persisted record and peer cache are
 // deleted.
 func (s *Service) UninstallNetwork(
-	name string,
+	networkName string,
 ) error {
-	if s.store == nil {
-		return ErrNotImplemented
-	}
+	_ = s.DisableNetwork(networkName)
 
-	_ = s.DisableNetwork(name)
-
-	return s.store.DeleteNetwork(name)
+	return s.store.DeleteNetwork(networkName)
 }
 
 // EnableNetwork brings up the WireGuard interface for the named network
@@ -352,23 +282,16 @@ func (s *Service) UninstallNetwork(
 // Idempotent: enabling an already-running network is a no-op.
 func (s *Service) EnableNetwork(
 	ctx context.Context,
-	name string,
+	networkName string,
 ) error {
-	if s.store == nil {
-		return ErrNotImplemented
-	}
-	if s.wg == nil {
-		return ErrWireGuardUnavailable
-	}
-
 	s.mu.Lock()
-	if _, ok := s.running[name]; ok {
+	if _, ok := s.running[networkName]; ok {
 		s.mu.Unlock()
 		return nil
 	}
 	s.mu.Unlock()
 
-	nw, err := s.store.GetNetwork(name)
+	nw, err := s.store.GetNetwork(networkName)
 	if err != nil {
 		return err
 	}
@@ -392,19 +315,13 @@ func (s *Service) EnableNetwork(
 		if !committed {
 			s.stopLive(nw.Name, ln)
 			disabled := false
-			_, _ = s.store.UpdateNetwork(name, UpdateNetworkRequest{
+			_, _ = s.store.UpdateNetwork(networkName, UpdateNetworkRequest{
 				Enabled: &disabled,
 			})
 		}
 	}()
 
-	peers, err := s.store.ListPeers(nw.Name)
-	if err != nil {
-		return err
-	}
-
-	wgPeers := s.buildPeers(nw, peers)
-	if err := device.ApplyPeers(wgPeers); err != nil {
+	if err := s.reconcilePeers(device, nw); err != nil {
 		return err
 	}
 
@@ -415,7 +332,7 @@ func (s *Service) EnableNetwork(
 	s.startLive(nw.Name, ln, nw.ServerApiAddr)
 
 	yes := true
-	if _, err := s.store.UpdateNetwork(name, UpdateNetworkRequest{
+	if _, err := s.store.UpdateNetwork(networkName, UpdateNetworkRequest{
 		Enabled: &yes,
 	}); err != nil {
 		return err
@@ -431,76 +348,93 @@ func (s *Service) EnableNetwork(
 //
 // Idempotent: disabling an already-disabled network is a no-op.
 func (s *Service) DisableNetwork(
-	name string,
+	networkName string,
 ) error {
-	if s.store == nil {
-		return ErrNotImplemented
-	}
-
 	s.mu.Lock()
-	ln, ok := s.running[name]
+	ln, ok := s.running[networkName]
 	s.mu.Unlock()
 
 	if ok {
-		s.stopLive(name, ln)
+		s.stopLive(networkName, ln)
 	}
 
 	no := false
-	_, err := s.store.UpdateNetwork(name, UpdateNetworkRequest{
+	_, err := s.store.UpdateNetwork(networkName, UpdateNetworkRequest{
 		Enabled: &no,
 	})
 	return err
 }
 
-// FetchNetwork performs a one-shot peer sync from the server for the
+// FetchNetwork performs a one-shot peer fetch from the server for the
 // named network. The network must be running — the server API is only
 // reachable through the WireGuard tunnel.
 //
-// It fetches the visible peer list from the server's peer API,
-// reconciles it into the local peer cache, and applies the updated
-// peer set to the live WireGuard device.
+// It fetches the visible peer list from the server's peer API and
+// reconciles it into the local peer cache. The cache is not applied
+// to the WireGuard device — that is done in the sync loop via reconcilePeers.
 func (s *Service) FetchNetwork(
-	name string,
+	networkName string,
 ) error {
-	if s.store == nil {
-		return ErrNotImplemented
-	}
-
 	s.mu.Lock()
-	ln, ok := s.running[name]
+	ln, ok := s.running[networkName]
 	s.mu.Unlock()
 
 	if !ok {
 		return ErrNetworkNotEnabled
 	}
 
-	network, err := s.store.GetNetwork(name)
-	if err != nil {
-		return err
-	}
-
 	peerResponse, err := ln.ApiClient.ListPeers()
 	if err != nil {
-		return fmt.Errorf("fetch peers for %q: %w", name, err)
+		return fmt.Errorf("fetch peers for %q: %w", networkName, err)
 	}
 
 	peers := peersFromDTOs(peerResponse)
-	if err := s.store.ReconcilePeers(name, peers); err != nil {
-		return fmt.Errorf("reconcile peers for %q: %w", name, err)
-	}
-
-	updated, err := s.store.ListPeers(name)
-	if err != nil {
-		return err
-	}
-
-	wgPeers := s.buildPeers(network, updated)
-	return ln.Device.ApplyPeers(wgPeers)
+	return s.store.SetPeers(networkName, peers)
 }
 
-// startLive starts the background sync loop for a device and registers
-// the LiveNetwork in s.running. The LiveNetwork must already have a
-// valid Device.
+// Status returns the current runtime status for every installed
+// network: enabled flag, whether the interface is running, last sync
+// time, last error, and peer count.
+func (s *Service) Status() (
+	[]NetworkStatus,
+	error,
+) {
+	names, err := s.store.ListNetworkNames()
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	statuses := make([]NetworkStatus, 0, len(names))
+	for _, name := range names {
+		nw, err := s.store.GetNetwork(name)
+		if err != nil {
+			continue
+		}
+		peers, _ := s.store.ListPeers(name)
+
+		status := NetworkStatus{
+			Name:      name,
+			Enabled:   nw.Enabled,
+			PeerCount: len(peers),
+		}
+
+		if liveNet, ok := s.running[name]; ok {
+			status.Running = true
+			status.LastSync = liveNet.LastSync
+			status.LastError = liveNet.LastErr
+		}
+
+		statuses = append(statuses, status)
+	}
+	return statuses, nil
+}
+
+// startLive starts the background sync and scan loops for a device
+// and registers the LiveNetwork in s.running. The LiveNetwork must
+// already have a valid Device.
 func (s *Service) startLive(
 	name string,
 	liveNet *LiveNetwork,
@@ -509,6 +443,7 @@ func (s *Service) startLive(
 	ctx := context.Background()
 	syncCtx, cancel := context.WithCancel(ctx)
 	go s.syncLoop(syncCtx, name)
+	go s.scanLoop(syncCtx, name)
 
 	liveNet.Cancel = cancel
 	liveNet.ApiClient = serverapi.NewClient(apiAddr, "", s.httpClient)
@@ -523,26 +458,26 @@ func (s *Service) startLive(
 // Cancel — the sync cancellation is skipped when the goroutine was
 // never started.
 func (s *Service) stopLive(
-	name string,
+	networkName string,
 	ln *LiveNetwork,
 ) {
 	if ln.Cancel != nil {
 		ln.Cancel()
 	}
 	_ = ln.Device.Down()
-	_ = s.wg.RemoveDevice(name)
+	_ = s.wg.RemoveDevice(networkName)
 	s.mu.Lock()
-	delete(s.running, name)
+	delete(s.running, networkName)
 	s.mu.Unlock()
 }
 
 // syncLoop is the background goroutine for an enabled network. It runs
-// until ctx is cancelled, periodically fetching peers from the server
-// and applying changes to the live device. Sync status (LastSync,
-// LastErr) is recorded on the LiveNetwork entry.
+// until ctx is cancelled, periodically fetching updated peer info from
+// the server and syncing the local peer cache to the WireGuard device.
+// Sync status (LastSync, LastErr) is recorded on the LiveNetwork entry.
 func (s *Service) syncLoop(
 	ctx context.Context,
-	name string,
+	networkName string,
 ) {
 	ticker := time.NewTicker(s.syncInterval)
 	defer ticker.Stop()
@@ -552,30 +487,40 @@ func (s *Service) syncLoop(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.doSync(ctx, name)
+			s.syncOnce(ctx, networkName)
 		}
 	}
 }
 
-// doSync performs one round of sync for a network and records the
+// syncOnce performs one round of sync for a network and records the
 // outcome on the LiveNetwork entry.
-func (s *Service) doSync(
+func (s *Service) syncOnce(
 	ctx context.Context,
-	name string,
+	networkName string,
 ) {
 	s.mu.Lock()
-	ln, ok := s.running[name]
+	ln, ok := s.running[networkName]
 	s.mu.Unlock()
 	if !ok {
 		return
 	}
 
-	err := s.FetchNetwork(name)
+	var err error
+	if e := s.FetchNetwork(networkName); e != nil {
+		err = e
+	} else {
+		nw, e := s.store.GetNetwork(networkName)
+		if e != nil {
+			err = e
+		} else {
+			err = s.reconcilePeers(ln.Device, nw)
+		}
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	ln, ok = s.running[name]
+	ln, ok = s.running[networkName]
 	if !ok {
 		return
 	}
@@ -588,60 +533,118 @@ func (s *Service) doSync(
 	}
 }
 
-// syncInterval is the period between background peer syncs. Exported
-// so tests can assert against it.
-const SyncInterval = 30 * time.Second
+// scanLoop is the background goroutine that periodically scans the
+// live WireGuard device for peer endpoint sightings and reports them
+// to the server. Runs until ctx is cancelled.
+func (s *Service) scanLoop(
+	ctx context.Context,
+	networkName string,
+) {
+	ticker := time.NewTicker(s.scanInterval)
+	defer ticker.Stop()
 
-// buildPeers converts the local peer cache for a network into a slice
-// of WGPeer values suitable for ApplyPeers. The server peer is always
-// included first with an all-network allowed-ips (for relay); cached
-// peers follow with their individual CIDRs.
-func (s *Service) buildPeers(
-	nw *Network,
-	peers []*Peer,
-) []wireguard.WGPeer {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.scanOnce(networkName); err != nil {
+				s.logf("scan %s: %v", networkName, err)
+			}
+		}
+	}
+}
+
+// scanOnce queries the live WireGuard device for its current peer
+// state, reports all known peer endpoints to the server, and updates
+// the local cache with any changed endpoints.
+func (s *Service) scanOnce(
+	networkName string,
+) error {
+	s.mu.Lock()
+	ln, ok := s.running[networkName]
+	s.mu.Unlock()
+	if !ok {
+		return ErrNetworkNotEnabled
+	}
+
+	livePeers, err := ln.Device.Status()
+	if err != nil {
+		return fmt.Errorf("scan %s: status: %w", networkName, err)
+	}
+
+	cachedPeers, err := s.store.ListPeers(networkName)
+	if err != nil {
+		return fmt.Errorf("scan %s: list peers: %w", networkName, err)
+	}
+	cachedByKey := make(map[string]*Peer, len(cachedPeers))
+	for _, p := range cachedPeers {
+		cachedByKey[p.PublicKey] = p
+	}
+
+	now := s.clock().Unix()
+	sightings := make([]serverapi.EndpointSightingDTO, 0, len(livePeers))
+
+	for _, lp := range livePeers {
+		cached, inCache := cachedByKey[lp.PublicKey]
+		if !inCache || lp.Endpoint == "" {
+			continue
+		}
+
+		sightings = append(sightings, serverapi.EndpointSightingDTO{
+			PeerKey:  lp.PublicKey,
+			Endpoint: lp.Endpoint,
+		})
+
+		if lp.Endpoint != cached.Endpoint {
+			if err := s.store.UpdatePeerEndpoint(
+				networkName,
+				lp.PublicKey,
+				lp.Endpoint,
+				now,
+			); err != nil {
+				s.logf("scan %s: update endpoint for %q: %v", networkName, lp.PublicKey, err)
+			}
+		}
+	}
+
+	if len(sightings) > 0 {
+		if err := ln.ApiClient.ReportEndpoints(sightings); err != nil {
+			return fmt.Errorf("scan %s: report endpoints: %w", networkName, err)
+		}
+	}
+
+	return nil
+}
+
+// reconcilePeers applies the current peer cache to a WireGuard device.
+func (s *Service) reconcilePeers(
+	device wireguard.WGDevice,
+	network *Network,
+) error {
+	peers, err := s.store.ListPeers(network.Name)
+	if err != nil {
+		return err
+	}
+
 	wgPeers := make([]wireguard.WGPeer, 0, len(peers)+1)
 
-	wgPeers = append(wgPeers, wireguard.WGPeer{
-		PublicKey:      nw.ServerPubkey,
-		AllowedIPs:     []string{nw.AssignedCidr},
-		Endpoint:       nw.ServerEndpoint,
+	serverPeer := wireguard.WGPeer{
+		PublicKey:      network.ServerPubkey,
+		AllowedIPs:     []string{network.AssignedCidr},
+		Endpoint:       network.ServerEndpoint,
 		EndpointPolicy: wireguard.EndpointFixed,
-	})
+	}
+	wgPeers = append(wgPeers, serverPeer)
 
-	for _, p := range peers {
+	for _, peer := range peers {
 		wgPeers = append(wgPeers, wireguard.WGPeer{
-			PublicKey:      p.PublicKey,
-			AllowedIPs:     []string{p.Cidr},
-			Endpoint:       p.Endpoint,
+			PublicKey:      peer.PublicKey,
+			AllowedIPs:     []string{peer.Cidr},
+			Endpoint:       peer.Endpoint,
 			EndpointPolicy: wireguard.EndpointBootstrap,
 		})
 	}
 
-	return wgPeers
-}
-
-// peersFromDTOs converts the server's visible peer list into local Peer
-// records. For each peer, the most recent endpoint witness is selected.
-func peersFromDTOs(dtos []serverapi.VisiblePeerDTO) []Peer {
-	peers := make([]Peer, len(dtos))
-	for i, dto := range dtos {
-		var endpoint string
-		var endpointTime int64
-		for _, ep := range dto.Endpoints {
-			t := ep.Timestamp.Unix()
-			if t > endpointTime {
-				endpointTime = t
-				endpoint = ep.Endpoint
-			}
-		}
-		peers[i] = Peer{
-			Name:         dto.Name,
-			PublicKey:    dto.PublicKey,
-			Cidr:         dto.Cidr,
-			Endpoint:     endpoint,
-			EndpointTime: endpointTime,
-		}
-	}
-	return peers
+	return device.ApplyPeers(wgPeers)
 }

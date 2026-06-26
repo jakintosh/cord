@@ -88,7 +88,7 @@ func (a *API) handleNetworkShow(
 ) {
 	name := r.PathValue("name")
 
-	nw, err := a.service.ShowNetwork(name)
+	nw, err := a.service.GetNetwork(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -162,7 +162,7 @@ func (a *API) handleNetworkEnable(
 		return
 	}
 
-	nw, err := a.service.ShowNetwork(name)
+	nw, err := a.service.GetNetwork(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -182,7 +182,7 @@ func (a *API) handleNetworkDisable(
 		return
 	}
 
-	nw, err := a.service.ShowNetwork(name)
+	nw, err := a.service.GetNetwork(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -202,7 +202,7 @@ func (a *API) handleNetworkFetch(
 		return
 	}
 
-	nw, err := a.service.ShowNetwork(name)
+	nw, err := a.service.GetNetwork(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -243,8 +243,6 @@ func writeServiceError(
 		wire.WriteError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, service.ErrInvalidInput):
 		wire.WriteError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, service.ErrNotImplemented):
-		wire.WriteError(w, http.StatusNotImplemented, err.Error())
 	default:
 		wire.WriteError(w, http.StatusInternalServerError, err.Error())
 	}
@@ -263,7 +261,7 @@ func (c *Client) ListNetworks(
 	return daemon.DecodeResponse[[]NetworkDTO](resp)
 }
 
-func (c *Client) ShowNetwork(
+func (c *Client) GetNetwork(
 	ctx context.Context,
 	name string,
 ) (

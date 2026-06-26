@@ -63,6 +63,7 @@ type MockDevice struct {
 	UpErr     error
 	DownErr   error
 	ApplyErr  error
+	StatusErr error
 }
 
 func (d *MockDevice) ApplyPeers(peers []wireguard.WGPeer) error {
@@ -92,6 +93,10 @@ func (d *MockDevice) DeviceName() string {
 
 func (d *MockDevice) WaitForHandshake(pubKey string, timeout time.Duration, onStatus func(wireguard.PeerStatus)) error {
 	return nil
+}
+
+func (d *MockDevice) Status() ([]wireguard.PeerStatus, error) {
+	return nil, d.StatusErr
 }
 
 // AppliedPeers returns the last set of peers applied to this device.

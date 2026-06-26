@@ -132,7 +132,10 @@ func (s ReconcileStatus) Degraded() bool {
 
 // PlanPeerReconciliation compares desired peers with live peer state
 // and produces a targeted reconciliation plan.
-func PlanPeerReconciliation(desired []desiredPeer, observed []ObservedPeer) ReconcilePlan {
+func PlanPeerReconciliation(
+	desired []desiredPeer,
+	observed []ObservedPeer,
+) ReconcilePlan {
 	desiredByKey := make(map[wgtypes.Key]desiredPeer, len(desired))
 	observedByKey := make(map[wgtypes.Key]ObservedPeer, len(observed))
 	keySet := make(map[wgtypes.Key]struct{}, len(desired)+len(observed))
@@ -185,7 +188,9 @@ func PlanPeerReconciliation(desired []desiredPeer, observed []ObservedPeer) Reco
 	}
 }
 
-func normalizeAllowedIPs(ips []net.IPNet) []net.IPNet {
+func normalizeAllowedIPs(
+	ips []net.IPNet,
+) []net.IPNet {
 	normalized := append([]net.IPNet(nil), ips...)
 	sort.Slice(normalized, func(i, j int) bool {
 		return normalized[i].String() < normalized[j].String()
@@ -193,7 +198,10 @@ func normalizeAllowedIPs(ips []net.IPNet) []net.IPNet {
 	return normalized
 }
 
-func allowedIPsEqual(left, right []net.IPNet) bool {
+func allowedIPsEqual(
+	left []net.IPNet,
+	right []net.IPNet,
+) bool {
 	if len(left) != len(right) {
 		return false
 	}
@@ -205,14 +213,19 @@ func allowedIPsEqual(left, right []net.IPNet) bool {
 	return true
 }
 
-func endpointsEqual(left, right *net.UDPAddr) bool {
+func endpointsEqual(
+	left *net.UDPAddr,
+	right *net.UDPAddr,
+) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
 	}
 	return left.String() == right.String()
 }
 
-func shortKey(key wgtypes.Key) string {
+func shortKey(
+	key wgtypes.Key,
+) string {
 	s := key.String()
 	if len(s) <= 8 {
 		return s
@@ -220,7 +233,9 @@ func shortKey(key wgtypes.Key) string {
 	return s[:8] + "..."
 }
 
-func wgPeerConfig(op PeerOperation) wgtypes.PeerConfig {
+func wgPeerConfig(
+	op PeerOperation,
+) wgtypes.PeerConfig {
 	peer := op.Peer
 	cfg := wgtypes.PeerConfig{PublicKey: peer.PublicKey}
 	switch op.Type {
@@ -229,7 +244,8 @@ func wgPeerConfig(op PeerOperation) wgtypes.PeerConfig {
 	case PeerAdd:
 		cfg.ReplaceAllowedIPs = true
 		cfg.AllowedIPs = peer.AllowedIPs
-		if peer.EndpointPolicy != EndpointDynamic {
+		switch peer.EndpointPolicy {
+		case EndpointBootstrap, EndpointFixed:
 			cfg.Endpoint = peer.Endpoint
 		}
 		keepalive := peer.PersistentKeepalive

@@ -28,12 +28,12 @@ type Store interface {
 
 	// Peer cache within a network.
 
-	// ReconcilePeers replaces the stored peer set for the named
-	// network with the provided peers. Peers already present are
-	// upserted by public key; peers not in the provided list are
-	// deleted. When upserting, a locally-observed endpoint is
-	// preserved if its timestamp is newer than the incoming value.
-	ReconcilePeers(network string, peers []Peer) error
+	// SetPeers replaces the stored peer set for the named network
+	// with the provided peers. Peers already present are upserted by
+	// public key; peers not in the provided list are deleted. When
+	// upserting, a locally-observed endpoint is preserved if its
+	// timestamp is newer than the incoming value.
+	SetPeers(network string, peers []Peer) error
 
 	// ListPeers returns all cached peers for the named network,
 	// ordered by name ascending.

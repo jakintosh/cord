@@ -225,7 +225,7 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 		t.Fatalf("insert network: %v", err)
 	}
 
-	if err := db.ReconcilePeers("cascadenet", []service.Peer{
+	if err := db.SetPeers("cascadenet", []service.Peer{
 		{Name: "peer-1", PublicKey: "peer-key-1", Cidr: "10.42.1.5/32"},
 		{Name: "peer-2", PublicKey: "peer-key-2", Cidr: "10.42.1.6/32"},
 	}); err != nil {

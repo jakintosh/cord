@@ -56,7 +56,7 @@ func (a *API) handleReportEndpoints(
 			WitnessKey: caller.PublicKey,
 			PeerKey:    s.PeerKey,
 			Endpoint:   s.Endpoint,
-			Timestamp:  time.Unix(s.Timestamp, 0),
+			Timestamp:  time.Now(),
 		}
 	}
 

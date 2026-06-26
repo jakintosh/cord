@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"sync"
@@ -29,6 +30,10 @@ type Options struct {
 	// enabled network. Defaults to 30s when zero.
 	SyncInterval time.Duration
 
+	// ScanInterval controls how often the peer scan loop runs for
+	// each enabled network. Defaults to 5m when zero.
+	ScanInterval time.Duration
+
 	// HTTPClient is the HTTP client used to reach the server's peer
 	// and invite APIs through the WireGuard tunnel. Nil uses a
 	// default client with a 10s timeout.
@@ -50,6 +55,7 @@ type Service struct {
 	httpClient   *http.Client
 	mu           sync.Mutex
 	syncInterval time.Duration
+	scanInterval time.Duration
 
 	// running tracks networks that are currently enabled (interface
 	// up, sync loop active). The key is the network name.
@@ -66,21 +72,29 @@ type LiveNetwork struct {
 	LastErr   string
 }
 
-// New returns a ready-to-use Service. Store and WG may be nil during
-// early development — methods that depend on them will return
-// ErrNotImplemented (store) or ErrWireGuardUnavailable (wg).
+// New returns a ready-to-use Service. Store and WG must be non-nil.
 func New(
 	opts Options,
 ) (
 	*Service,
 	error,
 ) {
+	if opts.Store == nil {
+		return nil, errors.New("service: Store is required")
+	}
+	if opts.WG == nil {
+		return nil, errors.New("service: WG is required")
+	}
 	if opts.Clock == nil {
 		opts.Clock = time.Now
 	}
 	syncInterval := opts.SyncInterval
 	if syncInterval == 0 {
-		syncInterval = 30 * time.Second
+		syncInterval = SyncInterval
+	}
+	scanInterval := opts.ScanInterval
+	if scanInterval == 0 {
+		scanInterval = ScanInterval
 	}
 	return &Service{
 		store:        opts.Store,
@@ -90,6 +104,7 @@ func New(
 		httpClient:   opts.HTTPClient,
 		running:      make(map[string]*LiveNetwork),
 		syncInterval: syncInterval,
+		scanInterval: scanInterval,
 	}, nil
 }
 
@@ -100,13 +115,6 @@ func New(
 func (s *Service) Start(
 	ctx context.Context,
 ) error {
-	if s.store == nil {
-		return ErrNotImplemented
-	}
-	if s.wg == nil {
-		return ErrWireGuardUnavailable
-	}
-
 	names, err := s.store.ListNetworkNames()
 	if err != nil {
 		return err

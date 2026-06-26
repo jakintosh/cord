@@ -118,47 +118,81 @@ func (d *wgDevice) WaitForHandshake(
 	timeout time.Duration,
 	onStatus func(PeerStatus),
 ) error {
+
+	findPeer := func(
+		status *DeviceStatus,
+		key wgtypes.Key,
+	) (
+		PeerStatus,
+		bool,
+	) {
+		for _, peer := range status.Peers {
+			if peer.PublicKey == key {
+				return PeerStatus{
+					PublicKey:     peer.PublicKey.String(),
+					Endpoint:      endpointString(peer.Endpoint),
+					LastHandshake: peer.LastHandshake,
+					ReceiveBytes:  peer.ReceiveBytes,
+					TransmitBytes: peer.TransmitBytes,
+				}, true
+			}
+		}
+		return PeerStatus{}, false
+	}
+
 	key, err := parseKey(pubKey)
 	if err != nil {
 		return fmt.Errorf("wireguard: wait for handshake: %w", err)
 	}
 
+	devName := d.deviceName()
 	deadline := time.Now().Add(timeout)
-	var lastStatusErr error
 
-	for {
-		status, err := d.backend.Status(d.deviceName())
-		if err != nil {
-			lastStatusErr = err
-		} else {
-			lastStatusErr = nil
-			for _, peer := range status.Peers {
-				if peer.PublicKey == key {
-					ps := PeerStatus{
-						PublicKey:     peer.PublicKey.String(),
-						Endpoint:      endpointString(peer.Endpoint),
-						LastHandshake: peer.LastHandshake,
-						ReceiveBytes:  peer.ReceiveBytes,
-						TransmitBytes: peer.TransmitBytes,
-					}
-					if onStatus != nil {
-						onStatus(ps)
-					}
-					if !peer.LastHandshake.IsZero() {
-						return nil
-					}
+	for true {
+		status, err := d.backend.Status(devName)
+		if err == nil {
+			if ps, ok := findPeer(status, key); ok {
+				if onStatus != nil {
+					onStatus(ps)
+				}
+				if !ps.LastHandshake.IsZero() {
+					break
 				}
 			}
 		}
 
+		time.Sleep(100 * time.Millisecond)
 		if time.Now().After(deadline) {
-			if lastStatusErr != nil {
-				return fmt.Errorf("wireguard: wait for handshake: %w", lastStatusErr)
-			}
 			return fmt.Errorf("wireguard: no handshake completed within %s", timeout)
 		}
-		time.Sleep(100 * time.Millisecond)
 	}
+
+	return nil
+}
+
+// Status returns the live WireGuard device state by querying the
+// backend, converting observed peer state into PeerStatus values.
+func (d *wgDevice) Status() (
+	[]PeerStatus,
+	error,
+) {
+	devName := d.deviceName()
+	status, err := d.backend.Status(devName)
+	if err != nil {
+		return nil, fmt.Errorf("wireguard: status: %w", err)
+	}
+
+	peers := make([]PeerStatus, len(status.Peers))
+	for i, p := range status.Peers {
+		peers[i] = PeerStatus{
+			PublicKey:     p.PublicKey.String(),
+			Endpoint:      endpointString(p.Endpoint),
+			LastHandshake: p.LastHandshake,
+			ReceiveBytes:  p.ReceiveBytes,
+			TransmitBytes: p.TransmitBytes,
+		}
+	}
+	return peers, nil
 }
 
 // SetLogger configures optional logging for reconciliation activity.
@@ -277,7 +311,12 @@ func (d *wgDevice) reconcile() error {
 
 // buildDesiredPeers converts WGPeer values to internal desiredPeer
 // values, parsing keys and addresses from their string representations.
-func buildDesiredPeers(peers []WGPeer) (map[wgtypes.Key]desiredPeer, error) {
+func buildDesiredPeers(
+	peers []WGPeer,
+) (
+	map[wgtypes.Key]desiredPeer,
+	error,
+) {
 	result := make(map[wgtypes.Key]desiredPeer, len(peers))
 	for _, p := range peers {
 		key, err := parseKey(p.PublicKey)
