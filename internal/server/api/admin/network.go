@@ -35,7 +35,7 @@ func NetworkDTOFromService(
 ) NetworkDTO {
 	return NetworkDTO{
 		Name:       n.Name,
-		Cidr:       n.RootCidr,
+		Cidr:       n.MainCidr,
 		ExternalIP: n.ExternalIP,
 		Port:       n.ListenPort,
 		InviteCidr: n.InviteCidr,
@@ -86,7 +86,7 @@ func (a *API) handleNetworkAdd(
 
 	cfg := service.Network{
 		Name:             req.Name,
-		RootCidr:         req.Cidr,
+		MainCidr:         req.Cidr,
 		InviteCidr:       req.InviteCidr,
 		ExternalIP:       req.ExternalIP,
 		ListenPort:       req.Port,

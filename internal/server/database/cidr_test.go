@@ -16,7 +16,7 @@ func seedNetworkForCidr(t *testing.T, db *database.DB) {
 		Name:             "cidrnet",
 		PrivateKey:       "priv",
 		PublicKey:        "pub",
-		RootCidr:         "10.0.0.0/16",
+		MainCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
 		ExternalIP:       "1.1.1.1",
 		ListenPort:       51820,

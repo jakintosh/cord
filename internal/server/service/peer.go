@@ -182,16 +182,16 @@ func (s *Service) AddPeer(
 		if parsedIP == nil {
 			return nil, fmt.Errorf("%w: invalid IP %q", ErrInvalidInput, cfg.IP)
 		}
-		_, rootNet, _ := net.ParseCIDR(nw.RootCidr)
+		_, rootNet, _ := net.ParseCIDR(nw.MainCidr)
 		if !rootNet.Contains(parsedIP) {
 			return nil, fmt.Errorf(
-				"%w: IP %q is not within root CIDR %q",
-				ErrInvalidInput, cfg.IP, nw.RootCidr,
+				"%w: IP %q is not within main CIDR %q",
+				ErrInvalidInput, cfg.IP, nw.MainCidr,
 			)
 		}
 		ip = fmt.Sprintf("%s/%d", parsedIP.String(), terminalPrefix(parsedIP))
 	} else {
-		ip, err = s.nextFreePeerIP(network, nw.RootCidr)
+		ip, err = s.nextFreePeerIP(network, nw.MainCidr)
 		if err != nil {
 			return nil, fmt.Errorf("auto-assign IP: %w", err)
 		}

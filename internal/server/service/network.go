@@ -16,9 +16,11 @@ import (
 // It is inert domain data — the Service owns all behavior.
 type Network struct {
 	Name             string
+	MainName         string // WireGuard interface name for the main device (defaults to Name)
+	InviteName       string // WireGuard interface name for the invite device (defaults to Name + "-i")
 	PrivateKey       string
 	PublicKey        string
-	RootCidr         string    // e.g. "10.42.0.0/16" — the network's address space
+	MainCidr         string    // e.g. "10.42.0.0/16" — the network's address space
 	InviteCidr       string    // e.g. "10.43.0.0/24" — the invite subnet
 	ExternalIP       string    // the server's public IP address
 	ListenPort       uint16    // WireGuard listen port for the main interface
@@ -73,9 +75,23 @@ func (s *Service) CreateNetwork(
 		return nil, fmt.Errorf("%w: network name required", ErrInvalidInput)
 	}
 
-	_, rootNet, err := net.ParseCIDR(cfg.RootCidr)
+	if cfg.MainName == "" {
+		cfg.MainName = cfg.Name
+	}
+	if cfg.InviteName == "" {
+		cfg.InviteName = cfg.Name + inviteSuffix
+	}
+
+	if err := wireguard.ValidateDeviceName(cfg.MainName); err != nil {
+		return nil, fmt.Errorf("%w: invalid main device name: %v", ErrInvalidInput, err)
+	}
+	if err := wireguard.ValidateDeviceName(cfg.InviteName); err != nil {
+		return nil, fmt.Errorf("%w: invalid invite device name: %v", ErrInvalidInput, err)
+	}
+
+	_, mainNet, err := net.ParseCIDR(cfg.MainCidr)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid root CIDR %q: %v", ErrInvalidInput, cfg.RootCidr, err)
+		return nil, fmt.Errorf("%w: invalid main CIDR %q: %v", ErrInvalidInput, cfg.MainCidr, err)
 	}
 
 	if cfg.ExternalIP == "" {
@@ -103,10 +119,10 @@ func (s *Service) CreateNetwork(
 		cfg.ApiPort = cfg.ListenPort + 2
 	}
 
-	if rootNet.Contains(inviteNet.IP) || inviteNet.Contains(rootNet.IP) {
+	if mainNet.Contains(inviteNet.IP) || inviteNet.Contains(mainNet.IP) {
 		return nil, fmt.Errorf(
-			"%w: invite CIDR %q overlaps root CIDR %q",
-			ErrCIDROverlap, cfg.InviteCidr, cfg.RootCidr,
+			"%w: invite CIDR %q overlaps main CIDR %q",
+			ErrCIDROverlap, cfg.InviteCidr, cfg.MainCidr,
 		)
 	}
 
@@ -120,15 +136,15 @@ func (s *Service) CreateNetwork(
 		return nil, fmt.Errorf("derive public key: %w", err)
 	}
 
-	ones, bits := rootNet.Mask.Size()
+	ones, bits := mainNet.Mask.Size()
 	rootCidr := &Cidr{
 		Name:   cfg.Name,
-		Cidr:   cfg.RootCidr,
+		Cidr:   cfg.MainCidr,
 		Length: ones,
 		Prefix: bits,
 	}
 
-	serverIP := firstAssignableIP(rootNet)
+	serverIP := firstAssignableIP(mainNet)
 	serverPeer := &Peer{
 		Name:      "cord-server",
 		Cidr:      fmt.Sprintf("%s/%d", serverIP.String(), terminalPrefix(serverIP)),
@@ -140,9 +156,11 @@ func (s *Service) CreateNetwork(
 
 	nw := &Network{
 		Name:             cfg.Name,
+		MainName:         cfg.MainName,
+		InviteName:       cfg.InviteName,
 		PrivateKey:       privKey,
 		PublicKey:        pubKey,
-		RootCidr:         cfg.RootCidr,
+		MainCidr:         cfg.MainCidr,
 		InviteCidr:       cfg.InviteCidr,
 		ExternalIP:       cfg.ExternalIP,
 		ListenPort:       cfg.ListenPort,
@@ -232,16 +250,11 @@ func (s *Service) StartNetwork(
 		return fmt.Errorf("start network: %w", err)
 	}
 
-	mainName, inviteName, err := deviceNames(name)
+	_, mainNet, err := net.ParseCIDR(network.MainCidr)
 	if err != nil {
-		return fmt.Errorf("start network: %w", err)
+		return fmt.Errorf("start network: parse main cidr: %w", err)
 	}
-
-	_, rootNet, err := net.ParseCIDR(network.RootCidr)
-	if err != nil {
-		return fmt.Errorf("start network: parse root cidr: %w", err)
-	}
-	serverAddress := cidrAddress(rootNet)
+	serverAddress := cidrAddress(mainNet)
 
 	_, inviteNet, err := net.ParseCIDR(network.InviteCidr)
 	if err != nil {
@@ -260,7 +273,7 @@ func (s *Service) StartNetwork(
 	}
 
 	main, err := s.wg.NewDevice(
-		mainName,
+		network.MainName,
 		network.PrivateKey,
 		serverAddress,
 		network.ListenPort,
@@ -270,7 +283,7 @@ func (s *Service) StartNetwork(
 	}
 	cleanups = append(cleanups, func() {
 		_ = main.Down()
-		_ = s.wg.RemoveDevice(mainName)
+		_ = s.wg.RemoveDevice(network.MainName)
 	})
 
 	if err := main.Up(); err != nil {
@@ -291,7 +304,7 @@ func (s *Service) StartNetwork(
 	}
 
 	invite, err := s.wg.NewDevice(
-		inviteName,
+		network.InviteName,
 		network.PrivateKey,
 		inviteAddress,
 		network.InviteListenPort,
@@ -302,7 +315,7 @@ func (s *Service) StartNetwork(
 	}
 	cleanups = append(cleanups, func() {
 		_ = invite.Down()
-		_ = s.wg.RemoveDevice(inviteName)
+		_ = s.wg.RemoveDevice(network.InviteName)
 	})
 
 	if err := invite.Up(); err != nil {
@@ -321,8 +334,8 @@ func (s *Service) StartNetwork(
 	s.running[name] = &NetworkDevices{
 		Main:       main,
 		Invite:     invite,
-		MainName:   mainName,
-		InviteName: inviteName,
+		MainName:   network.MainName,
+		InviteName: network.InviteName,
 		Cancel:     cancel,
 	}
 	s.mu.Unlock()
@@ -332,8 +345,8 @@ func (s *Service) StartNetwork(
 		handlers := s.apiFactory(name)
 
 		// serve main network api
-		rootIP := firstAssignableIP(rootNet)
-		mainAddr := fmt.Sprintf("%s:%d", rootIP.String(), network.ApiPort)
+		mainIP := firstAssignableIP(mainNet)
+		mainAddr := fmt.Sprintf("%s:%d", mainIP.String(), network.ApiPort)
 		mainServer := &http.Server{
 			Addr:    mainAddr,
 			Handler: handlers.Main,
@@ -531,27 +544,4 @@ func (s *Service) buildInvitePeers(
 		})
 	}
 	return wgpeers
-}
-
-// deviceNames returns the WireGuard interface names for a network's
-// main and invite devices. Both names are validated against the
-// kernel interface name length limit.
-func deviceNames(
-	network string,
-) (
-	main string,
-	invite string,
-	err error,
-) {
-	main = network
-	invite = network + inviteSuffix
-
-	if err := wireguard.ValidateDeviceName(main); err != nil {
-		return "", "", fmt.Errorf("main device: %w", err)
-	}
-	if err := wireguard.ValidateDeviceName(invite); err != nil {
-		return "", "", fmt.Errorf("invite device: %w", err)
-	}
-
-	return main, invite, nil
 }

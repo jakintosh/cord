@@ -78,7 +78,7 @@ func TestAPIAddCidr_NetworkNotFound(
 	result.ExpectStatusError(t, http.StatusNotFound)
 }
 
-func TestAPIAddCidr_OutsideRootCidr(
+func TestAPIAddCidr_OutsideMainCidr(
 	t *testing.T,
 ) {
 	// setup env and seed network

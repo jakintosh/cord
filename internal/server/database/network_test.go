@@ -26,7 +26,7 @@ func TestInsertAndGetNetwork(t *testing.T) {
 		Name:             "homenet",
 		PrivateKey:       "priv-key-123",
 		PublicKey:        "pub-key-123",
-		RootCidr:         "10.0.0.0/16",
+		MainCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
 		ExternalIP:       "192.168.1.1",
 		ListenPort:       51820,
@@ -53,8 +53,8 @@ func TestInsertAndGetNetwork(t *testing.T) {
 	if got.PublicKey != net.PublicKey {
 		t.Errorf("public_key = %q, want %q", got.PublicKey, net.PublicKey)
 	}
-	if got.RootCidr != net.RootCidr {
-		t.Errorf("root_cidr = %q, want %q", got.RootCidr, net.RootCidr)
+	if got.MainCidr != net.MainCidr {
+		t.Errorf("main_cidr = %q, want %q", got.MainCidr, net.MainCidr)
 	}
 	if got.InviteCidr != net.InviteCidr {
 		t.Errorf("invite_cidr = %q, want %q", got.InviteCidr, net.InviteCidr)
@@ -83,7 +83,7 @@ func TestInsertNetwork_Duplicate(t *testing.T) {
 		Name:             "homenet",
 		PrivateKey:       "priv-a",
 		PublicKey:        "pub-a",
-		RootCidr:         "10.0.0.0/16",
+		MainCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
 		ExternalIP:       "1.1.1.1",
 		ListenPort:       51820,
@@ -120,7 +120,7 @@ func TestListNetworkNames(t *testing.T) {
 			Name:             name,
 			PrivateKey:       "priv-" + name,
 			PublicKey:        "pub-" + name,
-			RootCidr:         "10.0.0.0/16",
+			MainCidr:         "10.0.0.0/16",
 			InviteCidr:       "10.1.0.0/24",
 			ExternalIP:       "1.1.1.1",
 			ListenPort:       51820,
@@ -157,7 +157,7 @@ func TestDeleteNetwork(t *testing.T) {
 		Name:             "deleteme",
 		PrivateKey:       "priv",
 		PublicKey:        "pub",
-		RootCidr:         "10.0.0.0/16",
+		MainCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
 		ExternalIP:       "1.1.1.1",
 		ListenPort:       51820,
@@ -195,7 +195,7 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 		Name:             "cascadenet",
 		PrivateKey:       "priv",
 		PublicKey:        "pub",
-		RootCidr:         "10.0.0.0/16",
+		MainCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
 		ExternalIP:       "1.1.1.1",
 		ListenPort:       51820,

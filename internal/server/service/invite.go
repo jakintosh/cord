@@ -137,7 +137,7 @@ func (s *Service) CreateInvite(
 		}
 		finalIP = normalizeIP(ip)
 	} else {
-		freeIP, err := s.nextFreePeerIP(network, nw.RootCidr)
+		freeIP, err := s.nextFreePeerIP(network, nw.MainCidr)
 		if err != nil {
 			return nil, fmt.Errorf("auto-assign permanent IP: %w", err)
 		}
@@ -267,7 +267,7 @@ func (s *Service) buildRedeemResult(
 	*RedeemResult,
 	error,
 ) {
-	_, rootNet, _ := net.ParseCIDR(nw.RootCidr)
+	_, rootNet, _ := net.ParseCIDR(nw.MainCidr)
 	prefix, _ := rootNet.Mask.Size()
 
 	peerIP, _, _ := net.ParseCIDR(peer.Cidr)

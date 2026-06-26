@@ -17,9 +17,11 @@ func (db *DB) GetNetwork(
 	row := db.Conn.QueryRow(`
 		SELECT
 			name,
+			main_name,
+			invite_name,
 			private_key,
 			public_key,
-			root_cidr,
+			main_cidr,
 			invite_cidr,
 			external_ip,
 			listen_port,
@@ -36,9 +38,11 @@ func (db *DB) GetNetwork(
 	var createdUnix int64
 	if err := row.Scan(
 		&net.Name,
+		&net.MainName,
+		&net.InviteName,
 		&net.PrivateKey,
 		&net.PublicKey,
-		&net.RootCidr,
+		&net.MainCidr,
 		&net.InviteCidr,
 		&net.ExternalIP,
 		&net.ListenPort,
@@ -112,9 +116,11 @@ func (db *DB) BootstrapNetwork(
 	_, err = tx.Exec(`
 		INSERT INTO network (
 			name,
+			main_name,
+			invite_name,
 			private_key,
 			public_key,
-			root_cidr,
+			main_cidr,
 			invite_cidr,
 			external_ip,
 			listen_port,
@@ -123,11 +129,13 @@ func (db *DB) BootstrapNetwork(
 			enabled,
 			created_at_unix
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`,
 		network.Name,
+		network.MainName,
+		network.InviteName,
 		network.PrivateKey,
 		network.PublicKey,
-		network.RootCidr,
+		network.MainCidr,
 		network.InviteCidr,
 		network.ExternalIP,
 		network.ListenPort,

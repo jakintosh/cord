@@ -13,7 +13,7 @@ func TestCreateNetwork_Success(t *testing.T) {
 
 	net, err := env.Service.CreateNetwork(service.Network{
 		Name:             "mynet",
-		RootCidr:         "10.0.0.0/16",
+		MainCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
 		ExternalIP:       "1.2.3.4",
 		ListenPort:       51820,
@@ -33,8 +33,8 @@ func TestCreateNetwork_Success(t *testing.T) {
 	if net.PublicKey == "" {
 		t.Error("public_key should not be empty")
 	}
-	if net.RootCidr != "10.0.0.0/16" {
-		t.Errorf("root_cidr = %q, want 10.0.0.0/16", net.RootCidr)
+	if net.MainCidr != "10.0.0.0/16" {
+		t.Errorf("main_cidr = %q, want 10.0.0.0/16", net.MainCidr)
 	}
 	if net.InviteCidr != "10.1.0.0/24" {
 		t.Errorf("invite_cidr = %q, want 10.1.0.0/24", net.InviteCidr)
@@ -61,7 +61,7 @@ func TestCreateNetwork_StoresKeyPair(t *testing.T) {
 
 	net, err := env.Service.CreateNetwork(service.Network{
 		Name:             "keytest",
-		RootCidr:         "10.0.0.0/16",
+		MainCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
 		ExternalIP:       "1.2.3.4",
 		ListenPort:       51820,
@@ -90,7 +90,7 @@ func TestCreateNetwork_DuplicateName(t *testing.T) {
 
 	cfg := service.Network{
 		Name:             "dup",
-		RootCidr:         "10.0.0.0/16",
+		MainCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
 		ExternalIP:       "1.2.3.4",
 		ListenPort:       51820,
@@ -112,7 +112,7 @@ func TestCreateNetwork_EmptyName(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.CreateNetwork(service.Network{
-		RootCidr:         "10.0.0.0/16",
+		MainCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
 		ExternalIP:       "1.2.3.4",
 		ListenPort:       51820,
@@ -124,12 +124,12 @@ func TestCreateNetwork_EmptyName(t *testing.T) {
 	}
 }
 
-func TestCreateNetwork_InvalidRootCIDR(t *testing.T) {
+func TestCreateNetwork_InvalidMainCIDR(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.CreateNetwork(service.Network{
 		Name:             "badcidr",
-		RootCidr:         "not-a-cidr",
+		MainCidr:         "not-a-cidr",
 		InviteCidr:       "10.1.0.0/24",
 		ExternalIP:       "1.2.3.4",
 		ListenPort:       51820,
@@ -146,7 +146,7 @@ func TestCreateNetwork_InvalidInviteCIDR(t *testing.T) {
 
 	_, err := env.Service.CreateNetwork(service.Network{
 		Name:             "badinvite",
-		RootCidr:         "10.0.0.0/16",
+		MainCidr:         "10.0.0.0/16",
 		InviteCidr:       "not-a-cidr",
 		ExternalIP:       "1.2.3.4",
 		ListenPort:       51820,
@@ -163,7 +163,7 @@ func TestCreateNetwork_MissingExternalIP(t *testing.T) {
 
 	_, err := env.Service.CreateNetwork(service.Network{
 		Name:             "noip",
-		RootCidr:         "10.0.0.0/16",
+		MainCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
 		ListenPort:       51820,
 		InviteListenPort: 51821,
@@ -179,7 +179,7 @@ func TestCreateNetwork_MissingPorts(t *testing.T) {
 
 	_, err := env.Service.CreateNetwork(service.Network{
 		Name:             "noports",
-		RootCidr:         "10.0.0.0/16",
+		MainCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.1.0.0/24",
 		ExternalIP:       "1.2.3.4",
 		InviteListenPort: 51821,
@@ -195,7 +195,7 @@ func TestCreateNetwork_DefaultPorts(t *testing.T) {
 
 	nw, err := env.Service.CreateNetwork(service.Network{
 		Name:       "defaults",
-		RootCidr:   "10.0.0.0/16",
+		MainCidr:   "10.0.0.0/16",
 		InviteCidr: "10.1.0.0/24",
 		ExternalIP: "1.2.3.4",
 		ListenPort: 51820,
@@ -216,7 +216,7 @@ func TestCreateNetwork_DefaultInviteCidr(t *testing.T) {
 
 	nw, err := env.Service.CreateNetwork(service.Network{
 		Name:       "auto-invite",
-		RootCidr:   "10.27.0.0/16",
+		MainCidr:   "10.27.0.0/16",
 		ExternalIP: "1.2.3.4",
 		ListenPort: 51820,
 	})
@@ -233,7 +233,7 @@ func TestCreateNetwork_OverlappingCIDRs(t *testing.T) {
 
 	_, err := env.Service.CreateNetwork(service.Network{
 		Name:             "overlap",
-		RootCidr:         "10.0.0.0/16",
+		MainCidr:         "10.0.0.0/16",
 		InviteCidr:       "10.0.1.0/24",
 		ExternalIP:       "1.2.3.4",
 		ListenPort:       51820,
@@ -256,8 +256,8 @@ func TestGetNetwork_Success(t *testing.T) {
 	if net.Name != "testnet" {
 		t.Errorf("name = %q, want testnet", net.Name)
 	}
-	if net.RootCidr != "10.0.0.0/16" {
-		t.Errorf("root_cidr = %q, want 10.0.0.0/16", net.RootCidr)
+	if net.MainCidr != "10.0.0.0/16" {
+		t.Errorf("main_cidr = %q, want 10.0.0.0/16", net.MainCidr)
 	}
 }
 

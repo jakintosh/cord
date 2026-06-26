@@ -17,9 +17,11 @@ var migrations = []Migration{
 		SQL: `
 CREATE TABLE network (
     name                TEXT PRIMARY KEY,
+    main_name           TEXT NOT NULL,
+    invite_name         TEXT NOT NULL,
     private_key         TEXT NOT NULL,
     public_key          TEXT NOT NULL,
-    root_cidr           TEXT NOT NULL,
+    main_cidr           TEXT NOT NULL,
     invite_cidr         TEXT NOT NULL,
     external_ip         TEXT NOT NULL,
     listen_port         INTEGER NOT NULL,

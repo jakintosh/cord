@@ -67,11 +67,11 @@ type Service struct {
 type NetworkDevices struct {
 	MainName     string
 	Main         wireguard.WGDevice
+	MainServer   *http.Server
 	InviteName   string
 	Invite       wireguard.WGDevice
-	Cancel       context.CancelFunc
-	MainServer   *http.Server
 	InviteServer *http.Server
+	Cancel       context.CancelFunc
 }
 
 // New returns a ready-to-use Service. All Options fields are required
