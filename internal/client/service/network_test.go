@@ -496,11 +496,11 @@ func TestStatus_WithRunningNetworks(t *testing.T) {
 	}
 }
 
-func TestFetchNetwork_NotImplemented(t *testing.T) {
+func TestFetchNetwork_NotRunning(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	err := env.Service.FetchNetwork("any")
-	if !errors.Is(err, service.ErrNotImplemented) {
-		t.Errorf("err = %v, want ErrNotImplemented", err)
+	if !errors.Is(err, service.ErrNetworkNotEnabled) {
+		t.Errorf("err = %v, want ErrNetworkNotEnabled", err)
 	}
 }

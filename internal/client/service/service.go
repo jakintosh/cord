@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"log"
+	"net/http"
 	"sync"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -26,6 +28,11 @@ type Options struct {
 	// SyncInterval controls how often the sync loop runs for each
 	// enabled network. Defaults to 30s when zero.
 	SyncInterval time.Duration
+
+	// HTTPClient is the HTTP client used to reach the server's peer
+	// and invite APIs through the WireGuard tunnel. Nil uses a
+	// default client with a 10s timeout.
+	HTTPClient *http.Client
 }
 
 // Service is the domain core for the cord client daemon. It manages
@@ -40,22 +47,23 @@ type Service struct {
 	wg           wireguard.WG
 	clock        func() time.Time
 	log          *log.Logger
+	httpClient   *http.Client
 	mu           sync.Mutex
 	syncInterval time.Duration
 
 	// running tracks networks that are currently enabled (interface
 	// up, sync loop active). The key is the network name.
-	running map[string]*runningNetwork
+	running map[string]*LiveNetwork
 }
 
-// runningNetwork holds the live state for one enabled client network:
-// the WireGuard device plus a cancel function that stops the
-// background sync loop, and sync status tracking.
-type runningNetwork struct {
-	device   wireguard.WGDevice
-	cancel   context.CancelFunc
-	lastSync time.Time
-	lastErr  string
+// LiveNetwork holds the live resources for one enabled client network:
+// the WireGuard device, the server API client, and sync status.
+type LiveNetwork struct {
+	Device    wireguard.WGDevice
+	ApiClient *serverapi.Client
+	Cancel    context.CancelFunc
+	LastSync  time.Time
+	LastErr   string
 }
 
 // New returns a ready-to-use Service. Store and WG may be nil during
@@ -79,7 +87,8 @@ func New(
 		wg:           opts.WG,
 		clock:        opts.Clock,
 		log:          opts.Logger,
-		running:      make(map[string]*runningNetwork),
+		httpClient:   opts.HTTPClient,
+		running:      make(map[string]*LiveNetwork),
 		syncInterval: syncInterval,
 	}, nil
 }
@@ -104,24 +113,17 @@ func (s *Service) Start(
 	}
 
 	for _, name := range names {
-		nw, err := s.store.GetNetwork(name)
+		network, err := s.store.GetNetwork(name)
 		if err != nil {
-			if s.log != nil {
-				s.log.Printf("start: get network %q: %v", name, err)
-			}
+			s.logf("start: get network %q: %v", name, err)
 			continue
 		}
-		if !nw.Enabled {
+		if !network.Enabled {
 			continue
 		}
 
 		if err := s.EnableNetwork(ctx, name); err != nil {
-			if s.log != nil {
-				s.log.Printf("start: enable network %q: %v", name, err)
-			}
-			_, _ = s.store.UpdateNetwork(name, UpdateNetworkRequest{
-				Enabled: &[]bool{false}[0],
-			})
+			s.logf("start: enable network %q: %v", name, err)
 		}
 	}
 
@@ -132,10 +134,19 @@ func (s *Service) Start(
 // releases resources. It should be called during daemon shutdown.
 func (s *Service) Close() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	running := s.running
+	s.running = make(map[string]*LiveNetwork)
+	s.mu.Unlock()
 
-	for name := range s.running {
-		s.disableLocked(name)
+	for name, ln := range running {
+		s.stopLive(name, ln)
 	}
 	return nil
+}
+
+// logf writes a message to the service logger if configured.
+func (s *Service) logf(format string, args ...any) {
+	if s.log != nil {
+		s.log.Printf(format, args...)
+	}
 }

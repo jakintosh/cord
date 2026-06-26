@@ -412,7 +412,7 @@ func TestAPIDisableNetwork_AlreadyDisabled(
 // Fetch
 //
 
-func TestAPIFetchNetwork_NotImplemented(
+func TestAPIFetchNetwork_NotEnabled(
 	t *testing.T,
 ) {
 	// setup env
@@ -424,5 +424,5 @@ func TestAPIFetchNetwork_NotImplemented(
 	result := wire.TestPost[any](env.Router, url, "")
 
 	// verify result
-	result.ExpectStatusError(t, http.StatusNotImplemented)
+	result.ExpectStatusError(t, http.StatusConflict)
 }

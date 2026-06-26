@@ -16,9 +16,17 @@ func TestListPeers_Success(t *testing.T) {
 			return
 		}
 		wire.WriteData(w, http.StatusOK, []VisiblePeerDTO{
-		{Name: "alice", Cidr: "10.42.0.5/16", PublicKey: "alice-key", Endpoints: []EndpointWitnessDTO{
-			{Endpoint: "1.2.3.4:51820", Timestamp: time.Unix(1718956800, 0)},
-			}},
+			{
+				Name:      "alice",
+				Cidr:      "10.42.0.5/16",
+				PublicKey: "alice-key",
+				Endpoints: []EndpointWitnessDTO{
+					{
+						Endpoint:  "1.2.3.4:51820",
+						Timestamp: time.Unix(1718956800, 0),
+					},
+				},
+			},
 		})
 	})
 	defer teardown()
