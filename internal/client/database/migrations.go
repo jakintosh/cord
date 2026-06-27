@@ -1,0 +1,85 @@
+package database
+
+import "fmt"
+
+type Migration struct {
+	Version int
+	Name    string
+	SQL     string
+}
+
+var migrations = []Migration{
+	{
+		Version: 1,
+		Name:    "create client schema",
+		SQL: `
+CREATE TABLE network (
+    name              TEXT PRIMARY KEY,
+    private_key       TEXT NOT NULL,
+    public_key        TEXT NOT NULL,
+    assigned_cidr     TEXT NOT NULL,
+    server_pubkey     TEXT NOT NULL,
+    server_endpoint   TEXT NOT NULL,
+    server_api_addr   TEXT NOT NULL,
+    enabled           INTEGER NOT NULL DEFAULT 0,
+    created_at_unix   INTEGER NOT NULL
+);
+
+CREATE TABLE peer (
+    id              INTEGER PRIMARY KEY,
+    network_name    TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    public_key      TEXT NOT NULL,
+    cidr            TEXT NOT NULL,
+    endpoint        TEXT NOT NULL DEFAULT '',
+    endpoint_time   INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (network_name)
+        REFERENCES network (name)
+        ON DELETE CASCADE,
+    UNIQUE (network_name, public_key)
+);
+`,
+	},
+}
+
+func (db *DB) migrate() error {
+	current, err := db.userVersion()
+	if err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+
+	for _, m := range migrations {
+		if m.Version <= current {
+			continue
+		}
+
+		tx, err := db.Conn.Begin()
+		if err != nil {
+			return fmt.Errorf("begin migration %d %q: %w", m.Version, m.Name, err)
+		}
+
+		if _, err := tx.Exec(m.SQL); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("run migration %d %q: %w", m.Version, m.Name, err)
+		}
+		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", m.Version)); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("set schema version %d: %w", m.Version, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration %d %q: %w", m.Version, m.Name, err)
+		}
+
+		current = m.Version
+	}
+
+	return nil
+}
+
+func (db *DB) userVersion() (int, error) {
+	var version int
+	if err := db.Conn.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return 0, err
+	}
+	return version, nil
+}
