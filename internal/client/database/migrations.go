@@ -31,13 +31,30 @@ CREATE TABLE peer (
     name            TEXT NOT NULL,
     public_key      TEXT NOT NULL,
     cidr            TEXT NOT NULL,
-    endpoint        TEXT NOT NULL DEFAULT '',
-    endpoint_time   INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (network_name)
         REFERENCES network (name)
         ON DELETE CASCADE,
     UNIQUE (network_name, public_key)
 );
+
+CREATE TABLE endpoint (
+    id                  INTEGER PRIMARY KEY,
+    network_name        TEXT NOT NULL,
+    peer_id             INTEGER NOT NULL,
+    endpoint            TEXT NOT NULL,
+    server_observed_at  INTEGER NOT NULL DEFAULT 0,
+    local_observed_at   INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (network_name)
+        REFERENCES network (name)
+        ON DELETE CASCADE,
+    FOREIGN KEY (peer_id)
+        REFERENCES peer (id)
+        ON DELETE CASCADE,
+    UNIQUE (network_name, peer_id, endpoint)
+);
+
+CREATE INDEX idx_peer_endpoint_lookup
+    ON endpoint (network_name, peer_id, server_observed_at DESC);
 `,
 	},
 }

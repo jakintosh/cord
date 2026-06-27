@@ -5,6 +5,7 @@
 package wireguard
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -92,6 +93,11 @@ type WGDevice interface {
 	// not disturbed.
 	ApplyPeers(peers []WGPeer) error
 
+	// UpdateEndpoint sets the endpoint for a single existing peer,
+	// bypassing the normal reconciliation flow. Used by the health
+	// check loop to rotate endpoints on unhealthy peers.
+	UpdateEndpoint(pubKey, endpoint string) error
+
 	// Up brings the device into the running state.
 	Up() error
 
@@ -111,6 +117,10 @@ type WGDevice interface {
 	// observed peer endpoints, handshake times, and byte counts.
 	Status() ([]PeerStatus, error)
 }
+
+// ErrDeviceNotUp is returned when an operation requiring a live
+// WireGuard device is attempted before the device is brought up.
+var ErrDeviceNotUp = errors.New("wireguard: device not up")
 
 // EndpointPolicy controls how Cord manages a peer's endpoint.
 type EndpointPolicy int

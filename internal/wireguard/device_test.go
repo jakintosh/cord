@@ -504,11 +504,100 @@ func TestDevice_WaitForHandshake_OnStatusCallback(t *testing.T) {
 	}
 }
 
+func TestDevice_ApplyPeers_NotUp(t *testing.T) {
+	backend := &testBackend{}
+	d := newTestDevice(t, backend)
+	d.up = false
+
+	k := mustGenerateKey(t)
+	peers := []WGPeer{
+		{PublicKey: k.String(), AllowedIPs: []string{"10.0.0.1/32"}},
+	}
+
+	err := d.ApplyPeers(peers)
+	if !errors.Is(err, ErrDeviceNotUp) {
+		t.Fatalf("expected ErrDeviceNotUp, got %v", err)
+	}
+
+	// Peers should still be stored in desired.
+	d.mu.Lock()
+	_, ok := d.desired[k]
+	d.mu.Unlock()
+	if !ok {
+		t.Error("expected desired peers to be stored even when not up")
+	}
+}
+
+func TestDevice_Up_ReconcilesStoredPeers(t *testing.T) {
+	backend := &testBackend{}
+	d := newTestDevice(t, backend)
+	d.up = false
+
+	k := mustGenerateKey(t)
+	peers := []WGPeer{
+		{PublicKey: k.String(), AllowedIPs: []string{"10.0.0.1/32"}},
+	}
+
+	// Store peers while not up.
+	err := d.ApplyPeers(peers)
+	if !errors.Is(err, ErrDeviceNotUp) {
+		t.Fatalf("expected ErrDeviceNotUp, got %v", err)
+	}
+
+	// Bring up the device — should reconcile stored peers.
+	if err := d.Up(); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	ops := backend.lastOperations()
+	if len(ops) != 1 {
+		t.Fatalf("expected 1 operation after Up, got %d", len(ops))
+	}
+	if ops[0].Type != PeerAdd {
+		t.Errorf("expected add, got %s", ops[0].Type)
+	}
+}
+
+func TestDevice_Status_NotUp(t *testing.T) {
+	backend := &testBackend{}
+	d := newTestDevice(t, backend)
+	d.up = false
+
+	_, err := d.Status()
+	if !errors.Is(err, ErrDeviceNotUp) {
+		t.Fatalf("expected ErrDeviceNotUp, got %v", err)
+	}
+}
+
+func TestDevice_UpdateEndpoint_NotUp(t *testing.T) {
+	backend := &testBackend{}
+	d := newTestDevice(t, backend)
+	d.up = false
+
+	err := d.UpdateEndpoint(mustGenerateKey(t).String(), "1.2.3.4:51820")
+	if !errors.Is(err, ErrDeviceNotUp) {
+		t.Fatalf("expected ErrDeviceNotUp, got %v", err)
+	}
+}
+
+func TestDevice_WaitForHandshake_NotUp(t *testing.T) {
+	backend := &testBackend{}
+	d := newTestDevice(t, backend)
+	d.up = false
+
+	err := d.WaitForHandshake(mustGenerateKey(t).String(), time.Second, nil)
+	if !errors.Is(err, ErrDeviceNotUp) {
+		t.Fatalf("expected ErrDeviceNotUp, got %v", err)
+	}
+}
+
 func newTestDevice(t *testing.T, backend Backend) *wgDevice {
 	t.Helper()
 	key, err := wgtypes.GeneratePrivateKey()
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	return newDevice("test", key, net.IPNet{}, 0, 0, false, backend)
+	d := newDevice("test", key, net.IPNet{}, 0, 0, false, backend)
+	d.up = true
+	return d
 }

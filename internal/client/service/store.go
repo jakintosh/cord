@@ -21,27 +21,38 @@ type Store interface {
 	// cache entries via foreign-key cascade.
 	DeleteNetwork(name string) error
 
-	// UpdateNetwork applies a partial update to the named network
-	// and returns the updated record. Nil pointers in the request
-	// mean "no change."
-	UpdateNetwork(name string, req UpdateNetworkRequest) (*Network, error)
+	// SetNetworkEnabled updates the enabled flag for a network.
+	SetNetworkEnabled(name string, enabled bool) error
 
 	// Peer cache within a network.
 
 	// SetPeers replaces the stored peer set for the named network
 	// with the provided peers. Peers already present are upserted by
-	// public key; peers not in the provided list are deleted. When
-	// upserting, a locally-observed endpoint is preserved if its
-	// timestamp is newer than the incoming value.
+	// public key; peers not in the provided list are deleted.
 	SetPeers(network string, peers []Peer) error
 
 	// ListPeers returns all cached peers for the named network,
-	// ordered by name ascending.
+	// ordered by name ascending. Each peer's Endpoint field is
+	// populated with the best known endpoint from the endpoint
+	// table (most recently observed by the server, then locally).
 	ListPeers(network string) ([]*Peer, error)
 
-	// UpdatePeerEndpoint records a locally-observed endpoint for a
-	// peer identified by public key within the named network.
-	UpdatePeerEndpoint(network, pubKey, endpoint string, when int64) error
+	// Endpoint catalog within a network.
+
+	// SetPeerEndpoints replaces the known endpoints for a peer
+	// identified by public key. Existing endpoints not in the list
+	// are deleted. Incoming endpoints are upserted;
+	// server_observed_at is updated only if the incoming value is
+	// newer.
+	SetPeerEndpoints(network, pubKey string, endpoints []PeerEndpoint) error
+
+	// UpdatePeerEndpointLocal sets local_observed_at on the
+	// matching endpoint row. No-op if the endpoint doesn't exist.
+	UpdatePeerEndpointLocal(network, pubKey, endpoint string, when int64) error
+
+	// ListPeerEndpoints returns all known endpoints for a peer,
+	// ordered by server_observed_at DESC, local_observed_at DESC.
+	ListPeerEndpoints(network, pubKey string) ([]PeerEndpoint, error)
 
 	// Close releases the database connection.
 	Close() error

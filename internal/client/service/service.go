@@ -26,12 +26,12 @@ type Options struct {
 	// Logger receives internal diagnostics from the service.
 	Logger *log.Logger
 
-	// SyncInterval controls how often the sync loop runs for each
+	// SyncInterval controls how often the sync block runs for each
 	// enabled network. Defaults to 30s when zero.
 	SyncInterval time.Duration
 
-	// ScanInterval controls how often the peer scan loop runs for
-	// each enabled network. Defaults to 5m when zero.
+	// ScanInterval controls how often endpoint sightings are reported
+	// to the server. Defaults to 5m when zero.
 	ScanInterval time.Duration
 
 	// HTTPClient is the HTTP client used to reach the server's peer
@@ -65,11 +65,26 @@ type Service struct {
 // LiveNetwork holds the live resources for one enabled client network:
 // the WireGuard device, the server API client, and sync status.
 type LiveNetwork struct {
-	Device    wireguard.WGDevice
-	ApiClient *serverapi.Client
-	Cancel    context.CancelFunc
-	LastSync  time.Time
-	LastErr   string
+	Device       wireguard.WGDevice
+	ApiClient    *serverapi.Client
+	ServerPubkey string
+	Cancel       context.CancelFunc
+	LastSync     time.Time
+	LastScan     time.Time
+	LastErr      string
+	Degraded     map[string]*DegradedPeer
+}
+
+// DegradedPeer tracks the endpoint rotation state for a peer that has
+// lost its handshake. It maintains an ordered list of candidate
+// endpoints and cycles through them, with exponential backoff after
+// exhausting all candidates.
+type DegradedPeer struct {
+	Candidates  []string
+	Index       int
+	LoopCount   int
+	Idle        bool
+	NextAttempt time.Time
 }
 
 // New returns a ready-to-use Service. Store and WG must be non-nil.

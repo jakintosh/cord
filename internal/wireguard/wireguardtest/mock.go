@@ -55,15 +55,23 @@ func (m *MockWG) RemoveDevice(name string) error {
 // MockDevice is a test double for wireguard.WGDevice that records
 // calls for assertions.
 type MockDevice struct {
-	mu        sync.Mutex
-	Name      string
-	Peers     []wireguard.WGPeer
-	UpCalls   int
-	DownCalls int
-	UpErr     error
-	DownErr   error
-	ApplyErr  error
-	StatusErr error
+	mu              sync.Mutex
+	Name            string
+	Peers           []wireguard.WGPeer
+	UpCalls         int
+	DownCalls       int
+	UpErr           error
+	DownErr         error
+	ApplyErr        error
+	StatusErr       error
+	EndpointUpdates []EndpointUpdate
+	UpdateErr       error
+}
+
+// EndpointUpdate records a call to UpdateEndpoint.
+type EndpointUpdate struct {
+	PubKey   string
+	Endpoint string
 }
 
 func (d *MockDevice) ApplyPeers(peers []wireguard.WGPeer) error {
@@ -71,6 +79,19 @@ func (d *MockDevice) ApplyPeers(peers []wireguard.WGPeer) error {
 	defer d.mu.Unlock()
 	d.Peers = peers
 	return d.ApplyErr
+}
+
+func (d *MockDevice) UpdateEndpoint(pubKey, endpoint string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.UpdateErr != nil {
+		return d.UpdateErr
+	}
+	d.EndpointUpdates = append(d.EndpointUpdates, EndpointUpdate{
+		PubKey:   pubKey,
+		Endpoint: endpoint,
+	})
+	return nil
 }
 
 func (d *MockDevice) Up() error {

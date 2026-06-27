@@ -245,7 +245,7 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 	}
 }
 
-func TestUpdateNetwork_EnableDisable(t *testing.T) {
+func TestSetNetworkEnabled(t *testing.T) {
 	db := testutil.SetupDB(t)
 
 	net := &service.Network{
@@ -263,49 +263,34 @@ func TestUpdateNetwork_EnableDisable(t *testing.T) {
 		t.Fatalf("insert: %v", err)
 	}
 
-	enable := true
-	got, err := db.UpdateNetwork("toggle", service.UpdateNetworkRequest{Enabled: &enable})
-	if err != nil {
+	if err := db.SetNetworkEnabled("toggle", true); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
+	got, err := db.GetNetwork("toggle")
+	if err != nil {
+		t.Fatalf("get after enable: %v", err)
+	}
 	if !got.Enabled {
-		t.Error("expected enabled=true after update")
+		t.Error("expected enabled=true after SetNetworkEnabled(true)")
 	}
 
-	disable := false
-	got, err = db.UpdateNetwork("toggle", service.UpdateNetworkRequest{Enabled: &disable})
-	if err != nil {
+	if err := db.SetNetworkEnabled("toggle", false); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
+	got, err = db.GetNetwork("toggle")
+	if err != nil {
+		t.Fatalf("get after disable: %v", err)
+	}
 	if got.Enabled {
-		t.Error("expected enabled=false after update")
+		t.Error("expected enabled=false after SetNetworkEnabled(false)")
 	}
 }
 
-func TestUpdateNetwork_NilRequest(t *testing.T) {
+func TestSetNetworkEnabled_NotFound(t *testing.T) {
 	db := testutil.SetupDB(t)
 
-	createdAt := time.Date(2026, 6, 21, 0, 0, 0, 0, time.UTC)
-	net := &service.Network{
-		Name:           "nochange",
-		PrivateKey:     "priv",
-		PublicKey:      "pub",
-		AssignedCidr:   "10.42.0.5/16",
-		ServerPubkey:   "srv-key",
-		ServerEndpoint: "1.1.1.1:51820",
-		ServerApiAddr:  "10.42.0.1:8443",
-		Enabled:        false,
-		CreatedAt:      createdAt,
-	}
-	if err := db.InsertNetwork(net); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
-
-	got, err := db.UpdateNetwork("nochange", service.UpdateNetworkRequest{})
-	if err != nil {
-		t.Fatalf("update with empty request: %v", err)
-	}
-	if got.Enabled {
-		t.Error("enabled should remain false with nil request")
+	err := db.SetNetworkEnabled("nonexistent", true)
+	if err == nil {
+		t.Fatal("expected error for nonexistent network")
 	}
 }

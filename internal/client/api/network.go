@@ -119,19 +119,16 @@ func (a *API) handleNetworkInstall(
 		wire.WriteError(w, http.StatusBadRequest, "malformed json")
 		return
 	}
-	if req.NetworkName == "" {
-		wire.WriteError(w, http.StatusBadRequest, "network_name is required")
-		return
-	}
-
 	invite := installRequestToInvite(req)
-	nw, err := a.service.InstallNetwork(invite)
+
+	network, err := a.service.InstallNetwork(invite)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusCreated, NetworkDTOFromService(*nw, false))
+	networkDTO := NetworkDTOFromService(*network, false)
+	wire.WriteData(w, http.StatusCreated, networkDTO)
 }
 
 func (a *API) handleNetworkUninstall(

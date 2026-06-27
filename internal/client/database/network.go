@@ -110,27 +110,28 @@ func (db *DB) InsertNetwork(
 	return CheckSqliteErr("insert network", err)
 }
 
-func (db *DB) UpdateNetwork(
+func (db *DB) SetNetworkEnabled(
 	name string,
-	req service.UpdateNetworkRequest,
-) (
-	*service.Network,
-	error,
-) {
-	if req.Enabled != nil {
-		_, err := db.Conn.Exec(`
-			UPDATE network
-			SET enabled = ?1
-			WHERE name = ?2`,
-			boolToInt(*req.Enabled),
-			name,
-		)
-		if err != nil {
-			return nil, CheckSqliteErr("update network enabled", err)
-		}
+	enabled bool,
+) error {
+	result, err := db.Conn.Exec(`
+		UPDATE network
+		SET enabled = ?1
+		WHERE name = ?2`,
+		boolToInt(enabled),
+		name,
+	)
+	if err != nil {
+		return CheckSqliteErr("set network enabled", err)
 	}
-
-	return db.GetNetwork(name)
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set network enabled: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("%w: network %q not found", service.ErrNotFound, name)
+	}
+	return nil
 }
 
 func (db *DB) DeleteNetwork(

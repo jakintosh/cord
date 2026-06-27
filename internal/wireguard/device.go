@@ -19,6 +19,7 @@ type wgDevice struct {
 	port       uint16
 	mtu        int
 	noRoutes   bool
+	up         bool
 
 	backend  Backend
 	realName string // actual OS device name (e.g. utun4 on macOS)
@@ -67,7 +68,9 @@ func (d *wgDevice) DeviceName() string {
 }
 
 // setRealName records the OS-assigned device name.
-func (d *wgDevice) setRealName(name string) {
+func (d *wgDevice) setRealName(
+	name string,
+) {
 	d.mu.Lock()
 	d.realName = name
 	d.mu.Unlock()
@@ -75,7 +78,9 @@ func (d *wgDevice) setRealName(name string) {
 
 // ApplyPeers stores the full desired peer set and reconciles it
 // against the live WireGuard device.
-func (d *wgDevice) ApplyPeers(peers []WGPeer) error {
+func (d *wgDevice) ApplyPeers(
+	peers []WGPeer,
+) error {
 	d.mu.Lock()
 	desired, err := buildDesiredPeers(peers)
 	if err != nil {
@@ -83,17 +88,62 @@ func (d *wgDevice) ApplyPeers(peers []WGPeer) error {
 		return fmt.Errorf("wireguard: build desired peers: %w", err)
 	}
 	d.desired = desired
+	up := d.up
 	d.mu.Unlock()
 
+	if !up {
+		return ErrDeviceNotUp
+	}
 	return d.reconcile()
+}
+
+// UpdateEndpoint sets the endpoint for a single existing peer,
+// bypassing the normal reconciliation flow. It builds a targeted
+// PeerUpdate operation and applies it directly to the backend.
+func (d *wgDevice) UpdateEndpoint(pubKey, endpoint string) error {
+	d.mu.Lock()
+	up := d.up
+	d.mu.Unlock()
+	if !up {
+		return ErrDeviceNotUp
+	}
+
+	key, err := parseKey(pubKey)
+	if err != nil {
+		return fmt.Errorf("wireguard: update endpoint: %w", err)
+	}
+
+	addr, err := net.ResolveUDPAddr("udp", endpoint)
+	if err != nil {
+		return fmt.Errorf("wireguard: update endpoint: %w", err)
+	}
+
+	op := PeerOperation{
+		Type:           PeerUpdate,
+		Peer:           desiredPeer{PublicKey: key, Endpoint: addr},
+		UpdateEndpoint: true,
+	}
+
+	devName := d.deviceName()
+	if err := d.backend.ApplyPeerOperations(devName, []PeerOperation{op}); err != nil {
+		return fmt.Errorf("wireguard: update endpoint: %w", err)
+	}
+
+	// Update the desired set so future reconciliations don't revert.
+	d.mu.Lock()
+	if dp, ok := d.desired[key]; ok {
+		dp.Endpoint = addr
+		d.desired[key] = dp
+	}
+	d.mu.Unlock()
+
+	return nil
 }
 
 // Up creates the network device, configures it, and brings it up.
 // An initial reconciliation is performed after the device is up.
 func (d *wgDevice) Up() error {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	cfg := DeviceConfig{
 		Name:       d.name,
 		PrivateKey: d.privateKey,
@@ -103,11 +153,24 @@ func (d *wgDevice) Up() error {
 		NoRoutes:   d.noRoutes,
 	}
 
-	return d.backend.Up(cfg)
+	if err := d.backend.Up(cfg); err != nil {
+		d.mu.Unlock()
+		return err
+	}
+	d.up = true
+	d.mu.Unlock()
+
+	if err := d.reconcile(); err != nil {
+		d.verboselog("up: initial reconciliation failed: %v", err)
+	}
+	return nil
 }
 
 // Down brings the device down without removing it.
 func (d *wgDevice) Down() error {
+	d.mu.Lock()
+	d.up = false
+	d.mu.Unlock()
 	return d.backend.Down(d.deviceName())
 }
 
@@ -118,6 +181,12 @@ func (d *wgDevice) WaitForHandshake(
 	timeout time.Duration,
 	onStatus func(PeerStatus),
 ) error {
+	d.mu.Lock()
+	up := d.up
+	d.mu.Unlock()
+	if !up {
+		return ErrDeviceNotUp
+	}
 
 	findPeer := func(
 		status *DeviceStatus,
@@ -176,6 +245,13 @@ func (d *wgDevice) Status() (
 	[]PeerStatus,
 	error,
 ) {
+	d.mu.Lock()
+	up := d.up
+	d.mu.Unlock()
+	if !up {
+		return nil, ErrDeviceNotUp
+	}
+
 	devName := d.deviceName()
 	status, err := d.backend.Status(devName)
 	if err != nil {
