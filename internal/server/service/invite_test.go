@@ -37,8 +37,8 @@ func TestCreateInvite_Success(t *testing.T) {
 	if invite.Server.PublicKey == "" {
 		t.Error("server public_key should not be empty")
 	}
-	if invite.Server.ExternalEndpoint != "192.168.1.1:51820" {
-		t.Errorf("external_endpoint = %q, want 192.168.1.1:51820", invite.Server.ExternalEndpoint)
+	if invite.Server.ExternalEndpoint != "192.168.1.1:51821" {
+		t.Errorf("external_endpoint = %q, want 192.168.1.1:51821", invite.Server.ExternalEndpoint)
 	}
 }
 

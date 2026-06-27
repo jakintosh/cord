@@ -190,7 +190,7 @@ func (s *Service) CreateInvite(
 		},
 		Server: ServerInfo{
 			PublicKey:        nw.PublicKey,
-			ExternalEndpoint: fmt.Sprintf("%s:%d", nw.ExternalIP, nw.ListenPort),
+			ExternalEndpoint: fmt.Sprintf("%s:%d", nw.ExternalIP, nw.InviteListenPort),
 			InternalEndpoint: fmt.Sprintf("%s:%d", firstAssignableIP(inviteNet).String(), nw.ApiPort),
 		},
 	}
