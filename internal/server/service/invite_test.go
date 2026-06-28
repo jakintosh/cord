@@ -270,7 +270,7 @@ func TestRedeemInvite_MultipleInvites(t *testing.T) {
 	}
 }
 
-func TestRedeemInvite_ReconcilesRunningDevices(t *testing.T) {
+func TestRedeemInvite_ReconcilesOnlyOnConfirm(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -291,18 +291,36 @@ func TestRedeemInvite_ReconcilesRunningDevices(t *testing.T) {
 		t.Fatalf("redeem: %v", err)
 	}
 
+	// After redeem but before confirm, the peer should still be on the
+	// invite device (so the client can retry if the response was lost)
+	// and NOT yet on the main device.
 	inviteDev := env.WireGuard.Devices["testnet-i"]
 	if inviteDev == nil {
 		t.Fatal("expected invite device")
 	}
-	if peers := inviteDev.AppliedPeers(); len(peers) != 0 {
-		t.Fatalf("invite peers after redeem = %d, want 0", len(peers))
+	if peers := inviteDev.AppliedPeers(); len(peers) != 1 {
+		t.Fatalf("invite peers after redeem = %d, want 1 (temp peer still active)", len(peers))
 	}
 
 	mainDev := env.WireGuard.Devices["testnet"]
 	if mainDev == nil {
 		t.Fatal("expected main device")
 	}
+	for _, peer := range mainDev.AppliedPeers() {
+		if peer.PublicKey == "perm-live-key" {
+			t.Fatal("main device should not have redeemed peer before confirm")
+		}
+	}
+
+	// Now confirm — this is what triggers reconciliation.
+	if err := env.Service.ConfirmPeer("testnet", "live-redeem"); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+
+	if peers := inviteDev.AppliedPeers(); len(peers) != 0 {
+		t.Fatalf("invite peers after confirm = %d, want 0", len(peers))
+	}
+
 	var found bool
 	for _, peer := range mainDev.AppliedPeers() {
 		if peer.PublicKey == "perm-live-key" {
@@ -313,7 +331,7 @@ func TestRedeemInvite_ReconcilesRunningDevices(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("main device missing redeemed peer")
+		t.Fatal("main device missing redeemed peer after confirm")
 	}
 }
 

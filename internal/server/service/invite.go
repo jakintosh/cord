@@ -211,12 +211,10 @@ func (s *Service) RedeemInvite(
 	if err != nil {
 		peer, lookupErr := s.store.GetPeerByKey(network, permPubKey)
 		if lookupErr == nil && !peer.Confirmed {
-			s.reconcileOnce(network)
 			return s.buildRedeemResult(nw, peer)
 		}
 		return nil, fmt.Errorf("redeem invite: %w", mapStoreError(err))
 	}
-	s.reconcileOnce(network)
 
 	peer, err := s.store.GetPeerByKey(network, permPubKey)
 	if err != nil {
