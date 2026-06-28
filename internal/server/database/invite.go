@@ -25,6 +25,7 @@ func (db *DB) GetInvite(
 			admin,
 			redeemed,
 			redeemed_key,
+			confirmed,
 			expires_at_unix,
 			created_at_unix
 		FROM invite
@@ -55,12 +56,13 @@ func (db *DB) GetInviteByIP(
 			admin,
 			redeemed,
 			redeemed_key,
+			confirmed,
 			expires_at_unix,
 			created_at_unix
 		FROM invite
 		WHERE network_name = ?1
 			AND temp_ip = ?2
-			AND redeemed = 0
+			AND confirmed = 0
 			AND expires_at_unix > ?3`,
 		network,
 		ip,
@@ -85,6 +87,7 @@ func (db *DB) ListInvites(
 			admin,
 			redeemed,
 			redeemed_key,
+			confirmed,
 			expires_at_unix,
 			created_at_unix
 		FROM invite
@@ -129,11 +132,12 @@ func (db *DB) ListActiveInvites(
 			admin,
 			redeemed,
 			redeemed_key,
+			confirmed,
 			expires_at_unix,
 			created_at_unix
 		FROM invite
 		WHERE network_name = ?1
-			AND redeemed = 0
+			AND confirmed = 0
 			AND expires_at_unix > ?2
 		ORDER BY created_at_unix DESC`,
 		network,
@@ -177,10 +181,11 @@ func (db *DB) InsertInvite(
 			admin,
 			redeemed,
 			redeemed_key,
+			confirmed,
 			expires_at_unix,
 			created_at_unix
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
 		network,
 		invite.Name,
 		invite.TempPubKey,
@@ -189,6 +194,7 @@ func (db *DB) InsertInvite(
 		boolToInt(invite.Admin),
 		boolToInt(invite.Redeemed),
 		invite.RedeemedKey,
+		boolToInt(invite.Confirmed),
 		invite.ExpiresAt.Unix(),
 		invite.CreatedAt.Unix(),
 	)
@@ -296,6 +302,32 @@ func (db *DB) DeleteInvite(
 	return nil
 }
 
+func (db *DB) ConfirmInvite(
+	network string,
+	name string,
+) error {
+	result, err := db.Conn.Exec(`
+		UPDATE invite
+		SET confirmed = 1
+		WHERE network_name = ?1
+			AND name = ?2
+			AND confirmed = 0`,
+		network,
+		name,
+	)
+	if err != nil {
+		return CheckSqliteErr("confirm invite", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("confirm invite rows affected: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("%w: invite %q not found or already confirmed", service.ErrNotFound, name)
+	}
+	return nil
+}
+
 func (db *DB) DeleteExpiredInvites(
 	network string,
 	before time.Time,
@@ -323,6 +355,7 @@ func scanInvite(
 	var admin int64
 	var redeemed int64
 	var redeemedKey string
+	var confirmed int64
 	var expiresUnix int64
 	var createdUnix int64
 
@@ -334,6 +367,7 @@ func scanInvite(
 		&admin,
 		&redeemed,
 		&redeemedKey,
+		&confirmed,
 		&expiresUnix,
 		&createdUnix,
 	); err != nil {
@@ -348,6 +382,7 @@ func scanInvite(
 		Admin:       admin != 0,
 		Redeemed:    redeemed != 0,
 		RedeemedKey: redeemedKey,
+		Confirmed:   confirmed != 0,
 		ExpiresAt:   time.Unix(expiresUnix, 0),
 		CreatedAt:   time.Unix(createdUnix, 0),
 	}, nil

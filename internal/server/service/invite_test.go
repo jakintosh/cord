@@ -270,7 +270,7 @@ func TestRedeemInvite_MultipleInvites(t *testing.T) {
 	}
 }
 
-func TestRedeemInvite_ReconcilesOnlyOnConfirm(t *testing.T) {
+func TestRedeemInvite_ReconcilesRunningDevices(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -291,9 +291,9 @@ func TestRedeemInvite_ReconcilesOnlyOnConfirm(t *testing.T) {
 		t.Fatalf("redeem: %v", err)
 	}
 
-	// After redeem but before confirm, the peer should still be on the
-	// invite device (so the client can retry if the response was lost)
-	// and NOT yet on the main device.
+	// After redeem, the peer is added to the main device but the temp
+	// peer stays on the invite device so the client can retry if the
+	// response was lost.
 	inviteDev := env.WireGuard.Devices["testnet-i"]
 	if inviteDev == nil {
 		t.Fatal("expected invite device")
@@ -306,21 +306,6 @@ func TestRedeemInvite_ReconcilesOnlyOnConfirm(t *testing.T) {
 	if mainDev == nil {
 		t.Fatal("expected main device")
 	}
-	for _, peer := range mainDev.AppliedPeers() {
-		if peer.PublicKey == "perm-live-key" {
-			t.Fatal("main device should not have redeemed peer before confirm")
-		}
-	}
-
-	// Now confirm — this is what triggers reconciliation.
-	if err := env.Service.ConfirmPeer("testnet", "live-redeem"); err != nil {
-		t.Fatalf("confirm: %v", err)
-	}
-
-	if peers := inviteDev.AppliedPeers(); len(peers) != 0 {
-		t.Fatalf("invite peers after confirm = %d, want 0", len(peers))
-	}
-
 	var found bool
 	for _, peer := range mainDev.AppliedPeers() {
 		if peer.PublicKey == "perm-live-key" {
@@ -331,7 +316,7 @@ func TestRedeemInvite_ReconcilesOnlyOnConfirm(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("main device missing redeemed peer after confirm")
+		t.Fatal("main device missing redeemed peer")
 	}
 }
 
@@ -369,19 +354,32 @@ func TestListInvites_Mixed(t *testing.T) {
 		t.Fatalf("expected 2 invites, got %d", len(invites))
 	}
 
-	var redeemed, active int
+	var used, active int
 	for _, inv := range invites {
-		if inv.Redeemed {
-			redeemed++
+		if inv.RedeemedKey != "" {
+			used++
 		} else {
 			active++
 		}
 	}
-	if redeemed != 1 {
-		t.Errorf("expected 1 redeemed, got %d", redeemed)
+	if used != 1 {
+		t.Errorf("expected 1 used (redeemed_key set), got %d", used)
 	}
 	if active != 1 {
 		t.Errorf("expected 1 active, got %d", active)
+	}
+	// After redeem, the invite is marked as redeemed but the mere
+	// existence of the invite record keeps the temp peer on the
+	// invite device so the client can retry if the response was
+	// lost. ConfirmPeer marks it confirmed, removing it from the
+	// invite device.
+	for _, inv := range invites {
+		if inv.RedeemedKey != "" && !inv.Redeemed {
+			t.Errorf("invite %q: should be redeemed after RedeemInvite", inv.Name)
+		}
+		if inv.RedeemedKey == "" && inv.Redeemed {
+			t.Errorf("invite %q: should not be redeemed without redeemed_key", inv.Name)
+		}
 	}
 }
 

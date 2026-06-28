@@ -110,7 +110,7 @@ type Store interface {
 	// expired, and redeemed).
 	ListInvites(network string) ([]*Invite, error)
 
-	// ListActiveInvites returns only unredeemed, unexpired invites
+	// ListActiveInvites returns only unexpired, unconfirmed invites
 	// in the network.
 	ListActiveInvites(network string, now time.Time) ([]*Invite, error)
 
@@ -121,6 +121,9 @@ type Store interface {
 	// permanent public key. The temporary key is recorded as the
 	// lookup key. now is used to check the invite has not expired.
 	RedeemInvite(network string, tempPubKey, permPubKey string, now time.Time) error
+
+	// ConfirmInvite marks an invite as confirmed.
+	ConfirmInvite(network, name string) error
 
 	// DeleteInvite removes an invite by name from the network.
 	DeleteInvite(network, name string) error

@@ -92,6 +92,7 @@ CREATE TABLE invite (
     admin           INTEGER DEFAULT 0 NOT NULL,
     redeemed        INTEGER DEFAULT 0 NOT NULL,
     redeemed_key    TEXT DEFAULT '' NOT NULL,
+    confirmed       INTEGER DEFAULT 0 NOT NULL,
     expires_at_unix INTEGER NOT NULL,
     created_at_unix INTEGER NOT NULL,
     FOREIGN KEY (network_name)

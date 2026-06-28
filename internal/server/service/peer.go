@@ -282,7 +282,8 @@ func (s *Service) DisablePeer(
 
 // ConfirmPeer marks a peer as confirmed — it has proven WireGuard
 // reachability on the main network from its assigned IP. The
-// temporary invite record is removed on first confirmation.
+// invite is marked as confirmed, which removes the temp peer from
+// the invite device and releases the invite IPs.
 func (s *Service) ConfirmPeer(
 	network string,
 	name string,
@@ -296,7 +297,7 @@ func (s *Service) ConfirmPeer(
 		return fmt.Errorf("confirm peer %q: %w", name, mapStoreError(err))
 	}
 
-	_ = s.store.DeleteInvite(network, name)
+	_ = s.store.ConfirmInvite(network, name)
 	s.reconcileOnce(network)
 
 	return nil

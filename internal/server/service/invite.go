@@ -72,6 +72,7 @@ type Invite struct {
 	Admin       bool      // whether the invite grants admin privileges
 	Redeemed    bool      // whether the invite has been redeemed
 	RedeemedKey string    // the permanent public key after redemption
+	Confirmed   bool      // whether the peer has confirmed via /confirm
 	ExpiresAt   time.Time // when the invite expires
 	CreatedAt   time.Time // when the invite was created
 }
@@ -211,10 +212,12 @@ func (s *Service) RedeemInvite(
 	if err != nil {
 		peer, lookupErr := s.store.GetPeerByKey(network, permPubKey)
 		if lookupErr == nil && !peer.Confirmed {
+			s.reconcileOnce(network)
 			return s.buildRedeemResult(nw, peer)
 		}
 		return nil, fmt.Errorf("redeem invite: %w", mapStoreError(err))
 	}
+	s.reconcileOnce(network)
 
 	peer, err := s.store.GetPeerByKey(network, permPubKey)
 	if err != nil {
@@ -239,8 +242,10 @@ func (s *Service) ListInvites(
 	return invites, nil
 }
 
-// RevokeInvite deletes an invite by name, preventing it from being
+// RevokeInvite deletes an invite by name (the only operation that
+// physically removes an invite record), preventing it from being
 // redeemed. Any associated temporary key and IP are released.
+// After redemption, use ConfirmPeer to confirm the peer instead.
 func (s *Service) RevokeInvite(
 	network string,
 	name string,

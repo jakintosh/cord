@@ -192,7 +192,7 @@ func TestListActiveInvites(t *testing.T) {
 	}
 }
 
-func TestListActiveInvites_ExcludesRedeemed(t *testing.T) {
+func TestListActiveInvites_IncludesRedeemed(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetworkForInvite(t, db)
 
@@ -209,8 +209,11 @@ func TestListActiveInvites_ExcludesRedeemed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list active invites: %v", err)
 	}
-	if len(active) != 0 {
-		t.Fatalf("expected 0 active invites, got %d", len(active))
+	// Redeemed invites remain active on the invite device until
+	// ConfirmPeer marks them confirmed, so the temp peer can still
+	// receive retries if the client's redeem response was lost.
+	if len(active) != 1 {
+		t.Fatalf("expected 1 active invite (redeemed still active on invite device), got %d", len(active))
 	}
 }
 
@@ -319,6 +322,9 @@ func TestUpdateInviteRedemption(t *testing.T) {
 	}
 	if peer.Confirmed != false {
 		t.Error("peer should not be confirmed yet")
+	}
+	if !peer.Enabled {
+		t.Error("peer should be enabled immediately for /confirm")
 	}
 }
 
