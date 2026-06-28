@@ -153,7 +153,6 @@ func TestRedeemInvite_Success(t *testing.T) {
 	defer teardown()
 
 	result, err := c.RedeemInvite(RedeemInviteRequest{
-		TempPubKey: "temp-key",
 		PermPubKey: "perm-key",
 	})
 	if err != nil {
@@ -183,7 +182,6 @@ func TestRedeemInvite_Forbidden(t *testing.T) {
 	defer teardown()
 
 	_, err := c.RedeemInvite(RedeemInviteRequest{
-		TempPubKey: "temp-key",
 		PermPubKey: "perm-key",
 	})
 	if err == nil {

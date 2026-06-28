@@ -14,9 +14,9 @@ import (
 )
 
 func TestHandleRedeemInvite_Success(t *testing.T) {
-	_, api, tempPubKey := setupInviteTest(t)
+	_, api := setupInviteTest(t)
 
-	body := `{"temp_pubkey": "` + tempPubKey + `", "perm_pubkey": "new-perm-key"}`
+	body := `{"perm_pubkey": "new-perm-key"}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/redeem", strings.NewReader(body))
 	r.RemoteAddr = "10.1.0.5:12345"
@@ -29,7 +29,7 @@ func TestHandleRedeemInvite_Success(t *testing.T) {
 }
 
 func TestHandleRedeemInvite_InvalidJSON(t *testing.T) {
-	_, api, _ := setupInviteTest(t)
+	_, api := setupInviteTest(t)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/redeem", strings.NewReader(`{`))
@@ -43,12 +43,12 @@ func TestHandleRedeemInvite_InvalidJSON(t *testing.T) {
 }
 
 func TestHandleRedeemInvite_IdentityFails(t *testing.T) {
-	_, api, _ := setupInviteTest(t)
+	_, api := setupInviteTest(t)
 
 	api.resolver = &testutil.FailResolver{}
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest("POST", "/redeem", strings.NewReader(`{"temp_pubkey": "x", "perm_pubkey": "y"}`))
+	r := httptest.NewRequest("POST", "/redeem", strings.NewReader(`{"perm_pubkey": "y"}`))
 	r.RemoteAddr = "10.1.0.99:12345"
 
 	api.Router().ServeHTTP(w, r)
@@ -60,7 +60,7 @@ func TestHandleRedeemInvite_IdentityFails(t *testing.T) {
 
 // --- Test helpers ---
 
-func setupInviteTest(t *testing.T) (*testutil.ServiceEnv, *API, string) {
+func setupInviteTest(t *testing.T) (*testutil.ServiceEnv, *API) {
 	t.Helper()
 
 	env := testutil.SetupService(t)
@@ -82,5 +82,5 @@ func setupInviteTest(t *testing.T) (*testutil.ServiceEnv, *API, string) {
 
 	api := New(env.Service, "testnet", log.Default())
 
-	return env, api, "temp-key-123"
+	return env, api
 }

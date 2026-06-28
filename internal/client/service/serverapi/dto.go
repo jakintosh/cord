@@ -31,9 +31,9 @@ type EndpointSightingDTO struct {
 // --- Invite API (invite network) ---
 
 // RedeemInviteRequest is the JSON body for POST /redeem. It provides
-// the temporary invite key and the caller's permanent public key.
+// the caller's new permanent public key. The invite temp key is derived
+// server-side from the WireGuard tunnel source IP.
 type RedeemInviteRequest struct {
-	TempPubKey string `json:"temp_pubkey"`
 	PermPubKey string `json:"perm_pubkey"`
 }
 

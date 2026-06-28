@@ -196,13 +196,8 @@ func (s *Service) InstallNetwork(
 	}
 
 	// Redeem invite
-	tempPubKey, err := s.wg.PublicKey(invite.TempPrivKey)
-	if err != nil {
-		return nil, err
-	}
 	inviteAPI := serverapi.NewClient("", invite.TempApiAddr, s.httpClient)
 	redeemResult, err := inviteAPI.RedeemInvite(serverapi.RedeemInviteRequest{
-		TempPubKey: tempPubKey,
 		PermPubKey: permPubKey,
 	})
 	if err != nil {

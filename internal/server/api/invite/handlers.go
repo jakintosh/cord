@@ -12,7 +12,7 @@ func (a *API) handleRedeemInvite(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	_, err := identity.Resolve(r, a.resolver)
+	peer, err := identity.Resolve(r, a.resolver)
 	if err != nil {
 		wire.WriteError(w, http.StatusForbidden, "identity unknown")
 		return
@@ -24,7 +24,7 @@ func (a *API) handleRedeemInvite(
 		return
 	}
 
-	result, err := a.service.RedeemInvite(a.network, req.TempPubKey, req.PermPubKey)
+	result, err := a.service.RedeemInvite(a.network, peer.PublicKey, req.PermPubKey)
 	if err != nil {
 		wire.WriteError(w, http.StatusInternalServerError, err.Error())
 		return

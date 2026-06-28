@@ -1,7 +1,6 @@
 package invite
 
 type RedeemInviteRequest struct {
-	TempPubKey string `json:"temp_pubkey"`
 	PermPubKey string `json:"perm_pubkey"`
 }
 
