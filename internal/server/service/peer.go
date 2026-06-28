@@ -181,7 +181,7 @@ func (s *Service) AddPeer(
 		return nil, fmt.Errorf("get network: %w", mapStoreError(err))
 	}
 
-	var ip string
+	var ip net.IP
 	if cfg.IP != "" {
 		parsedIP := net.ParseIP(cfg.IP)
 		if parsedIP == nil {
@@ -194,8 +194,7 @@ func (s *Service) AddPeer(
 				ErrInvalidInput, cfg.IP, nw.MainCidr,
 			)
 		}
-		route := netaddr.HostRoute(parsedIP)
-		ip = route.String()
+		ip = parsedIP
 	} else {
 		ip, err = s.nextFreePeerIP(network, nw.MainCidr)
 		if err != nil {
@@ -328,22 +327,22 @@ func (s *Service) nextFreePeerIP(
 	network string,
 	rootCidr string,
 ) (
-	string,
+	net.IP,
 	error,
 ) {
 	_, ipNet, err := net.ParseCIDR(rootCidr)
 	if err != nil {
-		return "", fmt.Errorf("parse root CIDR: %w", err)
+		return nil, fmt.Errorf("parse root CIDR: %w", err)
 	}
 
 	peers, err := s.store.ListPeers(network)
 	if err != nil {
-		return "", fmt.Errorf("list peers: %w", err)
+		return nil, fmt.Errorf("list peers: %w", err)
 	}
 
 	invites, err := s.store.ListActiveInvites(network, s.clock())
 	if err != nil {
-		return "", fmt.Errorf("list active invites: %w", err)
+		return nil, fmt.Errorf("list active invites: %w", err)
 	}
 
 	used := map[string]bool{}
@@ -365,11 +364,10 @@ func (s *Service) nextFreePeerIP(
 	candidate := netaddr.Increment(first)
 	for ipNet.Contains(candidate) && !candidate.Equal(last) {
 		if !used[netaddr.Normalize(candidate).String()] {
-			route := netaddr.HostRoute(candidate)
-			return route.String(), nil
+			return netaddr.Normalize(candidate), nil
 		}
 		candidate = netaddr.Increment(candidate)
 	}
 
-	return "", fmt.Errorf("%w: no free addresses in %s", ErrInvalidInput, rootCidr)
+	return nil, fmt.Errorf("%w: no free addresses in %s", ErrInvalidInput, rootCidr)
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"testing"
 	"time"
 
@@ -18,7 +19,7 @@ func TestCreateInvite_Success(t *testing.T) {
 
 	invite, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name:      "new-peer",
-		IP:        "10.0.0.5",
+		IP:        net.ParseIP("10.0.0.5"),
 		Admin:     false,
 		ExpiresIn: time.Hour,
 	})
@@ -49,7 +50,7 @@ func TestCreateInvite_DefaultExpiration(t *testing.T) {
 
 	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "default-exp",
-		IP:   "10.0.0.6",
+		IP:   net.ParseIP("10.0.0.6"),
 	})
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
@@ -96,7 +97,7 @@ func TestCreateInvite_ReconcilesRunningInviteDeviceWithHostRoute(t *testing.T) {
 
 	invite, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "live-invite",
-		IP:   "10.0.0.5",
+		IP:   net.ParseIP("10.0.0.5"),
 	})
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
@@ -123,7 +124,7 @@ func TestCreateInvite_EmptyName(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		IP: "10.0.0.5",
+		IP: net.ParseIP("10.0.0.5"),
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -135,7 +136,7 @@ func TestCreateInvite_NonexistentNetwork(t *testing.T) {
 
 	_, err := env.Service.CreateInvite("nonexistent", service.CreateInviteRequest{
 		Name: "peer",
-		IP:   "10.0.0.5",
+		IP:   net.ParseIP("10.0.0.5"),
 	})
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
@@ -148,7 +149,7 @@ func TestRedeemInvite_Success(t *testing.T) {
 
 	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "redeemer",
-		IP:   "10.0.0.5",
+		IP:   net.ParseIP("10.0.0.5"),
 	})
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
@@ -188,7 +189,7 @@ func TestRedeemInvite_Idempotent_SameKey(t *testing.T) {
 
 	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "idempotent",
-		IP:   "10.0.0.6",
+		IP:   net.ParseIP("10.0.0.6"),
 	})
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
@@ -216,7 +217,7 @@ func TestRedeemInvite_UnknownKey(t *testing.T) {
 
 	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "peer",
-		IP:   "10.0.0.5",
+		IP:   net.ParseIP("10.0.0.5"),
 	})
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
@@ -234,7 +235,7 @@ func TestRedeemInvite_MultipleInvites(t *testing.T) {
 
 	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "peer-a",
-		IP:   "10.0.0.10",
+		IP:   net.ParseIP("10.0.0.10"),
 	})
 	if err != nil {
 		t.Fatalf("create invite a: %v", err)
@@ -243,7 +244,7 @@ func TestRedeemInvite_MultipleInvites(t *testing.T) {
 
 	_, err = env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "peer-b",
-		IP:   "10.0.0.11",
+		IP:   net.ParseIP("10.0.0.11"),
 	})
 	if err != nil {
 		t.Fatalf("create invite b: %v", err)
@@ -278,7 +279,7 @@ func TestRedeemInvite_ReconcilesRunningDevices(t *testing.T) {
 	}
 	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "live-redeem",
-		IP:   "10.0.0.5",
+		IP:   net.ParseIP("10.0.0.5"),
 	})
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
@@ -322,7 +323,7 @@ func TestListInvites_Mixed(t *testing.T) {
 
 	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "active",
-		IP:   "10.0.0.20",
+		IP:   net.ParseIP("10.0.0.20"),
 	})
 	if err != nil {
 		t.Fatalf("create active: %v", err)
@@ -330,7 +331,7 @@ func TestListInvites_Mixed(t *testing.T) {
 
 	_, err = env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "to-redeem",
-		IP:   "10.0.0.21",
+		IP:   net.ParseIP("10.0.0.21"),
 	})
 	if err != nil {
 		t.Fatalf("create to-redeem: %v", err)
@@ -372,7 +373,7 @@ func TestRevokeInvite_Success(t *testing.T) {
 
 	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name: "revoke-me",
-		IP:   "10.0.0.30",
+		IP:   net.ParseIP("10.0.0.30"),
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -487,7 +488,7 @@ func TestInvite_Persistence(t *testing.T) {
 
 	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
 		Name:      "persist-test",
-		IP:        "10.0.0.5",
+		IP:        net.ParseIP("10.0.0.5"),
 		Admin:     true,
 		ExpiresIn: 2 * time.Hour,
 	})

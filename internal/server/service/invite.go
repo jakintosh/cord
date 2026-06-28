@@ -79,7 +79,7 @@ type Invite struct {
 // CreateInviteRequest is the input for generating a peer invite.
 type CreateInviteRequest struct {
 	Name      string        // the name for the new peer
-	IP        string        // permanent IP; auto-assigned from root CIDR if empty
+	IP        net.IP        // permanent IP; auto-assigned from root CIDR if nil
 	Admin     bool          // whether the peer has admin privileges
 	ExpiresIn time.Duration // zero means default 24-hour expiration
 }
@@ -127,24 +127,14 @@ func (s *Service) CreateInvite(
 	}
 
 	var finalIP net.IP
-	if req.IP != "" {
-		ip := net.ParseIP(req.IP)
-		if ip == nil {
-			// Try parsing as CIDR (e.g. from AddPeer which passes "10.0.0.5/16")
-			parsed, _, err := net.ParseCIDR(req.IP)
-			if err != nil {
-				return nil, fmt.Errorf("%w: invalid permanent IP %q", ErrInvalidInput, req.IP)
-			}
-			ip = parsed
-		}
-		finalIP = netaddr.Normalize(ip)
+	if req.IP != nil {
+		finalIP = netaddr.Normalize(req.IP)
 	} else {
 		freeIP, err := s.nextFreePeerIP(network, nw.MainCidr)
 		if err != nil {
 			return nil, fmt.Errorf("auto-assign permanent IP: %w", err)
 		}
-		ip, _, _ := net.ParseCIDR(freeIP)
-		finalIP = netaddr.Normalize(ip)
+		finalIP = freeIP
 	}
 
 	tempPrivKey, err := s.wg.GenerateKey()
