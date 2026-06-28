@@ -245,7 +245,7 @@ func (s *Service) InstallNetwork(
 	mainServerPeer := wireguard.WGPeer{
 		PublicKey:      invite.ServerPubkey,
 		AllowedIPs:     []string{mainAllowedIP},
-		Endpoint:       invite.ServerEndpoint,
+		Endpoint:       redeemResult.Server.ExternalEndpoint,
 		EndpointPolicy: wireguard.EndpointFixed,
 	}
 	if err := mainDev.ApplyPeers([]wireguard.WGPeer{mainServerPeer}); err != nil {
@@ -267,7 +267,7 @@ func (s *Service) InstallNetwork(
 		PublicKey:      permPubKey,
 		AssignedCidr:   redeemResult.AssignedCidr,
 		ServerPubkey:   invite.ServerPubkey,
-		ServerEndpoint: invite.ServerEndpoint,
+		ServerEndpoint: redeemResult.Server.ExternalEndpoint,
 		ServerApiAddr:  redeemResult.Server.InternalEndpoint,
 		Enabled:        false,
 		CreatedAt:      s.clock(),

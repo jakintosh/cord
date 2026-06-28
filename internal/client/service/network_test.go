@@ -104,7 +104,7 @@ func TestInstallNetwork_Success(t *testing.T) {
 		TempPrivKey:    "temp-priv-key",
 		TempCidr:       "10.43.0.2/24",
 		ServerPubkey:   "server-pub-key",
-		ServerEndpoint: "1.2.3.4:51820",
+		ServerEndpoint: "5.6.7.8:51821", // invite listener port — different from main
 		TempApiAddr:    env.Server.Listener.Addr().String(),
 	}
 
@@ -146,6 +146,12 @@ func TestInstallNetwork_Success(t *testing.T) {
 	}
 	if got := peers[0].AllowedIPs; len(got) != 1 || got[0] != "10.42.0.0/16" {
 		t.Fatalf("main server allowed IPs = %v, want [10.42.0.0/16]", got)
+	}
+	if peers[0].Endpoint != "1.2.3.4:51820" {
+		t.Fatalf("main server endpoint = %q, want 1.2.3.4:51820 (redeem result, not invite)", peers[0].Endpoint)
+	}
+	if nw.ServerEndpoint != "1.2.3.4:51820" {
+		t.Fatalf("persisted ServerEndpoint = %q, want 1.2.3.4:51820", nw.ServerEndpoint)
 	}
 }
 
