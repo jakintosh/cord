@@ -74,10 +74,13 @@ type WG interface {
 	PublicKey(privateKey string) (string, error)
 
 	// NewDevice creates a new WireGuard device (interface) with the
-	// given name, private key, address, and listen port. The device
-	// is not yet brought up. The name must not exceed
+	// given name, private key, interface address, and listen port. The
+	// address is the device's own address with its on-link prefix
+	// (e.g. 10.0.0.1/16), not a masked network — callers parsing a CIDR
+	// string should use netaddr.ParseInterface to preserve the host
+	// bits. The device is not yet brought up. The name must not exceed
 	// maxInterfaceNameBytes bytes (kernel limit).
-	NewDevice(name string, privateKey string, address string, port uint16) (WGDevice, error)
+	NewDevice(name string, privateKey string, ifaceAddr net.IPNet, port uint16) (WGDevice, error)
 
 	// RemoveDevice destroys a WireGuard device by name. The device
 	// must be down before removal.
@@ -202,7 +205,7 @@ func (m *manager) PublicKey(
 func (m *manager) NewDevice(
 	name string,
 	privateKey string,
-	address string,
+	address net.IPNet,
 	port uint16,
 ) (
 	WGDevice,
@@ -221,12 +224,7 @@ func (m *manager) NewDevice(
 		return nil, fmt.Errorf("wireguard: new device: %w", err)
 	}
 
-	_, ipNet, err := net.ParseCIDR(address)
-	if err != nil {
-		return nil, fmt.Errorf("wireguard: new device: parse address %q: %w", address, err)
-	}
-
-	d := newDevice(name, key, *ipNet, port, 0, false, m.backend)
+	d := newDevice(name, key, address, port, 0, false, m.backend)
 
 	m.mu.Lock()
 	m.devices[name] = d

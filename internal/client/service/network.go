@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
+	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -158,8 +159,13 @@ func (s *Service) InstallNetwork(
 		return nil, fmt.Errorf("%w: invalid temp CIDR %q", ErrInvalidInput, invite.TempCidr)
 	}
 
+	inviteIfaceAddr, err := netaddr.ParseInterface(invite.TempCidr)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid temp CIDR %q", ErrInvalidInput, invite.TempCidr)
+	}
+
 	// Create invite device
-	inviteDev, err := s.wg.NewDevice(inviteName, invite.TempPrivKey, invite.TempCidr, 0)
+	inviteDev, err := s.wg.NewDevice(inviteName, invite.TempPrivKey, inviteIfaceAddr, 0)
 	if err != nil {
 		return nil, fmt.Errorf("create invite device: %w", err)
 	}
@@ -205,8 +211,13 @@ func (s *Service) InstallNetwork(
 
 	cleanupInvite()
 
+	mainIfaceAddr, err := netaddr.ParseInterface(redeemResult.AssignedCidr)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, redeemResult.AssignedCidr)
+	}
+
 	// Create main interface
-	mainDev, err := s.wg.NewDevice(mainName, permPrivKey, redeemResult.AssignedCidr, 0)
+	mainDev, err := s.wg.NewDevice(mainName, permPrivKey, mainIfaceAddr, 0)
 	if err != nil {
 		return nil, fmt.Errorf("create main device: %w", err)
 	}
@@ -310,12 +321,12 @@ func (s *Service) EnableNetwork(
 		return err
 	}
 
-	device, err := s.wg.NewDevice(
-		nw.Name,
-		nw.PrivateKey,
-		nw.AssignedCidr,
-		0,
-	)
+	ifaceAddr, err := netaddr.ParseInterface(nw.AssignedCidr)
+	if err != nil {
+		return fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, nw.AssignedCidr)
+	}
+
+	device, err := s.wg.NewDevice(nw.Name, nw.PrivateKey, ifaceAddr, 0)
 	if err != nil {
 		return err
 	}

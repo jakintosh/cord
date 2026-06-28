@@ -5,6 +5,7 @@ import (
 	"net"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -44,7 +45,7 @@ func (db *DB) GetInviteByIP(
 	*service.Invite,
 	error,
 ) {
-	ip = normalizeIP(ip)
+	ip = netaddr.Normalize(ip)
 	row := db.Conn.QueryRow(`
 		SELECT
 			name,
@@ -163,8 +164,8 @@ func (db *DB) InsertInvite(
 	network string,
 	invite *service.Invite,
 ) error {
-	tempIP := normalizeIP(invite.TempIP)
-	finalIP := normalizeIP(invite.FinalIP)
+	tempIP := netaddr.Normalize(invite.TempIP)
+	finalIP := netaddr.Normalize(invite.FinalIP)
 
 	_, err := db.Conn.Exec(`
 		INSERT INTO invite (

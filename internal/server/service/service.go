@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -133,68 +132,4 @@ func (s *Service) logf(format string, args ...any) {
 	if s.log != nil {
 		s.log.Printf(format, args...)
 	}
-}
-
-// firstAssignableIP returns the first usable IP in a network
-// (network address + 1, which is typically the server's own address).
-func firstAssignableIP(n *net.IPNet) net.IP {
-	ip := make(net.IP, len(n.IP))
-	copy(ip, n.IP)
-	ip[len(ip)-1]++
-	return normalizeIP(ip)
-}
-
-// cidrRange returns the network address and broadcast address.
-func cidrRange(n *net.IPNet) (net.IP, net.IP) {
-	first := n.IP.Mask(n.Mask)
-	last := make(net.IP, len(first))
-	copy(last, first)
-	for i := range last {
-		last[i] |= ^n.Mask[i]
-	}
-	return normalizeIP(first), normalizeIP(last)
-}
-
-// incrementIP adds 1 to an IP address.
-func incrementIP(ip net.IP) net.IP {
-	ip = normalizeIP(ip)
-	next := make(net.IP, len(ip))
-	copy(next, ip)
-	for i := len(next) - 1; i >= 0; i-- {
-		next[i]++
-		if next[i] > 0 {
-			break
-		}
-	}
-	return next
-}
-
-// normalizeIP converts an IPv4-in-IPv6 to a 4-byte representation.
-func normalizeIP(ip net.IP) net.IP {
-	if v4 := ip.To4(); v4 != nil {
-		return v4
-	}
-	return ip
-}
-
-// terminalPrefix returns /32 for v4 or /128 for v6 — host routes for WireGuard peers.
-func terminalPrefix(ip net.IP) int {
-	if ip.To4() != nil {
-		return 32
-	}
-	return 128
-}
-
-// interfaceAddress returns a CIDR notation string for the first
-// assignable IP in a network, preserving the network prefix length.
-func interfaceAddress(n *net.IPNet) string {
-	ip := firstAssignableIP(n)
-	prefix, _ := n.Mask.Size()
-	return fmt.Sprintf("%s/%d", ip.String(), prefix)
-}
-
-// hostRoute returns a terminal route for a peer IP.
-func hostRoute(ip net.IP) string {
-	ip = normalizeIP(ip)
-	return fmt.Sprintf("%s/%d", ip.String(), terminalPrefix(ip))
 }

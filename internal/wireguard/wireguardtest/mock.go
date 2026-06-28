@@ -4,6 +4,7 @@ package wireguardtest
 
 import (
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -26,25 +27,41 @@ func NewMockWG() *MockWG {
 	}
 }
 
-func (m *MockWG) GenerateKey() (string, error) {
+func (m *MockWG) GenerateKey() (
+	string,
+	error,
+) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.keySeq++
 	return fmt.Sprintf("mock-priv-key-%d", m.keySeq), nil
 }
 
-func (m *MockWG) PublicKey(privateKey string) (string, error) {
+func (m *MockWG) PublicKey(
+	privateKey string,
+) (
+	string,
+	error,
+) {
 	return privateKey + "-pub", nil
 }
 
-func (m *MockWG) NewDevice(name, privateKey, address string, port uint16) (wireguard.WGDevice, error) {
+func (m *MockWG) NewDevice(
+	name string,
+	privateKey string,
+	address net.IPNet,
+	port uint16,
+) (
+	wireguard.WGDevice,
+	error,
+) {
 	if m.NewErr != nil {
 		return nil, m.NewErr
 	}
 	d := &MockDevice{
 		Name:       name,
 		PrivateKey: privateKey,
-		Address:    address,
+		Address:    address.String(),
 		Port:       port,
 	}
 	m.mu.Lock()
@@ -85,7 +102,9 @@ type EndpointUpdate struct {
 	Endpoint string
 }
 
-func (d *MockDevice) ApplyPeers(peers []wireguard.WGPeer) error {
+func (d *MockDevice) ApplyPeers(
+	peers []wireguard.WGPeer,
+) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.ApplyCalls++
@@ -96,7 +115,10 @@ func (d *MockDevice) ApplyPeers(peers []wireguard.WGPeer) error {
 	return d.ApplyErr
 }
 
-func (d *MockDevice) UpdateEndpoint(pubKey, endpoint string) error {
+func (d *MockDevice) UpdateEndpoint(
+	pubKey string,
+	endpoint string,
+) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.UpdateErr != nil {
@@ -133,14 +155,21 @@ func (d *MockDevice) DeviceName() string {
 	return d.Name
 }
 
-func (d *MockDevice) WaitForHandshake(pubKey string, timeout time.Duration, onStatus func(wireguard.PeerStatus)) error {
+func (d *MockDevice) WaitForHandshake(
+	pubKey string,
+	timeout time.Duration,
+	onStatus func(wireguard.PeerStatus),
+) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.WaitCalls++
 	return nil
 }
 
-func (d *MockDevice) Status() ([]wireguard.PeerStatus, error) {
+func (d *MockDevice) Status() (
+	[]wireguard.PeerStatus,
+	error,
+) {
 	return nil, d.StatusErr
 }
 

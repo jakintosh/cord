@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -144,10 +145,11 @@ func (s *Service) CreateNetwork(
 		Prefix: bits,
 	}
 
-	serverIP := firstAssignableIP(mainNet)
+	serverIP := netaddr.FirstAssignable(mainNet)
+	serverCIDR := netaddr.HostRoute(serverIP)
 	serverPeer := &Peer{
 		Name:      "cord-server",
-		Cidr:      fmt.Sprintf("%s/%d", serverIP.String(), terminalPrefix(serverIP)),
+		Cidr:      serverCIDR.String(),
 		PublicKey: pubKey,
 		Admin:     true,
 		Enabled:   true,
@@ -254,13 +256,13 @@ func (s *Service) StartNetwork(
 	if err != nil {
 		return fmt.Errorf("start network: parse main cidr: %w", err)
 	}
-	serverAddress := interfaceAddress(mainNet)
+	serverIfaceAddr := netaddr.InterfaceAddress(mainNet)
 
 	_, inviteNet, err := net.ParseCIDR(network.InviteCidr)
 	if err != nil {
 		return fmt.Errorf("start network: parse invite cidr: %w", err)
 	}
-	inviteAddress := interfaceAddress(inviteNet)
+	inviteIfaceAddr := netaddr.InterfaceAddress(inviteNet)
 
 	// Cleanup stack: each successful creation pushes a teardown
 	// function. If anything fails during setup, we unwind the
@@ -275,7 +277,7 @@ func (s *Service) StartNetwork(
 	main, err := s.wg.NewDevice(
 		network.MainName,
 		network.PrivateKey,
-		serverAddress,
+		serverIfaceAddr,
 		network.ListenPort,
 	)
 	if err != nil {
@@ -306,7 +308,7 @@ func (s *Service) StartNetwork(
 	invite, err := s.wg.NewDevice(
 		network.InviteName,
 		network.PrivateKey,
-		inviteAddress,
+		inviteIfaceAddr,
 		network.InviteListenPort,
 	)
 	if err != nil {
@@ -345,7 +347,7 @@ func (s *Service) StartNetwork(
 		handlers := s.apiFactory(name)
 
 		// serve main network api
-		mainIP := firstAssignableIP(mainNet)
+		mainIP := netaddr.FirstAssignable(mainNet)
 		mainAddr := fmt.Sprintf("%s:%d", mainIP.String(), network.ApiPort)
 		mainServer := &http.Server{
 			Addr:    mainAddr,
@@ -358,7 +360,7 @@ func (s *Service) StartNetwork(
 		}()
 
 		// serve invite network api
-		inviteIP := firstAssignableIP(inviteNet)
+		inviteIP := netaddr.FirstAssignable(inviteNet)
 		inviteAddr := fmt.Sprintf("%s:%d", inviteIP.String(), network.ApiPort)
 		inviteServer := &http.Server{
 			Addr:    inviteAddr,
@@ -521,9 +523,10 @@ func (s *Service) buildInvitePeers(
 ) []wireguard.WGPeer {
 	var wgpeers []wireguard.WGPeer
 	for _, invite := range invites {
+		route := netaddr.HostRoute(invite.TempIP)
 		wgpeers = append(wgpeers, wireguard.WGPeer{
 			PublicKey:      invite.TempPubKey,
-			AllowedIPs:     []string{hostRoute(invite.TempIP)},
+			AllowedIPs:     []string{route.String()},
 			EndpointPolicy: wireguard.EndpointDynamic,
 		})
 	}

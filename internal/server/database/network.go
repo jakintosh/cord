@@ -5,6 +5,7 @@ import (
 	"net"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -104,7 +105,7 @@ func (db *DB) BootstrapNetwork(
 	if err != nil {
 		return fmt.Errorf("parse server peer cidr: %w", err)
 	}
-	peerIP := normalizeIP(peerIPNet.IP)
+	peerIP := netaddr.Normalize(peerIPNet.IP)
 	peerOnes, _ := peerIPNet.Mask.Size()
 
 	tx, err := db.Conn.Begin()

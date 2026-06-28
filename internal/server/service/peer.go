@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net"
 	"time"
+
+	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 )
 
 // Peer is the canonical server-side record of a network participant.
@@ -192,7 +194,8 @@ func (s *Service) AddPeer(
 				ErrInvalidInput, cfg.IP, nw.MainCidr,
 			)
 		}
-		ip = fmt.Sprintf("%s/%d", parsedIP.String(), terminalPrefix(parsedIP))
+		route := netaddr.HostRoute(parsedIP)
+		ip = route.String()
 	} else {
 		ip, err = s.nextFreePeerIP(network, nw.MainCidr)
 		if err != nil {
@@ -347,24 +350,25 @@ func (s *Service) nextFreePeerIP(
 	for _, p := range peers {
 		ip, _, _ := net.ParseCIDR(p.Cidr)
 		if ip != nil {
-			used[normalizeIP(ip).String()] = true
+			used[netaddr.Normalize(ip).String()] = true
 		}
 	}
 	for _, inv := range invites {
 		if inv.FinalIP != nil {
-			used[normalizeIP(inv.FinalIP).String()] = true
+			used[netaddr.Normalize(inv.FinalIP).String()] = true
 		}
 	}
 
-	first := firstAssignableIP(ipNet)
-	_, last := cidrRange(ipNet)
+	first := netaddr.FirstAssignable(ipNet)
+	_, last := netaddr.Range(ipNet)
 
-	candidate := incrementIP(first)
+	candidate := netaddr.Increment(first)
 	for ipNet.Contains(candidate) && !candidate.Equal(last) {
-		if !used[normalizeIP(candidate).String()] {
-			return fmt.Sprintf("%s/%d", candidate.String(), terminalPrefix(candidate)), nil
+		if !used[netaddr.Normalize(candidate).String()] {
+			route := netaddr.HostRoute(candidate)
+			return route.String(), nil
 		}
-		candidate = incrementIP(candidate)
+		candidate = netaddr.Increment(candidate)
 	}
 
 	return "", fmt.Errorf("%w: no free addresses in %s", ErrInvalidInput, rootCidr)

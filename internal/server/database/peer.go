@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 
+	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -45,7 +46,7 @@ func (db *DB) GetPeerByIP(
 	*service.Peer,
 	error,
 ) {
-	ip = normalizeIP(ip)
+	ip = netaddr.Normalize(ip)
 	row := db.Conn.QueryRow(`
 		SELECT
 			name,
@@ -159,7 +160,7 @@ func (db *DB) InsertPeer(
 		)
 	}
 
-	ip := normalizeIP(cidr.IP)
+	ip := netaddr.Normalize(cidr.IP)
 
 	_, err = db.Conn.Exec(`
 		INSERT INTO peer (
@@ -367,7 +368,7 @@ func scanPeer(
 func ipToPeerCidr(
 	ip net.IP,
 ) *net.IPNet {
-	ip = normalizeIP(ip)
+	ip = netaddr.Normalize(ip)
 	prefix := len(ip) * 8
 	return &net.IPNet{
 		IP:   ip,

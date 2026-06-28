@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 
@@ -95,15 +94,6 @@ func CheckSqliteErr(
 	}
 
 	return fmt.Errorf("database error while %s: %w", context, err)
-}
-
-func normalizeIP(
-	ip net.IP,
-) net.IP {
-	if v4 := ip.To4(); v4 != nil {
-		return v4
-	}
-	return ip
 }
 
 func boolToInt(

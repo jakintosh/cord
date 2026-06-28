@@ -6,6 +6,8 @@ import (
 	"io"
 	"net"
 	"time"
+
+	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 )
 
 // External Invite types — these travel over the wire in JSON form.
@@ -135,14 +137,14 @@ func (s *Service) CreateInvite(
 			}
 			ip = parsed
 		}
-		finalIP = normalizeIP(ip)
+		finalIP = netaddr.Normalize(ip)
 	} else {
 		freeIP, err := s.nextFreePeerIP(network, nw.MainCidr)
 		if err != nil {
 			return nil, fmt.Errorf("auto-assign permanent IP: %w", err)
 		}
 		ip, _, _ := net.ParseCIDR(freeIP)
-		finalIP = normalizeIP(ip)
+		finalIP = netaddr.Normalize(ip)
 	}
 
 	tempPrivKey, err := s.wg.GenerateKey()
@@ -192,7 +194,7 @@ func (s *Service) CreateInvite(
 		Server: ServerInfo{
 			PublicKey:        nw.PublicKey,
 			ExternalEndpoint: fmt.Sprintf("%s:%d", nw.ExternalIP, nw.InviteListenPort),
-			InternalEndpoint: fmt.Sprintf("%s:%d", firstAssignableIP(inviteNet).String(), nw.ApiPort),
+			InternalEndpoint: fmt.Sprintf("%s:%d", netaddr.FirstAssignable(inviteNet).String(), nw.ApiPort),
 		},
 	}
 
@@ -282,7 +284,7 @@ func (s *Service) buildRedeemResult(
 		Server: ServerInfo{
 			PublicKey:        nw.PublicKey,
 			ExternalEndpoint: fmt.Sprintf("%s:%d", nw.ExternalIP, nw.ListenPort),
-			InternalEndpoint: fmt.Sprintf("%s:%d", firstAssignableIP(rootNet).String(), nw.ApiPort),
+			InternalEndpoint: fmt.Sprintf("%s:%d", netaddr.FirstAssignable(rootNet).String(), nw.ApiPort),
 		},
 	}, nil
 }
@@ -309,19 +311,19 @@ func (s *Service) nextFreeInviteIP(
 	used := map[string]bool{}
 	for _, inv := range invites {
 		if inv.TempIP != nil {
-			used[normalizeIP(inv.TempIP).String()] = true
+			used[netaddr.Normalize(inv.TempIP).String()] = true
 		}
 	}
 
-	first := firstAssignableIP(ipNet)
-	_, last := cidrRange(ipNet)
+	first := netaddr.FirstAssignable(ipNet)
+	_, last := netaddr.Range(ipNet)
 
-	candidate := incrementIP(first)
+	candidate := netaddr.Increment(first)
 	for ipNet.Contains(candidate) && !candidate.Equal(last) {
-		if !used[normalizeIP(candidate).String()] {
-			return normalizeIP(candidate), nil
+		if !used[netaddr.Normalize(candidate).String()] {
+			return netaddr.Normalize(candidate), nil
 		}
-		candidate = incrementIP(candidate)
+		candidate = netaddr.Increment(candidate)
 	}
 
 	return nil, fmt.Errorf("%w: no free addresses in invite CIDR %s", ErrInvalidInput, inviteCidr)

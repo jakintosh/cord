@@ -1,8 +1,18 @@
 package wireguard
 
 import (
+	"net"
 	"testing"
 )
+
+func cidr(t *testing.T, s string) net.IPNet {
+	t.Helper()
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		t.Fatalf("ParseCIDR(%q): %v", s, err)
+	}
+	return *n
+}
 
 func TestNew_ReturnsManager(t *testing.T) {
 	wg, err := New(Options{Backend: BackendUserspace})
@@ -26,13 +36,13 @@ func TestNewDevice_ValidatesNameLength(t *testing.T) {
 	}
 
 	// Name exactly 15 bytes should succeed
-	_, err = wg.NewDevice("123456789012345", key, "10.0.0.1/32", 0)
+	_, err = wg.NewDevice("123456789012345", key, cidr(t, "10.0.0.1/32"), 0)
 	if err != nil {
 		t.Errorf("15-byte name should succeed: %v", err)
 	}
 
 	// 16 bytes should fail
-	_, err = wg.NewDevice("1234567890123456", key, "10.0.0.1/32", 0)
+	_, err = wg.NewDevice("1234567890123456", key, cidr(t, "10.0.0.1/32"), 0)
 	if err == nil {
 		t.Error("16-byte name should fail")
 	}
@@ -44,26 +54,9 @@ func TestNewDevice_InvalidPrivateKey(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	_, err = wg.NewDevice("test", "not-a-key", "10.0.0.1/32", 0)
+	_, err = wg.NewDevice("test", "not-a-key", cidr(t, "10.0.0.1/32"), 0)
 	if err == nil {
 		t.Error("expected error for invalid private key")
-	}
-}
-
-func TestNewDevice_InvalidAddress(t *testing.T) {
-	wg, err := New(Options{Backend: BackendUserspace})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	key, err := GenerateKey()
-	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
-	}
-
-	_, err = wg.NewDevice("test", key, "not-a-cidr", 0)
-	if err == nil {
-		t.Error("expected error for invalid address")
 	}
 }
 
@@ -78,7 +71,7 @@ func TestNewDevice_Valid(t *testing.T) {
 		t.Fatalf("GenerateKey: %v", err)
 	}
 
-	dev, err := wg.NewDevice("test", key, "10.0.0.1/32", 51820)
+	dev, err := wg.NewDevice("test", key, cidr(t, "10.0.0.1/32"), 51820)
 	if err != nil {
 		t.Fatalf("NewDevice: %v", err)
 	}
@@ -101,7 +94,7 @@ func TestRemoveDevice_Existing(t *testing.T) {
 		t.Fatalf("GenerateKey: %v", err)
 	}
 
-	_, err = wg.NewDevice("test", key, "10.0.0.1/32", 0)
+	_, err = wg.NewDevice("test", key, cidr(t, "10.0.0.1/32"), 0)
 	if err != nil {
 		t.Fatalf("NewDevice: %v", err)
 	}
