@@ -178,6 +178,7 @@ func (s *Service) CreateInvite(
 	if err := s.store.InsertInvite(network, invite); err != nil {
 		return nil, fmt.Errorf("insert invite: %w", mapStoreError(err))
 	}
+	s.reconcileOnce(network)
 
 	_, inviteNet, _ := net.ParseCIDR(nw.InviteCidr)
 	prefix, _ := inviteNet.Mask.Size()
@@ -218,10 +219,12 @@ func (s *Service) RedeemInvite(
 	if err != nil {
 		peer, lookupErr := s.store.GetPeerByKey(network, permPubKey)
 		if lookupErr == nil && !peer.Confirmed {
+			s.reconcileOnce(network)
 			return s.buildRedeemResult(nw, peer)
 		}
 		return nil, fmt.Errorf("redeem invite: %w", mapStoreError(err))
 	}
+	s.reconcileOnce(network)
 
 	peer, err := s.store.GetPeerByKey(network, permPubKey)
 	if err != nil {
@@ -255,6 +258,7 @@ func (s *Service) RevokeInvite(
 	if err := s.store.DeleteInvite(network, name); err != nil {
 		return fmt.Errorf("delete invite %q: %w", name, mapStoreError(err))
 	}
+	s.reconcileOnce(network)
 	return nil
 }
 

@@ -41,7 +41,12 @@ func (m *MockWG) NewDevice(name, privateKey, address string, port uint16) (wireg
 	if m.NewErr != nil {
 		return nil, m.NewErr
 	}
-	d := &MockDevice{Name: name}
+	d := &MockDevice{
+		Name:       name,
+		PrivateKey: privateKey,
+		Address:    address,
+		Port:       port,
+	}
 	m.mu.Lock()
 	m.Devices[name] = d
 	m.mu.Unlock()
@@ -57,13 +62,19 @@ func (m *MockWG) RemoveDevice(name string) error {
 type MockDevice struct {
 	mu              sync.Mutex
 	Name            string
+	PrivateKey      string
+	Address         string
+	Port            uint16
 	Peers           []wireguard.WGPeer
 	UpCalls         int
 	DownCalls       int
+	ApplyCalls      int
+	IsUp            bool
 	UpErr           error
 	DownErr         error
 	ApplyErr        error
 	StatusErr       error
+	WaitCalls       int
 	EndpointUpdates []EndpointUpdate
 	UpdateErr       error
 }
@@ -77,6 +88,10 @@ type EndpointUpdate struct {
 func (d *MockDevice) ApplyPeers(peers []wireguard.WGPeer) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.ApplyCalls++
+	if !d.IsUp {
+		return wireguard.ErrDeviceNotUp
+	}
 	d.Peers = peers
 	return d.ApplyErr
 }
@@ -98,6 +113,9 @@ func (d *MockDevice) Up() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.UpCalls++
+	if d.UpErr == nil {
+		d.IsUp = true
+	}
 	return d.UpErr
 }
 
@@ -105,6 +123,9 @@ func (d *MockDevice) Down() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.DownCalls++
+	if d.DownErr == nil {
+		d.IsUp = false
+	}
 	return d.DownErr
 }
 
@@ -113,6 +134,9 @@ func (d *MockDevice) DeviceName() string {
 }
 
 func (d *MockDevice) WaitForHandshake(pubKey string, timeout time.Duration, onStatus func(wireguard.PeerStatus)) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.WaitCalls++
 	return nil
 }
 

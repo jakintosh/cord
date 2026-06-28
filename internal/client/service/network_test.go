@@ -3,9 +3,12 @@ package service_test
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 
+	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 )
 
@@ -79,9 +82,71 @@ func TestListNetworks_WithNetworks(t *testing.T) {
 }
 
 func TestInstallNetwork_Success(t *testing.T) {
-	// Full flow requires a mock HTTP server. Tested in serverapi package
-	// and will be covered by integration tests.
-	t.Skip("requires mock HTTP server for /redeem and /confirm endpoints")
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
+		wire.WriteData(w, http.StatusOK, serverapi.RedeemResultDTO{
+			NetworkName:  "install-me",
+			AssignedCidr: "10.42.0.5/16",
+			Server: serverapi.ServerInfoDTO{
+				PublicKey:        "server-pub-key",
+				ExternalEndpoint: "1.2.3.4:51820",
+				InternalEndpoint: r.Host,
+			},
+		})
+	})
+	mux.HandleFunc("POST /confirm", func(w http.ResponseWriter, r *http.Request) {
+		wire.WriteData(w, http.StatusOK, map[string]string{"status": "confirmed"})
+	})
+
+	env := testutil.SetupServiceWithServer(t, mux)
+	invite := service.Invite{
+		NetworkName:    "install-me",
+		TempPrivKey:    "temp-priv-key",
+		TempCidr:       "10.43.0.2/24",
+		ServerPubkey:   "server-pub-key",
+		ServerEndpoint: "1.2.3.4:51820",
+		TempApiAddr:    env.Server.Listener.Addr().String(),
+	}
+
+	nw, err := env.Service.InstallNetwork(invite)
+	if err != nil {
+		t.Fatalf("install network: %v", err)
+	}
+	if nw.Name != "install-me" {
+		t.Fatalf("name = %q, want install-me", nw.Name)
+	}
+	if nw.AssignedCidr != "10.42.0.5/16" {
+		t.Fatalf("assigned cidr = %q, want 10.42.0.5/16", nw.AssignedCidr)
+	}
+
+	inviteDev := env.WireGuard.Devices["install-me-i"]
+	if inviteDev == nil {
+		t.Fatal("expected invite device")
+	}
+	if inviteDev.WaitCalls != 0 {
+		t.Fatalf("invite wait calls = %d, want 0", inviteDev.WaitCalls)
+	}
+	if inviteDev.DownCalls != 1 {
+		t.Fatalf("invite down calls = %d, want 1", inviteDev.DownCalls)
+	}
+
+	mainDev := env.WireGuard.Devices["install-me"]
+	if mainDev == nil {
+		t.Fatal("expected main device")
+	}
+	if mainDev.WaitCalls != 0 {
+		t.Fatalf("main wait calls = %d, want 0", mainDev.WaitCalls)
+	}
+	if mainDev.DownCalls != 1 {
+		t.Fatalf("main down calls = %d, want 1", mainDev.DownCalls)
+	}
+	peers := mainDev.AppliedPeers()
+	if len(peers) != 1 {
+		t.Fatalf("main peers = %d, want 1", len(peers))
+	}
+	if got := peers[0].AllowedIPs; len(got) != 1 || got[0] != "10.42.0.0/16" {
+		t.Fatalf("main server allowed IPs = %v, want [10.42.0.0/16]", got)
+	}
 }
 
 func TestInstallNetwork_Duplicate(t *testing.T) {

@@ -63,7 +63,10 @@ type EndpointWitness struct {
 // ResolvePeerIdentity looks up a confirmed peer by IP address within
 // the network. Used by the identity middleware to authenticate incoming
 // peer requests by their WireGuard source IP.
-func (s *Service) ResolvePeerIdentity(network string, ip net.IP) (*Peer, error) {
+func (s *Service) ResolvePeerIdentity(
+	network string,
+	ip net.IP,
+) (*Peer, error) {
 	p, err := s.store.GetPeerByIP(network, ip)
 	if err != nil {
 		return nil, fmt.Errorf("resolve peer identity: %w", mapStoreError(err))
@@ -214,6 +217,7 @@ func (s *Service) RemovePeer(
 	if err := s.store.DeletePeer(network, name); err != nil {
 		return fmt.Errorf("delete peer %q: %w", name, mapStoreError(err))
 	}
+	s.reconcileOnce(network)
 	return nil
 }
 
@@ -236,6 +240,7 @@ func (s *Service) UpdatePeer(
 	if err != nil {
 		return nil, fmt.Errorf("update peer %q: %w", name, mapStoreError(err))
 	}
+	s.reconcileOnce(network)
 	return p, nil
 }
 
@@ -252,6 +257,7 @@ func (s *Service) EnablePeer(
 	if err != nil {
 		return fmt.Errorf("enable peer %q: %w", name, mapStoreError(err))
 	}
+	s.reconcileOnce(network)
 	return nil
 }
 
@@ -268,6 +274,7 @@ func (s *Service) DisablePeer(
 	if err != nil {
 		return fmt.Errorf("disable peer %q: %w", name, mapStoreError(err))
 	}
+	s.reconcileOnce(network)
 	return nil
 }
 
@@ -288,6 +295,7 @@ func (s *Service) ConfirmPeer(
 	}
 
 	_ = s.store.DeleteInvite(network, name)
+	s.reconcileOnce(network)
 
 	return nil
 }

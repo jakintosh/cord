@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -82,6 +83,38 @@ func TestCreateInvite_AutoAssignsIP(t *testing.T) {
 	// First auto-assigned IP should be 10.0.0.2 (10.0.0.0 = network, 10.0.0.1 = server)
 	if invite.Interface.AssignedCidr != "10.1.0.2/24" {
 		t.Errorf("assigned_cidr = %q, want 10.1.0.2/24", invite.Interface.AssignedCidr)
+	}
+}
+
+func TestCreateInvite_ReconcilesRunningInviteDeviceWithHostRoute(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
+		t.Fatalf("start network: %v", err)
+	}
+
+	invite, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
+		Name: "live-invite",
+		IP:   "10.0.0.5",
+	})
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+
+	inviteDev := env.WireGuard.Devices["testnet-i"]
+	if inviteDev == nil {
+		t.Fatal("expected invite device")
+	}
+	peers := inviteDev.AppliedPeers()
+	if len(peers) != 1 {
+		t.Fatalf("invite peers = %d, want 1", len(peers))
+	}
+	if peers[0].PublicKey != invite.Interface.PrivateKey+"-pub" {
+		t.Fatalf("public key = %q, want temp invite public key", peers[0].PublicKey)
+	}
+	if got := peers[0].AllowedIPs; len(got) != 1 || got[0] != "10.1.0.2/32" {
+		t.Fatalf("allowed IPs = %v, want [10.1.0.2/32]", got)
 	}
 }
 
@@ -233,6 +266,53 @@ func TestRedeemInvite_MultipleInvites(t *testing.T) {
 	}
 	if len(peers) != 3 {
 		t.Fatalf("expected 3 peers (cord-server + peer-a + peer-b), got %d", len(peers))
+	}
+}
+
+func TestRedeemInvite_ReconcilesRunningDevices(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
+		t.Fatalf("start network: %v", err)
+	}
+	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
+		Name: "live-redeem",
+		IP:   "10.0.0.5",
+	})
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	_, err = env.Service.RedeemInvite("testnet", tempKey, "perm-live-key")
+	if err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	inviteDev := env.WireGuard.Devices["testnet-i"]
+	if inviteDev == nil {
+		t.Fatal("expected invite device")
+	}
+	if peers := inviteDev.AppliedPeers(); len(peers) != 0 {
+		t.Fatalf("invite peers after redeem = %d, want 0", len(peers))
+	}
+
+	mainDev := env.WireGuard.Devices["testnet"]
+	if mainDev == nil {
+		t.Fatal("expected main device")
+	}
+	var found bool
+	for _, peer := range mainDev.AppliedPeers() {
+		if peer.PublicKey == "perm-live-key" {
+			found = true
+			if got := peer.AllowedIPs; len(got) != 1 || got[0] != "10.0.0.5/32" {
+				t.Fatalf("redeemed peer allowed IPs = %v, want [10.0.0.5/32]", got)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("main device missing redeemed peer")
 	}
 }
 

@@ -163,10 +163,15 @@ func (s *Service) InstallNetwork(
 	if err != nil {
 		return nil, fmt.Errorf("create invite device: %w", err)
 	}
-	defer func() {
+	cleanupInvite := func() {
+		if inviteDev == nil {
+			return
+		}
 		_ = inviteDev.Down()
 		_ = s.wg.RemoveDevice(inviteName)
-	}()
+		inviteDev = nil
+	}
+	defer cleanupInvite()
 
 	// Bring up invite device
 	if err := inviteDev.Up(); err != nil {
@@ -183,9 +188,6 @@ func (s *Service) InstallNetwork(
 	if err := inviteDev.ApplyPeers([]wireguard.WGPeer{inviteServerPeer}); err != nil {
 		return nil, fmt.Errorf("apply invite peers: %w", err)
 	}
-	if err := inviteDev.WaitForHandshake(invite.ServerPubkey, 10*time.Second, nil); err != nil {
-		return nil, fmt.Errorf("invite handshake: %w", err)
-	}
 
 	// Redeem invite
 	tempPubKey, err := s.wg.PublicKey(invite.TempPrivKey)
@@ -201,33 +203,42 @@ func (s *Service) InstallNetwork(
 		return nil, fmt.Errorf("redeem invite: %w", err)
 	}
 
+	cleanupInvite()
+
 	// Create main interface
 	mainDev, err := s.wg.NewDevice(mainName, permPrivKey, redeemResult.AssignedCidr, 0)
 	if err != nil {
 		return nil, fmt.Errorf("create main device: %w", err)
 	}
-	defer func() {
+	cleanupMain := func() {
+		if mainDev == nil {
+			return
+		}
 		_ = mainDev.Down()
 		_ = s.wg.RemoveDevice(mainName)
-	}()
+		mainDev = nil
+	}
+	defer cleanupMain()
 
 	// Bring up main interface
 	if err := mainDev.Up(); err != nil {
 		return nil, fmt.Errorf("bring up main device: %w", err)
 	}
 
+	mainAllowedIP, err := networkRoute(redeemResult.AssignedCidr)
+	if err != nil {
+		return nil, fmt.Errorf("main server route: %w", err)
+	}
+
 	// Add server peer to main interface
 	mainServerPeer := wireguard.WGPeer{
 		PublicKey:      invite.ServerPubkey,
-		AllowedIPs:     []string{redeemResult.AssignedCidr},
+		AllowedIPs:     []string{mainAllowedIP},
 		Endpoint:       invite.ServerEndpoint,
 		EndpointPolicy: wireguard.EndpointFixed,
 	}
 	if err := mainDev.ApplyPeers([]wireguard.WGPeer{mainServerPeer}); err != nil {
 		return nil, fmt.Errorf("apply main peers: %w", err)
-	}
-	if err := mainDev.WaitForHandshake(invite.ServerPubkey, 10*time.Second, nil); err != nil {
-		return nil, fmt.Errorf("main handshake: %w", err)
 	}
 
 	// Confirm peer with server API
@@ -236,11 +247,7 @@ func (s *Service) InstallNetwork(
 		return nil, fmt.Errorf("confirm peer: %w", err)
 	}
 
-	// Tear down both interfaces
-	_ = mainDev.Down()
-	_ = s.wg.RemoveDevice(mainName)
-	_ = inviteDev.Down()
-	_ = s.wg.RemoveDevice(inviteName)
+	cleanupMain()
 
 	// Persist the main network
 	network := &Network{
@@ -327,11 +334,11 @@ func (s *Service) EnableNetwork(
 		}
 	}()
 
-	if err := s.reconcilePeers(device, nw); err != nil {
+	if err := device.Up(); err != nil {
 		return err
 	}
 
-	if err := device.Up(); err != nil {
+	if err := s.reconcilePeers(device, nw); err != nil {
 		return err
 	}
 
@@ -800,11 +807,16 @@ func (s *Service) reconcilePeers(
 		return err
 	}
 
+	serverRoute, err := networkRoute(network.AssignedCidr)
+	if err != nil {
+		return fmt.Errorf("server route: %w", err)
+	}
+
 	wgPeers := make([]wireguard.WGPeer, 0, len(peers)+1)
 
 	serverPeer := wireguard.WGPeer{
 		PublicKey:      network.ServerPubkey,
-		AllowedIPs:     []string{network.AssignedCidr},
+		AllowedIPs:     []string{serverRoute},
 		Endpoint:       network.ServerEndpoint,
 		EndpointPolicy: wireguard.EndpointFixed,
 	}
@@ -820,4 +832,17 @@ func (s *Service) reconcilePeers(
 	}
 
 	return device.ApplyPeers(wgPeers)
+}
+
+func networkRoute(
+	cidr string,
+) (
+	string,
+	error,
+) {
+	_, network, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return "", fmt.Errorf("parse %q: %w", cidr, err)
+	}
+	return network.String(), nil
 }

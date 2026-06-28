@@ -185,8 +185,16 @@ func terminalPrefix(ip net.IP) int {
 	return 128
 }
 
-// cidrAddress returns a CIDR notation string for the first assignable IP in a network.
-func cidrAddress(n *net.IPNet) string {
+// interfaceAddress returns a CIDR notation string for the first
+// assignable IP in a network, preserving the network prefix length.
+func interfaceAddress(n *net.IPNet) string {
 	ip := firstAssignableIP(n)
+	prefix, _ := n.Mask.Size()
+	return fmt.Sprintf("%s/%d", ip.String(), prefix)
+}
+
+// hostRoute returns a terminal route for a peer IP.
+func hostRoute(ip net.IP) string {
+	ip = normalizeIP(ip)
 	return fmt.Sprintf("%s/%d", ip.String(), terminalPrefix(ip))
 }

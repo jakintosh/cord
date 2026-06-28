@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -338,5 +339,30 @@ func TestDeleteNetwork_CascadesResources(t *testing.T) {
 	}
 	if len(peers) != 0 {
 		t.Errorf("expected 0 peers after cascade, got %d", len(peers))
+	}
+}
+
+func TestStartNetwork_UsesNetworkPrefixInterfaceAddresses(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
+		t.Fatalf("start network: %v", err)
+	}
+
+	main := env.WireGuard.Devices["testnet"]
+	if main == nil {
+		t.Fatal("expected main device")
+	}
+	if main.Address != "10.0.0.1/16" {
+		t.Fatalf("main address = %q, want 10.0.0.1/16", main.Address)
+	}
+
+	invite := env.WireGuard.Devices["testnet-i"]
+	if invite == nil {
+		t.Fatal("expected invite device")
+	}
+	if invite.Address != "10.1.0.1/24" {
+		t.Fatalf("invite address = %q, want 10.1.0.1/24", invite.Address)
 	}
 }

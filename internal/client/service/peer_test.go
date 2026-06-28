@@ -35,8 +35,8 @@ func TestBuildPeers_IncludesServer(t *testing.T) {
 	if len(serverPeer.AllowedIPs) != 1 {
 		t.Fatalf("expected 1 allowed ip, got %d", len(serverPeer.AllowedIPs))
 	}
-	if serverPeer.AllowedIPs[0] != "10.42.0.5/16" {
-		t.Errorf("allowed_ips[0] = %q, want 10.42.0.5/16", serverPeer.AllowedIPs[0])
+	if serverPeer.AllowedIPs[0] != "10.42.0.0/16" {
+		t.Errorf("allowed_ips[0] = %q, want 10.42.0.0/16", serverPeer.AllowedIPs[0])
 	}
 	if serverPeer.Endpoint != "1.2.3.4:51820" {
 		t.Errorf("endpoint = %q, want 1.2.3.4:51820", serverPeer.Endpoint)

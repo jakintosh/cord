@@ -254,13 +254,13 @@ func (s *Service) StartNetwork(
 	if err != nil {
 		return fmt.Errorf("start network: parse main cidr: %w", err)
 	}
-	serverAddress := cidrAddress(mainNet)
+	serverAddress := interfaceAddress(mainNet)
 
 	_, inviteNet, err := net.ParseCIDR(network.InviteCidr)
 	if err != nil {
 		return fmt.Errorf("start network: parse invite cidr: %w", err)
 	}
-	inviteAddress := cidrAddress(inviteNet)
+	inviteAddress := interfaceAddress(inviteNet)
 
 	// Cleanup stack: each successful creation pushes a teardown
 	// function. If anything fails during setup, we unwind the
@@ -323,7 +323,7 @@ func (s *Service) StartNetwork(
 		return fmt.Errorf("start network: invite up: %w", err)
 	}
 
-	invitePeers := s.buildInvitePeers(inviteNet, invites)
+	invitePeers := s.buildInvitePeers(invites)
 	if err := invite.ApplyPeers(invitePeers); err != nil {
 		undo()
 		return fmt.Errorf("start network: apply invite peers: %w", err)
@@ -472,12 +472,6 @@ func (s *Service) reconcileOnce(
 		return
 	}
 
-	network, err := s.store.GetNetwork(name)
-	if err != nil {
-		s.logf("reconcile %s: get network: %v", name, err)
-		return
-	}
-
 	peers, err := s.store.ListPeers(name)
 	if err != nil {
 		s.logf("reconcile %s: list peers: %v", name, err)
@@ -489,19 +483,13 @@ func (s *Service) reconcileOnce(
 		s.logf("reconcile %s: apply main peers: %v", name, err)
 	}
 
-	_, inviteNet, err := net.ParseCIDR(network.InviteCidr)
-	if err != nil {
-		s.logf("reconcile %s: parse invite cidr: %v", name, err)
-		return
-	}
-
 	invites, err := s.store.ListActiveInvites(name, s.clock())
 	if err != nil {
 		s.logf("reconcile %s: list invites: %v", name, err)
 		return
 	}
 
-	invitePeers := s.buildInvitePeers(inviteNet, invites)
+	invitePeers := s.buildInvitePeers(invites)
 	if err := devices.Invite.ApplyPeers(invitePeers); err != nil {
 		s.logf("reconcile %s: apply invite peers: %v", name, err)
 	}
@@ -529,17 +517,13 @@ func (s *Service) buildMainPeers(
 // buildInvitePeers converts active invites into WireGuard peer
 // configuration for the invite device.
 func (s *Service) buildInvitePeers(
-	inviteNet *net.IPNet,
 	invites []*Invite,
 ) []wireguard.WGPeer {
-	prefix, _ := inviteNet.Mask.Size()
-
 	var wgpeers []wireguard.WGPeer
 	for _, invite := range invites {
-		cidr := fmt.Sprintf("%s/%d", invite.TempIP.String(), prefix)
 		wgpeers = append(wgpeers, wireguard.WGPeer{
 			PublicKey:      invite.TempPubKey,
-			AllowedIPs:     []string{cidr},
+			AllowedIPs:     []string{hostRoute(invite.TempIP)},
 			EndpointPolicy: wireguard.EndpointDynamic,
 		})
 	}
