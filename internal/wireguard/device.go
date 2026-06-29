@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+
+	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 )
 
 const defaultMTU = 1420
@@ -402,11 +404,11 @@ func buildDesiredPeers(
 
 		var allowedIPs []net.IPNet
 		for _, cidr := range p.AllowedIPs {
-			_, ipNet, err := net.ParseCIDR(cidr)
+			ipNet, err := netaddr.ParseInterface(cidr)
 			if err != nil {
 				return nil, fmt.Errorf("allowed-ip %q: %w", cidr, err)
 			}
-			allowedIPs = append(allowedIPs, *ipNet)
+			allowedIPs = append(allowedIPs, ipNet)
 		}
 
 		var endpoint *net.UDPAddr

@@ -3,6 +3,8 @@ package service
 import (
 	"fmt"
 	"net"
+
+	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 )
 
 // Cidr is a named CIDR range within a server network. CIDRs partition
@@ -28,13 +30,13 @@ type UpdateCidrRequest struct {
 
 // GetCidr returns a CIDR by name within the given network.
 func (s *Service) GetCidr(
-	network string,
+	networkName string,
 	name string,
 ) (
 	*Cidr,
 	error,
 ) {
-	c, err := s.store.GetCidr(network, name)
+	c, err := s.store.GetCidr(networkName, name)
 	if err != nil {
 		return nil, fmt.Errorf("get cidr %q: %w", name, mapStoreError(err))
 	}
@@ -43,12 +45,12 @@ func (s *Service) GetCidr(
 
 // ListCidrs returns all CIDRs in the given network.
 func (s *Service) ListCidrs(
-	network string,
+	networkName string,
 ) (
 	[]*Cidr,
 	error,
 ) {
-	cidrs, err := s.store.ListCidrs(network)
+	cidrs, err := s.store.ListCidrs(networkName)
 	if err != nil {
 		return nil, fmt.Errorf("list cidrs: %w", err)
 	}
@@ -59,10 +61,10 @@ func (s *Service) ListCidrs(
 // as a valid net.IPNet and must be contained within the root CIDR.
 // Returns ErrCIDROverlap if the range conflicts with an existing CIDR.
 func (s *Service) AddCidr(
-	network string,
+	networkName string,
 	req CreateCidrRequest,
 ) error {
-	if network == "" {
+	if networkName == "" {
 		return fmt.Errorf("%w: network name required", ErrInvalidInput)
 	}
 
@@ -75,16 +77,20 @@ func (s *Service) AddCidr(
 		return fmt.Errorf("%w: invalid CIDR %q: %v", ErrInvalidInput, req.Cidr, err)
 	}
 
-	nw, err := s.store.GetNetwork(network)
+	network, err := s.store.GetNetwork(networkName)
 	if err != nil {
 		return fmt.Errorf("get network for cidr check: %w", mapStoreError(err))
 	}
 
-	_, rootNet, _ := net.ParseCIDR(nw.MainCidr)
-	if !cidrContains(rootNet, cidrNet) {
+	_, rootNet, err := net.ParseCIDR(network.MainCidr)
+	if err != nil {
+		return fmt.Errorf("%w: parse main CIDR %q: %v", ErrInvalidInput, network.MainCidr, err)
+	}
+
+	if !netaddr.Contains(rootNet, cidrNet) {
 		return fmt.Errorf(
 			"%w: CIDR %q is not contained within main CIDR %q",
-			ErrInvalidInput, req.Cidr, nw.MainCidr,
+			ErrInvalidInput, req.Cidr, network.MainCidr,
 		)
 	}
 
@@ -96,7 +102,7 @@ func (s *Service) AddCidr(
 		Prefix: bits,
 	}
 
-	if err := s.store.InsertCidr(network, c); err != nil {
+	if err := s.store.InsertCidr(networkName, c); err != nil {
 		return fmt.Errorf("insert cidr: %w", mapStoreError(err))
 	}
 
@@ -108,14 +114,14 @@ func (s *Service) AddCidr(
 // root CIDR (named after the network) cannot be deleted individually;
 // it is removed automatically when the network is deleted.
 func (s *Service) RemoveCidr(
-	network string,
+	networkName string,
 	name string,
 ) error {
-	if name == network {
+	if name == networkName {
 		return fmt.Errorf("%w: cannot delete the root CIDR", ErrInvalidInput)
 	}
 
-	if err := s.store.DeleteCidr(network, name); err != nil {
+	if err := s.store.DeleteCidr(networkName, name); err != nil {
 		return fmt.Errorf("delete cidr %q: %w", name, mapStoreError(err))
 	}
 	return nil
@@ -123,7 +129,7 @@ func (s *Service) RemoveCidr(
 
 // UpdateCidr renames a CIDR and returns the updated record.
 func (s *Service) UpdateCidr(
-	network string,
+	networkName string,
 	name string,
 	req UpdateCidrRequest,
 ) error {
@@ -131,24 +137,9 @@ func (s *Service) UpdateCidr(
 		return fmt.Errorf("%w: CIDR name required", ErrInvalidInput)
 	}
 
-	_, err := s.store.UpdateCidr(network, name, req)
+	_, err := s.store.UpdateCidr(networkName, name, req)
 	if err != nil {
 		return fmt.Errorf("update cidr %q: %w", name, mapStoreError(err))
 	}
 	return nil
-}
-
-// cidrContains reports whether outer fully contains inner.
-func cidrContains(outer, inner *net.IPNet) bool {
-	return outer.Contains(inner.IP) && outer.Contains(lastIP(inner))
-}
-
-// lastIP returns the last IP in the network range.
-func lastIP(n *net.IPNet) net.IP {
-	ip := make(net.IP, len(n.IP))
-	copy(ip, n.IP)
-	for i := range ip {
-		ip[i] |= ^n.Mask[i]
-	}
-	return ip
 }

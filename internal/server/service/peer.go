@@ -204,7 +204,10 @@ func (s *Service) AddPeer(
 		if parsedIP == nil {
 			return nil, fmt.Errorf("%w: invalid IP %q", ErrInvalidInput, cfg.IP)
 		}
-		_, rootNet, _ := net.ParseCIDR(nw.MainCidr)
+		_, rootNet, err := net.ParseCIDR(nw.MainCidr)
+		if err != nil {
+			return nil, fmt.Errorf("%w: parse main CIDR %q: %v", ErrInvalidInput, nw.MainCidr, err)
+		}
 		if !rootNet.Contains(parsedIP) {
 			return nil, fmt.Errorf(
 				"%w: IP %q is not within main CIDR %q",

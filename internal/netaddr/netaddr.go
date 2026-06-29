@@ -8,11 +8,16 @@
 // its mask stay byte-length consistent.
 package netaddr
 
-import "net"
+import (
+	"net"
+	"strconv"
+)
 
 // Normalize returns the canonical representation of ip: a 4-byte slice
 // for IPv4 (including IPv4-in-IPv6), or the original slice for IPv6.
-func Normalize(ip net.IP) net.IP {
+func Normalize(
+	ip net.IP,
+) net.IP {
 	if v4 := ip.To4(); v4 != nil {
 		return v4
 	}
@@ -20,7 +25,9 @@ func Normalize(ip net.IP) net.IP {
 }
 
 // Increment returns ip + 1, carrying across all octets.
-func Increment(ip net.IP) net.IP {
+func Increment(
+	ip net.IP,
+) net.IP {
 	ip = Normalize(ip)
 	next := make(net.IP, len(ip))
 	copy(next, ip)
@@ -36,15 +43,24 @@ func Increment(ip net.IP) net.IP {
 // FirstAssignable returns the first usable host address in n: the
 // network address plus one, which is typically the gateway/server
 // address.
-func FirstAssignable(n *net.IPNet) net.IP {
-	ip := make(net.IP, len(n.IP))
-	copy(ip, n.IP)
-	ip[len(ip)-1]++
-	return Normalize(ip)
+func FirstAssignable(
+	n *net.IPNet,
+) net.IP {
+	ip := n.IP.Mask(n.Mask)
+	ip = Normalize(ip)
+	next := make(net.IP, len(ip))
+	copy(next, ip)
+	next[len(next)-1]++
+	return next
 }
 
 // Range returns the network (first) and broadcast (last) addresses of n.
-func Range(n *net.IPNet) (first, last net.IP) {
+func Range(
+	n *net.IPNet,
+) (
+	first net.IP,
+	last net.IP,
+) {
 	f := n.IP.Mask(n.Mask)
 	l := make(net.IP, len(f))
 	copy(l, f)
@@ -56,7 +72,9 @@ func Range(n *net.IPNet) (first, last net.IP) {
 
 // TerminalPrefix returns the single-host route prefix length for ip:
 // 32 for IPv4, 128 for IPv6.
-func TerminalPrefix(ip net.IP) int {
+func TerminalPrefix(
+	ip net.IP,
+) int {
 	if ip.To4() != nil {
 		return 32
 	}
@@ -67,7 +85,9 @@ func TerminalPrefix(ip net.IP) int {
 // n: the first assignable host IP carrying n's prefix length (e.g.
 // 10.0.0.1/16). This is deliberately not a masked network address — the
 // host bits identify the device itself.
-func InterfaceAddress(n *net.IPNet) net.IPNet {
+func InterfaceAddress(
+	n *net.IPNet,
+) net.IPNet {
 	mask := make(net.IPMask, len(n.Mask))
 	copy(mask, n.Mask)
 	return net.IPNet{
@@ -78,7 +98,9 @@ func InterfaceAddress(n *net.IPNet) net.IPNet {
 
 // HostRoute returns a single-host route for ip (e.g. 10.0.0.5/32 or
 // fd00::1/128).
-func HostRoute(ip net.IP) net.IPNet {
+func HostRoute(
+	ip net.IP,
+) net.IPNet {
 	ip = Normalize(ip)
 	return net.IPNet{
 		IP:   ip,
@@ -91,11 +113,59 @@ func HostRoute(ip net.IP) net.IPNet {
 // whose returned *net.IPNet is masked to the network address — the
 // result retains the host portion, so it is suitable for assigning to a
 // device. Returns an error if s is not valid CIDR.
-func ParseInterface(s string) (net.IPNet, error) {
+func ParseInterface(
+	s string,
+) (
+	net.IPNet,
+	error,
+) {
 	ip, ipNet, err := net.ParseCIDR(s)
 	if err != nil {
 		return net.IPNet{}, err
 	}
 	ipNet.IP = Normalize(ip)
 	return *ipNet, nil
+}
+
+// Endpoint joins ip and port into a "host:port" string suitable for
+// use as a WireGuard or HTTP endpoint. IPv6 addresses are bracketed
+// automatically (e.g. [::1]:8080).
+func Endpoint(
+	ip net.IP,
+	port uint16,
+) string {
+	ip = Normalize(ip)
+	return net.JoinHostPort(ip.String(), strconv.FormatUint(uint64(port), 10))
+}
+
+// Overlaps reports whether a and b share any IP address.
+func Overlaps(
+	a *net.IPNet,
+	b *net.IPNet,
+) bool {
+	return a.Contains(b.IP) || b.Contains(a.IP)
+}
+
+// Contains reports whether outer fully contains every address in inner.
+func Contains(
+	outer *net.IPNet,
+	inner *net.IPNet,
+) bool {
+	_, innerLast := Range(inner)
+	return outer.Contains(inner.IP) && outer.Contains(innerLast)
+}
+
+// HostRouteFromCidr parses s as a CIDR and returns a single-host route
+// for the IP it contains (e.g. "10.42.0.5/16" returns 10.42.0.5/32).
+func HostRouteFromCidr(
+	s string,
+) (
+	net.IPNet,
+	error,
+) {
+	ip, _, err := net.ParseCIDR(s)
+	if err != nil {
+		return net.IPNet{}, err
+	}
+	return HostRoute(ip), nil
 }

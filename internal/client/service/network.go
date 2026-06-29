@@ -968,9 +968,13 @@ func (s *Service) reconcilePeers(
 	wgPeers = append(wgPeers, serverPeer)
 
 	for _, peer := range peers {
+		peerRoute, err := netaddr.HostRouteFromCidr(peer.Cidr)
+		if err != nil {
+			return fmt.Errorf("parse peer cidr %q: %w", peer.Cidr, err)
+		}
 		wgPeers = append(wgPeers, wireguard.WGPeer{
 			PublicKey:      peer.PublicKey,
-			AllowedIPs:     []string{peer.Cidr},
+			AllowedIPs:     []string{peerRoute.String()},
 			Endpoint:       peer.Endpoint,
 			EndpointPolicy: wireguard.EndpointBootstrap,
 		})

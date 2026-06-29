@@ -120,7 +120,7 @@ func (s *Service) CreateNetwork(
 		cfg.ApiPort = cfg.ListenPort + 2
 	}
 
-	if mainNet.Contains(inviteNet.IP) || inviteNet.Contains(mainNet.IP) {
+	if netaddr.Overlaps(mainNet, inviteNet) {
 		return nil, fmt.Errorf(
 			"%w: invite CIDR %q overlaps main CIDR %q",
 			ErrCIDROverlap, cfg.InviteCidr, cfg.MainCidr,
@@ -345,7 +345,7 @@ func (s *Service) StartNetwork(
 
 		// serve main network api
 		mainIP := netaddr.FirstAssignable(mainNet)
-		mainAddr := fmt.Sprintf("%s:%d", mainIP.String(), network.ApiPort)
+		mainAddr := netaddr.Endpoint(mainIP, network.ApiPort)
 		mainServer := &http.Server{
 			Addr:    mainAddr,
 			Handler: handlers.Main,
@@ -358,7 +358,7 @@ func (s *Service) StartNetwork(
 
 		// serve invite network api
 		inviteIP := netaddr.FirstAssignable(inviteNet)
-		inviteAddr := fmt.Sprintf("%s:%d", inviteIP.String(), network.ApiPort)
+		inviteAddr := netaddr.Endpoint(inviteIP, network.ApiPort)
 		inviteServer := &http.Server{
 			Addr:    inviteAddr,
 			Handler: handlers.Invite,
@@ -521,9 +521,13 @@ func (s *Service) buildMainPeers(
 		if !peer.Enabled {
 			continue
 		}
+		peerCidr, err := netaddr.HostRouteFromCidr(peer.Cidr)
+		if err != nil {
+			return nil, fmt.Errorf("parse peer CIDR %q: %w", peer.Cidr, err)
+		}
 		wgpeers = append(wgpeers, wireguard.WGPeer{
 			PublicKey:      peer.PublicKey,
-			AllowedIPs:     []string{peer.Cidr},
+			AllowedIPs:     []string{peerCidr.String()},
 			EndpointPolicy: wireguard.EndpointDynamic,
 		})
 	}
