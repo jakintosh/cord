@@ -146,8 +146,8 @@ func TestAPIInstallNetwork_Success(
 	if nw.Name != "mynet" {
 		t.Fatalf("name = %q, want mynet", nw.Name)
 	}
-	if nw.ServerPubkey != "srv-pub" {
-		t.Fatalf("server_pubkey = %q, want srv-pub", nw.ServerPubkey)
+	if nw.ServerPubkey != "server-pub-key" {
+		t.Fatalf("server_pubkey = %q, want server-pub-key (from redeem result)", nw.ServerPubkey)
 	}
 	if nw.ServerEndpoint != "1.2.3.4:51820" {
 		t.Fatalf("server_endpoint = %q, want 1.2.3.4:51820", nw.ServerEndpoint)

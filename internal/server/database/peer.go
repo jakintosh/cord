@@ -21,7 +21,6 @@ func (db *DB) GetPeer(
 			name,
 			public_key,
 			ip,
-			prefix,
 			admin,
 			enabled,
 			confirmed
@@ -52,7 +51,6 @@ func (db *DB) GetPeerByIP(
 			name,
 			public_key,
 			ip,
-			prefix,
 			admin,
 			enabled,
 			confirmed
@@ -60,6 +58,38 @@ func (db *DB) GetPeerByIP(
 		WHERE network_name = ?1
 			AND ip = ?2
 			AND confirmed = 1
+			AND enabled = 1`,
+		network,
+		ip,
+	)
+
+	peer, err := scanPeer(row)
+	if err != nil {
+		return nil, err
+	}
+	return peer, nil
+}
+
+func (db *DB) GetProvisionalPeerByIP(
+	network string,
+	ip net.IP,
+) (
+	*service.Peer,
+	error,
+) {
+	ip = netaddr.Normalize(ip)
+	row := db.Conn.QueryRow(`
+		SELECT
+			name,
+			public_key,
+			ip,
+			admin,
+			enabled,
+			confirmed
+		FROM peer
+		WHERE network_name = ?1
+			AND ip = ?2
+			AND confirmed = 0
 			AND enabled = 1`,
 		network,
 		ip,
@@ -84,7 +114,6 @@ func (db *DB) GetPeerByKey(
 			name,
 			public_key,
 			ip,
-			prefix,
 			admin,
 			enabled,
 			confirmed
@@ -113,7 +142,6 @@ func (db *DB) ListPeers(
 			name,
 			public_key,
 			ip,
-			prefix,
 			admin,
 			enabled,
 			confirmed
@@ -168,23 +196,22 @@ func (db *DB) InsertPeer(
 			name,
 			public_key,
 			ip,
-			prefix,
 			admin,
 			enabled,
 			confirmed
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
 		network,
 		peer.Name,
 		peer.PublicKey,
 		ip,
-		ones,
 		boolToInt(peer.Admin),
 		boolToInt(peer.Enabled),
 		boolToInt(peer.Confirmed),
 	)
 	return CheckSqliteErr("insert peer", err)
 }
+
 func (db *DB) UpdatePeer(
 	network string,
 	name string,
@@ -218,7 +245,6 @@ func (db *DB) UpdatePeer(
 			name,
 			public_key,
 			ip,
-			prefix,
 			admin,
 			enabled,
 			confirmed`,
@@ -246,22 +272,6 @@ func (db *DB) DeletePeer(
 		return fmt.Errorf("begin delete peer tx: %w", err)
 	}
 	defer tx.Rollback()
-
-	if _, err := tx.Exec(`
-		DELETE FROM endpoint
-		WHERE peer IN (
-			SELECT id FROM peer
-			WHERE network_name = ?1 AND name = ?2
-		)
-		OR witness IN (
-			SELECT id FROM peer
-			WHERE network_name = ?1 AND name = ?2
-		)`,
-		network,
-		name,
-	); err != nil {
-		return CheckSqliteErr("delete peer endpoints", err)
-	}
 
 	if _, err := tx.Exec(`
 		DELETE FROM invite
@@ -333,7 +343,6 @@ func scanPeer(
 	var name string
 	var publicKey string
 	var ip []byte
-	var prefix int
 	var admin int64
 	var enabled int64
 	var confirmed int64
@@ -342,7 +351,6 @@ func scanPeer(
 		&name,
 		&publicKey,
 		&ip,
-		&prefix,
 		&admin,
 		&enabled,
 		&confirmed,

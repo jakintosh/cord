@@ -106,7 +106,6 @@ func (db *DB) BootstrapNetwork(
 		return fmt.Errorf("parse server peer cidr: %w", err)
 	}
 	peerIP := netaddr.Normalize(peerIPNet.IP)
-	peerOnes, _ := peerIPNet.Mask.Size()
 
 	tx, err := db.Conn.Begin()
 	if err != nil {
@@ -170,17 +169,15 @@ func (db *DB) BootstrapNetwork(
 			name,
 			public_key,
 			ip,
-			prefix,
 			admin,
 			enabled,
 			confirmed
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
 		network.Name,
 		serverPeer.Name,
 		serverPeer.PublicKey,
 		peerIP,
-		peerOnes,
 		boolToInt(serverPeer.Admin),
 		boolToInt(serverPeer.Enabled),
 		boolToInt(serverPeer.Confirmed),

@@ -218,7 +218,6 @@ func (db *DB) RedeemInvite(
 			network_name,
 			name,
 			ip,
-			prefix,
 			public_key,
 			admin,
 			enabled,
@@ -228,10 +227,6 @@ func (db *DB) RedeemInvite(
 			i.network_name,
 			i.name,
 			i.final_ip,
-			CASE
-				WHEN LENGTH(i.final_ip) = 4 THEN 32
-				ELSE 128
-			END,
 			?3,
 			i.admin,
 			1,
@@ -340,6 +335,58 @@ func (db *DB) DeleteExpiredInvites(
 		before.Unix(),
 	)
 	return CheckSqliteErr("delete expired invites", err)
+}
+
+// PruneExpiredInvites removes expired unconfirmed invites and any
+// provisional peer rows that no longer have a live invite. A peer is
+// provisional when confirmed = 0; it is kept only while its invite is
+// unconfirmed and unexpired. Confirmed peers are never pruned here —
+// their invites are retained as audit state.
+//
+// Endpoint rows referencing pruned peers are removed via the ON DELETE
+// CASCADE foreign keys on the endpoint table.
+func (db *DB) PruneExpiredInvites(
+	network string,
+	now time.Time,
+) error {
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		return fmt.Errorf("begin prune tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
+		DELETE FROM invite
+		WHERE network_name = ?1
+			AND confirmed = 0
+			AND expires_at_unix <= ?2`,
+		network,
+		now.Unix(),
+	); err != nil {
+		return CheckSqliteErr("prune expired invites", err)
+	}
+
+	if _, err := tx.Exec(`
+		DELETE FROM peer
+		WHERE network_name = ?1
+			AND confirmed = 0
+			AND NOT EXISTS (
+				SELECT 1 FROM invite
+				WHERE invite.network_name = peer.network_name
+					AND invite.name = peer.name
+					AND invite.confirmed = 0
+					AND invite.expires_at_unix > ?2
+			)`,
+		network,
+		now.Unix(),
+	); err != nil {
+		return CheckSqliteErr("prune provisional peers", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit prune tx: %w", err)
+	}
+	return nil
 }
 
 func scanInvite(

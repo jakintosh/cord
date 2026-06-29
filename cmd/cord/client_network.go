@@ -19,6 +19,8 @@ var clientNetworkCmd = &args.Command{
 		clientNetworkList,
 		clientNetworkShow,
 		clientNetworkInstall,
+		clientNetworkRedeem,
+		clientNetworkConfirm,
 		clientNetworkUninstall,
 		clientNetworkEnable,
 		clientNetworkDisable,
@@ -93,6 +95,52 @@ var clientNetworkInstall = &args.Command{
 
 		client := api.NewClient(socketPath)
 		result, err := client.InstallNetwork(context.Background(), req)
+		if err != nil {
+			return err
+		}
+
+		return printJSON(result)
+	},
+}
+
+var clientNetworkRedeem = &args.Command{
+	Name: "redeem",
+	Help: "redeem an installed network's invite",
+	Operands: []args.Operand{
+		{
+			Name: "network",
+			Help: "network name",
+		},
+	},
+	Handler: func(i *args.Input) error {
+		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
+		network := i.GetOperand("network")
+
+		client := api.NewClient(socketPath)
+		result, err := client.RedeemNetwork(context.Background(), network)
+		if err != nil {
+			return err
+		}
+
+		return printJSON(result)
+	},
+}
+
+var clientNetworkConfirm = &args.Command{
+	Name: "confirm",
+	Help: "confirm a redeemed network's membership",
+	Operands: []args.Operand{
+		{
+			Name: "network",
+			Help: "network name",
+		},
+	},
+	Handler: func(i *args.Input) error {
+		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
+		network := i.GetOperand("network")
+
+		client := api.NewClient(socketPath)
+		result, err := client.ConfirmNetwork(context.Background(), network)
 		if err != nil {
 			return err
 		}
@@ -212,11 +260,11 @@ func parseInviteFile(
 	}
 
 	return api.InstallNetworkRequest{
-		NetworkName:    payload.Interface.NetworkName,
-		TempPrivKey:    payload.Interface.PrivateKey,
-		TempCidr:       payload.Interface.AssignedCidr,
-		ServerPubkey:   payload.Server.PublicKey,
-		ServerEndpoint: payload.Server.ExternalEndpoint,
-		TempApiAddr:    payload.Server.InternalEndpoint,
+		NetworkName:          payload.Interface.NetworkName,
+		TempPeerPrivKey:      payload.Interface.PrivateKey,
+		TempPeerAssignedCidr: payload.Interface.AssignedCidr,
+		InviteServerPubkey:   payload.Server.PublicKey,
+		InviteServerEndpoint: payload.Server.ExternalEndpoint,
+		InviteServerAddr:     payload.Server.InternalEndpoint,
 	}, nil
 }

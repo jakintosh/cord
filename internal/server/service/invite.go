@@ -112,13 +112,13 @@ func (s *Service) ResolveInviteIdentity(network string, ip net.IP) (*Invite, err
 // persists the invite record, and returns the PeerInvite payload to
 // deliver to the invitee out-of-band.
 func (s *Service) CreateInvite(
-	network string,
+	networkName string,
 	req CreateInviteRequest,
 ) (
 	*PeerInvite,
 	error,
 ) {
-	nw, err := s.store.GetNetwork(network)
+	network, err := s.store.GetNetwork(networkName)
 	if err != nil {
 		return nil, fmt.Errorf("get network: %w", mapStoreError(err))
 	}
@@ -131,7 +131,7 @@ func (s *Service) CreateInvite(
 	if req.IP != nil {
 		finalIP = netaddr.Normalize(req.IP)
 	} else {
-		freeIP, err := s.nextFreePeerIP(network, nw.MainCidr)
+		freeIP, err := s.nextFreePeerIP(networkName, network.MainCidr)
 		if err != nil {
 			return nil, fmt.Errorf("auto-assign permanent IP: %w", err)
 		}
@@ -148,7 +148,7 @@ func (s *Service) CreateInvite(
 		return nil, fmt.Errorf("derive temp public key: %w", err)
 	}
 
-	tempIP, err := s.nextFreeInviteIP(network, nw.InviteCidr)
+	tempIP, err := s.nextFreeInviteIP(networkName, network.InviteCidr)
 	if err != nil {
 		return nil, fmt.Errorf("allocate invite IP: %w", err)
 	}
@@ -168,24 +168,24 @@ func (s *Service) CreateInvite(
 		CreatedAt:  now,
 	}
 
-	if err := s.store.InsertInvite(network, invite); err != nil {
+	if err := s.store.InsertInvite(networkName, invite); err != nil {
 		return nil, fmt.Errorf("insert invite: %w", mapStoreError(err))
 	}
-	s.reconcileOnce(network)
+	s.reconcileOnce(networkName)
 
-	_, inviteNet, _ := net.ParseCIDR(nw.InviteCidr)
+	_, inviteNet, _ := net.ParseCIDR(network.InviteCidr)
 	prefix, _ := inviteNet.Mask.Size()
 
 	payload := &PeerInvite{
 		Interface: InviteInterface{
-			NetworkName:  nw.Name,
+			NetworkName:  network.Name,
 			PrivateKey:   tempPrivKey,
 			AssignedCidr: fmt.Sprintf("%s/%d", tempIP.String(), prefix),
 		},
 		Server: ServerInfo{
-			PublicKey:        nw.PublicKey,
-			ExternalEndpoint: fmt.Sprintf("%s:%d", nw.ExternalIP, nw.InviteListenPort),
-			InternalEndpoint: fmt.Sprintf("%s:%d", netaddr.FirstAssignable(inviteNet).String(), nw.ApiPort),
+			PublicKey:        network.PublicKey,
+			ExternalEndpoint: fmt.Sprintf("%s:%d", network.ExternalIP, network.InviteListenPort),
+			InternalEndpoint: fmt.Sprintf("%s:%d", netaddr.FirstAssignable(inviteNet).String(), network.ApiPort),
 		},
 	}
 
@@ -196,35 +196,35 @@ func (s *Service) CreateInvite(
 // registration. Idempotent: redeeming an already-redeemed invite with
 // the same permanent key returns the same result.
 func (s *Service) RedeemInvite(
-	network string,
+	networkName string,
 	tempPubKey string,
 	permPubKey string,
 ) (
 	*RedeemResult,
 	error,
 ) {
-	nw, err := s.store.GetNetwork(network)
+	network, err := s.store.GetNetwork(networkName)
 	if err != nil {
 		return nil, fmt.Errorf("get network: %w", mapStoreError(err))
 	}
 
-	err = s.store.RedeemInvite(network, tempPubKey, permPubKey, s.clock())
+	err = s.store.RedeemInvite(networkName, tempPubKey, permPubKey, s.clock())
 	if err != nil {
-		peer, lookupErr := s.store.GetPeerByKey(network, permPubKey)
+		peer, lookupErr := s.store.GetPeerByKey(networkName, permPubKey)
 		if lookupErr == nil && !peer.Confirmed {
-			s.reconcileOnce(network)
-			return s.buildRedeemResult(nw, peer)
+			s.reconcileOnce(networkName)
+			return s.buildRedeemResult(network, peer)
 		}
 		return nil, fmt.Errorf("redeem invite: %w", mapStoreError(err))
 	}
-	s.reconcileOnce(network)
+	s.reconcileOnce(networkName)
 
-	peer, err := s.store.GetPeerByKey(network, permPubKey)
+	peer, err := s.store.GetPeerByKey(networkName, permPubKey)
 	if err != nil {
 		return nil, fmt.Errorf("get redeemed peer: %w", mapStoreError(err))
 	}
 
-	return s.buildRedeemResult(nw, peer)
+	return s.buildRedeemResult(network, peer)
 }
 
 // ListInvites returns all invites for the given network (active,
@@ -267,13 +267,13 @@ func (s *Service) buildRedeemResult(
 	error,
 ) {
 	_, rootNet, _ := net.ParseCIDR(nw.MainCidr)
-	prefix, _ := rootNet.Mask.Size()
+	networkPrefix, _ := rootNet.Mask.Size()
 
 	peerIP, _, _ := net.ParseCIDR(peer.Cidr)
 
 	return &RedeemResult{
 		NetworkName:  nw.Name,
-		AssignedCidr: fmt.Sprintf("%s/%d", peerIP.String(), prefix),
+		AssignedCidr: fmt.Sprintf("%s/%d", peerIP.String(), networkPrefix),
 		Server: ServerInfo{
 			PublicKey:        nw.PublicKey,
 			ExternalEndpoint: fmt.Sprintf("%s:%d", nw.ExternalIP, nw.ListenPort),

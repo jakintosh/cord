@@ -16,12 +16,20 @@ func (db *DB) GetNetwork(
 	row := db.Conn.QueryRow(`
 		SELECT
 			name,
+			state,
 			private_key,
 			public_key,
+			main_interface_name,
+			invite_interface_name,
 			assigned_cidr,
 			server_pubkey,
 			server_endpoint,
 			server_api_addr,
+			temp_priv_key,
+			temp_cidr,
+			invite_server_pubkey,
+			invite_server_endpoint,
+			temp_api_addr,
 			enabled,
 			created_at_unix
 		FROM network
@@ -32,20 +40,27 @@ func (db *DB) GetNetwork(
 	var net service.Network
 	var enabledInt int64
 	var createdUnix int64
-	if err := row.Scan(
+	if err := Scanner(row).Scan(
 		&net.Name,
+		&net.State,
 		&net.PrivateKey,
 		&net.PublicKey,
+		&net.MainInterfaceName,
+		&net.InviteInterfaceName,
 		&net.AssignedCidr,
 		&net.ServerPubkey,
 		&net.ServerEndpoint,
 		&net.ServerApiAddr,
+		&net.TempPeerPrivKey,
+		&net.TempPeerAssignedCidr,
+		&net.InviteServerPubkey,
+		&net.InviteServerEndpoint,
+		&net.InviteServerAddr,
 		&enabledInt,
 		&createdUnix,
 	); err != nil {
-		return nil, CheckSqliteErr("get network", err)
+		return nil, CheckSqliteErr("scan network", err)
 	}
-
 	net.Enabled = enabledInt != 0
 	net.CreatedAt = time.Unix(createdUnix, 0)
 	return &net, nil
@@ -87,27 +102,106 @@ func (db *DB) InsertNetwork(
 	_, err := db.Conn.Exec(`
 		INSERT INTO network (
 			name,
+			state,
 			private_key,
 			public_key,
+			main_interface_name,
+			invite_interface_name,
 			assigned_cidr,
 			server_pubkey,
 			server_endpoint,
 			server_api_addr,
+			temp_priv_key,
+			temp_cidr,
+			invite_server_pubkey,
+			invite_server_endpoint,
+			temp_api_addr,
 			enabled,
 			created_at_unix
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)`,
 		network.Name,
+		network.State,
 		network.PrivateKey,
 		network.PublicKey,
+		network.MainInterfaceName,
+		network.InviteInterfaceName,
 		network.AssignedCidr,
 		network.ServerPubkey,
 		network.ServerEndpoint,
 		network.ServerApiAddr,
+		network.TempPeerPrivKey,
+		network.TempPeerAssignedCidr,
+		network.InviteServerPubkey,
+		network.InviteServerEndpoint,
+		network.InviteServerAddr,
 		boolToInt(network.Enabled),
 		network.CreatedAt.Unix(),
 	)
 	return CheckSqliteErr("insert network", err)
+}
+
+func (db *DB) SetNetworkRedeemed(
+	name string,
+	assignedCidr string,
+	serverPubkey string,
+	serverEndpoint string,
+	serverApiAddr string,
+) error {
+	result, err := db.Conn.Exec(`
+		UPDATE network
+		SET
+			state = 'redeemed',
+			assigned_cidr = ?2,
+			server_pubkey = ?3,
+			server_endpoint = ?4,
+			server_api_addr = ?5
+		WHERE name = ?1`,
+		name,
+		assignedCidr,
+		serverPubkey,
+		serverEndpoint,
+		serverApiAddr,
+	)
+	if err != nil {
+		return CheckSqliteErr("set network redeemed", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set network redeemed: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("%w: network %q not found", service.ErrNotFound, name)
+	}
+	return nil
+}
+
+func (db *DB) SetNetworkConfirmed(
+	name string,
+) error {
+	result, err := db.Conn.Exec(`
+		UPDATE network
+		SET
+			state = 'confirmed',
+			temp_priv_key = '',
+			temp_cidr = '',
+			invite_server_pubkey = '',
+			invite_server_endpoint = '',
+			temp_api_addr = ''
+		WHERE name = ?1`,
+		name,
+	)
+	if err != nil {
+		return CheckSqliteErr("set network confirmed", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set network confirmed: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("%w: network %q not found", service.ErrNotFound, name)
+	}
+	return nil
 }
 
 func (db *DB) SetNetworkEnabled(

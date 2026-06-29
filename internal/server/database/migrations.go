@@ -53,7 +53,6 @@ CREATE TABLE peer (
     network_name    TEXT NOT NULL,
     name            TEXT NOT NULL,
     ip              BLOB NOT NULL,
-    prefix          INTEGER NOT NULL,
     public_key      TEXT NOT NULL,
     admin           INTEGER DEFAULT 0 NOT NULL,
     enabled         INTEGER DEFAULT 0 NOT NULL,
@@ -115,9 +114,11 @@ CREATE TABLE endpoint (
         REFERENCES network (name)
         ON DELETE CASCADE,
     FOREIGN KEY (peer)
-        REFERENCES peer (id),
+        REFERENCES peer (id)
+        ON DELETE CASCADE,
     FOREIGN KEY (witness)
         REFERENCES peer (id)
+        ON DELETE CASCADE
 );
 `,
 	},

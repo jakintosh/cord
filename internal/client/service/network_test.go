@@ -81,7 +81,7 @@ func TestListNetworks_WithNetworks(t *testing.T) {
 	}
 }
 
-func TestInstallNetwork_Success(t *testing.T) {
+func TestInstall_Success(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
 		wire.WriteData(w, http.StatusOK, serverapi.RedeemResultDTO{
@@ -100,15 +100,15 @@ func TestInstallNetwork_Success(t *testing.T) {
 
 	env := testutil.SetupServiceWithServer(t, mux)
 	invite := service.Invite{
-		NetworkName:    "install-me",
-		TempPrivKey:    "temp-priv-key",
-		TempCidr:       "10.43.0.2/24",
-		ServerPubkey:   "server-pub-key",
-		ServerEndpoint: "5.6.7.8:51821", // invite listener port — different from main
-		TempApiAddr:    env.Server.Listener.Addr().String(),
+		NetworkName:          "install-me",
+		TempPeerPrivKey:      "temp-priv-key",
+		TempPeerAssignedCidr: "10.43.0.2/24",
+		InviteServerPubkey:   "server-pub-key",
+		InviteServerEndpoint: "5.6.7.8:51821", // invite listener port — different from main
+		InviteServerAddr:     env.Server.Listener.Addr().String(),
 	}
 
-	nw, err := env.Service.InstallNetwork(invite)
+	nw, err := env.Service.Install(invite)
 	if err != nil {
 		t.Fatalf("install network: %v", err)
 	}
@@ -155,101 +155,101 @@ func TestInstallNetwork_Success(t *testing.T) {
 	}
 }
 
-func TestInstallNetwork_Duplicate(t *testing.T) {
+func TestInstall_Duplicate(t *testing.T) {
 	t.Skip("requires mock HTTP server for /redeem endpoint")
 }
 
-func TestInstallNetwork_MissingNetworkName(t *testing.T) {
+func TestBeginInstall_MissingNetworkName(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.InstallNetwork(service.Invite{
-		TempPrivKey:    "temp-key",
-		TempCidr:       "10.42.0.5/16",
-		ServerPubkey:   "srv",
-		ServerEndpoint: "1.2.3.4:51820",
-		TempApiAddr:    "10.42.0.1:8443",
+	_, err := env.Service.BeginInstall(service.Invite{
+		TempPeerPrivKey:      "temp-key",
+		TempPeerAssignedCidr: "10.42.0.5/16",
+		InviteServerPubkey:   "srv",
+		InviteServerEndpoint: "1.2.3.4:51820",
+		InviteServerAddr:     "10.42.0.1:8443",
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
 }
 
-func TestInstallNetwork_MissingTempPrivKey(t *testing.T) {
+func TestBeginInstall_MissingTempPrivKey(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.InstallNetwork(service.Invite{
-		NetworkName:    "noname",
-		TempCidr:       "10.42.0.5/16",
-		ServerPubkey:   "srv",
-		ServerEndpoint: "1.2.3.4:51820",
-		TempApiAddr:    "10.42.0.1:8443",
+	_, err := env.Service.BeginInstall(service.Invite{
+		NetworkName:          "noname",
+		TempPeerAssignedCidr: "10.42.0.5/16",
+		InviteServerPubkey:   "srv",
+		InviteServerEndpoint: "1.2.3.4:51820",
+		InviteServerAddr:     "10.42.0.1:8443",
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
 }
 
-func TestInstallNetwork_MissingTempCidr(t *testing.T) {
+func TestBeginInstall_MissingTempCidr(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.InstallNetwork(service.Invite{
-		NetworkName:    "noname",
-		TempPrivKey:    "temp-key",
-		ServerPubkey:   "srv",
-		ServerEndpoint: "1.2.3.4:51820",
-		TempApiAddr:    "10.42.0.1:8443",
+	_, err := env.Service.BeginInstall(service.Invite{
+		NetworkName:          "noname",
+		TempPeerPrivKey:      "temp-key",
+		InviteServerPubkey:   "srv",
+		InviteServerEndpoint: "1.2.3.4:51820",
+		InviteServerAddr:     "10.42.0.1:8443",
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
 }
 
-func TestInstallNetwork_MissingServerPubkey(t *testing.T) {
+func TestBeginInstall_MissingServerPubkey(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.InstallNetwork(service.Invite{
-		NetworkName:    "noname",
-		TempPrivKey:    "temp-key",
-		TempCidr:       "10.42.0.5/16",
-		ServerEndpoint: "1.2.3.4:51820",
-		TempApiAddr:    "10.42.0.1:8443",
+	_, err := env.Service.BeginInstall(service.Invite{
+		NetworkName:          "noname",
+		TempPeerPrivKey:      "temp-key",
+		TempPeerAssignedCidr: "10.42.0.5/16",
+		InviteServerEndpoint: "1.2.3.4:51820",
+		InviteServerAddr:     "10.42.0.1:8443",
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
 }
 
-func TestInstallNetwork_MissingServerEndpoint(t *testing.T) {
+func TestBeginInstall_MissingServerEndpoint(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.InstallNetwork(service.Invite{
-		NetworkName:  "noname",
-		TempPrivKey:  "temp-key",
-		TempCidr:     "10.42.0.5/16",
-		ServerPubkey: "srv",
-		TempApiAddr:  "10.42.0.1:8443",
+	_, err := env.Service.BeginInstall(service.Invite{
+		NetworkName:          "noname",
+		TempPeerPrivKey:      "temp-key",
+		TempPeerAssignedCidr: "10.42.0.5/16",
+		InviteServerPubkey:   "srv",
+		InviteServerAddr:     "10.42.0.1:8443",
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
 }
 
-func TestInstallNetwork_MissingTempApiAddr(t *testing.T) {
+func TestBeginInstall_MissingTempApiAddr(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.InstallNetwork(service.Invite{
-		NetworkName:    "noname",
-		TempPrivKey:    "temp-key",
-		TempCidr:       "10.42.0.5/16",
-		ServerPubkey:   "srv",
-		ServerEndpoint: "1.2.3.4:51820",
+	_, err := env.Service.BeginInstall(service.Invite{
+		NetworkName:          "noname",
+		TempPeerPrivKey:      "temp-key",
+		TempPeerAssignedCidr: "10.42.0.5/16",
+		InviteServerPubkey:   "srv",
+		InviteServerEndpoint: "1.2.3.4:51820",
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
 }
 
-func TestInstallNetwork_PersistsKeys(t *testing.T) {
+func TestInstall_PersistsKeys(t *testing.T) {
 	t.Skip("requires mock HTTP server")
 }
 

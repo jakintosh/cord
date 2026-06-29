@@ -21,6 +21,14 @@ func SetupService(
 	t *testing.T,
 ) *ServiceEnv {
 	t.Helper()
+	return SetupServiceWithClock(t, func() time.Time { return FixedTime })
+}
+
+func SetupServiceWithClock(
+	t *testing.T,
+	clock func() time.Time,
+) *ServiceEnv {
+	t.Helper()
 
 	db := SetupDB(t)
 	wg := wireguardtest.NewMockWG()
@@ -28,7 +36,7 @@ func SetupService(
 	svc, err := service.New(service.Options{
 		Store:  db,
 		WG:     wg,
-		Clock:  func() time.Time { return FixedTime },
+		Clock:  clock,
 		Logger: log.Default(),
 	})
 	if err != nil {

@@ -39,9 +39,16 @@ type Store interface {
 	// GetPeer returns a peer by name within the given network.
 	GetPeer(network, name string) (*Peer, error)
 
-	// GetPeerByIP returns the confirmed peer at the given IP
-	// address within the network. Unconfirmed peers are excluded.
+	// GetPeerByIP returns the confirmed, enabled peer at the given IP
+	// address within the network. Used for authenticating ordinary
+	// peer API calls (peers, endpoints).
 	GetPeerByIP(network string, ip net.IP) (*Peer, error)
+
+	// GetProvisionalPeerByIP returns the unconfirmed, enabled peer at
+	// the given IP address within the network. Used for authenticating
+	// the /confirm endpoint, which is called by peers that have
+	// redeemed but not yet confirmed.
+	GetProvisionalPeerByIP(network string, ip net.IP) (*Peer, error)
 
 	// GetPeerByKey returns the peer with the given public key
 	// within the network.
@@ -131,6 +138,13 @@ type Store interface {
 	// DeleteExpiredInvites removes all invites whose expiration
 	// time is before the given timestamp.
 	DeleteExpiredInvites(network string, before time.Time) error
+
+	// PruneExpiredInvites removes expired unconfirmed invites and
+	// any provisional peer rows whose invite is gone or expired.
+	// Confirmed peers are retained; their invites are retained as
+	// audit state. Called from buildMainPeers and buildInvitePeers
+	// so that both WireGuard peer sets are derived from clean state.
+	PruneExpiredInvites(network string, now time.Time) error
 
 	// Endpoint records within a network.
 

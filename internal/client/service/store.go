@@ -17,6 +17,15 @@ type Store interface {
 	// ErrConflict when a network with this name already exists.
 	InsertNetwork(network *Network) error
 
+	// SetNetworkRedeemed transitions a network to the redeemed
+	// state, recording the main network parameters returned by
+	// the server's /redeem endpoint.
+	SetNetworkRedeemed(name string, assignedCidr string, serverPubkey string, serverEndpoint string, serverApiAddr string) error
+
+	// SetNetworkConfirmed transitions a network to the confirmed
+	// state and clears the temporary install scratch fields.
+	SetNetworkConfirmed(name string) error
+
 	// DeleteNetwork removes the named network and all of its peer
 	// cache entries via foreign-key cascade.
 	DeleteNetwork(name string) error

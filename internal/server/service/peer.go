@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -12,7 +13,7 @@ import (
 // It includes the identity, assigned address, and management flags.
 type Peer struct {
 	Name      string
-	Cidr      string // e.g. "10.42.0.5/16" — assigned IP and network mask
+	Cidr      string // terminal host route, e.g. "10.42.0.5/32" or "fd00::5/128"
 	PublicKey string
 	Admin     bool // whether the peer has administrative privileges
 	Enabled   bool // whether the peer's WireGuard config is applied
@@ -62,9 +63,9 @@ type EndpointWitness struct {
 	Timestamp time.Time
 }
 
-// ResolvePeerIdentity looks up a confirmed peer by IP address within
-// the network. Used by the identity middleware to authenticate incoming
-// peer requests by their WireGuard source IP.
+// ResolvePeerIdentity looks up a confirmed, enabled peer by IP address
+// within the network. Used by the identity middleware to authenticate
+// ordinary peer API calls (/peers, /endpoints) by WireGuard source IP.
 func (s *Service) ResolvePeerIdentity(
 	network string,
 	ip net.IP,
@@ -72,6 +73,22 @@ func (s *Service) ResolvePeerIdentity(
 	p, err := s.store.GetPeerByIP(network, ip)
 	if err != nil {
 		return nil, fmt.Errorf("resolve peer identity: %w", mapStoreError(err))
+	}
+	return p, nil
+}
+
+// ResolveProvisionalIdentity looks up an unconfirmed, enabled peer by
+// IP address within the network. Used by the identity middleware to
+// authenticate /confirm calls from peers that have redeemed but not
+// yet confirmed. Once a peer is confirmed, it authenticates via
+// ResolvePeerIdentity instead.
+func (s *Service) ResolveProvisionalIdentity(
+	network string,
+	ip net.IP,
+) (*Peer, error) {
+	p, err := s.store.GetProvisionalPeerByIP(network, ip)
+	if err != nil {
+		return nil, fmt.Errorf("resolve provisional identity: %w", mapStoreError(err))
 	}
 	return p, nil
 }
@@ -281,23 +298,33 @@ func (s *Service) DisablePeer(
 }
 
 // ConfirmPeer marks a peer as confirmed — it has proven WireGuard
-// reachability on the main network from its assigned IP. The
-// invite is marked as confirmed, which removes the temp peer from
-// the invite device and releases the invite IPs.
+// reachability on the main network from its assigned IP. Only the
+// confirmed flag is flipped; enabled is left untouched, so an admin
+// who disabled the peer before confirm gets a peer that is
+// confirmed but not live until re-enabled.
+//
+// The corresponding invite is marked confirmed, which removes the
+// temp peer from the invite device and releases the invite IPs. If
+// the invite is already gone (revoked or already confirmed) the
+// invite update is treated as a no-op rather than an error, so
+// confirm remains idempotent.
 func (s *Service) ConfirmPeer(
 	network string,
 	name string,
 ) error {
 	confirmed := true
 	_, err := s.store.UpdatePeer(network, name, UpdatePeerRequest{
-		Enabled:   &confirmed,
 		Confirmed: &confirmed,
 	})
 	if err != nil {
 		return fmt.Errorf("confirm peer %q: %w", name, mapStoreError(err))
 	}
 
-	_ = s.store.ConfirmInvite(network, name)
+	if err := s.store.ConfirmInvite(network, name); err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("confirm invite %q: %w", name, mapStoreError(err))
+		}
+	}
 	s.reconcileOnce(network)
 
 	return nil

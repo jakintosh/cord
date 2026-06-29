@@ -247,11 +247,6 @@ func (s *Service) StartNetwork(
 		return fmt.Errorf("start network: %w", mapStoreError(err))
 	}
 
-	peers, err := s.store.ListPeers(name)
-	if err != nil {
-		return fmt.Errorf("start network: %w", err)
-	}
-
 	_, mainNet, err := net.ParseCIDR(network.MainCidr)
 	if err != nil {
 		return fmt.Errorf("start network: parse main cidr: %w", err)
@@ -293,16 +288,14 @@ func (s *Service) StartNetwork(
 		return fmt.Errorf("start network: main up: %w", err)
 	}
 
-	mainPeers := s.buildMainPeers(peers)
+	mainPeers, err := s.buildMainPeers(name)
+	if err != nil {
+		undo()
+		return fmt.Errorf("start network: build main peers: %w", err)
+	}
 	if err := main.ApplyPeers(mainPeers); err != nil {
 		undo()
 		return fmt.Errorf("start network: apply main peers: %w", err)
-	}
-
-	invites, err := s.store.ListActiveInvites(name, s.clock())
-	if err != nil {
-		undo()
-		return fmt.Errorf("start network: list invites: %w", err)
 	}
 
 	invite, err := s.wg.NewDevice(
@@ -325,7 +318,11 @@ func (s *Service) StartNetwork(
 		return fmt.Errorf("start network: invite up: %w", err)
 	}
 
-	invitePeers := s.buildInvitePeers(invites)
+	invitePeers, err := s.buildInvitePeers(name)
+	if err != nil {
+		undo()
+		return fmt.Errorf("start network: build invite peers: %w", err)
+	}
 	if err := invite.ApplyPeers(invitePeers); err != nil {
 		undo()
 		return fmt.Errorf("start network: apply invite peers: %w", err)
@@ -462,6 +459,14 @@ func (s *Service) reconcileLoop(
 	}
 }
 
+// Reconcile triggers an immediate reconciliation pass for the named
+// network, applying the current peer set to both devices. It is the
+// exported entry point for the internal reconcileLoop and for
+// on-demand reconciliation from admin actions.
+func (s *Service) Reconcile(name string) {
+	s.reconcileOnce(name)
+}
+
 // reconcileOnce performs a single reconciliation pass for a network,
 // applying the current peer set to both devices.
 func (s *Service) reconcileOnce(
@@ -474,34 +479,43 @@ func (s *Service) reconcileOnce(
 		return
 	}
 
-	peers, err := s.store.ListPeers(name)
+	mainPeers, err := s.buildMainPeers(name)
 	if err != nil {
-		s.logf("reconcile %s: list peers: %v", name, err)
+		s.logf("reconcile %s: build main peers: %v", name, err)
 		return
 	}
-
-	mainPeers := s.buildMainPeers(peers)
 	if err := devices.Main.ApplyPeers(mainPeers); err != nil {
 		s.logf("reconcile %s: apply main peers: %v", name, err)
 	}
 
-	invites, err := s.store.ListActiveInvites(name, s.clock())
+	invitePeers, err := s.buildInvitePeers(name)
 	if err != nil {
-		s.logf("reconcile %s: list invites: %v", name, err)
+		s.logf("reconcile %s: build invite peers: %v", name, err)
 		return
 	}
-
-	invitePeers := s.buildInvitePeers(invites)
 	if err := devices.Invite.ApplyPeers(invitePeers); err != nil {
 		s.logf("reconcile %s: apply invite peers: %v", name, err)
 	}
 }
 
-// buildMainPeers converts the peer list into WireGuard peer
-// configuration for the main device. Only enabled peers are included.
+// buildMainPeers prunes expired onboarding state, then converts the
+// surviving peer list into WireGuard peer configuration for the main
+// device. Only enabled peers are included.
 func (s *Service) buildMainPeers(
-	peers []*Peer,
-) []wireguard.WGPeer {
+	network string,
+) (
+	[]wireguard.WGPeer,
+	error,
+) {
+	if err := s.store.PruneExpiredInvites(network, s.clock()); err != nil {
+		return nil, fmt.Errorf("prune expired invites: %w", err)
+	}
+
+	peers, err := s.store.ListPeers(network)
+	if err != nil {
+		return nil, fmt.Errorf("list peers: %w", err)
+	}
+
 	var wgpeers []wireguard.WGPeer
 	for _, peer := range peers {
 		if !peer.Enabled {
@@ -513,14 +527,27 @@ func (s *Service) buildMainPeers(
 			EndpointPolicy: wireguard.EndpointDynamic,
 		})
 	}
-	return wgpeers
+	return wgpeers, nil
 }
 
-// buildInvitePeers converts active invites into WireGuard peer
-// configuration for the invite device.
+// buildInvitePeers prunes expired onboarding state, then converts
+// the surviving active invites into WireGuard peer configuration for
+// the invite device.
 func (s *Service) buildInvitePeers(
-	invites []*Invite,
-) []wireguard.WGPeer {
+	network string,
+) (
+	[]wireguard.WGPeer,
+	error,
+) {
+	if err := s.store.PruneExpiredInvites(network, s.clock()); err != nil {
+		return nil, fmt.Errorf("prune expired invites: %w", err)
+	}
+
+	invites, err := s.store.ListActiveInvites(network, s.clock())
+	if err != nil {
+		return nil, fmt.Errorf("list active invites: %w", err)
+	}
+
 	var wgpeers []wireguard.WGPeer
 	for _, invite := range invites {
 		route := netaddr.HostRoute(invite.TempIP)
@@ -530,5 +557,5 @@ func (s *Service) buildInvitePeers(
 			EndpointPolicy: wireguard.EndpointDynamic,
 		})
 	}
-	return wgpeers
+	return wgpeers, nil
 }

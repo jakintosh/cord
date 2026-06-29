@@ -31,12 +31,22 @@ func (a *API) SetResolver(resolver identity.Resolver) {
 	a.resolver = resolver
 }
 
-// ResolveIdentity looks up a confirmed peer by source IP within the
-// API's network. Satisfies identity.Resolver.
+// ResolveIdentity looks up a confirmed, enabled peer by source IP.
+// Satisfies identity.Resolver. Used for /peers and /endpoints.
 func (a *API) ResolveIdentity(ip net.IP) (*identity.Peer, error) {
 	p, err := a.service.ResolvePeerIdentity(a.network, ip)
 	if err != nil {
 		return nil, fmt.Errorf("resolve peer identity: %w", err)
+	}
+	return &identity.Peer{PublicKey: p.PublicKey, Name: p.Name}, nil
+}
+
+// ResolveProvisionalIdentity looks up an unconfirmed, enabled peer by
+// source IP. Satisfies identity.ProvisionalResolver. Used for /confirm.
+func (a *API) ResolveProvisionalIdentity(ip net.IP) (*identity.Peer, error) {
+	p, err := a.service.ResolveProvisionalIdentity(a.network, ip)
+	if err != nil {
+		return nil, fmt.Errorf("resolve provisional identity: %w", err)
 	}
 	return &identity.Peer{PublicKey: p.PublicKey, Name: p.Name}, nil
 }

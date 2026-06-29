@@ -72,7 +72,7 @@ func (a *API) handleConfirmPeer(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	caller, err := identity.Resolve(r, a.resolver)
+	caller, err := identity.ResolveProvisional(r, a)
 	if err != nil {
 		wire.WriteError(w, http.StatusForbidden, "identity unknown")
 		return

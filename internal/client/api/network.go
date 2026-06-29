@@ -13,28 +13,29 @@ import (
 
 type NetworkDTO struct {
 	Name      string `json:"name"`
+	State     string `json:"state"`
 	Installed bool   `json:"installed"`
 	Enabled   bool   `json:"enabled"`
 	Connected bool   `json:"connected"`
 }
 
 type InstallNetworkRequest struct {
-	NetworkName    string `json:"network_name"`
-	TempPrivKey    string `json:"temp_private_key"`
-	TempCidr       string `json:"temp_cidr"`
-	ServerPubkey   string `json:"server_pubkey"`
-	ServerEndpoint string `json:"server_endpoint"`
-	TempApiAddr    string `json:"temp_api_addr"`
+	NetworkName          string `json:"network_name"`
+	TempPeerPrivKey      string `json:"temp_private_key"`
+	TempPeerAssignedCidr string `json:"temp_cidr"`
+	InviteServerPubkey   string `json:"server_pubkey"`
+	InviteServerEndpoint string `json:"server_endpoint"`
+	InviteServerAddr     string `json:"temp_api_addr"`
 }
 
 func installRequestToInvite(req InstallNetworkRequest) service.Invite {
 	return service.Invite{
-		NetworkName:    req.NetworkName,
-		TempPrivKey:    req.TempPrivKey,
-		TempCidr:       req.TempCidr,
-		ServerPubkey:   req.ServerPubkey,
-		ServerEndpoint: req.ServerEndpoint,
-		TempApiAddr:    req.TempApiAddr,
+		NetworkName:          req.NetworkName,
+		TempPeerPrivKey:      req.TempPeerPrivKey,
+		TempPeerAssignedCidr: req.TempPeerAssignedCidr,
+		InviteServerPubkey:   req.InviteServerPubkey,
+		InviteServerEndpoint: req.InviteServerEndpoint,
+		InviteServerAddr:     req.InviteServerAddr,
 	}
 }
 
@@ -44,6 +45,7 @@ func NetworkDTOFromService(
 ) NetworkDTO {
 	return NetworkDTO{
 		Name:      nw.Name,
+		State:     nw.State,
 		Installed: true,
 		Enabled:   nw.Enabled,
 		Connected: connected,
@@ -121,7 +123,7 @@ func (a *API) handleNetworkInstall(
 	}
 	invite := installRequestToInvite(req)
 
-	network, err := a.service.InstallNetwork(invite)
+	network, err := a.service.Install(invite)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -129,6 +131,46 @@ func (a *API) handleNetworkInstall(
 
 	networkDTO := NetworkDTOFromService(*network, false)
 	wire.WriteData(w, http.StatusCreated, networkDTO)
+}
+
+func (a *API) handleNetworkRedeem(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	name := r.PathValue("name")
+
+	if _, err := a.service.Redeem(name); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	nw, err := a.service.GetNetwork(name)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*nw, false))
+}
+
+func (a *API) handleNetworkConfirm(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	name := r.PathValue("name")
+
+	if err := a.service.Confirm(name); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	nw, err := a.service.GetNetwork(name)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*nw, false))
 }
 
 func (a *API) handleNetworkUninstall(
@@ -280,6 +322,34 @@ func (c *Client) InstallNetwork(
 	error,
 ) {
 	resp, err := c.t.Post(ctx, "/networks", req)
+	if err != nil {
+		return NetworkDTO{}, err
+	}
+	return daemon.DecodeResponse[NetworkDTO](resp)
+}
+
+func (c *Client) RedeemNetwork(
+	ctx context.Context,
+	name string,
+) (
+	NetworkDTO,
+	error,
+) {
+	resp, err := c.t.Post(ctx, "/networks/"+name+"/redeem", nil)
+	if err != nil {
+		return NetworkDTO{}, err
+	}
+	return daemon.DecodeResponse[NetworkDTO](resp)
+}
+
+func (c *Client) ConfirmNetwork(
+	ctx context.Context,
+	name string,
+) (
+	NetworkDTO,
+	error,
+) {
+	resp, err := c.t.Post(ctx, "/networks/"+name+"/confirm", nil)
 	if err != nil {
 		return NetworkDTO{}, err
 	}

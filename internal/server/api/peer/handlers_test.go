@@ -89,7 +89,21 @@ func TestHandleReportEndpoints_IdentityFails(t *testing.T) {
 }
 
 func TestHandleConfirmPeer_Success(t *testing.T) {
-	_, api := setupPeerTest(t)
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if err := env.Database.InsertPeer("testnet", &service.Peer{
+		Name:      "alice",
+		PublicKey: "alice-pub-key",
+		Cidr:      "10.0.0.5/32",
+		Admin:     false,
+		Enabled:   true,
+		Confirmed: false,
+	}); err != nil {
+		t.Fatalf("seed provisional peer: %v", err)
+	}
+
+	api := New(env.Service, "testnet", log.Default())
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/confirm", nil)

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -30,20 +31,89 @@ const DefaultBackoff = 5 * time.Minute
 // MaxBackoff caps the exponential backoff duration.
 const MaxBackoff = 1 * time.Hour
 
+// NetworkState tracks where a network is in the install lifecycle.
+const (
+	StateInvited   = "invited"   // invite parsed, permanent key generated
+	StateRedeemed  = "redeemed"  // invite redeemed, main network info stored
+	StateConfirmed = "confirmed" // confirm succeeded, install fields cleared
+)
+
+// Invite carries the parsed contents of a server-issued invite file.
+// Fields prefixed with "Temp" describe the invite network; they are used
+// only during installation and discarded once the permanent identity is
+// assigned.
+//
+// It is the caller's responsibility to read and parse the invite
+// payload from whatever format it arrives in (JSON file, clipboard,
+// etc.).
+type Invite struct {
+	NetworkName          string
+	TempPeerPrivKey      string
+	TempPeerAssignedCidr string
+	InviteServerPubkey   string
+	InviteServerAddr     string
+	InviteServerEndpoint string
+}
+
+func (inv Invite) Validate() error {
+	if inv.NetworkName == "" {
+		return ErrInvalidInput
+	}
+	if inv.TempPeerPrivKey == "" {
+		return ErrInvalidInput
+	}
+	if inv.TempPeerAssignedCidr == "" {
+		return ErrInvalidInput
+	}
+	if inv.InviteServerPubkey == "" {
+		return ErrInvalidInput
+	}
+	if inv.InviteServerAddr == "" {
+		return ErrInvalidInput
+	}
+	if inv.InviteServerEndpoint == "" {
+		return ErrInvalidInput
+	}
+	return nil
+}
+
 // Network is the persistent record of a client-side network membership.
 // It holds the local identity, the assigned address, the server peer
 // reference, and the user's enable/disable policy. It is inert domain
 // data — the Service owns all behavior.
+//
+// Fields are grouped by lifecycle phase:
+//   - Interface names (MainInterfaceName, InviteInterfaceName) — set and
+//     validated at StateInvited, never changes.
+//   - Permanent identity (PrivateKey, PublicKey) — set at StateInvited,
+//     never changes.
+//   - Main network params (AssignedCidr, ServerPubkey, ServerEndpoint,
+//     ServerApiAddr) — set at StateRedeemed, never changes after.
+//   - Install scratch (TempPrivKey, TempCidr, InviteServerPubkey,
+//     InviteServerEndpoint, TempApiAddr) — set at StateInvited, cleared
+//     at StateConfirmed.
 type Network struct {
-	Name           string
-	PrivateKey     string
-	PublicKey      string
-	AssignedCidr   string // e.g. "10.42.0.5/16" — this client's address
-	ServerPubkey   string // the server's WireGuard public key
-	ServerEndpoint string // server's external endpoint, e.g. "1.2.3.4:51820"
-	ServerApiAddr  string // server API through tunnel, e.g. "10.42.0.1:8443"
-	Enabled        bool   // whether the daemon should bring up the interface
-	CreatedAt      time.Time
+	Name      string
+	State     string
+	Enabled   bool
+	CreatedAt time.Time
+
+	PrivateKey string
+	PublicKey  string
+
+	MainInterfaceName   string
+	InviteInterfaceName string
+
+	AssignedCidr   string
+	ServerPubkey   string
+	ServerEndpoint string
+	ServerApiAddr  string
+
+	TempPeerPrivKey      string
+	TempPeerAssignedCidr string
+	InviteServerPubkey   string
+	InviteServerEndpoint string
+	InviteServerAddr     string
 }
 
 // NetworkStatus carries the runtime state of a single client network
@@ -57,23 +127,6 @@ type NetworkStatus struct {
 	LastSync  time.Time
 	LastError string
 	PeerCount int
-}
-
-// Invite carries the parsed contents of a server-issued invite file.
-// Fields prefixed with "Temp" describe the invite network; they are used
-// only during installation and discarded once the permanent identity is
-// assigned.
-//
-// It is the caller's responsibility to read and parse the invite
-// payload from whatever format it arrives in (JSON file, clipboard,
-// etc.).
-type Invite struct {
-	NetworkName    string
-	ServerPubkey   string
-	ServerEndpoint string // server's external WG endpoint, e.g. "1.2.3.4:51820"
-	TempCidr       string // temp address on the invite subnet (step 4)
-	TempApiAddr    string // invite API listener, e.g. "10.43.0.1:8443" (step 6 only)
-	TempPrivKey    string // invite WG private key (step 4–6)
 }
 
 // GetNetwork returns the persisted network record by name.
@@ -95,56 +148,39 @@ func (s *Service) ListNetworks() (
 	return s.store.ListNetworkNames()
 }
 
-// InstallNetwork validates an invite, generates a permanent keypair,
-// brings up temporary and permanent WireGuard interfaces to communicate
-// with the server, redeems the invite, confirms the peer, tears down
-// both interfaces, and persists the complete network record.
-//
-// The new network is left in the disabled state — the caller must call
-// EnableNetwork to bring it up. No partial state persists on failure.
-func (s *Service) InstallNetwork(
+// BeginInstall validates an invite, generates a permanent keypair, and
+// persists a network record in the invited state. No WireGuard devices
+// are brought up. Idempotent: if a network with the same name already
+// exists in the invited state, the existing record is returned without
+// regenerating the key.
+func (s *Service) BeginInstall(
 	invite Invite,
 ) (
 	*Network,
 	error,
 ) {
-	// Validate invite
-	if invite.NetworkName == "" {
-		return nil, ErrInvalidInput
-	}
-	if invite.TempPrivKey == "" {
-		return nil, ErrInvalidInput
-	}
-	if invite.TempCidr == "" {
-		return nil, ErrInvalidInput
-	}
-	if invite.ServerPubkey == "" {
-		return nil, ErrInvalidInput
-	}
-	if invite.ServerEndpoint == "" {
-		return nil, ErrInvalidInput
-	}
-	if invite.TempApiAddr == "" {
-		return nil, ErrInvalidInput
+	if err := invite.Validate(); err != nil {
+		return nil, err
 	}
 
-	// Check if network already exists
-	_, err := s.store.GetNetwork(invite.NetworkName)
+	mainIfaceName := invite.NetworkName
+	if err := wireguard.ValidateDeviceName(mainIfaceName); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+
+	inviteIfaceName := invite.NetworkName + "-i"
+	if err := wireguard.ValidateDeviceName(inviteIfaceName); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+
+	existing, err := s.store.GetNetwork(invite.NetworkName)
 	if err == nil {
+		if existing.State == StateInvited {
+			return existing, nil
+		}
 		return nil, ErrNetworkExists
 	}
 
-	// Validate device names
-	mainName := invite.NetworkName
-	if err := wireguard.ValidateDeviceName(mainName); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
-	}
-	inviteName := mainName + "-i"
-	if err := wireguard.ValidateDeviceName(inviteName); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
-	}
-
-	// Generate permanent key pair
 	permPrivKey, err := s.wg.GenerateKey()
 	if err != nil {
 		return nil, err
@@ -154,124 +190,222 @@ func (s *Service) InstallNetwork(
 		return nil, err
 	}
 
-	_, inviteCidr, err := net.ParseCIDR(invite.TempCidr)
+	network := &Network{
+		Name:                 invite.NetworkName,
+		State:                StateInvited,
+		PrivateKey:           permPrivKey,
+		PublicKey:            permPubKey,
+		MainInterfaceName:    mainIfaceName,
+		InviteInterfaceName:  inviteIfaceName,
+		TempPeerPrivKey:      invite.TempPeerPrivKey,
+		TempPeerAssignedCidr: invite.TempPeerAssignedCidr,
+		InviteServerPubkey:   invite.InviteServerPubkey,
+		InviteServerEndpoint: invite.InviteServerEndpoint,
+		InviteServerAddr:     invite.InviteServerAddr,
+		Enabled:              false,
+		CreatedAt:            s.clock(),
+	}
+	if err := s.store.InsertNetwork(network); err != nil {
+		return nil, err
+	}
+	return network, nil
+}
+
+// Redeem brings up the temporary invite WireGuard interface, calls
+// /redeem with the stored permanent public key, records the main
+// network parameters, and tears down the invite interface. The network
+// must be in the invited or redeemed state. Idempotent: re-calling
+// Redeem in the redeemed state re-contacts the server with the same
+// key and is safe.
+func (s *Service) Redeem(
+	name string,
+) (
+	*serverapi.RedeemResultDTO,
+	error,
+) {
+	network, err := s.store.GetNetwork(name)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid temp CIDR %q", ErrInvalidInput, invite.TempCidr)
+		return nil, err
 	}
 
-	inviteIfaceAddr, err := netaddr.ParseInterface(invite.TempCidr)
-	if err != nil {
-		return nil, fmt.Errorf("%w: invalid temp CIDR %q", ErrInvalidInput, invite.TempCidr)
+	if network.State != StateInvited && network.State != StateRedeemed {
+		return nil, fmt.Errorf("%w: network %q is in state %q, expected invited or redeemed",
+			ErrInvalidInput, name, network.State)
 	}
 
-	// Create invite device
-	inviteDev, err := s.wg.NewDevice(inviteName, invite.TempPrivKey, inviteIfaceAddr, 0)
+	inviteIfaceAddr, err := netaddr.ParseInterface(network.TempPeerAssignedCidr)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid temp CIDR %q", ErrInvalidInput, network.TempPeerAssignedCidr)
+	}
+
+	inviteDev, err := s.wg.NewDevice(network.InviteInterfaceName, network.TempPeerPrivKey, inviteIfaceAddr, 0)
 	if err != nil {
 		return nil, fmt.Errorf("create invite device: %w", err)
 	}
-	cleanupInvite := func() {
-		if inviteDev == nil {
-			return
+	cleanup := func() {
+		if inviteDev != nil {
+			_ = inviteDev.Down()
+			_ = s.wg.RemoveDevice(network.InviteInterfaceName)
+			inviteDev = nil
 		}
-		_ = inviteDev.Down()
-		_ = s.wg.RemoveDevice(inviteName)
-		inviteDev = nil
 	}
-	defer cleanupInvite()
+	defer cleanup()
 
-	// Bring up invite device
 	if err := inviteDev.Up(); err != nil {
 		return nil, fmt.Errorf("bring up invite device: %w", err)
 	}
 
-	// Add invite server peer
+	// TempCidr carries the peer's invite address and the invite
+	// network prefix. Extract the network so the invite server
+	// peer routes the whole invite overlay.
+	inviteServerRoute, err := networkRoute(network.TempPeerAssignedCidr)
+	if err != nil {
+		return nil, fmt.Errorf("invite server route: %w", err)
+	}
 	inviteServerPeer := wireguard.WGPeer{
-		PublicKey:      invite.ServerPubkey,
-		AllowedIPs:     []string{inviteCidr.String()},
-		Endpoint:       invite.ServerEndpoint,
+		PublicKey:      network.InviteServerPubkey,
+		AllowedIPs:     []string{inviteServerRoute},
+		Endpoint:       network.InviteServerEndpoint,
 		EndpointPolicy: wireguard.EndpointFixed,
 	}
 	if err := inviteDev.ApplyPeers([]wireguard.WGPeer{inviteServerPeer}); err != nil {
 		return nil, fmt.Errorf("apply invite peers: %w", err)
 	}
 
-	// Redeem invite
-	inviteAPI := serverapi.NewClient("", invite.TempApiAddr, s.httpClient)
-	redeemResult, err := inviteAPI.RedeemInvite(serverapi.RedeemInviteRequest{
-		PermPubKey: permPubKey,
+	inviteAPI := serverapi.NewClient("", network.InviteServerAddr, s.httpClient)
+	result, err := inviteAPI.RedeemInvite(serverapi.RedeemInviteRequest{
+		PermPubKey: network.PublicKey,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("redeem invite: %w", err)
 	}
 
-	cleanupInvite()
+	cleanup()
 
-	mainIfaceAddr, err := netaddr.ParseInterface(redeemResult.AssignedCidr)
+	if err := s.store.SetNetworkRedeemed(
+		name,
+		result.AssignedCidr,
+		result.Server.PublicKey,
+		result.Server.ExternalEndpoint,
+		result.Server.InternalEndpoint,
+	); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// Confirm brings up the main WireGuard interface, calls /confirm to
+// prove reachability, and transitions the network to the confirmed
+// state. The network must be in the redeemed state. After confirm,
+// the install scratch fields are cleared and the network is ready to
+// enable.
+func (s *Service) Confirm(
+	name string,
+) error {
+	network, err := s.store.GetNetwork(name)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, redeemResult.AssignedCidr)
+		return err
+	}
+	if network.State != StateRedeemed {
+		return fmt.Errorf("%w: network %q is in state %q, expected redeemed",
+			ErrInvalidInput, name, network.State)
 	}
 
-	// Create main interface
-	mainDev, err := s.wg.NewDevice(mainName, permPrivKey, mainIfaceAddr, 0)
+	mainIfaceAddr, err := netaddr.ParseInterface(network.AssignedCidr)
 	if err != nil {
-		return nil, fmt.Errorf("create main device: %w", err)
+		return fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, network.AssignedCidr)
 	}
-	cleanupMain := func() {
-		if mainDev == nil {
-			return
+
+	mainDev, err := s.wg.NewDevice(network.MainInterfaceName, network.PrivateKey, mainIfaceAddr, 0)
+	if err != nil {
+		return fmt.Errorf("create main device: %w", err)
+	}
+	cleanup := func() {
+		if mainDev != nil {
+			_ = mainDev.Down()
+			_ = s.wg.RemoveDevice(network.MainInterfaceName)
+			mainDev = nil
 		}
-		_ = mainDev.Down()
-		_ = s.wg.RemoveDevice(mainName)
-		mainDev = nil
 	}
-	defer cleanupMain()
+	defer cleanup()
 
-	// Bring up main interface
 	if err := mainDev.Up(); err != nil {
-		return nil, fmt.Errorf("bring up main device: %w", err)
+		return fmt.Errorf("bring up main device: %w", err)
 	}
 
-	mainAllowedIP, err := networkRoute(redeemResult.AssignedCidr)
+	// AssignedCidr is the peer's own address (e.g. 10.42.0.5/16);
+	// the prefix encodes the overlay network size. Extract the
+	// network portion so the server peer routes the whole overlay.
+	serverRoute, err := networkRoute(network.AssignedCidr)
 	if err != nil {
-		return nil, fmt.Errorf("main server route: %w", err)
+		return fmt.Errorf("main server route: %w", err)
 	}
-
-	// Add server peer to main interface
-	mainServerPeer := wireguard.WGPeer{
-		PublicKey:      invite.ServerPubkey,
-		AllowedIPs:     []string{mainAllowedIP},
-		Endpoint:       redeemResult.Server.ExternalEndpoint,
+	serverPeer := wireguard.WGPeer{
+		PublicKey:      network.ServerPubkey,
+		AllowedIPs:     []string{serverRoute},
+		Endpoint:       network.ServerEndpoint,
 		EndpointPolicy: wireguard.EndpointFixed,
 	}
-	if err := mainDev.ApplyPeers([]wireguard.WGPeer{mainServerPeer}); err != nil {
-		return nil, fmt.Errorf("apply main peers: %w", err)
+	if err := mainDev.ApplyPeers([]wireguard.WGPeer{serverPeer}); err != nil {
+		return fmt.Errorf("apply main peers: %w", err)
 	}
 
-	// Confirm peer with server API
-	mainAPI := serverapi.NewClient(redeemResult.Server.InternalEndpoint, "", s.httpClient)
+	mainAPI := serverapi.NewClient(network.ServerApiAddr, "", s.httpClient)
 	if err := mainAPI.ConfirmPeer(); err != nil {
-		return nil, fmt.Errorf("confirm peer: %w", err)
+		return fmt.Errorf("confirm peer: %w", err)
 	}
 
-	cleanupMain()
+	cleanup()
 
-	// Persist the main network
-	network := &Network{
-		Name:           mainName,
-		PrivateKey:     permPrivKey,
-		PublicKey:      permPubKey,
-		AssignedCidr:   redeemResult.AssignedCidr,
-		ServerPubkey:   invite.ServerPubkey,
-		ServerEndpoint: redeemResult.Server.ExternalEndpoint,
-		ServerApiAddr:  redeemResult.Server.InternalEndpoint,
-		Enabled:        false,
-		CreatedAt:      s.clock(),
+	return s.store.SetNetworkConfirmed(name)
+}
+
+// Install runs the full onboarding flow: BeginInstall → Redeem →
+// Confirm. It is a convenience driver for callers that want to
+// complete onboarding in a single call. For retry-safe onboarding,
+// call each step individually — the permanent key is persisted at
+// BeginInstall and reused across retries.
+//
+// If the network already exists (from a previous partial run), Install
+// resumes from whatever state the network is in.
+func (s *Service) Install(
+	invite Invite,
+) (
+	*Network,
+	error,
+) {
+	nw, err := s.BeginInstall(invite)
+	if err != nil {
+		if !errors.Is(err, ErrNetworkExists) {
+			return nil, err
+		}
+		nw, err = s.store.GetNetwork(invite.NetworkName)
+		if err != nil {
+			return nil, err
+		}
+		if nw.State == StateConfirmed {
+			return nil, ErrNetworkExists
+		}
 	}
-	if err := s.store.InsertNetwork(network); err != nil {
+
+	if nw.State == StateInvited {
+		if _, err := s.Redeem(nw.Name); err != nil {
+			return nil, err
+		}
+	}
+
+	nw, err = s.store.GetNetwork(nw.Name)
+	if err != nil {
 		return nil, err
 	}
 
-	return network, nil
+	if nw.State == StateRedeemed {
+		if err := s.Confirm(nw.Name); err != nil {
+			return nil, err
+		}
+	}
+
+	return s.store.GetNetwork(nw.Name)
 }
 
 // InsertNetworkDirect persists a pre-built Network record. Exported for
@@ -311,31 +445,36 @@ func (s *Service) EnableNetwork(
 	}
 	s.mu.Unlock()
 
-	nw, err := s.store.GetNetwork(networkName)
+	network, err := s.store.GetNetwork(networkName)
 	if err != nil {
 		return err
 	}
 
-	ifaceAddr, err := netaddr.ParseInterface(nw.AssignedCidr)
-	if err != nil {
-		return fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, nw.AssignedCidr)
+	if network.State != StateConfirmed {
+		return fmt.Errorf("%w: network %q is not confirmed (state: %q)",
+			ErrInvalidInput, networkName, network.State)
 	}
 
-	device, err := s.wg.NewDevice(nw.Name, nw.PrivateKey, ifaceAddr, 0)
+	ifaceAddr, err := netaddr.ParseInterface(network.AssignedCidr)
+	if err != nil {
+		return fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, network.AssignedCidr)
+	}
+
+	device, err := s.wg.NewDevice(network.MainInterfaceName, network.PrivateKey, ifaceAddr, 0)
 	if err != nil {
 		return err
 	}
 
 	liveNet := &LiveNetwork{
 		Device:       device,
-		ServerPubkey: nw.ServerPubkey,
+		ServerPubkey: network.ServerPubkey,
 		Degraded:     make(map[string]*DegradedPeer),
 	}
 
 	var committed bool
 	defer func() {
 		if !committed {
-			s.stopLive(nw.Name, liveNet)
+			s.stopLive(network.Name, liveNet)
 			_ = s.store.SetNetworkEnabled(networkName, false)
 		}
 	}()
@@ -344,11 +483,11 @@ func (s *Service) EnableNetwork(
 		return err
 	}
 
-	if err := s.reconcilePeers(device, nw); err != nil {
+	if err := s.reconcilePeers(device, network); err != nil {
 		return err
 	}
 
-	s.startLive(nw.Name, liveNet, nw.ServerApiAddr)
+	s.startLive(network.Name, liveNet, network.ServerApiAddr)
 
 	if err := s.store.SetNetworkEnabled(networkName, true); err != nil {
 		return err

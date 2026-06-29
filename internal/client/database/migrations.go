@@ -14,15 +14,23 @@ var migrations = []Migration{
 		Name:    "create client schema",
 		SQL: `
 CREATE TABLE network (
-    name              TEXT PRIMARY KEY,
-    private_key       TEXT NOT NULL,
-    public_key        TEXT NOT NULL,
-    assigned_cidr     TEXT NOT NULL,
-    server_pubkey     TEXT NOT NULL,
-    server_endpoint   TEXT NOT NULL,
-    server_api_addr   TEXT NOT NULL,
-    enabled           INTEGER NOT NULL DEFAULT 0,
-    created_at_unix   INTEGER NOT NULL
+    name                    TEXT PRIMARY KEY,
+    state                   TEXT NOT NULL,
+    private_key             TEXT NOT NULL,
+    public_key              TEXT NOT NULL,
+    main_interface_name     TEXT NOT NULL DEFAULT '',
+    invite_interface_name   TEXT NOT NULL DEFAULT '',
+    assigned_cidr           TEXT NOT NULL DEFAULT '',
+    server_pubkey           TEXT NOT NULL DEFAULT '',
+    server_endpoint         TEXT NOT NULL DEFAULT '',
+    server_api_addr         TEXT NOT NULL DEFAULT '',
+    temp_priv_key           TEXT NOT NULL DEFAULT '',
+    temp_cidr               TEXT NOT NULL DEFAULT '',
+    invite_server_pubkey    TEXT NOT NULL DEFAULT '',
+    invite_server_endpoint  TEXT NOT NULL DEFAULT '',
+    temp_api_addr           TEXT NOT NULL DEFAULT '',
+    enabled                 INTEGER NOT NULL DEFAULT 0,
+    created_at_unix         INTEGER NOT NULL
 );
 
 CREATE TABLE peer (
