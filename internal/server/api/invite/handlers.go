@@ -24,19 +24,21 @@ func (a *API) handleRedeemInvite(
 		return
 	}
 
-	result, err := a.service.RedeemInvite(a.network, peer.PublicKey, req.PermPubKey)
+	result, err := a.service.RedeemRegistration(a.network, peer.PublicKey, req.PermPubKey)
 	if err != nil {
 		wire.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	response := RedeemResultDTO{
-		NetworkName:  result.NetworkName,
-		AssignedCidr: result.AssignedCidr,
-		Server: ServerInfoDTO{
-			PublicKey:        result.Server.PublicKey,
-			ExternalEndpoint: result.Server.ExternalEndpoint,
-			InternalEndpoint: result.Server.InternalEndpoint,
+	response := InvitationDTO{
+		Network: NetworkInfoDTO{
+			Name:        result.Network.Name,
+			PublicKey:   result.Network.PublicKey,
+			Endpoint:    result.Network.Endpoint,
+			APIEndpoint: result.Network.APIEndpoint,
+		},
+		Peer: PeerIdentityDTO{
+			CIDR: result.Peer.CIDR,
 		},
 	}
 

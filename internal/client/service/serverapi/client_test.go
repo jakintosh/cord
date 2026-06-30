@@ -140,38 +140,36 @@ func TestRedeemInvite_Success(t *testing.T) {
 			wire.WriteError(w, http.StatusNotFound, "not found")
 			return
 		}
-		wire.WriteData(w, http.StatusOK, RedeemResultDTO{
-			NetworkName:  "mynet",
-			AssignedCidr: "10.42.0.5/16",
-			Server: ServerInfoDTO{
-				PublicKey:        "server-key",
-				ExternalEndpoint: "1.2.3.4:51820",
-				InternalEndpoint: "10.42.0.1:8443",
+		wire.WriteData(w, http.StatusOK, InvitationDTO{
+			Network: NetworkInfoDTO{
+				PublicKey:   "server-key",
+				Endpoint:    "1.2.3.4:51820",
+				APIEndpoint: "10.42.0.1:8443",
+			},
+			Peer: PeerIdentityDTO{
+				CIDR: "10.42.0.5/16",
 			},
 		})
 	})
 	defer teardown()
 
-	result, err := c.RedeemInvite(RedeemInviteRequest{
+	result, err := c.RedeemInvitation(RedeemInvitationRequest{
 		PermPubKey: "perm-key",
 	})
 	if err != nil {
 		t.Fatalf("RedeemInvite: %v", err)
 	}
-	if result.NetworkName != "mynet" {
-		t.Errorf("NetworkName = %q, want mynet", result.NetworkName)
+	if result.Network.PublicKey != "server-key" {
+		t.Errorf("Network.PublicKey = %q, want server-key", result.Network.PublicKey)
 	}
-	if result.AssignedCidr != "10.42.0.5/16" {
-		t.Errorf("AssignedCidr = %q, want 10.42.0.5/16", result.AssignedCidr)
+	if result.Network.APIEndpoint != "10.42.0.1:8443" {
+		t.Errorf("Network.APIEndpoint = %q, want 10.42.0.1:8443", result.Network.APIEndpoint)
 	}
-	if result.Server.PublicKey != "server-key" {
-		t.Errorf("Server.PublicKey = %q, want server-key", result.Server.PublicKey)
+	if result.Network.Endpoint != "1.2.3.4:51820" {
+		t.Errorf("Network.Endpoint = %q, want 1.2.3.4:51820", result.Network.Endpoint)
 	}
-	if result.Server.InternalEndpoint != "10.42.0.1:8443" {
-		t.Errorf("Server.InternalEndpoint = %q, want 10.42.0.1:8443", result.Server.InternalEndpoint)
-	}
-	if result.Server.ExternalEndpoint != "1.2.3.4:51820" {
-		t.Errorf("Server.ExternalEndpoint = %q, want 1.2.3.4:51820", result.Server.ExternalEndpoint)
+	if result.Peer.CIDR != "10.42.0.5/16" {
+		t.Errorf("Peer.CIDR = %q, want 10.42.0.5/16", result.Peer.CIDR)
 	}
 }
 
@@ -181,7 +179,7 @@ func TestRedeemInvite_Forbidden(t *testing.T) {
 	})
 	defer teardown()
 
-	_, err := c.RedeemInvite(RedeemInviteRequest{
+	_, err := c.RedeemInvitation(RedeemInvitationRequest{
 		PermPubKey: "perm-key",
 	})
 	if err == nil {

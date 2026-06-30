@@ -25,39 +25,39 @@ func TestAPIAddPeer_Success(
 		"ip": "10.0.0.5",
 		"admin": false
 	}`
-	result := wire.TestPost[service.PeerInvite](env.Router, url, body)
+	result := wire.TestPost[service.Invitation](env.Router, url, body)
 
-	// verify result — handler returns a PeerInvite payload
+	// verify result — handler returns an Invitation payload
 	result.ExpectStatusOK(t, http.StatusCreated)
-	if result.Data.Interface.NetworkName != "testnet" {
-		t.Fatalf("network_name = %q, want testnet", result.Data.Interface.NetworkName)
+	if result.Data.Network.Name != "testnet" {
+		t.Fatalf("network_name = %q, want testnet", result.Data.Network.Name)
 	}
-	if result.Data.Interface.PrivateKey == "" {
+	if result.Data.Peer.PrivateKey == "" {
 		t.Fatal("private_key should not be empty")
 	}
-	if result.Data.Interface.AssignedCidr == "" {
-		t.Fatal("assigned_cidr should not be empty")
+	if result.Data.Peer.CIDR == "" {
+		t.Fatal("cidr should not be empty")
 	}
-	if result.Data.Server.PublicKey == "" {
+	if result.Data.Network.PublicKey == "" {
 		t.Fatal("server public_key should not be empty")
 	}
-	if result.Data.Server.ExternalEndpoint == "" {
-		t.Fatal("server external_endpoint should not be empty")
+	if result.Data.Network.Endpoint == "" {
+		t.Fatal("endpoint should not be empty")
 	}
-	if result.Data.Server.InternalEndpoint == "" {
-		t.Fatal("server internal_endpoint should not be empty")
+	if result.Data.Network.APIEndpoint == "" {
+		t.Fatal("api_endpoint should not be empty")
 	}
 
-	// verify invite was created
-	invites, err := env.Service.ListInvites("testnet")
+	// verify registration was created
+	regs, err := env.Service.ListRegistrations("testnet")
 	if err != nil {
-		t.Fatalf("list invites: %v", err)
+		t.Fatalf("list registrations: %v", err)
 	}
-	if len(invites) != 1 {
-		t.Fatalf("expected 1 invite, got %d", len(invites))
+	if len(regs) != 1 {
+		t.Fatalf("expected 1 registration, got %d", len(regs))
 	}
-	if invites[0].Name != "alice" {
-		t.Fatalf("invite name = %q, want alice", invites[0].Name)
+	if regs[0].Name != "alice" {
+		t.Fatalf("registration name = %q, want alice", regs[0].Name)
 	}
 }
 
@@ -74,12 +74,12 @@ func TestAPIAddPeer_AutoAssignIP(
 		"name": "bob",
 		"admin": false
 	}`
-	result := wire.TestPost[service.PeerInvite](env.Router, url, body)
+	result := wire.TestPost[service.Invitation](env.Router, url, body)
 
 	// verify result
 	result.ExpectStatusOK(t, http.StatusCreated)
-	if result.Data.Interface.AssignedCidr == "" {
-		t.Fatal("assigned_cidr should not be empty for auto-assigned IP")
+	if result.Data.Peer.CIDR == "" {
+		t.Fatal("cidr should not be empty for auto-assigned IP")
 	}
 }
 
@@ -130,7 +130,7 @@ func TestAPIAddPeer_DuplicateName(
 		"name": "alice",
 		"ip": "10.0.0.5"
 	}`
-	result := wire.TestPost[service.PeerInvite](env.Router, url, body)
+	result := wire.TestPost[service.Invitation](env.Router, url, body)
 	result.ExpectStatusOK(t, http.StatusCreated)
 
 	// add duplicate

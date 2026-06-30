@@ -30,25 +30,29 @@ type EndpointSightingDTO struct {
 
 // --- Invite API (invite network) ---
 
-// RedeemInviteRequest is the JSON body for POST /redeem. It provides
+// RedeemInvitationRequest is the JSON body for POST /redeem. It provides
 // the caller's new permanent public key. The invite temp key is derived
 // server-side from the WireGuard tunnel source IP.
-type RedeemInviteRequest struct {
+type RedeemInvitationRequest struct {
 	PermPubKey string `json:"perm_pubkey"`
 }
 
-// RedeemResultDTO is returned by a successful POST /redeem. It carries
+// InvitationDTO is returned by a successful POST /redeem. It carries
 // the permanent network identity that the server assigned to the peer.
-type RedeemResultDTO struct {
-	NetworkName  string        `json:"network_name"`
-	AssignedCidr string        `json:"assigned_cidr"`
-	Server       ServerInfoDTO `json:"server"`
+type InvitationDTO struct {
+	Network NetworkInfoDTO  `json:"network"`
+	Peer    PeerIdentityDTO `json:"peer"`
 }
 
-// ServerInfoDTO describes how to reach the coordination server on the
+// NetworkInfoDTO describes how to reach the coordination server on the
 // main network after invite redemption.
-type ServerInfoDTO struct {
-	PublicKey        string `json:"public_key"`
-	ExternalEndpoint string `json:"external_endpoint"`
-	InternalEndpoint string `json:"internal_endpoint"`
+type NetworkInfoDTO struct {
+	PublicKey   string `json:"public_key"`
+	Endpoint    string `json:"endpoint"`
+	APIEndpoint string `json:"api_endpoint"`
+}
+
+// PeerIdentityDTO describes the peer's assigned identity on the network.
+type PeerIdentityDTO struct {
+	CIDR string `json:"cidr"`
 }

@@ -9,11 +9,11 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
-func (db *DB) GetInvite(
+func (db *DB) GetRegistration(
 	network string,
 	name string,
 ) (
-	*service.Invite,
+	*service.Registration,
 	error,
 ) {
 	row := db.Conn.QueryRow(`
@@ -28,22 +28,22 @@ func (db *DB) GetInvite(
 			confirmed,
 			expires_at_unix,
 			created_at_unix
-		FROM invite
+		FROM registration
 		WHERE network_name = ?1
 			AND name = ?2`,
 		network,
 		name,
 	)
 
-	return scanInvite(row)
+	return scanRegistration(row)
 }
 
-func (db *DB) GetInviteByIP(
+func (db *DB) GetRegistrationByIP(
 	network string,
 	ip net.IP,
 	now time.Time,
 ) (
-	*service.Invite,
+	*service.Registration,
 	error,
 ) {
 	ip = netaddr.Normalize(ip)
@@ -59,7 +59,7 @@ func (db *DB) GetInviteByIP(
 			confirmed,
 			expires_at_unix,
 			created_at_unix
-		FROM invite
+		FROM registration
 		WHERE network_name = ?1
 			AND temp_ip = ?2
 			AND confirmed = 0
@@ -69,13 +69,13 @@ func (db *DB) GetInviteByIP(
 		now.Unix(),
 	)
 
-	return scanInvite(row)
+	return scanRegistration(row)
 }
 
-func (db *DB) ListInvites(
+func (db *DB) ListRegistrations(
 	network string,
 ) (
-	[]*service.Invite,
+	[]*service.Registration,
 	error,
 ) {
 	rows, err := db.Conn.Query(`
@@ -90,37 +90,37 @@ func (db *DB) ListInvites(
 			confirmed,
 			expires_at_unix,
 			created_at_unix
-		FROM invite
+		FROM registration
 		WHERE network_name = ?1
 		ORDER BY created_at_unix DESC`,
 		network,
 	)
 	if err != nil {
-		return nil, CheckSqliteErr("list invites", err)
+		return nil, CheckSqliteErr("list registrations", err)
 	}
 	defer rows.Close()
 
-	var invites []*service.Invite
+	var regs []*service.Registration
 	for rows.Next() {
-		inv, err := scanInvite(rows)
+		reg, err := scanRegistration(rows)
 		if err != nil {
 			return nil, err
 		}
-		invites = append(invites, inv)
+		regs = append(regs, reg)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate invites: %w", err)
+		return nil, fmt.Errorf("iterate registrations: %w", err)
 	}
 
-	return invites, nil
+	return regs, nil
 }
 
-func (db *DB) ListActiveInvites(
+func (db *DB) ListActiveRegistrations(
 	network string,
 	now time.Time,
 ) (
-	[]*service.Invite,
+	[]*service.Registration,
 	error,
 ) {
 	rows, err := db.Conn.Query(`
@@ -135,7 +135,7 @@ func (db *DB) ListActiveInvites(
 			confirmed,
 			expires_at_unix,
 			created_at_unix
-		FROM invite
+		FROM registration
 		WHERE network_name = ?1
 			AND confirmed = 0
 			AND expires_at_unix > ?2
@@ -144,35 +144,35 @@ func (db *DB) ListActiveInvites(
 		now.Unix(),
 	)
 	if err != nil {
-		return nil, CheckSqliteErr("list active invites", err)
+		return nil, CheckSqliteErr("list active registrations", err)
 	}
 	defer rows.Close()
 
-	var invites []*service.Invite
+	var regs []*service.Registration
 	for rows.Next() {
-		inv, err := scanInvite(rows)
+		reg, err := scanRegistration(rows)
 		if err != nil {
 			return nil, err
 		}
-		invites = append(invites, inv)
+		regs = append(regs, reg)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate active invites: %w", err)
+		return nil, fmt.Errorf("iterate active registrations: %w", err)
 	}
 
-	return invites, nil
+	return regs, nil
 }
 
-func (db *DB) InsertInvite(
+func (db *DB) InsertRegistration(
 	network string,
-	invite *service.Invite,
+	reg *service.Registration,
 ) error {
-	tempIP := netaddr.Normalize(invite.InviteIP)
-	finalIP := netaddr.Normalize(invite.MainIP)
+	tempIP := netaddr.Normalize(reg.InviteIP)
+	finalIP := netaddr.Normalize(reg.MainIP)
 
 	_, err := db.Conn.Exec(`
-		INSERT INTO invite (
+		INSERT INTO registration (
 			network_name,
 			name,
 			temp_public_key,
@@ -187,21 +187,21 @@ func (db *DB) InsertInvite(
 		)
 		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
 		network,
-		invite.Name,
-		invite.InvitePubKey,
+		reg.Name,
+		reg.InvitePublicKey,
 		tempIP,
 		finalIP,
-		boolToInt(invite.Admin),
-		boolToInt(invite.Redeemed),
-		invite.RedeemedKey,
-		boolToInt(invite.Confirmed),
-		invite.ExpiresAt.Unix(),
-		invite.CreatedAt.Unix(),
+		boolToInt(reg.Admin),
+		boolToInt(reg.Redeemed),
+		reg.RedeemedKey,
+		boolToInt(reg.Confirmed),
+		reg.ExpiresAt.Unix(),
+		reg.CreatedAt.Unix(),
 	)
-	return CheckSqliteErr("insert invite", err)
+	return CheckSqliteErr("insert registration", err)
 }
 
-func (db *DB) RedeemInvite(
+func (db *DB) RedeemRegistration(
 	network string,
 	tempPubKey string,
 	permPubKey string,
@@ -224,18 +224,18 @@ func (db *DB) RedeemInvite(
 			confirmed
 		)
 		SELECT
-			i.network_name,
-			i.name,
-			i.final_ip,
+			r.network_name,
+			r.name,
+			r.final_ip,
 			?3,
-			i.admin,
+			r.admin,
 			1,
 			0
-		FROM invite i
-		WHERE i.network_name = ?1
-			AND i.temp_public_key = ?2
-			AND i.redeemed = 0
-			AND i.expires_at_unix > ?4`,
+		FROM registration r
+		WHERE r.network_name = ?1
+			AND r.temp_public_key = ?2
+			AND r.redeemed = 0
+			AND r.expires_at_unix > ?4`,
 		network,
 		tempPubKey,
 		permPubKey,
@@ -249,11 +249,11 @@ func (db *DB) RedeemInvite(
 		return fmt.Errorf("redeem rows affected: %w", err)
 	}
 	if affected == 0 {
-		return fmt.Errorf("%w: no redeemable invite for key", service.ErrNotFound)
+		return fmt.Errorf("%w: no redeemable registration for key", service.ErrNotFound)
 	}
 
 	if _, err := tx.Exec(`
-		UPDATE invite
+		UPDATE registration
 		SET redeemed = 1,
 			redeemed_key = ?3
 		WHERE network_name = ?1
@@ -263,7 +263,7 @@ func (db *DB) RedeemInvite(
 		tempPubKey,
 		permPubKey,
 	); err != nil {
-		return CheckSqliteErr("redeem mark invite", err)
+		return CheckSqliteErr("redeem mark registration", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -273,36 +273,36 @@ func (db *DB) RedeemInvite(
 	return nil
 }
 
-func (db *DB) DeleteInvite(
+func (db *DB) DeleteRegistration(
 	network string,
 	name string,
 ) error {
 	result, err := db.Conn.Exec(`
-		DELETE FROM invite
+		DELETE FROM registration
 		WHERE network_name = ?1
 			AND name = ?2`,
 		network,
 		name,
 	)
 	if err != nil {
-		return CheckSqliteErr("delete invite", err)
+		return CheckSqliteErr("delete registration", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("delete invite rows affected: %w", err)
+		return fmt.Errorf("delete registration rows affected: %w", err)
 	}
 	if affected == 0 {
-		return fmt.Errorf("%w: invite %q not found", service.ErrNotFound, name)
+		return fmt.Errorf("%w: registration %q not found", service.ErrNotFound, name)
 	}
 	return nil
 }
 
-func (db *DB) ConfirmInvite(
+func (db *DB) ConfirmRegistration(
 	network string,
 	name string,
 ) error {
 	result, err := db.Conn.Exec(`
-		UPDATE invite
+		UPDATE registration
 		SET confirmed = 1
 		WHERE network_name = ?1
 			AND name = ?2
@@ -311,41 +311,42 @@ func (db *DB) ConfirmInvite(
 		name,
 	)
 	if err != nil {
-		return CheckSqliteErr("confirm invite", err)
+		return CheckSqliteErr("confirm registration", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("confirm invite rows affected: %w", err)
+		return fmt.Errorf("confirm registration rows affected: %w", err)
 	}
 	if affected == 0 {
-		return fmt.Errorf("%w: invite %q not found or already confirmed", service.ErrNotFound, name)
+		return fmt.Errorf("%w: registration %q not found or already confirmed", service.ErrNotFound, name)
 	}
 	return nil
 }
 
-func (db *DB) DeleteExpiredInvites(
+func (db *DB) DeleteExpiredRegistrations(
 	network string,
 	before time.Time,
 ) error {
 	_, err := db.Conn.Exec(`
-		DELETE FROM invite
+		DELETE FROM registration
 		WHERE network_name = ?1
 			AND expires_at_unix < ?2`,
 		network,
 		before.Unix(),
 	)
-	return CheckSqliteErr("delete expired invites", err)
+	return CheckSqliteErr("delete expired registrations", err)
 }
 
-// PruneExpiredInvites removes expired unconfirmed invites and any
-// provisional peer rows that no longer have a live invite. A peer is
-// provisional when confirmed = 0; it is kept only while its invite is
-// unconfirmed and unexpired. Confirmed peers are never pruned here —
-// their invites are retained as audit state.
+// PruneExpiredRegistrations removes expired unconfirmed registrations
+// and any provisional peer rows that no longer have a live
+// registration. A peer is provisional when confirmed = 0; it is kept
+// only while its registration is unconfirmed and unexpired. Confirmed
+// peers are never pruned here — their registrations are retained as
+// audit state.
 //
 // Endpoint rows referencing pruned peers are removed via the ON DELETE
 // CASCADE foreign keys on the endpoint table.
-func (db *DB) PruneExpiredInvites(
+func (db *DB) PruneExpiredRegistrations(
 	network string,
 	now time.Time,
 ) error {
@@ -356,14 +357,14 @@ func (db *DB) PruneExpiredInvites(
 	defer tx.Rollback()
 
 	if _, err := tx.Exec(`
-		DELETE FROM invite
+		DELETE FROM registration
 		WHERE network_name = ?1
 			AND confirmed = 0
 			AND expires_at_unix <= ?2`,
 		network,
 		now.Unix(),
 	); err != nil {
-		return CheckSqliteErr("prune expired invites", err)
+		return CheckSqliteErr("prune expired registrations", err)
 	}
 
 	if _, err := tx.Exec(`
@@ -371,11 +372,11 @@ func (db *DB) PruneExpiredInvites(
 		WHERE network_name = ?1
 			AND confirmed = 0
 			AND NOT EXISTS (
-				SELECT 1 FROM invite
-				WHERE invite.network_name = peer.network_name
-					AND invite.name = peer.name
-					AND invite.confirmed = 0
-					AND invite.expires_at_unix > ?2
+				SELECT 1 FROM registration
+				WHERE registration.network_name = peer.network_name
+					AND registration.name = peer.name
+					AND registration.confirmed = 0
+					AND registration.expires_at_unix > ?2
 			)`,
 		network,
 		now.Unix(),
@@ -389,16 +390,16 @@ func (db *DB) PruneExpiredInvites(
 	return nil
 }
 
-func scanInvite(
+func scanRegistration(
 	s Scanner,
 ) (
-	*service.Invite,
+	*service.Registration,
 	error,
 ) {
 	var name string
-	var invitePubKey string
-	var inviteIP []byte
-	var mainIP []byte
+	var tempPubKey string
+	var tempIPBytes []byte
+	var finalIPBytes []byte
 	var admin int64
 	var redeemed int64
 	var redeemedKey string
@@ -408,9 +409,9 @@ func scanInvite(
 
 	if err := s.Scan(
 		&name,
-		&invitePubKey,
-		&inviteIP,
-		&mainIP,
+		&tempPubKey,
+		&tempIPBytes,
+		&finalIPBytes,
 		&admin,
 		&redeemed,
 		&redeemedKey,
@@ -418,19 +419,19 @@ func scanInvite(
 		&expiresUnix,
 		&createdUnix,
 	); err != nil {
-		return nil, CheckSqliteErr("scan invite", err)
+		return nil, CheckSqliteErr("scan registration", err)
 	}
 
-	return &service.Invite{
-		Name:         name,
-		InvitePubKey: invitePubKey,
-		InviteIP:     net.IP(inviteIP),
-		MainIP:       net.IP(mainIP),
-		Admin:        admin != 0,
-		Redeemed:     redeemed != 0,
-		RedeemedKey:  redeemedKey,
-		Confirmed:    confirmed != 0,
-		ExpiresAt:    time.Unix(expiresUnix, 0),
-		CreatedAt:    time.Unix(createdUnix, 0),
+	return &service.Registration{
+		Name:            name,
+		InvitePublicKey: tempPubKey,
+		InviteIP:        net.IP(tempIPBytes),
+		MainIP:          net.IP(finalIPBytes),
+		Admin:           admin != 0,
+		Redeemed:        redeemed != 0,
+		RedeemedKey:     redeemedKey,
+		Confirmed:       confirmed != 0,
+		ExpiresAt:       time.Unix(expiresUnix, 0),
+		CreatedAt:       time.Unix(createdUnix, 0),
 	}, nil
 }

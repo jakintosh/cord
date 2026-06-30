@@ -37,14 +37,14 @@ func (a *API) SetResolver(
 	a.resolver = resolver
 }
 
-// ResolveIdentity looks up an unredeemed, unexpired invite by temporary
-// IP within the API's network. Satisfies identity.Resolver.
+// ResolveIdentity looks up an unredeemed, unexpired registration by
+// temporary IP within the API's network. Satisfies identity.Resolver.
 func (a *API) ResolveIdentity(ip net.IP) (*identity.Peer, error) {
-	inv, err := a.service.ResolveInviteIdentity(a.network, ip)
+	reg, err := a.service.ResolveRegistrationIdentity(a.network, ip)
 	if err != nil {
-		return nil, fmt.Errorf("resolve invite identity: %w", err)
+		return nil, fmt.Errorf("resolve registration identity: %w", err)
 	}
-	return &identity.Peer{PublicKey: inv.InvitePubKey, Name: inv.Name}, nil
+	return &identity.Peer{PublicKey: reg.InvitePublicKey, Name: reg.Name}, nil
 }
 
 func (a *API) Router() http.Handler {

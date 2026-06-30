@@ -57,7 +57,7 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("POST /networks/{name}/associations", a.handleAssociationAdd)
 	mux.HandleFunc("POST /networks/{name}/associations/delete", a.handleAssociationDelete)
 
-	mux.HandleFunc("GET /networks/{name}/invites", a.handleInviteList)
+	mux.HandleFunc("GET /networks/{name}/registrations", a.handleRegistrationList)
 
 	return mux
 }

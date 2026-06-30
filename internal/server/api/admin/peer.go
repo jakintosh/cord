@@ -81,13 +81,13 @@ func (a *API) handlePeerAdd(
 		return
 	}
 
-	invite, err := a.service.AddPeer(network, req.Name, req.Ip, req.Admin)
+	invitation, err := a.service.AddPeer(network, req.Name, req.Ip, req.Admin)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusCreated, invite)
+	wire.WriteData(w, http.StatusCreated, invitation)
 }
 
 func (a *API) handlePeerRename(
@@ -191,14 +191,14 @@ func (c *Client) AddPeer(
 	network string,
 	req AddPeerRequest,
 ) (
-	*service.PeerInvite,
+	*service.Invitation,
 	error,
 ) {
 	resp, err := c.t.Post(ctx, "/networks/"+network+"/peers", req)
 	if err != nil {
 		return nil, err
 	}
-	return daemon.DecodeResponse[*service.PeerInvite](resp)
+	return daemon.DecodeResponse[*service.Invitation](resp)
 }
 
 func (c *Client) RenamePeer(

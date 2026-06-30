@@ -13,6 +13,9 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
+// defaultDndpointTTL is how long an endpoint sighting is considered current.
+const defaultDndpointTTL = 24 * time.Hour
+
 // Options configures the domain core for the cord server. All fields are
 // required for full operation but may be nil during early development.
 type Options struct {
@@ -135,21 +138,21 @@ func (s *Service) logf(format string, args ...any) {
 	}
 }
 
-// ResolveInviteIdentity looks up an unredeemed, unexpired invite by
-// temporary IP within the invite network. Used by the identity middleware
-// to authenticate incoming invite-redemption requests.
-func (s *Service) ResolveInviteIdentity(
+// ResolveRegistrationIdentity looks up an unredeemed, unexpired
+// registration by temporary IP within the invite network. Used by the
+// identity middleware to authenticate incoming invite-redemption requests.
+func (s *Service) ResolveRegistrationIdentity(
 	networkName string,
 	ip net.IP,
 ) (
-	*Invite,
+	*Registration,
 	error,
 ) {
-	inv, err := s.store.GetInviteByIP(networkName, ip, s.clock())
+	reg, err := s.store.GetRegistrationByIP(networkName, ip, s.clock())
 	if err != nil {
-		return nil, fmt.Errorf("resolve invite identity: %w", mapStoreError(err))
+		return nil, fmt.Errorf("resolve registration identity: %w", mapStoreError(err))
 	}
-	return inv, nil
+	return reg, nil
 }
 
 // ResolvePeerIdentity looks up a confirmed, enabled peer by IP address
@@ -158,10 +161,32 @@ func (s *Service) ResolveInviteIdentity(
 func (s *Service) ResolvePeerIdentity(
 	network string,
 	ip net.IP,
-) (*Peer, error) {
+) (
+	*Peer,
+	error,
+) {
 	p, err := s.store.GetPeerByIP(network, ip)
 	if err != nil {
 		return nil, fmt.Errorf("resolve peer identity: %w", mapStoreError(err))
+	}
+	return p, nil
+}
+
+// ResolveProvisionalIdentity looks up an unconfirmed, enabled peer by
+// IP address within the network. Used by the identity middleware to
+// authenticate /confirm calls from peers that have redeemed but not
+// yet confirmed. Once a peer is confirmed, it authenticates via
+// ResolvePeerIdentity instead.
+func (s *Service) ResolveProvisionalIdentity(
+	network string,
+	ip net.IP,
+) (
+	*Peer,
+	error,
+) {
+	p, err := s.store.GetProvisionalPeerByIP(network, ip)
+	if err != nil {
+		return nil, fmt.Errorf("resolve provisional identity: %w", mapStoreError(err))
 	}
 	return p, nil
 }

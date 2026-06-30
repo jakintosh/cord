@@ -46,22 +46,6 @@ type EndpointWitness struct {
 	Timestamp time.Time
 }
 
-// ResolveProvisionalIdentity looks up an unconfirmed, enabled peer by
-// IP address within the network. Used by the identity middleware to
-// authenticate /confirm calls from peers that have redeemed but not
-// yet confirmed. Once a peer is confirmed, it authenticates via
-// ResolvePeerIdentity instead.
-func (s *Service) ResolveProvisionalIdentity(
-	network string,
-	ip net.IP,
-) (*Peer, error) {
-	p, err := s.store.GetProvisionalPeerByIP(network, ip)
-	if err != nil {
-		return nil, fmt.Errorf("resolve provisional identity: %w", mapStoreError(err))
-	}
-	return p, nil
-}
-
 // GetPeer returns a peer by name within the given network.
 func (s *Service) GetPeer(
 	network string,
@@ -107,7 +91,7 @@ func (s *Service) ListVisiblePeers(
 		return nil, fmt.Errorf("list peers for visibility: %w", err)
 	}
 
-	since := s.clock().Add(-endpointTTL)
+	since := s.clock().Add(-defaultDndpointTTL)
 	recentEndpoints, err := s.store.GetRecentEndpoints(network, since)
 	if err != nil {
 		return nil, fmt.Errorf("get recent endpoints: %w", err)
@@ -140,16 +124,16 @@ func (s *Service) ListVisiblePeers(
 	return visible, nil
 }
 
-// AddPeer creates an invite for a new participant. If ip is nil
+// AddPeer creates a registration for a new participant. If ip is nil
 // an address is auto-assigned from the root CIDR. Returns the
-// PeerInvite payload to deliver out-of-band to the invitee.
+// Invitation payload to deliver out-of-band to the invitee.
 func (s *Service) AddPeer(
 	network string,
 	name string,
 	ip *string,
 	admin bool,
 ) (
-	*PeerInvite,
+	*Invitation,
 	error,
 ) {
 	if name == "" {
@@ -194,7 +178,7 @@ func (s *Service) AddPeer(
 		peerIP = &freeIP
 	}
 
-	return s.CreateInvite(network, name, peerIP, admin, nil)
+	return s.CreateRegistration(network, name, peerIP, admin, nil)
 }
 
 // RemovePeer deletes a peer and its associated invite (if any). The
@@ -273,11 +257,11 @@ func (s *Service) DisablePeer(
 // who disabled the peer before confirm gets a peer that is
 // confirmed but not live until re-enabled.
 //
-// The corresponding invite is marked confirmed, which removes the
-// temp peer from the invite device and releases the invite IPs. If
-// the invite is already gone (revoked or already confirmed) the
-// invite update is treated as a no-op rather than an error, so
-// confirm remains idempotent.
+// The corresponding registration is marked confirmed, which removes
+// the temp peer from the invite device and releases the invite IPs.
+// If the registration is already gone (revoked or already confirmed)
+// the registration update is treated as a no-op rather than an error,
+// so confirm remains idempotent.
 func (s *Service) ConfirmPeer(
 	network string,
 	name string,
@@ -288,9 +272,9 @@ func (s *Service) ConfirmPeer(
 		return fmt.Errorf("confirm peer %q: %w", name, mapStoreError(err))
 	}
 
-	if err := s.store.ConfirmInvite(network, name); err != nil {
+	if err := s.store.ConfirmRegistration(network, name); err != nil {
 		if !errors.Is(err, ErrNotFound) {
-			return fmt.Errorf("confirm invite %q: %w", name, mapStoreError(err))
+			return fmt.Errorf("confirm registration %q: %w", name, mapStoreError(err))
 		}
 	}
 	s.reconcileOnce(network)
@@ -318,7 +302,7 @@ func (s *Service) ReportEndpoints(
 
 // nextFreePeerIP finds the lowest free address in the root CIDR,
 // skipping the network address, the server address, and addresses
-// held by existing peers or active invites.
+// held by existing peers or active registrations.
 func (s *Service) nextFreePeerIP(
 	network string,
 	rootCidr string,
@@ -336,9 +320,9 @@ func (s *Service) nextFreePeerIP(
 		return nil, fmt.Errorf("list peers: %w", err)
 	}
 
-	invites, err := s.store.ListActiveInvites(network, s.clock())
+	regs, err := s.store.ListActiveRegistrations(network, s.clock())
 	if err != nil {
-		return nil, fmt.Errorf("list active invites: %w", err)
+		return nil, fmt.Errorf("list active registrations: %w", err)
 	}
 
 	used := map[string]bool{}
@@ -348,9 +332,9 @@ func (s *Service) nextFreePeerIP(
 			used[netaddr.Normalize(ip).String()] = true
 		}
 	}
-	for _, inv := range invites {
-		if inv.MainIP != nil {
-			used[netaddr.Normalize(inv.MainIP).String()] = true
+	for _, reg := range regs {
+		if reg.MainIP != nil {
+			used[netaddr.Normalize(reg.MainIP).String()] = true
 		}
 	}
 

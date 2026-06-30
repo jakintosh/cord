@@ -82,7 +82,7 @@ CREATE TABLE association (
     UNIQUE (cidr1, cidr2)
 );
 
-CREATE TABLE invite (
+CREATE TABLE registration (
     id              INTEGER PRIMARY KEY,
     network_name    TEXT NOT NULL,
     name            TEXT NOT NULL,

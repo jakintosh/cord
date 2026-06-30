@@ -31,7 +31,7 @@ var serverInviteList = &args.Command{
 		network := i.GetOperand("network")
 
 		client := admin.NewClient(socketPath)
-		invites, err := client.ListInvites(context.Background(), network)
+		invites, err := client.ListRegistrations(context.Background(), network)
 		if err != nil {
 			return err
 		}

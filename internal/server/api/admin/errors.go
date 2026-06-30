@@ -23,9 +23,9 @@ func writeServiceError(
 		wire.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrInvalidInput):
 		wire.WriteError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, service.ErrInviteExpired):
+	case errors.Is(err, service.ErrRegistrationExpired):
 		wire.WriteError(w, http.StatusGone, err.Error())
-	case errors.Is(err, service.ErrInviteRedeemed):
+	case errors.Is(err, service.ErrRegistrationRedeemed):
 		wire.WriteError(w, http.StatusGone, err.Error())
 	case errors.Is(err, service.ErrNetworkRunning):
 		wire.WriteError(w, http.StatusConflict, err.Error())

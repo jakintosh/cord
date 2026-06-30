@@ -1,0 +1,517 @@
+package service_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net"
+	"testing"
+	"time"
+
+	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
+)
+
+func TestCreateRegistration_Success(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	ip := net.ParseIP("10.0.0.5")
+	expiresIn := time.Hour
+	inv, err := env.Service.CreateRegistration("testnet", "new-peer", &ip, false, &expiresIn)
+	if err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+
+	if inv.Network.Name != "testnet" {
+		t.Errorf("network_name = %q, want testnet", inv.Network.Name)
+	}
+	if inv.Peer.PrivateKey == "" {
+		t.Error("private_key should not be empty")
+	}
+	if inv.Peer.CIDR == "" {
+		t.Error("cidr should not be empty")
+	}
+	if inv.Network.PublicKey == "" {
+		t.Error("server public_key should not be empty")
+	}
+	if inv.Network.Endpoint != "192.168.1.1:51821" {
+		t.Errorf("endpoint = %q, want 192.168.1.1:51821", inv.Network.Endpoint)
+	}
+}
+
+func TestCreateRegistration_DefaultExpiration(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	ip := net.ParseIP("10.0.0.6")
+	_, err := env.Service.CreateRegistration("testnet", "default-exp", &ip, false, nil)
+	if err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+
+	regs, err := env.Service.ListRegistrations("testnet")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(regs) != 1 {
+		t.Fatalf("expected 1 registration, got %d", len(regs))
+	}
+
+	expectedExpiry := testutil.FixedTime.Add(24 * time.Hour)
+	if !regs[0].ExpiresAt.Equal(expectedExpiry) {
+		t.Errorf("expires_at = %v, want %v", regs[0].ExpiresAt, expectedExpiry)
+	}
+}
+
+func TestCreateRegistration_AutoAssignsIP(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	inv, err := env.Service.CreateRegistration("testnet", "auto-ip", nil, false, nil)
+	if err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+
+	// First auto-assigned IP should be 10.0.0.2 (10.0.0.0 = network, 10.0.0.1 = server)
+	if inv.Peer.CIDR != "10.1.0.2/24" {
+		t.Errorf("cidr = %q, want 10.1.0.2/24", inv.Peer.CIDR)
+	}
+}
+
+func TestCreateRegistration_ReconcilesRunningInviteDeviceWithHostRoute(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
+		t.Fatalf("start network: %v", err)
+	}
+
+	ip := net.ParseIP("10.0.0.5")
+	inv, err := env.Service.CreateRegistration("testnet", "live-reg", &ip, false, nil)
+	if err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+
+	inviteDev := env.WireGuard.Devices["testnet-i"]
+	if inviteDev == nil {
+		t.Fatal("expected invite device")
+	}
+	peers := inviteDev.AppliedPeers()
+	if len(peers) != 1 {
+		t.Fatalf("invite peers = %d, want 1", len(peers))
+	}
+	if peers[0].PublicKey != inv.Peer.PrivateKey+"-pub" {
+		t.Fatalf("public key = %q, want temp registration public key", peers[0].PublicKey)
+	}
+	if got := peers[0].AllowedIPs; len(got) != 1 || got[0] != "10.1.0.2/32" {
+		t.Fatalf("allowed IPs = %v, want [10.1.0.2/32]", got)
+	}
+}
+
+func TestCreateRegistration_EmptyName(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	ip := net.ParseIP("10.0.0.5")
+	_, err := env.Service.CreateRegistration("testnet", "", &ip, false, nil)
+	if !errors.Is(err, service.ErrInvalidInput) {
+		t.Errorf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestCreateRegistration_NonexistentNetwork(t *testing.T) {
+	env := testutil.SetupService(t)
+
+	ip := net.ParseIP("10.0.0.5")
+	_, err := env.Service.CreateRegistration("nonexistent", "peer", &ip, false, nil)
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRedeemRegistration_Success(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	ip := net.ParseIP("10.0.0.5")
+	_, err := env.Service.CreateRegistration("testnet", "redeemer", &ip, false, nil)
+	if err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	result, err := env.Service.RedeemRegistration("testnet", tempKey, "perm-key-1")
+	if err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	if result.Network.Name != "testnet" {
+		t.Errorf("network_name = %q, want testnet", result.Network.Name)
+	}
+	if result.Peer.CIDR != "10.0.0.5/16" {
+		t.Errorf("cidr = %q, want 10.0.0.5/16", result.Peer.CIDR)
+	}
+	if result.Network.PublicKey == "" {
+		t.Error("server public_key should not be empty")
+	}
+
+	peer, err := env.Service.GetPeer("testnet", "redeemer")
+	if err != nil {
+		t.Fatalf("get redeemed peer: %v", err)
+	}
+	if peer.PublicKey != "perm-key-1" {
+		t.Errorf("public_key = %q, want perm-key-1", peer.PublicKey)
+	}
+	if peer.Cidr != "10.0.0.5/32" {
+		t.Errorf("cidr = %q, want 10.0.0.5/32", peer.Cidr)
+	}
+}
+
+func TestRedeemRegistration_Idempotent_SameKey(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	ip := net.ParseIP("10.0.0.6")
+	_, err := env.Service.CreateRegistration("testnet", "idempotent", &ip, false, nil)
+	if err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	result1, err := env.Service.RedeemRegistration("testnet", tempKey, "perm-key-2")
+	if err != nil {
+		t.Fatalf("first redeem: %v", err)
+	}
+
+	result2, err := env.Service.RedeemRegistration("testnet", tempKey, "perm-key-2")
+	if err != nil {
+		t.Fatalf("second redeem: %v", err)
+	}
+
+	if result1.Peer.CIDR != result2.Peer.CIDR {
+		t.Errorf("results differ: %q vs %q", result1.Peer.CIDR, result2.Peer.CIDR)
+	}
+}
+
+func TestRedeemRegistration_UnknownKey(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	ip := net.ParseIP("10.0.0.5")
+	_, err := env.Service.CreateRegistration("testnet", "peer", &ip, false, nil)
+	if err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+
+	_, err = env.Service.RedeemRegistration("testnet", "unknown-temp-key", "perm-key")
+	if err == nil {
+		t.Fatal("expected error for unknown temp key")
+	}
+}
+
+func TestRedeemRegistration_MultipleRegistrations(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	ipA := net.ParseIP("10.0.0.10")
+	_, err := env.Service.CreateRegistration("testnet", "peer-a", &ipA, false, nil)
+	if err != nil {
+		t.Fatalf("create registration a: %v", err)
+	}
+	tempKey1 := lastTempKey(t, env.Service, "testnet")
+
+	ipB := net.ParseIP("10.0.0.11")
+	_, err = env.Service.CreateRegistration("testnet", "peer-b", &ipB, false, nil)
+	if err != nil {
+		t.Fatalf("create registration b: %v", err)
+	}
+	tempKey2 := lastTempKey(t, env.Service, "testnet")
+
+	_, err = env.Service.RedeemRegistration("testnet", tempKey1, "key-a")
+	if err != nil {
+		t.Fatalf("redeem a: %v", err)
+	}
+
+	_, err = env.Service.RedeemRegistration("testnet", tempKey2, "key-b")
+	if err != nil {
+		t.Fatalf("redeem b: %v", err)
+	}
+
+	peers, err := env.Service.ListPeers("testnet")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(peers) != 3 {
+		t.Fatalf("expected 3 peers (cord-server + peer-a + peer-b), got %d", len(peers))
+	}
+}
+
+func TestRedeemRegistration_ReconcilesRunningDevices(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
+		t.Fatalf("start network: %v", err)
+	}
+	ip := net.ParseIP("10.0.0.5")
+	_, err := env.Service.CreateRegistration("testnet", "live-redeem", &ip, false, nil)
+	if err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, "perm-live-key")
+	if err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	// After redeem, the peer is added to the main device but the temp
+	// peer stays on the invite device so the client can retry if the
+	// response was lost.
+	inviteDev := env.WireGuard.Devices["testnet-i"]
+	if inviteDev == nil {
+		t.Fatal("expected invite device")
+	}
+	if peers := inviteDev.AppliedPeers(); len(peers) != 1 {
+		t.Fatalf("invite peers after redeem = %d, want 1 (temp peer still active)", len(peers))
+	}
+
+	mainDev := env.WireGuard.Devices["testnet"]
+	if mainDev == nil {
+		t.Fatal("expected main device")
+	}
+	var found bool
+	for _, peer := range mainDev.AppliedPeers() {
+		if peer.PublicKey == "perm-live-key" {
+			found = true
+			if got := peer.AllowedIPs; len(got) != 1 || got[0] != "10.0.0.5/32" {
+				t.Fatalf("redeemed peer allowed IPs = %v, want [10.0.0.5/32]", got)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("main device missing redeemed peer")
+	}
+}
+
+func TestListRegistrations_Mixed(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	ipActive := net.ParseIP("10.0.0.20")
+	_, err := env.Service.CreateRegistration("testnet", "active", &ipActive, false, nil)
+	if err != nil {
+		t.Fatalf("create active: %v", err)
+	}
+
+	ipRedeem := net.ParseIP("10.0.0.21")
+	_, err = env.Service.CreateRegistration("testnet", "to-redeem", &ipRedeem, false, nil)
+	if err != nil {
+		t.Fatalf("create to-redeem: %v", err)
+	}
+
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, "redeemed-key")
+	if err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	regs, err := env.Service.ListRegistrations("testnet")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(regs) != 2 {
+		t.Fatalf("expected 2 registrations, got %d", len(regs))
+	}
+
+	var used, active int
+	for _, reg := range regs {
+		if reg.RedeemedKey != "" {
+			used++
+		} else {
+			active++
+		}
+	}
+	if used != 1 {
+		t.Errorf("expected 1 used (redeemed_key set), got %d", used)
+	}
+	if active != 1 {
+		t.Errorf("expected 1 active, got %d", active)
+	}
+	// After redeem, the registration is marked as redeemed but the mere
+	// existence of the record keeps the temp peer on the invite device
+	// so the client can retry if the response was lost. ConfirmPeer
+	// marks it confirmed, removing it from the invite device.
+	for _, reg := range regs {
+		if reg.RedeemedKey != "" && !reg.Redeemed {
+			t.Errorf("registration %q: should be redeemed after RedeemRegistration", reg.Name)
+		}
+		if reg.RedeemedKey == "" && reg.Redeemed {
+			t.Errorf("registration %q: should not be redeemed without redeemed_key", reg.Name)
+		}
+	}
+}
+
+func TestRevokeRegistration_Success(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	ip := net.ParseIP("10.0.0.30")
+	_, err := env.Service.CreateRegistration("testnet", "revoke-me", &ip, false, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if err := env.Service.RevokeRegistration("testnet", "revoke-me"); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	regs, err := env.Service.ListRegistrations("testnet")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(regs) != 0 {
+		t.Errorf("expected 0 registrations after revoke, got %d", len(regs))
+	}
+}
+
+func TestRevokeRegistration_NotFound(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	err := env.Service.RevokeRegistration("testnet", "ghost")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestParseInvitation_Success(t *testing.T) {
+	input := `{
+		"network": {
+			"name": "testnet",
+			"public_key": "server-key",
+			"endpoint": "1.2.3.4:51820",
+			"api_endpoint": "10.0.0.1:8080"
+		},
+		"peer": {
+			"cidr": "10.1.0.2/24",
+			"private_key": "temp-key"
+		}
+	}`
+
+	inv, err := service.ParseInvitation(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	if inv.Network.Name != "testnet" {
+		t.Errorf("network_name = %q, want testnet", inv.Network.Name)
+	}
+	if inv.Peer.PrivateKey != "temp-key" {
+		t.Errorf("private_key = %q, want temp-key", inv.Peer.PrivateKey)
+	}
+	if inv.Peer.CIDR != "10.1.0.2/24" {
+		t.Errorf("cidr = %q, want 10.1.0.2/24", inv.Peer.CIDR)
+	}
+	if inv.Network.PublicKey != "server-key" {
+		t.Errorf("server public_key = %q, want server-key", inv.Network.PublicKey)
+	}
+	if inv.Network.Endpoint != "1.2.3.4:51820" {
+		t.Errorf("endpoint = %q, want 1.2.3.4:51820", inv.Network.Endpoint)
+	}
+	if inv.Network.APIEndpoint != "10.0.0.1:8080" {
+		t.Errorf("api_endpoint = %q, want 10.0.0.1:8080", inv.Network.APIEndpoint)
+	}
+}
+
+func TestParseInvitation_InvalidJSON(t *testing.T) {
+	input := `{not valid json`
+
+	_, err := service.ParseInvitation(bytes.NewReader([]byte(input)))
+	if !errors.Is(err, service.ErrInvalidInput) {
+		t.Errorf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestInvitation_Write(t *testing.T) {
+	inv := &service.Invitation{
+		Network: service.NetworkInfo{
+			Name:        "mynet",
+			PublicKey:   "pub",
+			Endpoint:    "1.2.3.4:51820",
+			APIEndpoint: "10.0.0.1:8080",
+		},
+		Peer: service.PeerIdentity{
+			CIDR:       "10.0.0.5/24",
+			PrivateKey: "priv",
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := inv.Write(&buf); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	var parsed service.Invitation
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("unmarshal written: %v", err)
+	}
+
+	if parsed.Network.Name != "mynet" {
+		t.Errorf("network_name = %q, want mynet", parsed.Network.Name)
+	}
+	if parsed.Network.PublicKey != "pub" {
+		t.Errorf("public_key = %q, want pub", parsed.Network.PublicKey)
+	}
+}
+
+func TestRegistration_Persistence(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	ip := net.ParseIP("10.0.0.5")
+	expiresIn := 2 * time.Hour
+	_, err := env.Service.CreateRegistration("testnet", "persist-test", &ip, true, &expiresIn)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	regs, err := env.Service.ListRegistrations("testnet")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(regs) != 1 {
+		t.Fatalf("expected 1 registration, got %d", len(regs))
+	}
+
+	reg := regs[0]
+	if reg.Name != "persist-test" {
+		t.Errorf("name = %q, want persist-test", reg.Name)
+	}
+	if reg.InvitePublicKey == "" {
+		t.Error("temp_pub_key should not be empty")
+	}
+	if !reg.Admin {
+		t.Error("admin should be true")
+	}
+	if reg.Redeemed {
+		t.Error("should not be redeemed")
+	}
+	if reg.RedeemedKey != "" {
+		t.Errorf("redeemed_key = %q, want empty", reg.RedeemedKey)
+	}
+	if reg.MainIP == nil || reg.MainIP.String() != "10.0.0.5" {
+		t.Errorf("final_ip = %v, want 10.0.0.5", reg.MainIP)
+	}
+	if reg.InviteIP == nil {
+		t.Error("temp_ip should not be nil")
+	}
+	if reg.CreatedAt.IsZero() {
+		t.Error("created_at should not be zero")
+	}
+	if reg.ExpiresAt.IsZero() {
+		t.Error("expires_at should not be zero")
+	}
+}

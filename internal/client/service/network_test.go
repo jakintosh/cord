@@ -84,13 +84,14 @@ func TestListNetworks_WithNetworks(t *testing.T) {
 func TestInstall_Success(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, serverapi.RedeemResultDTO{
-			NetworkName:  "install-me",
-			AssignedCidr: "10.42.0.5/16",
-			Server: serverapi.ServerInfoDTO{
-				PublicKey:        "server-pub-key",
-				ExternalEndpoint: "1.2.3.4:51820",
-				InternalEndpoint: r.Host,
+		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
+			Network: serverapi.NetworkInfoDTO{
+				PublicKey:   "server-pub-key",
+				Endpoint:    "1.2.3.4:51820",
+				APIEndpoint: r.Host,
+			},
+			Peer: serverapi.PeerIdentityDTO{
+				CIDR: "10.42.0.5/16",
 			},
 		})
 	})

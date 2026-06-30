@@ -220,7 +220,7 @@ func (s *Service) BeginInstall(
 func (s *Service) Redeem(
 	name string,
 ) (
-	*serverapi.RedeemResultDTO,
+	*serverapi.InvitationDTO,
 	error,
 ) {
 	network, err := s.store.GetNetwork(name)
@@ -273,7 +273,7 @@ func (s *Service) Redeem(
 	}
 
 	inviteAPI := serverapi.NewClient("", network.InviteServerAddr, s.httpClient)
-	result, err := inviteAPI.RedeemInvite(serverapi.RedeemInviteRequest{
+	result, err := inviteAPI.RedeemInvitation(serverapi.RedeemInvitationRequest{
 		PermPubKey: network.PublicKey,
 	})
 	if err != nil {
@@ -284,10 +284,10 @@ func (s *Service) Redeem(
 
 	if err := s.store.SetNetworkRedeemed(
 		name,
-		result.AssignedCidr,
-		result.Server.PublicKey,
-		result.Server.ExternalEndpoint,
-		result.Server.InternalEndpoint,
+		result.Peer.CIDR,
+		result.Network.PublicKey,
+		result.Network.Endpoint,
+		result.Network.APIEndpoint,
 	); err != nil {
 		return nil, err
 	}

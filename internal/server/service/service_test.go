@@ -12,12 +12,12 @@ func lastTempKey(
 	network string,
 ) string {
 	t.Helper()
-	invites, err := svc.ListInvites(network)
+	regs, err := svc.ListRegistrations(network)
 	if err != nil {
-		t.Fatalf("list invites: %v", err)
+		t.Fatalf("list registrations: %v", err)
 	}
-	if len(invites) == 0 {
-		t.Fatal("no invites found")
+	if len(regs) == 0 {
+		t.Fatal("no registrations found")
 	}
-	return invites[len(invites)-1].InvitePubKey
+	return regs[len(regs)-1].InvitePublicKey
 }

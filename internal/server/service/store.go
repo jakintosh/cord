@@ -104,47 +104,51 @@ type Store interface {
 	// DeleteAssociation removes the association between two CIDRs.
 	DeleteAssociation(network, cidr1, cidr2 string) error
 
-	// Invite records within a network.
+	// Registration records within a network.
 
-	// GetInvite returns an invite by name within the network.
-	GetInvite(network, name string) (*Invite, error)
+	// GetRegistration returns a registration by name within the network.
+	GetRegistration(network, name string) (*Registration, error)
 
-	// GetInviteByIP returns the invite for the given temporary IP
-	// within the network. Expired invites are excluded using now.
-	GetInviteByIP(network string, ip net.IP, now time.Time) (*Invite, error)
+	// GetRegistrationByIP returns the registration for the given
+	// temporary IP within the network. Expired registrations are
+	// excluded using now.
+	GetRegistrationByIP(network string, ip net.IP, now time.Time) (*Registration, error)
 
-	// ListInvites returns all invites in the network (active,
-	// expired, and redeemed).
-	ListInvites(network string) ([]*Invite, error)
+	// ListRegistrations returns all registrations in the network
+	// (active, expired, and redeemed).
+	ListRegistrations(network string) ([]*Registration, error)
 
-	// ListActiveInvites returns only unexpired, unconfirmed invites
-	// in the network.
-	ListActiveInvites(network string, now time.Time) ([]*Invite, error)
+	// ListActiveRegistrations returns only unexpired, unconfirmed
+	// registrations in the network.
+	ListActiveRegistrations(network string, now time.Time) ([]*Registration, error)
 
-	// InsertInvite persists a new invite in the network.
-	InsertInvite(network string, invite *Invite) error
+	// InsertRegistration persists a new registration in the network.
+	InsertRegistration(network string, reg *Registration) error
 
-	// RedeemInvite marks an invite as redeemed with the given
-	// permanent public key. The temporary key is recorded as the
-	// lookup key. now is used to check the invite has not expired.
-	RedeemInvite(network string, tempPubKey, permPubKey string, now time.Time) error
+	// RedeemRegistration marks a registration as redeemed with the
+	// given permanent public key. The temporary key is recorded as
+	// the lookup key. now is used to check the registration has not
+	// expired.
+	RedeemRegistration(network string, tempPubKey, permPubKey string, now time.Time) error
 
-	// ConfirmInvite marks an invite as confirmed.
-	ConfirmInvite(network, name string) error
+	// ConfirmRegistration marks a registration as confirmed.
+	ConfirmRegistration(network, name string) error
 
-	// DeleteInvite removes an invite by name from the network.
-	DeleteInvite(network, name string) error
+	// DeleteRegistration removes a registration by name from the
+	// network.
+	DeleteRegistration(network, name string) error
 
-	// DeleteExpiredInvites removes all invites whose expiration
-	// time is before the given timestamp.
-	DeleteExpiredInvites(network string, before time.Time) error
+	// DeleteExpiredRegistrations removes all registrations whose
+	// expiration time is before the given timestamp.
+	DeleteExpiredRegistrations(network string, before time.Time) error
 
-	// PruneExpiredInvites removes expired unconfirmed invites and
-	// any provisional peer rows whose invite is gone or expired.
-	// Confirmed peers are retained; their invites are retained as
-	// audit state. Called from buildMainPeers and buildInvitePeers
-	// so that both WireGuard peer sets are derived from clean state.
-	PruneExpiredInvites(network string, now time.Time) error
+	// PruneExpiredRegistrations removes expired unconfirmed
+	// registrations and any provisional peer rows whose registration
+	// is gone or expired. Confirmed peers are retained; their
+	// registrations are retained as audit state. Called from
+	// buildMainPeers and buildInvitePeers so that both WireGuard
+	// peer sets are derived from clean state.
+	PruneExpiredRegistrations(network string, now time.Time) error
 
 	// Endpoint records within a network.
 

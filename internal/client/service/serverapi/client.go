@@ -72,20 +72,20 @@ func (c *Client) ReportEndpoints(
 	})
 }
 
-// RedeemInvite calls POST /redeem on the invite API, exchanging a
+// RedeemInvitation calls POST /redeem on the invite API, exchanging a
 // temporary invite key for a permanent peer identity and the main
 // network server details.
-func (c *Client) RedeemInvite(
-	req RedeemInviteRequest,
+func (c *Client) RedeemInvitation(
+	req RedeemInvitationRequest,
 ) (
-	*RedeemResultDTO,
+	*InvitationDTO,
 	error,
 ) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	var result RedeemResultDTO
+	var result InvitationDTO
 	err = withRetry(func() error {
 		return c.invite.Post("/redeem", body, &result)
 	})

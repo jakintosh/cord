@@ -66,18 +66,18 @@ func setupInviteTest(t *testing.T) (*testutil.ServiceEnv, *API) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	// Create an invite directly in the database
-	invite := &service.Invite{
-		Name:         "invitee",
-		InvitePubKey: "temp-key-123",
-		InviteIP:     net.ParseIP("10.1.0.5"),
-		MainIP:       net.ParseIP("10.0.0.50"),
-		ExpiresAt:    time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
-		CreatedAt:    time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC),
+	// Create a registration directly in the database
+	reg := &service.Registration{
+		Name:            "invitee",
+		InvitePublicKey: "temp-key-123",
+		InviteIP:        net.ParseIP("10.1.0.5"),
+		MainIP:          net.ParseIP("10.0.0.50"),
+		ExpiresAt:       time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
+		CreatedAt:       time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC),
 	}
 
-	if err := env.Database.InsertInvite("testnet", invite); err != nil {
-		t.Fatalf("insert invite: %v", err)
+	if err := env.Database.InsertRegistration("testnet", reg); err != nil {
+		t.Fatalf("insert registration: %v", err)
 	}
 
 	api := New(env.Service, "testnet", log.Default())

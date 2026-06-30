@@ -288,7 +288,7 @@ func TestOpenDatabase_TablesExist(t *testing.T) {
 		"cidr",
 		"peer",
 		"association",
-		"invite",
+		"registration",
 		"endpoint",
 	} {
 		var name string

@@ -78,14 +78,14 @@ func TestAPIRouter_ExposesAssociationRoutes(
 	result.ExpectOK(t)
 }
 
-func TestAPIRouter_ExposesInviteRoutes(
+func TestAPIRouter_ExposesRegistrationRoutes(
 	t *testing.T,
 ) {
 	// setup env
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
 
-	// list invites on empty network should return 200
-	result := wire.TestGet[[]admin.InviteDTO](env.Router, "/networks/testnet/invites")
+	// list registrations on empty network should return 200
+	result := wire.TestGet[[]admin.RegistrationDTO](env.Router, "/networks/testnet/registrations")
 	result.ExpectOK(t)
 }

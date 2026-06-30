@@ -12,23 +12,23 @@ func TestAddPeer_AutoAssignsIP(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	invite, err := env.Service.AddPeer("testnet", "alice", nil, false)
+	inv, err := env.Service.AddPeer("testnet", "alice", nil, false)
 	if err != nil {
 		t.Fatalf("add peer: %v", err)
 	}
 
-	if invite == nil {
-		t.Fatal("expected invite, got nil")
+	if inv == nil {
+		t.Fatal("expected invitation, got nil")
 	}
-	if invite.Interface.NetworkName != "testnet" {
-		t.Errorf("network_name = %q, want testnet", invite.Interface.NetworkName)
+	if inv.Network.Name != "testnet" {
+		t.Errorf("network_name = %q, want testnet", inv.Network.Name)
 	}
-	if invite.Interface.PrivateKey == "" {
+	if inv.Peer.PrivateKey == "" {
 		t.Error("private_key should not be empty")
 	}
 	// First auto-assigned IP should be 10.1.0.2 (10.1.0.0 = network, 10.1.0.1 = server)
-	if invite.Interface.AssignedCidr != "10.1.0.2/24" {
-		t.Errorf("assigned_cidr = %q, want 10.1.0.2/24", invite.Interface.AssignedCidr)
+	if inv.Peer.CIDR != "10.1.0.2/24" {
+		t.Errorf("cidr = %q, want 10.1.0.2/24", inv.Peer.CIDR)
 	}
 }
 
@@ -37,15 +37,15 @@ func TestAddPeer_SpecifiedIP(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := "10.0.5.10"
-	invite, err := env.Service.AddPeer("testnet", "bob", &ip, true)
+	inv, err := env.Service.AddPeer("testnet", "bob", &ip, true)
 	if err != nil {
 		t.Fatalf("add peer: %v", err)
 	}
 
-	if invite == nil {
-		t.Fatal("expected invite, got nil")
+	if inv == nil {
+		t.Fatal("expected invitation, got nil")
 	}
-	if invite.Server.PublicKey == "" {
+	if inv.Network.PublicKey == "" {
 		t.Error("server public_key should not be empty")
 	}
 }
@@ -94,12 +94,12 @@ func TestGetPeer_ViaRedeem(t *testing.T) {
 	}
 
 	tempKey := lastTempKey(t, env.Service, "testnet")
-	result, err := env.Service.RedeemInvite("testnet", tempKey, "carol-perm-key")
+	result, err := env.Service.RedeemRegistration("testnet", tempKey, "carol-perm-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
-	if result.NetworkName != "testnet" {
-		t.Errorf("result network = %q, want testnet", result.NetworkName)
+	if result.Network.Name != "testnet" {
+		t.Errorf("result network = %q, want testnet", result.Network.Name)
 	}
 
 	peer, err := env.Service.GetPeer("testnet", "carol")
@@ -158,7 +158,7 @@ func TestListPeers_AfterRedeem(t *testing.T) {
 	}
 	tempKey2 := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.Service.RedeemInvite("testnet", tempKey1, "key1")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey1, "key1")
 	if err != nil {
 		t.Fatalf("redeem peer1: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestRemovePeer_Success(t *testing.T) {
 	}
 
 	tempKey := lastTempKey(t, env.Service, "testnet")
-	_, err = env.Service.RedeemInvite("testnet", tempKey, "removeme-key")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, "removeme-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestUpdatePeer_Rename(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
-	_, err = env.Service.RedeemInvite("testnet", tempKey, "rename-key")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, "rename-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestUpdatePeer_ToggleAdmin(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
-	_, err = env.Service.RedeemInvite("testnet", tempKey, "toggle-key")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, "toggle-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestEnablePeer_Success(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
-	_, err = env.Service.RedeemInvite("testnet", tempKey, "enable-key")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, "enable-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestDisablePeer_Success(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
-	_, err = env.Service.RedeemInvite("testnet", tempKey, "disable-key")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, "disable-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestConfirmPeer_Success(t *testing.T) {
 	}
 
 	tempKey := lastTempKey(t, env.Service, "testnet")
-	_, err = env.Service.RedeemInvite("testnet", tempKey, "confirm-key")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, "confirm-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestListVisiblePeers_ExcludesSelf(t *testing.T) {
 		t.Fatalf("add self: %v", err)
 	}
 	tempKey1 := lastTempKey(t, env.Service, "testnet")
-	_, err = env.Service.RedeemInvite("testnet", tempKey1, "self-key")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey1, "self-key")
 	if err != nil {
 		t.Fatalf("redeem self: %v", err)
 	}
@@ -408,7 +408,7 @@ func TestListVisiblePeers_ExcludesSelf(t *testing.T) {
 		t.Fatalf("add other: %v", err)
 	}
 	tempKey2 := lastTempKey(t, env.Service, "testnet")
-	_, err = env.Service.RedeemInvite("testnet", tempKey2, "other-key")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey2, "other-key")
 	if err != nil {
 		t.Fatalf("redeem other: %v", err)
 	}

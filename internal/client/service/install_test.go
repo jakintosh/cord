@@ -101,19 +101,20 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 	mux := http.NewServeMux()
 	var redeemPubKey string
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
-		var req serverapi.RedeemInviteRequest
+		var req serverapi.RedeemInvitationRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			wire.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		redeemPubKey = req.PermPubKey
-		wire.WriteData(w, http.StatusOK, serverapi.RedeemResultDTO{
-			NetworkName:  "resume-test",
-			AssignedCidr: "10.42.0.5/16",
-			Server: serverapi.ServerInfoDTO{
-				PublicKey:        "server-pub-key",
-				ExternalEndpoint: "1.2.3.4:51820",
-				InternalEndpoint: r.Host,
+		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
+			Network: serverapi.NetworkInfoDTO{
+				PublicKey:   "server-pub-key",
+				Endpoint:    "1.2.3.4:51820",
+				APIEndpoint: r.Host,
+			},
+			Peer: serverapi.PeerIdentityDTO{
+				CIDR: "10.42.0.5/16",
 			},
 		})
 	})
@@ -163,13 +164,14 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 	mux := http.NewServeMux()
 	confirmCalled := false
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, serverapi.RedeemResultDTO{
-			NetworkName:  "res-redeemed",
-			AssignedCidr: "10.42.0.5/16",
-			Server: serverapi.ServerInfoDTO{
-				PublicKey:        "server-pub-key",
-				ExternalEndpoint: "1.2.3.4:51820",
-				InternalEndpoint: r.Host,
+		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
+			Network: serverapi.NetworkInfoDTO{
+				PublicKey:   "server-pub-key",
+				Endpoint:    "1.2.3.4:51820",
+				APIEndpoint: r.Host,
+			},
+			Peer: serverapi.PeerIdentityDTO{
+				CIDR: "10.42.0.5/16",
 			},
 		})
 	})
@@ -219,13 +221,14 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 func TestConfirm_ClearsInstallFields(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, serverapi.RedeemResultDTO{
-			NetworkName:  "clear-test",
-			AssignedCidr: "10.42.0.5/16",
-			Server: serverapi.ServerInfoDTO{
-				PublicKey:        "server-pub-key",
-				ExternalEndpoint: "1.2.3.4:51820",
-				InternalEndpoint: r.Host,
+		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
+			Network: serverapi.NetworkInfoDTO{
+				PublicKey:   "server-pub-key",
+				Endpoint:    "1.2.3.4:51820",
+				APIEndpoint: r.Host,
+			},
+			Peer: serverapi.PeerIdentityDTO{
+				CIDR: "10.42.0.5/16",
 			},
 		})
 	})

@@ -254,17 +254,17 @@ func parseInviteFile(
 		return api.InstallNetworkRequest{}, err
 	}
 
-	var payload server.PeerInvite
+	var payload server.Invitation
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return api.InstallNetworkRequest{}, err
 	}
 
 	return api.InstallNetworkRequest{
-		NetworkName:          payload.Interface.NetworkName,
-		TempPeerPrivKey:      payload.Interface.PrivateKey,
-		TempPeerAssignedCidr: payload.Interface.AssignedCidr,
-		InviteServerPubkey:   payload.Server.PublicKey,
-		InviteServerEndpoint: payload.Server.ExternalEndpoint,
-		InviteServerAddr:     payload.Server.InternalEndpoint,
+		NetworkName:          payload.Network.Name,
+		InviteServerPubkey:   payload.Network.PublicKey,
+		InviteServerEndpoint: payload.Network.Endpoint,
+		InviteServerAddr:     payload.Network.APIEndpoint,
+		TempPeerAssignedCidr: payload.Peer.CIDR,
+		TempPeerPrivKey:      payload.Peer.PrivateKey,
 	}, nil
 }

@@ -532,8 +532,8 @@ func (s *Service) buildMainPeers(
 	[]wireguard.WGPeer,
 	error,
 ) {
-	if err := s.store.PruneExpiredInvites(network, s.clock()); err != nil {
-		return nil, fmt.Errorf("prune expired invites: %w", err)
+	if err := s.store.PruneExpiredRegistrations(network, s.clock()); err != nil {
+		return nil, fmt.Errorf("prune expired registrations: %w", err)
 	}
 
 	peers, err := s.store.ListPeers(network)
@@ -560,28 +560,28 @@ func (s *Service) buildMainPeers(
 }
 
 // buildInvitePeers prunes expired onboarding state, then converts
-// the surviving active invites into WireGuard peer configuration for
-// the invite device.
+// the surviving active registrations into WireGuard peer configuration
+// for the invite device.
 func (s *Service) buildInvitePeers(
 	network string,
 ) (
 	[]wireguard.WGPeer,
 	error,
 ) {
-	if err := s.store.PruneExpiredInvites(network, s.clock()); err != nil {
-		return nil, fmt.Errorf("prune expired invites: %w", err)
+	if err := s.store.PruneExpiredRegistrations(network, s.clock()); err != nil {
+		return nil, fmt.Errorf("prune expired registrations: %w", err)
 	}
 
-	invites, err := s.store.ListActiveInvites(network, s.clock())
+	regs, err := s.store.ListActiveRegistrations(network, s.clock())
 	if err != nil {
-		return nil, fmt.Errorf("list active invites: %w", err)
+		return nil, fmt.Errorf("list active registrations: %w", err)
 	}
 
 	var wgpeers []wireguard.WGPeer
-	for _, invite := range invites {
-		route := netaddr.HostRoute(invite.InviteIP)
+	for _, reg := range regs {
+		route := netaddr.HostRoute(reg.InviteIP)
 		wgpeers = append(wgpeers, wireguard.WGPeer{
-			PublicKey:      invite.InvitePubKey,
+			PublicKey:      reg.InvitePublicKey,
 			AllowedIPs:     []string{route.String()},
 			EndpointPolicy: wireguard.EndpointDynamic,
 		})

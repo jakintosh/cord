@@ -26,18 +26,18 @@ func TestOnboardingLifecycle(t *testing.T) {
 
 	aliceIP := net.ParseIP("10.0.0.5")
 	expiresIn := time.Hour
-	_, err := env.Service.CreateInvite("testnet", "alice", &aliceIP, false, &expiresIn)
+	_, err := env.Service.CreateRegistration("testnet", "alice", &aliceIP, false, &expiresIn)
 	if err != nil {
-		t.Fatalf("create invite: %v", err)
+		t.Fatalf("create registration: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 
-	result, err := env.Service.RedeemInvite("testnet", tempKey, "alice-perm-key")
+	result, err := env.Service.RedeemRegistration("testnet", tempKey, "alice-perm-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
-	if result.AssignedCidr != "10.0.0.5/16" {
-		t.Errorf("assigned_cidr = %q, want 10.0.0.5/16", result.AssignedCidr)
+	if result.Peer.CIDR != "10.0.0.5/16" {
+		t.Errorf("cidr = %q, want 10.0.0.5/16", result.Peer.CIDR)
 	}
 
 	peer, err := env.Service.GetPeer("testnet", "alice")
@@ -127,13 +127,13 @@ func TestConfirmPeer_PreservesDisabledState(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	bobIP := net.ParseIP("10.0.0.6")
-	_, err := env.Service.CreateInvite("testnet", "bob", &bobIP, false, nil)
+	_, err := env.Service.CreateRegistration("testnet", "bob", &bobIP, false, nil)
 	if err != nil {
-		t.Fatalf("create invite: %v", err)
+		t.Fatalf("create registration: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.Service.RedeemInvite("testnet", tempKey, "bob-key")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, "bob-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -160,10 +160,10 @@ func TestConfirmPeer_PreservesDisabledState(t *testing.T) {
 	}
 }
 
-// TestPruneExpiredInvites_RemovesExpiredProvisionalPeer verifies
-// that an expired invite plus its orphaned provisional peer are
+// TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer verifies
+// that an expired registration plus its orphaned provisional peer are
 // pruned when reconciliation runs.
-func TestPruneExpiredInvites_RemovesExpiredProvisionalPeer(t *testing.T) {
+func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
 	now := testutil.FixedTime
 	clock := &mutableClock{t: now}
 	env := testutil.SetupServiceWithClock(t, clock.now)
@@ -175,13 +175,13 @@ func TestPruneExpiredInvites_RemovesExpiredProvisionalPeer(t *testing.T) {
 
 	shortIP := net.ParseIP("10.0.0.7")
 	shortExpiry := time.Hour
-	_, err := env.Service.CreateInvite("testnet", "short-lived", &shortIP, false, &shortExpiry)
+	_, err := env.Service.CreateRegistration("testnet", "short-lived", &shortIP, false, &shortExpiry)
 	if err != nil {
-		t.Fatalf("create invite: %v", err)
+		t.Fatalf("create registration: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.Service.RedeemInvite("testnet", tempKey, "short-lived-key")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, "short-lived-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -203,9 +203,9 @@ func TestPruneExpiredInvites_RemovesExpiredProvisionalPeer(t *testing.T) {
 		t.Errorf("get peer after expiry+reconcile: err = %v, want ErrNotFound", err)
 	}
 
-	_, err = env.Database.GetInvite("testnet", "short-lived")
+	_, err = env.Database.GetRegistration("testnet", "short-lived")
 	if !errors.Is(err, service.ErrNotFound) {
-		t.Errorf("get invite after expiry+reconcile: err = %v, want ErrNotFound", err)
+		t.Errorf("get registration after expiry+reconcile: err = %v, want ErrNotFound", err)
 	}
 
 	mainDev := env.WireGuard.Devices["testnet"]
@@ -217,9 +217,10 @@ func TestPruneExpiredInvites_RemovesExpiredProvisionalPeer(t *testing.T) {
 	}
 }
 
-// TestPruneExpiredInvites_RetainsActiveProvisionalPeer verifies
-// that a provisional peer whose invite is still valid is not pruned.
-func TestPruneExpiredInvites_RetainsActiveProvisionalPeer(t *testing.T) {
+// TestPruneExpiredRegistrations_RetainsActiveProvisionalPeer verifies
+// that a provisional peer whose registration is still valid is not
+// pruned.
+func TestPruneExpiredRegistrations_RetainsActiveProvisionalPeer(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -229,13 +230,13 @@ func TestPruneExpiredInvites_RetainsActiveProvisionalPeer(t *testing.T) {
 
 	stillIP := net.ParseIP("10.0.0.8")
 	stillExpiry := 24 * time.Hour
-	_, err := env.Service.CreateInvite("testnet", "still-active", &stillIP, false, &stillExpiry)
+	_, err := env.Service.CreateRegistration("testnet", "still-active", &stillIP, false, &stillExpiry)
 	if err != nil {
-		t.Fatalf("create invite: %v", err)
+		t.Fatalf("create registration: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.Service.RedeemInvite("testnet", tempKey, "still-active-key")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, "still-active-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -251,9 +252,9 @@ func TestPruneExpiredInvites_RetainsActiveProvisionalPeer(t *testing.T) {
 	}
 }
 
-// TestPruneExpiredInvites_RetainsConfirmedPeerWithoutInvite verifies
-// that a confirmed peer whose invite was deleted is not pruned.
-func TestPruneExpiredInvites_RetainsConfirmedPeerWithoutInvite(t *testing.T) {
+// TestPruneExpiredRegistrations_RetainsConfirmedPeerWithoutInvite verifies
+// that a confirmed peer whose registration was deleted is not pruned.
+func TestPruneExpiredRegistrations_RetainsConfirmedPeerWithoutInvite(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -262,13 +263,13 @@ func TestPruneExpiredInvites_RetainsConfirmedPeerWithoutInvite(t *testing.T) {
 	}
 
 	confirmedIP := net.ParseIP("10.0.0.9")
-	_, err := env.Service.CreateInvite("testnet", "confirmed", &confirmedIP, false, nil)
+	_, err := env.Service.CreateRegistration("testnet", "confirmed", &confirmedIP, false, nil)
 	if err != nil {
-		t.Fatalf("create invite: %v", err)
+		t.Fatalf("create registration: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.Service.RedeemInvite("testnet", tempKey, "confirmed-key")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, "confirmed-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -277,8 +278,8 @@ func TestPruneExpiredInvites_RetainsConfirmedPeerWithoutInvite(t *testing.T) {
 		t.Fatalf("confirm: %v", err)
 	}
 
-	if err := env.Service.RevokeInvite("testnet", "confirmed"); err != nil {
-		t.Fatalf("revoke invite: %v", err)
+	if err := env.Service.RevokeRegistration("testnet", "confirmed"); err != nil {
+		t.Fatalf("revoke registration: %v", err)
 	}
 
 	env.Service.Reconcile("testnet")
@@ -292,9 +293,10 @@ func TestPruneExpiredInvites_RetainsConfirmedPeerWithoutInvite(t *testing.T) {
 	}
 }
 
-// TestPruneExpiredInvites_RetainsConfirmedInviteAsAudit verifies
-// that a confirmed invite is not pruned even after its expiry passes.
-func TestPruneExpiredInvites_RetainsConfirmedInviteAsAudit(t *testing.T) {
+// TestPruneExpiredRegistrations_RetainsConfirmedRegistrationAsAudit verifies
+// that a confirmed registration is not pruned even after its expiry
+// passes.
+func TestPruneExpiredRegistrations_RetainsConfirmedRegistrationAsAudit(t *testing.T) {
 	now := testutil.FixedTime
 	clock := &mutableClock{t: now}
 	env := testutil.SetupServiceWithClock(t, clock.now)
@@ -302,13 +304,13 @@ func TestPruneExpiredInvites_RetainsConfirmedInviteAsAudit(t *testing.T) {
 
 	auditedIP := net.ParseIP("10.0.0.10")
 	auditedExpiry := time.Hour
-	_, err := env.Service.CreateInvite("testnet", "audited", &auditedIP, false, &auditedExpiry)
+	_, err := env.Service.CreateRegistration("testnet", "audited", &auditedIP, false, &auditedExpiry)
 	if err != nil {
-		t.Fatalf("create invite: %v", err)
+		t.Fatalf("create registration: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.Service.RedeemInvite("testnet", tempKey, "audited-key")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, "audited-key")
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -321,12 +323,12 @@ func TestPruneExpiredInvites_RetainsConfirmedInviteAsAudit(t *testing.T) {
 
 	env.Service.Reconcile("testnet")
 
-	inv, err := env.Database.GetInvite("testnet", "audited")
+	reg, err := env.Database.GetRegistration("testnet", "audited")
 	if err != nil {
-		t.Fatalf("get invite after expiry+reconcile: %v", err)
+		t.Fatalf("get registration after expiry+reconcile: %v", err)
 	}
-	if !inv.Confirmed {
-		t.Error("invite should be confirmed")
+	if !reg.Confirmed {
+		t.Error("registration should be confirmed")
 	}
 }
 

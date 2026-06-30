@@ -145,7 +145,7 @@ func (a *API) handleNetworkEnable(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, api.StatusResponse{Status: "enabled"})
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handleNetworkDisable(
@@ -159,7 +159,7 @@ func (a *API) handleNetworkDisable(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, api.StatusResponse{Status: "disabled"})
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (c *Client) ListNetworks(

@@ -277,7 +277,7 @@ func (db *DB) DeletePeer(
 	defer tx.Rollback()
 
 	if _, err := tx.Exec(`
-		DELETE FROM invite
+		DELETE FROM registration
 		WHERE final_ip IN (
 			SELECT ip FROM peer
 			WHERE network_name = ?1 AND name = ?2
@@ -285,7 +285,7 @@ func (db *DB) DeletePeer(
 		network,
 		name,
 	); err != nil {
-		return CheckSqliteErr("delete peer invite", err)
+		return CheckSqliteErr("delete peer registration", err)
 	}
 
 	result, err := tx.Exec(`
