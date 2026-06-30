@@ -16,20 +16,29 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-// UserspaceBackend implements Backend using wireguard-go. The device
-// lives inside this process.
+// userspaceDevice bundles a wireguard-go Device with its TUN.
+type userspaceDevice struct {
+	wg  *device.Device
+	tun tun.Device
+}
+
+// UserspaceBackend implements Backend using wireguard-go. Each device
+// lives inside this process, keyed by name.
 type UserspaceBackend struct {
-	wgDevice  *device.Device
-	tunDevice tun.Device
-	mu        sync.Mutex
+	devices map[string]*userspaceDevice
+	mu      sync.Mutex
 }
 
 func (b *UserspaceBackend) Up(cfg DeviceConfig) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.wgDevice != nil {
-		return b.applyDeviceConfig(cfg)
+	if b.devices == nil {
+		b.devices = make(map[string]*userspaceDevice)
+	}
+
+	if existing, ok := b.devices[cfg.Name]; ok {
+		return b.applyDeviceConfig(existing.wg, cfg)
 	}
 
 	mtu := cfg.MTU
@@ -57,19 +66,19 @@ func (b *UserspaceBackend) Up(cfg DeviceConfig) error {
 	logger := device.NewLogger(device.LogLevelError, fmt.Sprintf("(%s) ", realName))
 	dev := device.NewDevice(tunDev, conn.NewDefaultBind(), logger)
 
-	b.wgDevice = dev
-	b.tunDevice = tunDev
-
-	if err := b.applyDeviceConfig(cfg); err != nil {
-		b.closeLocked()
+	if err := b.applyDeviceConfig(dev, cfg); err != nil {
+		dev.Close()
+		tunDev.Close()
 		return fmt.Errorf("wireguard: apply device config: %w", err)
 	}
 
 	if err := dev.Up(); err != nil {
-		b.closeLocked()
+		dev.Close()
+		tunDev.Close()
 		return fmt.Errorf("wireguard: bring device up: %w", err)
 	}
 
+	b.devices[cfg.Name] = &userspaceDevice{wg: dev, tun: tunDev}
 	return nil
 }
 
@@ -77,11 +86,13 @@ func (b *UserspaceBackend) Down(name string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.wgDevice == nil {
+	d, ok := b.devices[name]
+	if !ok {
 		return nil
 	}
 
-	b.closeLocked()
+	d.wg.Close()
+	delete(b.devices, name)
 	return nil
 }
 
@@ -89,11 +100,13 @@ func (b *UserspaceBackend) Delete(name string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.wgDevice == nil {
+	d, ok := b.devices[name]
+	if !ok {
 		return nil
 	}
 
-	b.closeLocked()
+	d.wg.Close()
+	delete(b.devices, name)
 	return nil
 }
 
@@ -101,11 +114,12 @@ func (b *UserspaceBackend) Status(name string) (*DeviceStatus, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.wgDevice == nil {
+	d, ok := b.devices[name]
+	if !ok {
 		return nil, fmt.Errorf("wireguard: device not running")
 	}
 
-	raw, err := b.wgDevice.IpcGet()
+	raw, err := d.wg.IpcGet()
 	if err != nil {
 		return nil, fmt.Errorf("wireguard: ipc get: %w", err)
 	}
@@ -117,22 +131,15 @@ func (b *UserspaceBackend) ApplyPeerOperations(name string, operations []PeerOpe
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.wgDevice == nil {
+	d, ok := b.devices[name]
+	if !ok {
 		return fmt.Errorf("wireguard: device not running")
 	}
 
-	return b.wgDevice.IpcSet(peerOperationsUAPI(operations))
+	return d.wg.IpcSet(peerOperationsUAPI(operations))
 }
 
-func (b *UserspaceBackend) closeLocked() {
-	if b.wgDevice != nil {
-		b.wgDevice.Close()
-	}
-	b.wgDevice = nil
-	b.tunDevice = nil
-}
-
-func (b *UserspaceBackend) applyDeviceConfig(cfg DeviceConfig) error {
+func (b *UserspaceBackend) applyDeviceConfig(dev *device.Device, cfg DeviceConfig) error {
 	var sb strings.Builder
 
 	fmt.Fprintf(&sb, "private_key=%s\n", hex.EncodeToString(cfg.PrivateKey[:]))
@@ -141,7 +148,7 @@ func (b *UserspaceBackend) applyDeviceConfig(cfg DeviceConfig) error {
 		fmt.Fprintf(&sb, "listen_port=%d\n", cfg.ListenPort)
 	}
 
-	return b.wgDevice.IpcSet(sb.String())
+	return dev.IpcSet(sb.String())
 }
 
 func peerOperationsUAPI(operations []PeerOperation) string {

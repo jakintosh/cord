@@ -31,7 +31,8 @@ type wgDevice struct {
 	status ReconcileStatus
 	logf   func(format string, args ...any)
 
-	mu sync.Mutex
+	mu          sync.Mutex
+	reconcileMu sync.Mutex // serializes the plan→apply window
 }
 
 func newDevice(
@@ -119,6 +120,9 @@ func (d *wgDevice) UpdateEndpoint(pubKey, endpoint string) error {
 	if err != nil {
 		return fmt.Errorf("wireguard: update endpoint: %w", err)
 	}
+
+	d.reconcileMu.Lock()
+	defer d.reconcileMu.Unlock()
 
 	op := PeerOperation{
 		Type:           PeerUpdate,
@@ -308,6 +312,9 @@ func (d *wgDevice) verboselog(format string, args ...any) {
 // reconcile observes the live device, plans changes, and applies
 // only the operations needed to match the desired peer set.
 func (d *wgDevice) reconcile() error {
+	d.reconcileMu.Lock()
+	defer d.reconcileMu.Unlock()
+
 	d.mu.Lock()
 	desired := d.desired
 	backend := d.backend

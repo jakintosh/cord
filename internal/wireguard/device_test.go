@@ -601,3 +601,186 @@ func newTestDevice(t *testing.T, backend Backend) *wgDevice {
 	d.up = true
 	return d
 }
+
+// multiDeviceBackend implements Backend and dispatches by device name,
+// tracking independent state per device. It maintains a live peer map
+// so that Status() reflects applied operations.
+type multiDeviceBackend struct {
+	mu       sync.Mutex
+	devices  map[string]*deviceState
+	applyErr error
+}
+
+type deviceState struct {
+	operations []PeerOperation
+	peers      map[wgtypes.Key]*ObservedPeer
+}
+
+func newMultiDeviceBackend() *multiDeviceBackend {
+	return &multiDeviceBackend{devices: make(map[string]*deviceState)}
+}
+
+func (b *multiDeviceBackend) getOrCreate(name string) *deviceState {
+	d, ok := b.devices[name]
+	if !ok {
+		d = &deviceState{peers: make(map[wgtypes.Key]*ObservedPeer)}
+		b.devices[name] = d
+	}
+	return d
+}
+
+func (b *multiDeviceBackend) Up(cfg DeviceConfig) error { return nil }
+func (b *multiDeviceBackend) Down(name string) error    { return nil }
+func (b *multiDeviceBackend) Delete(name string) error  { return nil }
+
+func (b *multiDeviceBackend) Status(name string) (*DeviceStatus, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	d := b.getOrCreate(name)
+	status := &DeviceStatus{Name: name}
+	for _, p := range d.peers {
+		status.Peers = append(status.Peers, *p)
+	}
+	return status, nil
+}
+
+func (b *multiDeviceBackend) ApplyPeerOperations(name string, ops []PeerOperation) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.applyErr != nil {
+		return b.applyErr
+	}
+	d := b.getOrCreate(name)
+	d.operations = append(d.operations, ops...)
+	for _, op := range ops {
+		switch op.Type {
+		case PeerAdd:
+			d.peers[op.Peer.PublicKey] = &ObservedPeer{
+				PublicKey:  op.Peer.PublicKey,
+				AllowedIPs: op.Peer.AllowedIPs,
+				Endpoint:   op.Peer.Endpoint,
+			}
+		case PeerRemove:
+			delete(d.peers, op.Peer.PublicKey)
+		case PeerUpdate:
+			if existing, ok := d.peers[op.Peer.PublicKey]; ok {
+				if op.UpdateAllowedIPs {
+					existing.AllowedIPs = op.Peer.AllowedIPs
+				}
+				if op.UpdateEndpoint {
+					existing.Endpoint = op.Peer.Endpoint
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (b *multiDeviceBackend) operations(name string) []PeerOperation {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.devices[name].operations
+}
+
+func TestDevice_TwoDeviceIndependence(t *testing.T) {
+	backend := newMultiDeviceBackend()
+
+	k1 := mustGenerateKey(t)
+	k2 := mustGenerateKey(t)
+
+	d1 := newDevice("dev1", k1, net.IPNet{}, 51820, 0, false, backend)
+	d1.up = true
+	d2 := newDevice("dev2", k2, net.IPNet{}, 51821, 0, false, backend)
+	d2.up = true
+
+	peer1 := mustGenerateKey(t)
+	peer2 := mustGenerateKey(t)
+
+	if err := d1.ApplyPeers([]WGPeer{
+		{PublicKey: peer1.String(), AllowedIPs: []string{"10.0.0.1/32"}},
+	}); err != nil {
+		t.Fatalf("d1.ApplyPeers: %v", err)
+	}
+
+	if err := d2.ApplyPeers([]WGPeer{
+		{PublicKey: peer2.String(), AllowedIPs: []string{"10.0.1.1/32"}},
+	}); err != nil {
+		t.Fatalf("d2.ApplyPeers: %v", err)
+	}
+
+	ops1 := backend.operations("dev1")
+	ops2 := backend.operations("dev2")
+
+	if len(ops1) != 1 {
+		t.Fatalf("dev1: expected 1 operation, got %d", len(ops1))
+	}
+	if ops1[0].Peer.PublicKey != peer1 {
+		t.Errorf("dev1: expected peer %s, got %s", shortKey(peer1), shortKey(ops1[0].Peer.PublicKey))
+	}
+
+	if len(ops2) != 1 {
+		t.Fatalf("dev2: expected 1 operation, got %d", len(ops2))
+	}
+	if ops2[0].Peer.PublicKey != peer2 {
+		t.Errorf("dev2: expected peer %s, got %s", shortKey(peer2), shortKey(ops2[0].Peer.PublicKey))
+	}
+
+	if err := d1.Down(); err != nil {
+		t.Fatalf("d1.Down: %v", err)
+	}
+
+	if err := d2.ApplyPeers([]WGPeer{
+		{PublicKey: peer2.String(), AllowedIPs: []string{"10.0.1.1/32"}},
+		{PublicKey: mustGenerateKey(t).String(), AllowedIPs: []string{"10.0.1.2/32"}},
+	}); err != nil {
+		t.Fatalf("d2.ApplyPeers after d1 down: %v", err)
+	}
+
+	ops2 = backend.operations("dev2")
+	if len(ops2) != 2 {
+		t.Fatalf("dev2: expected 2 operations after second apply, got %d", len(ops2))
+	}
+}
+
+func TestDevice_ConcurrentReconcile(t *testing.T) {
+	backend := &testBackend{}
+	d := newTestDevice(t, backend)
+
+	k1 := mustGenerateKey(t)
+	k2 := mustGenerateKey(t)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 50 {
+			d.ApplyPeers([]WGPeer{
+				{PublicKey: k1.String(), AllowedIPs: []string{"10.0.0.1/32"}},
+			})
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 50 {
+			d.ApplyPeers([]WGPeer{
+				{PublicKey: k2.String(), AllowedIPs: []string{"10.0.1.1/32"}},
+			})
+		}
+	}()
+
+	close(start)
+	wg.Wait()
+
+	st := d.ReconcileStatus()
+	if st.Degraded() {
+		t.Error("expected no degradation after concurrent reconciles")
+	}
+	if st.Error != nil {
+		t.Errorf("expected no error, got %v", st.Error)
+	}
+}
