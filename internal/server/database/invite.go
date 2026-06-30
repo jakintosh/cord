@@ -168,8 +168,8 @@ func (db *DB) InsertInvite(
 	network string,
 	invite *service.Invite,
 ) error {
-	tempIP := netaddr.Normalize(invite.TempIP)
-	finalIP := netaddr.Normalize(invite.FinalIP)
+	tempIP := netaddr.Normalize(invite.InviteIP)
+	finalIP := netaddr.Normalize(invite.MainIP)
 
 	_, err := db.Conn.Exec(`
 		INSERT INTO invite (
@@ -188,7 +188,7 @@ func (db *DB) InsertInvite(
 		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
 		network,
 		invite.Name,
-		invite.TempPubKey,
+		invite.InvitePubKey,
 		tempIP,
 		finalIP,
 		boolToInt(invite.Admin),
@@ -396,9 +396,9 @@ func scanInvite(
 	error,
 ) {
 	var name string
-	var tempPubKey string
-	var tempIP []byte
-	var finalIP []byte
+	var invitePubKey string
+	var inviteIP []byte
+	var mainIP []byte
 	var admin int64
 	var redeemed int64
 	var redeemedKey string
@@ -408,9 +408,9 @@ func scanInvite(
 
 	if err := s.Scan(
 		&name,
-		&tempPubKey,
-		&tempIP,
-		&finalIP,
+		&invitePubKey,
+		&inviteIP,
+		&mainIP,
 		&admin,
 		&redeemed,
 		&redeemedKey,
@@ -422,15 +422,15 @@ func scanInvite(
 	}
 
 	return &service.Invite{
-		Name:        name,
-		TempPubKey:  tempPubKey,
-		TempIP:      net.IP(tempIP),
-		FinalIP:     net.IP(finalIP),
-		Admin:       admin != 0,
-		Redeemed:    redeemed != 0,
-		RedeemedKey: redeemedKey,
-		Confirmed:   confirmed != 0,
-		ExpiresAt:   time.Unix(expiresUnix, 0),
-		CreatedAt:   time.Unix(createdUnix, 0),
+		Name:         name,
+		InvitePubKey: invitePubKey,
+		InviteIP:     net.IP(inviteIP),
+		MainIP:       net.IP(mainIP),
+		Admin:        admin != 0,
+		Redeemed:     redeemed != 0,
+		RedeemedKey:  redeemedKey,
+		Confirmed:    confirmed != 0,
+		ExpiresAt:    time.Unix(expiresUnix, 0),
+		CreatedAt:    time.Unix(createdUnix, 0),
 	}, nil
 }

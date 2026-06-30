@@ -12,7 +12,7 @@ import (
 type InviteDTO struct {
 	Name      string `json:"name"`
 	Redeemed  bool   `json:"redeemed"`
-	ExpiresAt string `json:"expires_at,omitempty"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 func InviteDTOFromService(

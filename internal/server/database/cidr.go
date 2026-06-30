@@ -89,7 +89,7 @@ func (db *DB) InsertCidr(
 func (db *DB) UpdateCidr(
 	network string,
 	name string,
-	req service.UpdateCidrRequest,
+	newName string,
 ) (
 	*service.Cidr,
 	error,
@@ -102,7 +102,7 @@ func (db *DB) UpdateCidr(
 		RETURNING name, cidr, length, prefix`,
 		network,
 		name,
-		req.Name,
+		newName,
 	)
 
 	return scanCidr(row)

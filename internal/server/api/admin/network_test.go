@@ -20,9 +20,9 @@ func TestAPICreateNetwork_Success(
 	url := "/networks"
 	body := `{
 		"name": "mynet",
-		"cidr": "10.0.0.0/16",
 		"external_ip": "1.2.3.4",
-		"port": 51820
+		"main_cidr": "10.0.0.0/16",
+		"main_wg_port": 51820
 	}`
 	result := wire.TestPost[admin.NetworkDTO](env.Router, url, body)
 
@@ -31,17 +31,26 @@ func TestAPICreateNetwork_Success(
 	if data.Name != "mynet" {
 		t.Fatalf("name = %q, want mynet", data.Name)
 	}
-	if data.Cidr != "10.0.0.0/16" {
-		t.Fatalf("cidr = %q, want 10.0.0.0/16", data.Cidr)
+	if data.MainCidr != "10.0.0.0/16" {
+		t.Fatalf("cidr = %q, want 10.0.0.0/16", data.MainCidr)
 	}
 	if data.ExternalIP != "1.2.3.4" {
 		t.Fatalf("external_ip = %q, want 1.2.3.4", data.ExternalIP)
 	}
-	if data.Port != 51820 {
-		t.Fatalf("port = %d, want 51820", data.Port)
+	if data.MainWgPort != 51820 {
+		t.Fatalf("port = %d, want 51820", data.MainWgPort)
+	}
+	if data.InviteWgPort != 51821 {
+		t.Fatalf("invite_wg_port = %d, want 51821", data.InviteWgPort)
 	}
 	if data.InviteCidr != "172.16.10.0/24" {
 		t.Fatalf("invite_cidr = %q, want 172.16.10.0/24", data.InviteCidr)
+	}
+	if data.MainApiPort != 80 {
+		t.Fatalf("api_port = %d, want 80", data.MainApiPort)
+	}
+	if data.InviteApiPort != 80 {
+		t.Fatalf("invite_api_port = %d, want 80", data.InviteApiPort)
 	}
 
 	// verify network exists in store
@@ -64,12 +73,13 @@ func TestAPICreateNetwork_WithAllFields(
 	url := "/networks"
 	body := `{
 		"name": "fullnet",
-		"cidr": "10.0.0.0/16",
+		"main_cidr": "10.0.0.0/16",
 		"invite_cidr": "10.1.0.0/24",
 		"external_ip": "1.2.3.4",
-		"port": 51820,
-		"invite_port": 51821,
-		"api_port": 8080
+		"main_wg_port": 51820,
+		"invite_wg_port": 51821,
+		"main_api_port": 8080,
+		"invite_api_port": 8080
 	}`
 	result := wire.TestPost[admin.NetworkDTO](env.Router, url, body)
 
@@ -77,6 +87,15 @@ func TestAPICreateNetwork_WithAllFields(
 	data := result.ExpectStatusOK(t, http.StatusCreated)
 	if data.InviteCidr != "10.1.0.0/24" {
 		t.Fatalf("invite_cidr = %q, want 10.1.0.0/24", data.InviteCidr)
+	}
+	if data.MainApiPort != 8080 {
+		t.Fatalf("api_port = %d, want 8080", data.MainApiPort)
+	}
+	if data.InviteApiPort != 8080 {
+		t.Fatalf("invite_api_port = %d, want 8080", data.InviteApiPort)
+	}
+	if data.InviteWgPort != 51821 {
+		t.Fatalf("invite_wg_port = %d, want 51821", data.InviteWgPort)
 	}
 }
 
@@ -183,9 +202,9 @@ func TestAPICreateNetwork_DuplicateName(
 	url := "/networks"
 	body := `{
 		"name": "testnet",
-		"cidr": "10.42.0.0/16",
 		"external_ip": "1.2.3.4",
-		"port": 51820
+		"main_cidr": "10.42.0.0/16",
+		"main_wg_port": 51820
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 
@@ -247,14 +266,17 @@ func TestAPIShowNetwork_Success(
 	if data.Name != "testnet" {
 		t.Fatalf("name = %q, want testnet", data.Name)
 	}
-	if data.Cidr != "10.0.0.0/16" {
-		t.Fatalf("cidr = %q, want 10.0.0.0/16", data.Cidr)
+	if data.MainCidr != "10.0.0.0/16" {
+		t.Fatalf("cidr = %q, want 10.0.0.0/16", data.MainCidr)
 	}
 	if data.ExternalIP != "192.168.1.1" {
 		t.Fatalf("external_ip = %q, want 192.168.1.1", data.ExternalIP)
 	}
-	if data.Port != 51820 {
-		t.Fatalf("port = %d, want 51820", data.Port)
+	if data.MainWgPort != 51820 {
+		t.Fatalf("port = %d, want 51820", data.MainWgPort)
+	}
+	if data.InviteWgPort != 51821 {
+		t.Fatalf("invite_wg_port = %d, want 51821", data.InviteWgPort)
 	}
 }
 

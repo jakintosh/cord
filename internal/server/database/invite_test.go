@@ -14,16 +14,17 @@ func seedNetworkForInvite(t *testing.T, db *database.DB) {
 	t.Helper()
 	now := time.Now()
 	if err := db.BootstrapNetwork(&service.Network{
-		Name:             "invitenet",
-		PrivateKey:       "priv",
-		PublicKey:        "pub",
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.1.0.0/24",
-		ExternalIP:       "1.1.1.1",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-		CreatedAt:        now,
+		Name:                "invitenet",
+		PrivateKey:          "priv",
+		PublicKey:           "pub",
+		MainCidr:            "10.0.0.0/16",
+		InviteCidr:          "10.1.0.0/24",
+		ExternalIP:          "1.1.1.1",
+		MainWireguardPort:   51820,
+		InviteWireguardPort: 51821,
+		MainApiPort:         80,
+		InviteApiPort:       80,
+		CreatedAt:           now,
 	}, &service.Cidr{Name: "invitenet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
@@ -36,15 +37,15 @@ func TestInsertAndGetInvite(t *testing.T) {
 	now := time.Now()
 	expires := now.Add(24 * time.Hour)
 	inv := &service.Invite{
-		Name:        "invite-1",
-		TempPubKey:  "temp-key-1",
-		TempIP:      net.IPv4(10, 1, 0, 1),
-		FinalIP:     net.IPv4(10, 0, 5, 1),
-		Admin:       true,
-		Redeemed:    false,
-		RedeemedKey: "",
-		ExpiresAt:   expires,
-		CreatedAt:   now,
+		Name:         "invite-1",
+		InvitePubKey: "temp-key-1",
+		InviteIP:     net.IPv4(10, 1, 0, 1),
+		MainIP:       net.IPv4(10, 0, 5, 1),
+		Admin:        true,
+		Redeemed:     false,
+		RedeemedKey:  "",
+		ExpiresAt:    expires,
+		CreatedAt:    now,
 	}
 
 	if err := db.InsertInvite("invitenet", inv); err != nil {
@@ -59,14 +60,14 @@ func TestInsertAndGetInvite(t *testing.T) {
 	if got.Name != inv.Name {
 		t.Errorf("name = %q, want %q", got.Name, inv.Name)
 	}
-	if got.TempPubKey != inv.TempPubKey {
-		t.Errorf("temp_pub_key = %q, want %q", got.TempPubKey, inv.TempPubKey)
+	if got.InvitePubKey != inv.InvitePubKey {
+		t.Errorf("temp_pub_key = %q, want %q", got.InvitePubKey, inv.InvitePubKey)
 	}
-	if !got.TempIP.Equal(inv.TempIP) {
-		t.Errorf("temp_ip = %v, want %v", got.TempIP, inv.TempIP)
+	if !got.InviteIP.Equal(inv.InviteIP) {
+		t.Errorf("temp_ip = %v, want %v", got.InviteIP, inv.InviteIP)
 	}
-	if !got.FinalIP.Equal(inv.FinalIP) {
-		t.Errorf("final_ip = %v, want %v", got.FinalIP, inv.FinalIP)
+	if !got.MainIP.Equal(inv.MainIP) {
+		t.Errorf("final_ip = %v, want %v", got.MainIP, inv.MainIP)
 	}
 	if got.Admin != inv.Admin {
 		t.Errorf("admin = %v, want %v", got.Admin, inv.Admin)
@@ -99,13 +100,13 @@ func TestGetInviteByIP(t *testing.T) {
 	now := time.Now()
 	expires := now.Add(24 * time.Hour)
 	if err := db.InsertInvite("invitenet", &service.Invite{
-		Name:       "ip-invite",
-		TempPubKey: "ip-key",
-		TempIP:     net.IPv4(10, 1, 0, 10),
-		FinalIP:    net.IPv4(10, 0, 5, 10),
-		Admin:      false,
-		ExpiresAt:  expires,
-		CreatedAt:  now,
+		Name:         "ip-invite",
+		InvitePubKey: "ip-key",
+		InviteIP:     net.IPv4(10, 1, 0, 10),
+		MainIP:       net.IPv4(10, 0, 5, 10),
+		Admin:        false,
+		ExpiresAt:    expires,
+		CreatedAt:    now,
 	}); err != nil {
 		t.Fatalf("insert invite: %v", err)
 	}
@@ -137,14 +138,14 @@ func TestListInvites(t *testing.T) {
 	now := time.Now()
 	expires := now.Add(24 * time.Hour)
 	if err := db.InsertInvite("invitenet", &service.Invite{
-		Name: "zzz", TempPubKey: "z-key", TempIP: net.IPv4(10, 1, 0, 1),
-		FinalIP: net.IPv4(10, 0, 5, 1), ExpiresAt: expires, CreatedAt: now,
+		Name: "zzz", InvitePubKey: "z-key", InviteIP: net.IPv4(10, 1, 0, 1),
+		MainIP: net.IPv4(10, 0, 5, 1), ExpiresAt: expires, CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("insert zzz: %v", err)
 	}
 	if err := db.InsertInvite("invitenet", &service.Invite{
-		Name: "aaa", TempPubKey: "a-key", TempIP: net.IPv4(10, 1, 0, 2),
-		FinalIP: net.IPv4(10, 0, 5, 2), ExpiresAt: expires, CreatedAt: now.Add(time.Minute),
+		Name: "aaa", InvitePubKey: "a-key", InviteIP: net.IPv4(10, 1, 0, 2),
+		MainIP: net.IPv4(10, 0, 5, 2), ExpiresAt: expires, CreatedAt: now.Add(time.Minute),
 	}); err != nil {
 		t.Fatalf("insert aaa: %v", err)
 	}
@@ -168,14 +169,14 @@ func TestListActiveInvites(t *testing.T) {
 
 	now := time.Now()
 	if err := db.InsertInvite("invitenet", &service.Invite{
-		Name: "active", TempPubKey: "act-key", TempIP: net.IPv4(10, 1, 0, 1),
-		FinalIP: net.IPv4(10, 0, 5, 1), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
+		Name: "active", InvitePubKey: "act-key", InviteIP: net.IPv4(10, 1, 0, 1),
+		MainIP: net.IPv4(10, 0, 5, 1), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("insert active: %v", err)
 	}
 	if err := db.InsertInvite("invitenet", &service.Invite{
-		Name: "expired", TempPubKey: "exp-key", TempIP: net.IPv4(10, 1, 0, 2),
-		FinalIP: net.IPv4(10, 0, 5, 2), ExpiresAt: now.Add(-1 * time.Hour), CreatedAt: now,
+		Name: "expired", InvitePubKey: "exp-key", InviteIP: net.IPv4(10, 1, 0, 2),
+		MainIP: net.IPv4(10, 0, 5, 2), ExpiresAt: now.Add(-1 * time.Hour), CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("insert expired: %v", err)
 	}
@@ -198,8 +199,8 @@ func TestListActiveInvites_IncludesRedeemed(t *testing.T) {
 
 	now := time.Now()
 	if err := db.InsertInvite("invitenet", &service.Invite{
-		Name: "redeemed-one", TempPubKey: "red-key", TempIP: net.IPv4(10, 1, 0, 1),
-		FinalIP: net.IPv4(10, 0, 5, 1), Redeemed: true, RedeemedKey: "perm-key",
+		Name: "redeemed-one", InvitePubKey: "red-key", InviteIP: net.IPv4(10, 1, 0, 1),
+		MainIP: net.IPv4(10, 0, 5, 1), Redeemed: true, RedeemedKey: "perm-key",
 		ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("insert redeemed: %v", err)
@@ -223,8 +224,8 @@ func TestDeleteInvite(t *testing.T) {
 
 	now := time.Now()
 	if err := db.InsertInvite("invitenet", &service.Invite{
-		Name: "delme", TempPubKey: "del-key", TempIP: net.IPv4(10, 1, 0, 99),
-		FinalIP: net.IPv4(10, 0, 5, 99), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
+		Name: "delme", InvitePubKey: "del-key", InviteIP: net.IPv4(10, 1, 0, 99),
+		MainIP: net.IPv4(10, 0, 5, 99), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("insert invite: %v", err)
 	}
@@ -255,14 +256,14 @@ func TestDeleteExpiredInvites(t *testing.T) {
 
 	now := time.Now()
 	if err := db.InsertInvite("invitenet", &service.Invite{
-		Name: "old", TempPubKey: "old-key", TempIP: net.IPv4(10, 1, 0, 1),
-		FinalIP: net.IPv4(10, 0, 5, 1), ExpiresAt: now.Add(-2 * time.Hour), CreatedAt: now,
+		Name: "old", InvitePubKey: "old-key", InviteIP: net.IPv4(10, 1, 0, 1),
+		MainIP: net.IPv4(10, 0, 5, 1), ExpiresAt: now.Add(-2 * time.Hour), CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("insert old: %v", err)
 	}
 	if err := db.InsertInvite("invitenet", &service.Invite{
-		Name: "new", TempPubKey: "new-key", TempIP: net.IPv4(10, 1, 0, 2),
-		FinalIP: net.IPv4(10, 0, 5, 2), ExpiresAt: now.Add(2 * time.Hour), CreatedAt: now,
+		Name: "new", InvitePubKey: "new-key", InviteIP: net.IPv4(10, 1, 0, 2),
+		MainIP: net.IPv4(10, 0, 5, 2), ExpiresAt: now.Add(2 * time.Hour), CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("insert new: %v", err)
 	}
@@ -289,8 +290,8 @@ func TestUpdateInviteRedemption(t *testing.T) {
 
 	now := time.Now()
 	if err := db.InsertInvite("invitenet", &service.Invite{
-		Name: "redeem-me", TempPubKey: "temp-invite-key", TempIP: net.IPv4(10, 1, 0, 1),
-		FinalIP: net.IPv4(10, 0, 5, 1), Admin: true, ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
+		Name: "redeem-me", InvitePubKey: "temp-invite-key", InviteIP: net.IPv4(10, 1, 0, 1),
+		MainIP: net.IPv4(10, 0, 5, 1), Admin: true, ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("insert invite: %v", err)
 	}
@@ -345,8 +346,8 @@ func TestUpdateInviteRedemption_DoubleRedeem(t *testing.T) {
 
 	now := time.Now()
 	if err := db.InsertInvite("invitenet", &service.Invite{
-		Name: "redeem-twice", TempPubKey: "twice-key", TempIP: net.IPv4(10, 1, 0, 1),
-		FinalIP: net.IPv4(10, 0, 5, 1), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
+		Name: "redeem-twice", InvitePubKey: "twice-key", InviteIP: net.IPv4(10, 1, 0, 1),
+		MainIP: net.IPv4(10, 0, 5, 1), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("insert invite: %v", err)
 	}
@@ -367,16 +368,16 @@ func TestInsertInvite_DuplicateName(t *testing.T) {
 
 	now := time.Now()
 	inv := &service.Invite{
-		Name: "dup", TempPubKey: "key-a", TempIP: net.IPv4(10, 1, 0, 1),
-		FinalIP: net.IPv4(10, 0, 5, 1), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
+		Name: "dup", InvitePubKey: "key-a", InviteIP: net.IPv4(10, 1, 0, 1),
+		MainIP: net.IPv4(10, 0, 5, 1), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
 	}
 	if err := db.InsertInvite("invitenet", inv); err != nil {
 		t.Fatalf("first insert: %v", err)
 	}
 
-	inv.TempPubKey = "key-b"
-	inv.TempIP = net.IPv4(10, 1, 0, 2)
-	inv.FinalIP = net.IPv4(10, 0, 5, 2)
+	inv.InvitePubKey = "key-b"
+	inv.InviteIP = net.IPv4(10, 1, 0, 2)
+	inv.MainIP = net.IPv4(10, 0, 5, 2)
 	err := db.InsertInvite("invitenet", inv)
 	if err == nil {
 		t.Fatal("expected error for duplicate invite name")

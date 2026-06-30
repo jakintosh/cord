@@ -72,10 +72,7 @@ func (e *APIEnv) SeedCIDR(
 ) *service.Cidr {
 	t.Helper()
 
-	if err := e.Service.AddCidr(network, service.CreateCidrRequest{
-		Name: name,
-		Cidr: cidr,
-	}); err != nil {
+	if err := e.Service.CreateCidr(network, name, cidr); err != nil {
 		t.Fatalf("seed cidr %s: %v", name, err)
 	}
 

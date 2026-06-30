@@ -9,23 +9,30 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
-var DefaultNetwork = service.Network{
-	Name:             "testnet",
-	MainCidr:         "10.0.0.0/16",
-	InviteCidr:       "10.1.0.0/24",
-	ExternalIP:       "192.168.1.1",
-	ListenPort:       51820,
-	InviteListenPort: 51821,
-	ApiPort:          8080,
-}
-
 func SeedNetwork(
 	t *testing.T,
 	svc *service.Service,
 ) *service.Network {
 	t.Helper()
 
-	nw, err := svc.CreateNetwork(DefaultNetwork)
+	mainWgPort := uint16(51820)
+	mainAPIPort := uint16(80)
+	inviteWgPort := uint16(51821)
+	inviteAPIPort := uint16(80)
+	inviteCidr := "10.1.0.0/24"
+
+	nw, err := svc.CreateNetwork(
+		"testnet",
+		"192.168.1.1",
+		"10.0.0.0/16",
+		nil,
+		&mainWgPort,
+		&mainAPIPort,
+		nil,
+		&inviteCidr,
+		&inviteWgPort,
+		&inviteAPIPort,
+	)
 	if err != nil {
 		t.Fatalf("seed network: %v", err)
 	}

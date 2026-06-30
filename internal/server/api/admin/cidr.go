@@ -74,10 +74,7 @@ func (a *API) handleCidrAdd(
 		return
 	}
 
-	if err := a.service.AddCidr(network, service.CreateCidrRequest{
-		Name: req.Name,
-		Cidr: req.Cidr,
-	}); err != nil {
+	if err := a.service.CreateCidr(network, req.Name, req.Cidr); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -101,9 +98,7 @@ func (a *API) handleCidrRename(
 		return
 	}
 
-	if err := a.service.UpdateCidr(network, cidr, service.UpdateCidrRequest{
-		Name: req.Name,
-	}); err != nil {
+	if err := a.service.UpdateCidr(network, cidr, req.Name); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -120,7 +115,7 @@ func (a *API) handleCidrDelete(
 	network := r.PathValue("name")
 	cidr := r.PathValue("cidr")
 
-	if err := a.service.RemoveCidr(network, cidr); err != nil {
+	if err := a.service.DeleteCidr(network, cidr); err != nil {
 		writeServiceError(w, err)
 		return
 	}

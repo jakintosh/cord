@@ -12,34 +12,47 @@ import (
 )
 
 type NetworkDTO struct {
-	Name       string `json:"name"`
-	Cidr       string `json:"cidr"`
-	ExternalIP string `json:"external_ip"`
-	Port       uint16 `json:"port"`
-	InviteCidr string `json:"invite_cidr,omitempty"`
-	Enabled    bool   `json:"enabled"`
+	Name          string `json:"name"`
+	ExternalIP    string `json:"external_ip"`
+	MainName      string `json:"main_name"`
+	MainCidr      string `json:"main_cidr"`
+	MainWgPort    uint16 `json:"main_wg_port"`
+	MainApiPort   uint16 `json:"main_api_port"`
+	InviteName    string `json:"invite_name"`
+	InviteCidr    string `json:"invite_cidr"`
+	InviteWgPort  uint16 `json:"invite_wg_port"`
+	InviteApiPort uint16 `json:"invite_api_port"`
+	Enabled       bool   `json:"enabled"`
 }
 
 type AddNetworkRequest struct {
-	Name       string `json:"name"`
-	Cidr       string `json:"cidr"`
-	InviteCidr string `json:"invite_cidr"`
-	ExternalIP string `json:"external_ip"`
-	Port       uint16 `json:"port"`
-	InvitePort uint16 `json:"invite_port"`
-	ApiPort    uint16 `json:"api_port"`
+	Name          string  `json:"name"`
+	ExternalIP    string  `json:"external_ip"`
+	MainName      *string `json:"main_name,omitempty"`
+	MainCidr      string  `json:"main_cidr"`
+	MainWgPort    *uint16 `json:"main_wg_port,omitempty"`
+	MainApiPort   *uint16 `json:"main_api_port,omitempty"`
+	InviteName    *string `json:"invite_name,omitempty"`
+	InviteCidr    *string `json:"invite_cidr,omitempty"`
+	InviteWgPort  *uint16 `json:"invite_wg_port,omitempty"`
+	InviteApiPort *uint16 `json:"invite_api_port,omitempty"`
 }
 
 func NetworkDTOFromService(
 	n service.Network,
 ) NetworkDTO {
 	return NetworkDTO{
-		Name:       n.Name,
-		Cidr:       n.MainCidr,
-		ExternalIP: n.ExternalIP,
-		Port:       n.ListenPort,
-		InviteCidr: n.InviteCidr,
-		Enabled:    n.Enabled,
+		Name:          n.Name,
+		ExternalIP:    n.ExternalIP,
+		MainName:      n.MainName,
+		MainCidr:      n.MainCidr,
+		MainWgPort:    n.MainWireguardPort,
+		MainApiPort:   n.MainApiPort,
+		InviteName:    n.InviteName,
+		InviteCidr:    n.InviteCidr,
+		InviteWgPort:  n.InviteWireguardPort,
+		InviteApiPort: n.InviteApiPort,
+		Enabled:       n.Enabled,
 	}
 }
 
@@ -65,13 +78,13 @@ func (a *API) handleNetworkShow(
 ) {
 	name := r.PathValue("name")
 
-	nw, err := a.service.GetNetwork(name)
+	network, err := a.service.GetNetwork(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*nw))
+	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*network))
 }
 
 func (a *API) handleNetworkAdd(
@@ -84,23 +97,24 @@ func (a *API) handleNetworkAdd(
 		return
 	}
 
-	cfg := service.Network{
-		Name:             req.Name,
-		MainCidr:         req.Cidr,
-		InviteCidr:       req.InviteCidr,
-		ExternalIP:       req.ExternalIP,
-		ListenPort:       req.Port,
-		InviteListenPort: req.InvitePort,
-		ApiPort:          req.ApiPort,
-	}
-
-	nw, err := a.service.CreateNetwork(cfg)
+	network, err := a.service.CreateNetwork(
+		req.Name,
+		req.ExternalIP,
+		req.MainCidr,
+		req.MainName,
+		req.MainWgPort,
+		req.MainApiPort,
+		req.InviteName,
+		req.InviteCidr,
+		req.InviteWgPort,
+		req.InviteApiPort,
+	)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusCreated, NetworkDTOFromService(*nw))
+	wire.WriteData(w, http.StatusCreated, NetworkDTOFromService(*network))
 }
 
 func (a *API) handleNetworkDelete(

@@ -12,10 +12,7 @@ func TestAddCidr_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	err := env.Service.AddCidr("testnet", service.CreateCidrRequest{
-		Name: "lan",
-		Cidr: "10.0.1.0/24",
-	})
+	err := env.Service.CreateCidr("testnet", "lan", "10.0.1.0/24")
 	if err != nil {
 		t.Fatalf("add cidr: %v", err)
 	}
@@ -43,10 +40,7 @@ func TestAddCidr_EmptyName(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	err := env.Service.AddCidr("testnet", service.CreateCidrRequest{
-		Name: "",
-		Cidr: "10.0.1.0/24",
-	})
+	err := env.Service.CreateCidr("testnet", "", "10.0.1.0/24")
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
@@ -56,10 +50,7 @@ func TestAddCidr_InvalidFormat(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	err := env.Service.AddCidr("testnet", service.CreateCidrRequest{
-		Name: "bad",
-		Cidr: "not-a-cidr",
-	})
+	err := env.Service.CreateCidr("testnet", "bad", "not-a-cidr")
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
@@ -69,10 +60,7 @@ func TestAddCidr_NotContainedInRoot(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	err := env.Service.AddCidr("testnet", service.CreateCidrRequest{
-		Name: "outside",
-		Cidr: "192.168.1.0/24",
-	})
+	err := env.Service.CreateCidr("testnet", "outside", "192.168.1.0/24")
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
@@ -82,17 +70,11 @@ func TestAddCidr_Overlap(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Service.AddCidr("testnet", service.CreateCidrRequest{
-		Name: "first",
-		Cidr: "10.0.1.0/24",
-	}); err != nil {
+	if err := env.Service.CreateCidr("testnet", "first", "10.0.1.0/24"); err != nil {
 		t.Fatalf("first add: %v", err)
 	}
 
-	err := env.Service.AddCidr("testnet", service.CreateCidrRequest{
-		Name: "second",
-		Cidr: "10.0.1.0/24",
-	})
+	err := env.Service.CreateCidr("testnet", "second", "10.0.1.0/24")
 	if !errors.Is(err, service.ErrConflict) {
 		t.Errorf("err = %v, want ErrConflict", err)
 	}
@@ -101,10 +83,7 @@ func TestAddCidr_Overlap(t *testing.T) {
 func TestAddCidr_NonexistentNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	err := env.Service.AddCidr("nonexistent", service.CreateCidrRequest{
-		Name: "lan",
-		Cidr: "10.0.1.0/24",
-	})
+	err := env.Service.CreateCidr("nonexistent", "lan", "10.0.1.0/24")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
@@ -137,16 +116,10 @@ func TestListCidrs_Multiple(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Service.AddCidr("testnet", service.CreateCidrRequest{
-		Name: "beta",
-		Cidr: "10.0.2.0/24",
-	}); err != nil {
+	if err := env.Service.CreateCidr("testnet", "beta", "10.0.2.0/24"); err != nil {
 		t.Fatalf("add beta: %v", err)
 	}
-	if err := env.Service.AddCidr("testnet", service.CreateCidrRequest{
-		Name: "alpha",
-		Cidr: "10.0.1.0/24",
-	}); err != nil {
+	if err := env.Service.CreateCidr("testnet", "alpha", "10.0.1.0/24"); err != nil {
 		t.Fatalf("add alpha: %v", err)
 	}
 
@@ -166,14 +139,11 @@ func TestRemoveCidr_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Service.AddCidr("testnet", service.CreateCidrRequest{
-		Name: "removeme",
-		Cidr: "10.0.1.0/24",
-	}); err != nil {
+	if err := env.Service.CreateCidr("testnet", "removeme", "10.0.1.0/24"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 
-	if err := env.Service.RemoveCidr("testnet", "removeme"); err != nil {
+	if err := env.Service.DeleteCidr("testnet", "removeme"); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 
@@ -187,7 +157,7 @@ func TestRemoveCidr_NotFound(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	err := env.Service.RemoveCidr("testnet", "ghost")
+	err := env.Service.DeleteCidr("testnet", "ghost")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
@@ -197,16 +167,11 @@ func TestUpdateCidr_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Service.AddCidr("testnet", service.CreateCidrRequest{
-		Name: "old-name",
-		Cidr: "10.0.1.0/24",
-	}); err != nil {
+	if err := env.Service.CreateCidr("testnet", "old-name", "10.0.1.0/24"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 
-	err := env.Service.UpdateCidr("testnet", "old-name", service.UpdateCidrRequest{
-		Name: "new-name",
-	})
+	err := env.Service.UpdateCidr("testnet", "old-name", "new-name")
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -224,16 +189,11 @@ func TestUpdateCidr_EmptyName(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Service.AddCidr("testnet", service.CreateCidrRequest{
-		Name: "cidr1",
-		Cidr: "10.0.1.0/24",
-	}); err != nil {
+	if err := env.Service.CreateCidr("testnet", "cidr1", "10.0.1.0/24"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 
-	err := env.Service.UpdateCidr("testnet", "cidr1", service.UpdateCidrRequest{
-		Name: "",
-	})
+	err := env.Service.UpdateCidr("testnet", "cidr1", "")
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}

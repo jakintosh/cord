@@ -44,7 +44,7 @@ func (a *API) ResolveIdentity(ip net.IP) (*identity.Peer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve invite identity: %w", err)
 	}
-	return &identity.Peer{PublicKey: inv.TempPubKey, Name: inv.Name}, nil
+	return &identity.Peer{PublicKey: inv.InvitePubKey, Name: inv.Name}, nil
 }
 
 func (a *API) Router() http.Handler {

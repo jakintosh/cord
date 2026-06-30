@@ -14,16 +14,17 @@ func seedNetwork(t *testing.T, db *database.DB) {
 	t.Helper()
 	now := time.Now()
 	if err := db.BootstrapNetwork(&service.Network{
-		Name:             "testnet",
-		PrivateKey:       "priv-test",
-		PublicKey:        "pub-test",
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.1.0.0/24",
-		ExternalIP:       "192.168.1.1",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-		CreatedAt:        now,
+		Name:                "testnet",
+		PrivateKey:          "priv-test",
+		PublicKey:           "pub-test",
+		MainCidr:            "10.0.0.0/16",
+		InviteCidr:          "10.1.0.0/24",
+		ExternalIP:          "192.168.1.1",
+		MainWireguardPort:   51820,
+		InviteWireguardPort: 51821,
+		MainApiPort:         80,
+		InviteApiPort:       80,
+		CreatedAt:           now,
 	}, &service.Cidr{Name: "testnet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub-test", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
@@ -266,16 +267,17 @@ func TestInsertPeer_SameNameDifferentNetwork(t *testing.T) {
 
 	now := time.Now()
 	if err := db.BootstrapNetwork(&service.Network{
-		Name:             "net2",
-		PrivateKey:       "priv2",
-		PublicKey:        "pub2",
-		MainCidr:         "172.16.0.0/16",
-		InviteCidr:       "172.17.0.0/24",
-		ExternalIP:       "1.1.1.2",
-		ListenPort:       51822,
-		InviteListenPort: 51823,
-		ApiPort:          8081,
-		CreatedAt:        now,
+		Name:                "net2",
+		PrivateKey:          "priv2",
+		PublicKey:           "pub2",
+		MainCidr:            "172.16.0.0/16",
+		InviteCidr:          "172.17.0.0/24",
+		ExternalIP:          "1.1.1.2",
+		MainWireguardPort:   51822,
+		InviteWireguardPort: 51823,
+		MainApiPort:         8081,
+		InviteApiPort:       8082,
+		CreatedAt:           now,
 	}, &service.Cidr{Name: "net2", Cidr: "172.16.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "172.16.0.1/32", PublicKey: "pub2", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("insert net2: %v", err)
 	}
@@ -350,9 +352,7 @@ func TestUpdatePeer_Rename(t *testing.T) {
 	}
 
 	newName := "new-name"
-	peer, err := db.UpdatePeer("testnet", "old-name", service.UpdatePeerRequest{
-		Name: &newName,
-	})
+	peer, err := db.UpdatePeer("testnet", "old-name", &newName, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("update peer: %v", err)
 	}
@@ -383,9 +383,7 @@ func TestUpdatePeer_ToggleAdmin(t *testing.T) {
 	}
 
 	adminTrue := true
-	peer, err := db.UpdatePeer("testnet", "toggle-peer", service.UpdatePeerRequest{
-		Admin: &adminTrue,
-	})
+	peer, err := db.UpdatePeer("testnet", "toggle-peer", nil, &adminTrue, nil, nil)
 	if err != nil {
 		t.Fatalf("update peer admin: %v", err)
 	}

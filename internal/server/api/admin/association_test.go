@@ -108,7 +108,7 @@ func TestAPIListAssociations_WithData(
 	env.SeedNetwork(t)
 	env.SeedCIDR(t, "testnet", "engineering", "10.0.1.0/24")
 	env.SeedCIDR(t, "testnet", "marketing", "10.0.2.0/24")
-	if err := env.Service.AddAssociation("testnet", "engineering", "marketing"); err != nil {
+	if err := env.Service.CreateAssociation("testnet", "engineering", "marketing"); err != nil {
 		t.Fatalf("seed association: %v", err)
 	}
 
@@ -135,7 +135,7 @@ func TestAPIDeleteAssociation_Success(
 	env.SeedNetwork(t)
 	env.SeedCIDR(t, "testnet", "engineering", "10.0.1.0/24")
 	env.SeedCIDR(t, "testnet", "marketing", "10.0.2.0/24")
-	if err := env.Service.AddAssociation("testnet", "engineering", "marketing"); err != nil {
+	if err := env.Service.CreateAssociation("testnet", "engineering", "marketing"); err != nil {
 		t.Fatalf("seed association: %v", err)
 	}
 

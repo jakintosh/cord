@@ -24,10 +24,10 @@ func (s *Service) ListAssociations(
 	return assocs, nil
 }
 
-// AddAssociation creates an association between two CIDRs. After the
+// CreateAssociation creates an association between two CIDRs. After the
 // next reconciliation, peers in each CIDR become visible to peers in
 // the other.
-func (s *Service) AddAssociation(
+func (s *Service) CreateAssociation(
 	network string,
 	cidr1 string,
 	cidr2 string,
@@ -56,10 +56,10 @@ func (s *Service) AddAssociation(
 	return nil
 }
 
-// RemoveAssociation deletes the association between two CIDRs. After
+// DeleteAssociation deletes the association between two CIDRs. After
 // the next reconciliation, peers in each CIDR will no longer see
 // peers in the other (unless another association connects them).
-func (s *Service) RemoveAssociation(
+func (s *Service) DeleteAssociation(
 	network string,
 	cidr1 string,
 	cidr2 string,

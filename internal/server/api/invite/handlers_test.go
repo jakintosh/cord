@@ -68,12 +68,12 @@ func setupInviteTest(t *testing.T) (*testutil.ServiceEnv, *API) {
 
 	// Create an invite directly in the database
 	invite := &service.Invite{
-		Name:       "invitee",
-		TempPubKey: "temp-key-123",
-		TempIP:     net.ParseIP("10.1.0.5"),
-		FinalIP:    net.ParseIP("10.0.0.50"),
-		ExpiresAt:  time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
-		CreatedAt:  time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC),
+		Name:         "invitee",
+		InvitePubKey: "temp-key-123",
+		InviteIP:     net.ParseIP("10.1.0.5"),
+		MainIP:       net.ParseIP("10.0.0.50"),
+		ExpiresAt:    time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
+		CreatedAt:    time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC),
 	}
 
 	if err := env.Database.InsertInvite("testnet", invite); err != nil {

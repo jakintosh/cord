@@ -36,9 +36,9 @@ func TestAPIError_Conflict(
 	url := "/networks"
 	body := `{
 		"name": "testnet",
-		"cidr": "10.42.0.0/16",
 		"external_ip": "1.2.3.4",
-		"port": 51820
+		"main_cidr": "10.42.0.0/16",
+		"main_wg_port": 51820
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 

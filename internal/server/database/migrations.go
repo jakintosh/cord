@@ -17,16 +17,17 @@ var migrations = []Migration{
 		SQL: `
 CREATE TABLE network (
     name                TEXT PRIMARY KEY,
-    main_name           TEXT NOT NULL,
-    invite_name         TEXT NOT NULL,
     private_key         TEXT NOT NULL,
     public_key          TEXT NOT NULL,
-    main_cidr           TEXT NOT NULL,
-    invite_cidr         TEXT NOT NULL,
     external_ip         TEXT NOT NULL,
-    listen_port         INTEGER NOT NULL,
-    invite_listen_port  INTEGER NOT NULL,
-    api_port            INTEGER NOT NULL,
+    main_name           TEXT NOT NULL,
+    main_cidr           TEXT NOT NULL,
+    main_wg_port        INTEGER NOT NULL,
+    main_api_port       INTEGER NOT NULL,
+    invite_name         TEXT NOT NULL,
+    invite_cidr         TEXT NOT NULL,
+    invite_wg_port      INTEGER NOT NULL,
+    invite_api_port     INTEGER NOT NULL,
     enabled             INTEGER DEFAULT 0 NOT NULL,
     created_at_unix     INTEGER NOT NULL
 );

@@ -23,16 +23,17 @@ func TestInsertAndGetNetwork(t *testing.T) {
 
 	createdAt := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
 	net := &service.Network{
-		Name:             "homenet",
-		PrivateKey:       "priv-key-123",
-		PublicKey:        "pub-key-123",
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.1.0.0/24",
-		ExternalIP:       "192.168.1.1",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-		CreatedAt:        createdAt,
+		Name:                "homenet",
+		PrivateKey:          "priv-key-123",
+		PublicKey:           "pub-key-123",
+		MainCidr:            "10.0.0.0/16",
+		InviteCidr:          "10.1.0.0/24",
+		ExternalIP:          "192.168.1.1",
+		MainWireguardPort:   51820,
+		InviteWireguardPort: 51821,
+		MainApiPort:         80,
+		InviteApiPort:       80,
+		CreatedAt:           createdAt,
 	}
 
 	if err := db.BootstrapNetwork(net, &service.Cidr{Name: "homenet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub-key-123", Admin: true, Enabled: true, Confirmed: true}); err != nil {
@@ -62,14 +63,17 @@ func TestInsertAndGetNetwork(t *testing.T) {
 	if got.ExternalIP != net.ExternalIP {
 		t.Errorf("external_ip = %q, want %q", got.ExternalIP, net.ExternalIP)
 	}
-	if got.ListenPort != net.ListenPort {
-		t.Errorf("listen_port = %d, want %d", got.ListenPort, net.ListenPort)
+	if got.MainWireguardPort != net.MainWireguardPort {
+		t.Errorf("main_wg_port = %d, want %d", got.MainWireguardPort, net.MainWireguardPort)
 	}
-	if got.InviteListenPort != net.InviteListenPort {
-		t.Errorf("invite_listen_port = %d, want %d", got.InviteListenPort, net.InviteListenPort)
+	if got.InviteWireguardPort != net.InviteWireguardPort {
+		t.Errorf("invite_wg_port = %d, want %d", got.InviteWireguardPort, net.InviteWireguardPort)
 	}
-	if got.ApiPort != net.ApiPort {
-		t.Errorf("api_port = %d, want %d", got.ApiPort, net.ApiPort)
+	if got.MainApiPort != net.MainApiPort {
+		t.Errorf("main_api_port = %d, want %d", got.MainApiPort, net.MainApiPort)
+	}
+	if got.InviteApiPort != net.InviteApiPort {
+		t.Errorf("invite_api_port = %d, want %d", got.InviteApiPort, net.InviteApiPort)
 	}
 	if !got.CreatedAt.Equal(createdAt) {
 		t.Errorf("created_at = %v, want %v", got.CreatedAt, createdAt)
@@ -80,16 +84,17 @@ func TestInsertNetwork_Duplicate(t *testing.T) {
 	db := testutil.SetupDB(t)
 
 	net := &service.Network{
-		Name:             "homenet",
-		PrivateKey:       "priv-a",
-		PublicKey:        "pub-a",
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.1.0.0/24",
-		ExternalIP:       "1.1.1.1",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-		CreatedAt:        time.Now(),
+		Name:                "homenet",
+		PrivateKey:          "priv-a",
+		PublicKey:           "pub-a",
+		MainCidr:            "10.0.0.0/16",
+		InviteCidr:          "10.1.0.0/24",
+		ExternalIP:          "1.1.1.1",
+		MainWireguardPort:   51820,
+		InviteWireguardPort: 51821,
+		MainApiPort:         80,
+		InviteApiPort:       80,
+		CreatedAt:           time.Now(),
 	}
 
 	if err := db.BootstrapNetwork(net, &service.Cidr{Name: "homenet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub-a", Admin: true, Enabled: true, Confirmed: true}); err != nil {
@@ -117,16 +122,17 @@ func TestListNetworkNames(t *testing.T) {
 	mustInsert := func(name string) {
 		t.Helper()
 		err := db.BootstrapNetwork(&service.Network{
-			Name:             name,
-			PrivateKey:       "priv-" + name,
-			PublicKey:        "pub-" + name,
-			MainCidr:         "10.0.0.0/16",
-			InviteCidr:       "10.1.0.0/24",
-			ExternalIP:       "1.1.1.1",
-			ListenPort:       51820,
-			InviteListenPort: 51821,
-			ApiPort:          8080,
-			CreatedAt:        now,
+			Name:                name,
+			PrivateKey:          "priv-" + name,
+			PublicKey:           "pub-" + name,
+			MainCidr:            "10.0.0.0/16",
+			InviteCidr:          "10.1.0.0/24",
+			ExternalIP:          "1.1.1.1",
+			MainWireguardPort:   51820,
+			InviteWireguardPort: 51821,
+			MainApiPort:         80,
+			InviteApiPort:       80,
+			CreatedAt:           now,
 		}, &service.Cidr{Name: name, Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub-" + name, Admin: true, Enabled: true, Confirmed: true})
 		if err != nil {
 			t.Fatalf("insert %s: %v", name, err)
@@ -154,16 +160,17 @@ func TestDeleteNetwork(t *testing.T) {
 
 	now := time.Now()
 	if err := db.BootstrapNetwork(&service.Network{
-		Name:             "deleteme",
-		PrivateKey:       "priv",
-		PublicKey:        "pub",
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.1.0.0/24",
-		ExternalIP:       "1.1.1.1",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-		CreatedAt:        now,
+		Name:                "deleteme",
+		PrivateKey:          "priv",
+		PublicKey:           "pub",
+		MainCidr:            "10.0.0.0/16",
+		InviteCidr:          "10.1.0.0/24",
+		ExternalIP:          "1.1.1.1",
+		MainWireguardPort:   51820,
+		InviteWireguardPort: 51821,
+		MainApiPort:         80,
+		InviteApiPort:       80,
+		CreatedAt:           now,
 	}, &service.Cidr{Name: "deleteme", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
@@ -192,16 +199,17 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 
 	now := time.Now()
 	if err := db.BootstrapNetwork(&service.Network{
-		Name:             "cascadenet",
-		PrivateKey:       "priv",
-		PublicKey:        "pub",
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.1.0.0/24",
-		ExternalIP:       "1.1.1.1",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-		CreatedAt:        now,
+		Name:                "cascadenet",
+		PrivateKey:          "priv",
+		PublicKey:           "pub",
+		MainCidr:            "10.0.0.0/16",
+		InviteCidr:          "10.1.0.0/24",
+		ExternalIP:          "1.1.1.1",
+		MainWireguardPort:   51820,
+		InviteWireguardPort: 51821,
+		MainApiPort:         80,
+		InviteApiPort:       80,
+		CreatedAt:           now,
 	}, &service.Cidr{Name: "cascadenet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("insert network: %v", err)
 	}

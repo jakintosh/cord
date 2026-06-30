@@ -19,5 +19,5 @@ func lastTempKey(
 	if len(invites) == 0 {
 		t.Fatal("no invites found")
 	}
-	return invites[len(invites)-1].TempPubKey
+	return invites[len(invites)-1].InvitePubKey
 }

@@ -75,7 +75,7 @@ func (a *API) handleAssociationAdd(
 		return
 	}
 
-	if err := a.service.AddAssociation(network, req.Cidr1, req.Cidr2); err != nil {
+	if err := a.service.CreateAssociation(network, req.Cidr1, req.Cidr2); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -98,7 +98,7 @@ func (a *API) handleAssociationDelete(
 		return
 	}
 
-	if err := a.service.RemoveAssociation(network, req.Cidr1, req.Cidr2); err != nil {
+	if err := a.service.DeleteAssociation(network, req.Cidr1, req.Cidr2); err != nil {
 		writeServiceError(w, err)
 		return
 	}

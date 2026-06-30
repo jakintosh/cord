@@ -12,15 +12,24 @@ import (
 func TestCreateNetwork_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	net, err := env.Service.CreateNetwork(service.Network{
-		Name:             "mynet",
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.1.0.0/24",
-		ExternalIP:       "1.2.3.4",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-	})
+	mainWgPort := uint16(51820)
+	mainAPIPort := uint16(80)
+	inviteCidr := "10.1.0.0/24"
+	inviteWgPort := uint16(51821)
+	inviteAPIPort := uint16(80)
+
+	net, err := env.Service.CreateNetwork(
+		"mynet",
+		"1.2.3.4",
+		"10.0.0.0/16",
+		nil,
+		&mainWgPort,
+		&mainAPIPort,
+		nil,
+		&inviteCidr,
+		&inviteWgPort,
+		&inviteAPIPort,
+	)
 	if err != nil {
 		t.Fatalf("create network: %v", err)
 	}
@@ -43,14 +52,17 @@ func TestCreateNetwork_Success(t *testing.T) {
 	if net.ExternalIP != "1.2.3.4" {
 		t.Errorf("external_ip = %q, want 1.2.3.4", net.ExternalIP)
 	}
-	if net.ListenPort != 51820 {
-		t.Errorf("listen_port = %d, want 51820", net.ListenPort)
+	if net.MainWireguardPort != 51820 {
+		t.Errorf("listen_port = %d, want 51820", net.MainWireguardPort)
 	}
-	if net.InviteListenPort != 51821 {
-		t.Errorf("invite_listen_port = %d, want 51821", net.InviteListenPort)
+	if net.InviteWireguardPort != 51821 {
+		t.Errorf("invite_listen_port = %d, want 51821", net.InviteWireguardPort)
 	}
-	if net.ApiPort != 8080 {
-		t.Errorf("api_port = %d, want 8080", net.ApiPort)
+	if net.MainApiPort != 80 {
+		t.Errorf("api_port = %d, want 80", net.MainApiPort)
+	}
+	if net.InviteApiPort != 80 {
+		t.Errorf("invite_api_port = %d, want 80", net.InviteApiPort)
 	}
 	if net.CreatedAt.IsZero() {
 		t.Error("created_at should not be zero")
@@ -60,15 +72,24 @@ func TestCreateNetwork_Success(t *testing.T) {
 func TestCreateNetwork_StoresKeyPair(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	net, err := env.Service.CreateNetwork(service.Network{
-		Name:             "keytest",
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.1.0.0/24",
-		ExternalIP:       "1.2.3.4",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-	})
+	mainWgPort := uint16(51820)
+	mainAPIPort := uint16(80)
+	inviteCidr := "10.1.0.0/24"
+	inviteWgPort := uint16(51821)
+	inviteAPIPort := uint16(80)
+
+	net, err := env.Service.CreateNetwork(
+		"keytest",
+		"1.2.3.4",
+		"10.0.0.0/16",
+		nil,
+		&mainWgPort,
+		&mainAPIPort,
+		nil,
+		&inviteCidr,
+		&inviteWgPort,
+		&inviteAPIPort,
+	)
 	if err != nil {
 		t.Fatalf("create network: %v", err)
 	}
@@ -89,21 +110,41 @@ func TestCreateNetwork_StoresKeyPair(t *testing.T) {
 func TestCreateNetwork_DuplicateName(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	cfg := service.Network{
-		Name:             "dup",
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.1.0.0/24",
-		ExternalIP:       "1.2.3.4",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-	}
+	mainWgPort := uint16(51820)
+	mainAPIPort := uint16(80)
+	inviteCidr := "10.1.0.0/24"
+	inviteWgPort := uint16(51821)
+	inviteAPIPort := uint16(80)
 
-	if _, err := env.Service.CreateNetwork(cfg); err != nil {
+	first, err := env.Service.CreateNetwork(
+		"dup",
+		"1.2.3.4",
+		"10.0.0.0/16",
+		nil,
+		&mainWgPort,
+		&mainAPIPort,
+		nil,
+		&inviteCidr,
+		&inviteWgPort,
+		&inviteAPIPort,
+	)
+	if err != nil {
 		t.Fatalf("first create: %v", err)
 	}
+	_ = first
 
-	_, err := env.Service.CreateNetwork(cfg)
+	_, err = env.Service.CreateNetwork(
+		"dup",
+		"1.2.3.4",
+		"10.0.0.0/16",
+		nil,
+		&mainWgPort,
+		&mainAPIPort,
+		nil,
+		&inviteCidr,
+		&inviteWgPort,
+		&inviteAPIPort,
+	)
 	if !errors.Is(err, service.ErrNetworkExists) {
 		t.Errorf("err = %v, want ErrNetworkExists", err)
 	}
@@ -112,14 +153,24 @@ func TestCreateNetwork_DuplicateName(t *testing.T) {
 func TestCreateNetwork_EmptyName(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.CreateNetwork(service.Network{
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.1.0.0/24",
-		ExternalIP:       "1.2.3.4",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-	})
+	mainWgPort := uint16(51820)
+	mainAPIPort := uint16(80)
+	inviteCidr := "10.1.0.0/24"
+	inviteWgPort := uint16(51821)
+	inviteAPIPort := uint16(80)
+
+	_, err := env.Service.CreateNetwork(
+		"",
+		"1.2.3.4",
+		"10.0.0.0/16",
+		nil,
+		&mainWgPort,
+		&mainAPIPort,
+		nil,
+		&inviteCidr,
+		&inviteWgPort,
+		&inviteAPIPort,
+	)
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
@@ -128,15 +179,24 @@ func TestCreateNetwork_EmptyName(t *testing.T) {
 func TestCreateNetwork_InvalidMainCIDR(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.CreateNetwork(service.Network{
-		Name:             "badcidr",
-		MainCidr:         "not-a-cidr",
-		InviteCidr:       "10.1.0.0/24",
-		ExternalIP:       "1.2.3.4",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-	})
+	mainWgPort := uint16(51820)
+	mainAPIPort := uint16(80)
+	inviteCidr := "10.1.0.0/24"
+	inviteWgPort := uint16(51821)
+	inviteAPIPort := uint16(80)
+
+	_, err := env.Service.CreateNetwork(
+		"badcidr",
+		"1.2.3.4",
+		"not-a-cidr",
+		nil,
+		&mainWgPort,
+		&mainAPIPort,
+		nil,
+		&inviteCidr,
+		&inviteWgPort,
+		&inviteAPIPort,
+	)
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
@@ -145,15 +205,24 @@ func TestCreateNetwork_InvalidMainCIDR(t *testing.T) {
 func TestCreateNetwork_InvalidInviteCIDR(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.CreateNetwork(service.Network{
-		Name:             "badinvite",
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "not-a-cidr",
-		ExternalIP:       "1.2.3.4",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-	})
+	mainWgPort := uint16(51820)
+	mainAPIPort := uint16(80)
+	inviteCidr := "not-a-cidr"
+	inviteWgPort := uint16(51821)
+	inviteAPIPort := uint16(80)
+
+	_, err := env.Service.CreateNetwork(
+		"badinvite",
+		"1.2.3.4",
+		"10.0.0.0/16",
+		nil,
+		&mainWgPort,
+		&mainAPIPort,
+		nil,
+		&inviteCidr,
+		&inviteWgPort,
+		&inviteAPIPort,
+	)
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
@@ -162,65 +231,78 @@ func TestCreateNetwork_InvalidInviteCIDR(t *testing.T) {
 func TestCreateNetwork_MissingExternalIP(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.CreateNetwork(service.Network{
-		Name:             "noip",
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.1.0.0/24",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-	})
+	mainWgPort := uint16(51820)
+	mainAPIPort := uint16(80)
+	inviteCidr := "10.1.0.0/24"
+	inviteWgPort := uint16(51821)
+	inviteAPIPort := uint16(80)
+
+	_, err := env.Service.CreateNetwork(
+		"noip",
+		"",
+		"10.0.0.0/16",
+		nil,
+		&mainWgPort,
+		&mainAPIPort,
+		nil,
+		&inviteCidr,
+		&inviteWgPort,
+		&inviteAPIPort,
+	)
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
-	}
-}
-
-func TestCreateNetwork_MissingPorts(t *testing.T) {
-	env := testutil.SetupService(t)
-
-	_, err := env.Service.CreateNetwork(service.Network{
-		Name:             "noports",
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.1.0.0/24",
-		ExternalIP:       "1.2.3.4",
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-	})
-	if !errors.Is(err, service.ErrInvalidInput) {
-		t.Errorf("missing listen port: err = %v, want ErrInvalidInput", err)
 	}
 }
 
 func TestCreateNetwork_DefaultPorts(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	nw, err := env.Service.CreateNetwork(service.Network{
-		Name:       "defaults",
-		MainCidr:   "10.0.0.0/16",
-		InviteCidr: "10.1.0.0/24",
-		ExternalIP: "1.2.3.4",
-		ListenPort: 51820,
-	})
+	mainWgPort := uint16(51820)
+	inviteCidr := "10.1.0.0/24"
+
+	nw, err := env.Service.CreateNetwork(
+		"defaults",
+		"1.2.3.4",
+		"10.0.0.0/16",
+		nil,
+		&mainWgPort,
+		nil,
+		nil,
+		&inviteCidr,
+		nil,
+		nil,
+	)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if nw.InviteListenPort != 51821 {
-		t.Errorf("invite_listen_port = %d, want 51821", nw.InviteListenPort)
+	if nw.InviteWireguardPort != 51821 {
+		t.Errorf("invite_listen_port = %d, want 51821", nw.InviteWireguardPort)
 	}
-	if nw.ApiPort != 51822 {
-		t.Errorf("api_port = %d, want 51822", nw.ApiPort)
+	if nw.MainApiPort != 80 {
+		t.Errorf("api_port = %d, want 80", nw.MainApiPort)
+	}
+	if nw.InviteApiPort != 80 {
+		t.Errorf("invite_api_port = %d, want 80", nw.InviteApiPort)
 	}
 }
 
 func TestCreateNetwork_DefaultInviteCidr(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	nw, err := env.Service.CreateNetwork(service.Network{
-		Name:       "auto-invite",
-		MainCidr:   "10.27.0.0/16",
-		ExternalIP: "1.2.3.4",
-		ListenPort: 51820,
-	})
+	mainWgPort := uint16(51820)
+
+	nw, err := env.Service.CreateNetwork(
+		"auto-invite",
+		"1.2.3.4",
+		"10.27.0.0/16",
+		nil,
+		&mainWgPort,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -232,15 +314,24 @@ func TestCreateNetwork_DefaultInviteCidr(t *testing.T) {
 func TestCreateNetwork_OverlappingCIDRs(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.CreateNetwork(service.Network{
-		Name:             "overlap",
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.0.1.0/24",
-		ExternalIP:       "1.2.3.4",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-	})
+	mainWgPort := uint16(51820)
+	mainAPIPort := uint16(80)
+	inviteCidr := "10.0.1.0/24"
+	inviteWgPort := uint16(51821)
+	inviteAPIPort := uint16(80)
+
+	_, err := env.Service.CreateNetwork(
+		"overlap",
+		"1.2.3.4",
+		"10.0.0.0/16",
+		nil,
+		&mainWgPort,
+		&mainAPIPort,
+		nil,
+		&inviteCidr,
+		&inviteWgPort,
+		&inviteAPIPort,
+	)
 	if !errors.Is(err, service.ErrCIDROverlap) {
 		t.Errorf("err = %v, want ErrCIDROverlap", err)
 	}
@@ -320,11 +411,9 @@ func TestDeleteNetwork_CascadesResources(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.Service.AddPeer("testnet", service.PeerConfig{
-		Name:  "alice",
-		IP:    "10.0.0.5",
-		Admin: false,
-	})
+	ip := "10.0.0.5"
+	admin := false
+	_, err := env.Service.AddPeer("testnet", "alice", &ip, admin)
 	if err != nil {
 		t.Fatalf("add peer: %v", err)
 	}

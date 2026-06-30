@@ -17,12 +17,9 @@ func TestCreateInvite_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	invite, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name:      "new-peer",
-		IP:        net.ParseIP("10.0.0.5"),
-		Admin:     false,
-		ExpiresIn: time.Hour,
-	})
+	ip := net.ParseIP("10.0.0.5")
+	expiresIn := time.Hour
+	invite, err := env.Service.CreateInvite("testnet", "new-peer", &ip, false, &expiresIn)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
@@ -48,10 +45,8 @@ func TestCreateInvite_DefaultExpiration(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name: "default-exp",
-		IP:   net.ParseIP("10.0.0.6"),
-	})
+	ip := net.ParseIP("10.0.0.6")
+	_, err := env.Service.CreateInvite("testnet", "default-exp", &ip, false, nil)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
@@ -74,9 +69,7 @@ func TestCreateInvite_AutoAssignsIP(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	invite, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name: "auto-ip",
-	})
+	invite, err := env.Service.CreateInvite("testnet", "auto-ip", nil, false, nil)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
@@ -95,10 +88,8 @@ func TestCreateInvite_ReconcilesRunningInviteDeviceWithHostRoute(t *testing.T) {
 		t.Fatalf("start network: %v", err)
 	}
 
-	invite, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name: "live-invite",
-		IP:   net.ParseIP("10.0.0.5"),
-	})
+	ip := net.ParseIP("10.0.0.5")
+	invite, err := env.Service.CreateInvite("testnet", "live-invite", &ip, false, nil)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
@@ -123,9 +114,8 @@ func TestCreateInvite_EmptyName(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		IP: net.ParseIP("10.0.0.5"),
-	})
+	ip := net.ParseIP("10.0.0.5")
+	_, err := env.Service.CreateInvite("testnet", "", &ip, false, nil)
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
@@ -134,10 +124,8 @@ func TestCreateInvite_EmptyName(t *testing.T) {
 func TestCreateInvite_NonexistentNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.CreateInvite("nonexistent", service.CreateInviteRequest{
-		Name: "peer",
-		IP:   net.ParseIP("10.0.0.5"),
-	})
+	ip := net.ParseIP("10.0.0.5")
+	_, err := env.Service.CreateInvite("nonexistent", "peer", &ip, false, nil)
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
@@ -147,10 +135,8 @@ func TestRedeemInvite_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name: "redeemer",
-		IP:   net.ParseIP("10.0.0.5"),
-	})
+	ip := net.ParseIP("10.0.0.5")
+	_, err := env.Service.CreateInvite("testnet", "redeemer", &ip, false, nil)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
@@ -187,10 +173,8 @@ func TestRedeemInvite_Idempotent_SameKey(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name: "idempotent",
-		IP:   net.ParseIP("10.0.0.6"),
-	})
+	ip := net.ParseIP("10.0.0.6")
+	_, err := env.Service.CreateInvite("testnet", "idempotent", &ip, false, nil)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
@@ -215,10 +199,8 @@ func TestRedeemInvite_UnknownKey(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name: "peer",
-		IP:   net.ParseIP("10.0.0.5"),
-	})
+	ip := net.ParseIP("10.0.0.5")
+	_, err := env.Service.CreateInvite("testnet", "peer", &ip, false, nil)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
@@ -233,19 +215,15 @@ func TestRedeemInvite_MultipleInvites(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name: "peer-a",
-		IP:   net.ParseIP("10.0.0.10"),
-	})
+	ipA := net.ParseIP("10.0.0.10")
+	_, err := env.Service.CreateInvite("testnet", "peer-a", &ipA, false, nil)
 	if err != nil {
 		t.Fatalf("create invite a: %v", err)
 	}
 	tempKey1 := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name: "peer-b",
-		IP:   net.ParseIP("10.0.0.11"),
-	})
+	ipB := net.ParseIP("10.0.0.11")
+	_, err = env.Service.CreateInvite("testnet", "peer-b", &ipB, false, nil)
 	if err != nil {
 		t.Fatalf("create invite b: %v", err)
 	}
@@ -277,10 +255,8 @@ func TestRedeemInvite_ReconcilesRunningDevices(t *testing.T) {
 	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
 		t.Fatalf("start network: %v", err)
 	}
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name: "live-redeem",
-		IP:   net.ParseIP("10.0.0.5"),
-	})
+	ip := net.ParseIP("10.0.0.5")
+	_, err := env.Service.CreateInvite("testnet", "live-redeem", &ip, false, nil)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
@@ -324,18 +300,14 @@ func TestListInvites_Mixed(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name: "active",
-		IP:   net.ParseIP("10.0.0.20"),
-	})
+	ipActive := net.ParseIP("10.0.0.20")
+	_, err := env.Service.CreateInvite("testnet", "active", &ipActive, false, nil)
 	if err != nil {
 		t.Fatalf("create active: %v", err)
 	}
 
-	_, err = env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name: "to-redeem",
-		IP:   net.ParseIP("10.0.0.21"),
-	})
+	ipRedeem := net.ParseIP("10.0.0.21")
+	_, err = env.Service.CreateInvite("testnet", "to-redeem", &ipRedeem, false, nil)
 	if err != nil {
 		t.Fatalf("create to-redeem: %v", err)
 	}
@@ -387,10 +359,8 @@ func TestRevokeInvite_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name: "revoke-me",
-		IP:   net.ParseIP("10.0.0.30"),
-	})
+	ip := net.ParseIP("10.0.0.30")
+	_, err := env.Service.CreateInvite("testnet", "revoke-me", &ip, false, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -502,12 +472,9 @@ func TestInvite_Persistence(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name:      "persist-test",
-		IP:        net.ParseIP("10.0.0.5"),
-		Admin:     true,
-		ExpiresIn: 2 * time.Hour,
-	})
+	ip := net.ParseIP("10.0.0.5")
+	expiresIn := 2 * time.Hour
+	_, err := env.Service.CreateInvite("testnet", "persist-test", &ip, true, &expiresIn)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -524,7 +491,7 @@ func TestInvite_Persistence(t *testing.T) {
 	if inv.Name != "persist-test" {
 		t.Errorf("name = %q, want persist-test", inv.Name)
 	}
-	if inv.TempPubKey == "" {
+	if inv.InvitePubKey == "" {
 		t.Error("temp_pub_key should not be empty")
 	}
 	if !inv.Admin {
@@ -536,10 +503,10 @@ func TestInvite_Persistence(t *testing.T) {
 	if inv.RedeemedKey != "" {
 		t.Errorf("redeemed_key = %q, want empty", inv.RedeemedKey)
 	}
-	if inv.FinalIP == nil || inv.FinalIP.String() != "10.0.0.5" {
-		t.Errorf("final_ip = %v, want 10.0.0.5", inv.FinalIP)
+	if inv.MainIP == nil || inv.MainIP.String() != "10.0.0.5" {
+		t.Errorf("final_ip = %v, want 10.0.0.5", inv.MainIP)
 	}
-	if inv.TempIP == nil {
+	if inv.InviteIP == nil {
 		t.Error("temp_ip should not be nil")
 	}
 	if inv.CreatedAt.IsZero() {

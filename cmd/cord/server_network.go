@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/server"
@@ -33,37 +32,69 @@ var serverNetworkAdd = &args.Command{
 			Help: "network name",
 		},
 		{
-			Name: "cidr",
+			Name: "main-cidr",
 			Help: "root address range in CIDR notation",
 		},
 		{
 			Name: "external-ip",
 			Help: "external IP address for the WireGuard endpoint",
 		},
+	},
+	Options: []args.Option{
 		{
-			Name: "port",
-			Help: "WireGuard listen port",
+			Long: "main-wg-port",
+			Type: args.OptionTypeParameter,
+			Help: "WireGuard listen port for the main interface (default 51820)",
+		},
+		{
+			Long: "main-api-port",
+			Type: args.OptionTypeParameter,
+			Help: "internal API port on the main tunnel (default 80)",
+		},
+		{
+			Long: "main-name",
+			Type: args.OptionTypeParameter,
+			Help: "WireGuard interface name for the main device (default: network name)",
+		},
+		{
+			Long: "invite-cidr",
+			Type: args.OptionTypeParameter,
+			Help: "CIDR for the invite interface (default 172.16.10.0/24)",
+		},
+		{
+			Long: "invite-wg-port",
+			Type: args.OptionTypeParameter,
+			Help: "WireGuard listen port for the invite interface (default main port + 1)",
+		},
+		{
+			Long: "invite-api-port",
+			Type: args.OptionTypeParameter,
+			Help: "internal API port on the invite tunnel (default 80)",
+		},
+		{
+			Long: "invite-name",
+			Type: args.OptionTypeParameter,
+			Help: "WireGuard interface name for the invite device (default: network name + \"-i\")",
 		},
 	},
 	Handler: func(i *args.Input) error {
 		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
-		name := i.GetOperand("name")
-		cidr := i.GetOperand("cidr")
-		externalIP := i.GetOperand("external-ip")
-		portStr := i.GetOperand("port")
 
-		port, err := strconv.ParseUint(portStr, 10, 16)
-		if err != nil {
-			return fmt.Errorf("invalid port: %w", err)
+		req := admin.AddNetworkRequest{
+			Name:          i.GetOperand("name"),
+			ExternalIP:    i.GetOperand("external-ip"),
+			MainName:      i.GetParameter("main-name"),
+			MainCidr:      i.GetOperand("main-cidr"),
+			MainWgPort:    toUint16Ptr(i.GetIntParameter("main-wg-port")),
+			MainApiPort:   toUint16Ptr(i.GetIntParameter("main-api-port")),
+			InviteName:    i.GetParameter("invite-name"),
+			InviteCidr:    i.GetParameter("invite-cidr"),
+			InviteApiPort: toUint16Ptr(i.GetIntParameter("invite-api-port")),
+			InviteWgPort:  toUint16Ptr(i.GetIntParameter("invite-wg-port")),
 		}
 
 		client := admin.NewClient(socketPath)
-		network, err := client.AddNetwork(context.Background(), admin.AddNetworkRequest{
-			Name:       name,
-			Cidr:       cidr,
-			ExternalIP: externalIP,
-			Port:       uint16(port),
-		})
+		network, err := client.AddNetwork(context.Background(), req)
 		if err != nil {
 			return err
 		}
@@ -71,7 +102,7 @@ var serverNetworkAdd = &args.Command{
 		if err := printJSON(network); err != nil {
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "Network created and disabled. Use 'cord server network enable %s' to start it.\n", name)
+		fmt.Fprintf(os.Stderr, "Network created and disabled. Use 'cord server network enable %s' to start it.\n", req.Name)
 		return nil
 	},
 }
@@ -190,4 +221,12 @@ var serverNetworkDisable = &args.Command{
 		fmt.Println("disabled")
 		return nil
 	},
+}
+
+func toUint16Ptr(v *int) *uint16 {
+	if v == nil {
+		return nil
+	}
+	u := uint16(*v)
+	return &u
 }

@@ -16,18 +16,6 @@ type Cidr struct {
 	Prefix int    // total bits (32 for IPv4, 128 for IPv6)
 }
 
-// CreateCidrRequest is the input for adding a CIDR to a network.
-type CreateCidrRequest struct {
-	Name string
-	Cidr string
-}
-
-// UpdateCidrRequest carries the fields that can be changed on a CIDR.
-// Currently only the name is mutable.
-type UpdateCidrRequest struct {
-	Name string
-}
-
 // GetCidr returns a CIDR by name within the given network.
 func (s *Service) GetCidr(
 	networkName string,
@@ -57,24 +45,25 @@ func (s *Service) ListCidrs(
 	return cidrs, nil
 }
 
-// AddCidr adds a named CIDR to the network. The CIDR string must parse
+// CreateCidr adds a named CIDR to the network. The CIDR string must parse
 // as a valid net.IPNet and must be contained within the root CIDR.
 // Returns ErrCIDROverlap if the range conflicts with an existing CIDR.
-func (s *Service) AddCidr(
+func (s *Service) CreateCidr(
 	networkName string,
-	req CreateCidrRequest,
+	name string,
+	cidr string,
 ) error {
 	if networkName == "" {
 		return fmt.Errorf("%w: network name required", ErrInvalidInput)
 	}
 
-	if req.Name == "" {
+	if name == "" {
 		return fmt.Errorf("%w: CIDR name required", ErrInvalidInput)
 	}
 
-	_, cidrNet, err := net.ParseCIDR(req.Cidr)
+	_, cidrNet, err := net.ParseCIDR(cidr)
 	if err != nil {
-		return fmt.Errorf("%w: invalid CIDR %q: %v", ErrInvalidInput, req.Cidr, err)
+		return fmt.Errorf("%w: invalid CIDR %q: %v", ErrInvalidInput, cidr, err)
 	}
 
 	network, err := s.store.GetNetwork(networkName)
@@ -90,14 +79,14 @@ func (s *Service) AddCidr(
 	if !netaddr.Contains(rootNet, cidrNet) {
 		return fmt.Errorf(
 			"%w: CIDR %q is not contained within main CIDR %q",
-			ErrInvalidInput, req.Cidr, network.MainCidr,
+			ErrInvalidInput, cidr, network.MainCidr,
 		)
 	}
 
 	ones, bits := cidrNet.Mask.Size()
 	c := &Cidr{
-		Name:   req.Name,
-		Cidr:   req.Cidr,
+		Name:   name,
+		Cidr:   cidr,
 		Length: ones,
 		Prefix: bits,
 	}
@@ -109,11 +98,28 @@ func (s *Service) AddCidr(
 	return nil
 }
 
-// RemoveCidr removes a named CIDR from the network. Any associations
+// UpdateCidr renames a CIDR and returns the updated record.
+func (s *Service) UpdateCidr(
+	networkName string,
+	name string,
+	newName string,
+) error {
+	if newName == "" {
+		return fmt.Errorf("%w: CIDR name required", ErrInvalidInput)
+	}
+
+	_, err := s.store.UpdateCidr(networkName, name, newName)
+	if err != nil {
+		return fmt.Errorf("update cidr %q: %w", name, mapStoreError(err))
+	}
+	return nil
+}
+
+// DeleteCidr removes a named CIDR from the network. Any associations
 // involving this CIDR are also removed via foreign-key cascades. The
 // root CIDR (named after the network) cannot be deleted individually;
 // it is removed automatically when the network is deleted.
-func (s *Service) RemoveCidr(
+func (s *Service) DeleteCidr(
 	networkName string,
 	name string,
 ) error {
@@ -123,23 +129,6 @@ func (s *Service) RemoveCidr(
 
 	if err := s.store.DeleteCidr(networkName, name); err != nil {
 		return fmt.Errorf("delete cidr %q: %w", name, mapStoreError(err))
-	}
-	return nil
-}
-
-// UpdateCidr renames a CIDR and returns the updated record.
-func (s *Service) UpdateCidr(
-	networkName string,
-	name string,
-	req UpdateCidrRequest,
-) error {
-	if req.Name == "" {
-		return fmt.Errorf("%w: CIDR name required", ErrInvalidInput)
-	}
-
-	_, err := s.store.UpdateCidr(networkName, name, req)
-	if err != nil {
-		return fmt.Errorf("update cidr %q: %w", name, mapStoreError(err))
 	}
 	return nil
 }

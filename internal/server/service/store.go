@@ -66,8 +66,8 @@ type Store interface {
 	DeletePeer(network, name string) error
 
 	// UpdatePeer applies a partial update to the named peer and
-	// returns the updated record. Nil fields mean no change.
-	UpdatePeer(network, name string, req UpdatePeerRequest) (*Peer, error)
+	// returns the updated record. Nil pointers mean no change.
+	UpdatePeer(network, name string, newName *string, admin *bool, enabled *bool, confirmed *bool) (*Peer, error)
 
 	// PeerExists reports whether a peer with the given name exists
 	// in the network.
@@ -90,7 +90,7 @@ type Store interface {
 	DeleteCidr(network, name string) error
 
 	// UpdateCidr renames a CIDR and returns the updated record.
-	UpdateCidr(network, name string, req UpdateCidrRequest) (*Cidr, error)
+	UpdateCidr(network, name string, newName string) (*Cidr, error)
 
 	// Association records within a network.
 

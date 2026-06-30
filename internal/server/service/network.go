@@ -16,19 +16,28 @@ import (
 // server's keypair, address space configuration, and network endpoints.
 // It is inert domain data — the Service owns all behavior.
 type Network struct {
-	Name             string
-	MainName         string // WireGuard interface name for the main device (defaults to Name)
-	InviteName       string // WireGuard interface name for the invite device (defaults to Name + "-i")
-	PrivateKey       string
-	PublicKey        string
-	MainCidr         string    // e.g. "10.42.0.0/16" — the network's address space
-	InviteCidr       string    // e.g. "10.43.0.0/24" — the invite subnet
-	ExternalIP       string    // the server's public IP address
-	ListenPort       uint16    // WireGuard listen port for the main interface
-	InviteListenPort uint16    // WireGuard listen port for the invite interface
-	ApiPort          uint16    // the internal API port served over the tunnel
-	Enabled          bool      // whether the network's WireGuard devices are running
-	CreatedAt        time.Time // when the network was created
+	Name string
+
+	// Wireguard Entrypoint
+	PrivateKey string
+	PublicKey  string
+	ExternalIP string // the server's public IP address
+
+	// Main "Network"
+	MainName          string // WireGuard interface name for the main device (defaults to Name)
+	MainCidr          string // e.g. "10.42.0.0/16" — the main interface subnet
+	MainWireguardPort uint16 // WireGuard listen port for the main interface
+	MainApiPort       uint16 // the internal API port served over the tunnel
+
+	// Invite "Network"
+	InviteName          string // WireGuard interface name for the invite device (defaults to Name + "-i")
+	InviteCidr          string // e.g. "10.43.0.0/24" — the invite interface subnet
+	InviteWireguardPort uint16 // WireGuard listen port for the invite interface
+	InviteApiPort       uint16 // the internal API port served over the invite tunnel
+
+	// Metadata
+	Enabled   bool      // whether the network's WireGuard devices are running
+	CreatedAt time.Time // when the network was created
 }
 
 // GetNetwork returns the persisted network record by name.
@@ -39,11 +48,11 @@ func (s *Service) GetNetwork(
 	*Network,
 	error,
 ) {
-	nw, err := s.store.GetNetwork(name)
+	network, err := s.store.GetNetwork(name)
 	if err != nil {
 		return nil, fmt.Errorf("get network %q: %w", name, mapStoreError(err))
 	}
-	return nw, nil
+	return network, nil
 }
 
 // ListNetworks returns the names of all persisted server networks,
@@ -67,63 +76,78 @@ func (s *Service) ListNetworks() (
 // ErrNetworkExists if the name is already taken, ErrInvalidInput if
 // the configuration is invalid.
 func (s *Service) CreateNetwork(
-	cfg Network,
+	name string,
+	externalIP string,
+	mainCidr string,
+	mainName *string,
+	mainWireguardPort *uint16,
+	mainApiPort *uint16,
+	inviteName *string,
+	inviteCidr *string,
+	inviteWireguardPort *uint16,
+	inviteApiPort *uint16,
 ) (
 	*Network,
 	error,
 ) {
-	if cfg.Name == "" {
+	// validate network config
+	if name == "" {
 		return nil, fmt.Errorf("%w: network name required", ErrInvalidInput)
 	}
-
-	if cfg.MainName == "" {
-		cfg.MainName = cfg.Name
-	}
-	if cfg.InviteName == "" {
-		cfg.InviteName = cfg.Name + inviteSuffix
-	}
-
-	if err := wireguard.ValidateDeviceName(cfg.MainName); err != nil {
-		return nil, fmt.Errorf("%w: invalid main device name: %v", ErrInvalidInput, err)
-	}
-	if err := wireguard.ValidateDeviceName(cfg.InviteName); err != nil {
-		return nil, fmt.Errorf("%w: invalid invite device name: %v", ErrInvalidInput, err)
-	}
-
-	_, mainNet, err := net.ParseCIDR(cfg.MainCidr)
-	if err != nil {
-		return nil, fmt.Errorf("%w: invalid main CIDR %q: %v", ErrInvalidInput, cfg.MainCidr, err)
-	}
-
-	if cfg.ExternalIP == "" {
+	if externalIP == "" {
 		return nil, fmt.Errorf("%w: external IP required", ErrInvalidInput)
 	}
 
-	if cfg.ListenPort == 0 {
-		return nil, fmt.Errorf("%w: listen port required", ErrInvalidInput)
+	// validate main interface config
+	mainDevName := name
+	if mainName != nil && *mainName != "" {
+		mainDevName = *mainName
 	}
-
-	if cfg.InviteCidr == "" {
-		cfg.InviteCidr = defaultInviteCidr
+	if err := wireguard.ValidateDeviceName(mainDevName); err != nil {
+		return nil, fmt.Errorf("%w: invalid main device name: %v", ErrInvalidInput, err)
 	}
-
-	_, inviteNet, err := net.ParseCIDR(cfg.InviteCidr)
+	_, mainNet, err := net.ParseCIDR(mainCidr)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid invite CIDR %q: %v", ErrInvalidInput, cfg.InviteCidr, err)
+		return nil, fmt.Errorf("%w: invalid main CIDR %q: %v", ErrInvalidInput, mainCidr, err)
+	}
+	mainWgPort := uint16(51820)
+	if mainWireguardPort != nil && *mainWireguardPort != 0 {
+		mainWgPort = *mainWireguardPort
+	}
+	mainAPIPort := uint16(80)
+	if mainApiPort != nil && *mainApiPort != 0 {
+		mainAPIPort = *mainApiPort
 	}
 
-	if cfg.InviteListenPort == 0 {
-		cfg.InviteListenPort = cfg.ListenPort + 1
+	// validate invite interface config
+	inviteDevName := name + inviteSuffix
+	if inviteName != nil && *inviteName != "" {
+		inviteDevName = *inviteName
 	}
-
-	if cfg.ApiPort == 0 {
-		cfg.ApiPort = cfg.ListenPort + 2
+	if err := wireguard.ValidateDeviceName(inviteDevName); err != nil {
+		return nil, fmt.Errorf("%w: invalid invite device name: %v", ErrInvalidInput, err)
+	}
+	inviteCIDR := defaultInviteCidr
+	if inviteCidr != nil && *inviteCidr != "" {
+		inviteCIDR = *inviteCidr
+	}
+	_, inviteNet, err := net.ParseCIDR(inviteCIDR)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid invite CIDR %q: %v", ErrInvalidInput, inviteCIDR, err)
+	}
+	inviteWgPort := mainWgPort + 1
+	if inviteWireguardPort != nil && *inviteWireguardPort != 0 {
+		inviteWgPort = *inviteWireguardPort
+	}
+	inviteAPIPort := uint16(80)
+	if inviteApiPort != nil && *inviteApiPort != 0 {
+		inviteAPIPort = *inviteApiPort
 	}
 
 	if netaddr.Overlaps(mainNet, inviteNet) {
 		return nil, fmt.Errorf(
 			"%w: invite CIDR %q overlaps main CIDR %q",
-			ErrCIDROverlap, cfg.InviteCidr, cfg.MainCidr,
+			ErrCIDROverlap, inviteCIDR, mainCidr,
 		)
 	}
 
@@ -139,8 +163,8 @@ func (s *Service) CreateNetwork(
 
 	ones, bits := mainNet.Mask.Size()
 	rootCidr := &Cidr{
-		Name:   cfg.Name,
-		Cidr:   cfg.MainCidr,
+		Name:   name,
+		Cidr:   mainCidr,
 		Length: ones,
 		Prefix: bits,
 	}
@@ -156,27 +180,28 @@ func (s *Service) CreateNetwork(
 		Confirmed: true,
 	}
 
-	nw := &Network{
-		Name:             cfg.Name,
-		MainName:         cfg.MainName,
-		InviteName:       cfg.InviteName,
-		PrivateKey:       privKey,
-		PublicKey:        pubKey,
-		MainCidr:         cfg.MainCidr,
-		InviteCidr:       cfg.InviteCidr,
-		ExternalIP:       cfg.ExternalIP,
-		ListenPort:       cfg.ListenPort,
-		InviteListenPort: cfg.InviteListenPort,
-		ApiPort:          cfg.ApiPort,
-		Enabled:          false,
-		CreatedAt:        s.clock(),
+	network := &Network{
+		Name:                name,
+		ExternalIP:          externalIP,
+		PrivateKey:          privKey,
+		PublicKey:           pubKey,
+		MainName:            mainDevName,
+		MainCidr:            mainCidr,
+		MainWireguardPort:   mainWgPort,
+		MainApiPort:         mainAPIPort,
+		InviteName:          inviteDevName,
+		InviteCidr:          inviteCIDR,
+		InviteWireguardPort: inviteWgPort,
+		InviteApiPort:       inviteAPIPort,
+		Enabled:             false,
+		CreatedAt:           s.clock(),
 	}
 
-	if err := s.store.BootstrapNetwork(nw, rootCidr, serverPeer); err != nil {
+	if err := s.store.BootstrapNetwork(network, rootCidr, serverPeer); err != nil {
 		return nil, fmt.Errorf("bootstrap network: %w", mapStoreError(err))
 	}
 
-	return nw, nil
+	return network, nil
 }
 
 // DeleteNetwork removes the named network and all of its resources
@@ -251,7 +276,7 @@ func (s *Service) StartNetwork(
 	if err != nil {
 		return fmt.Errorf("start network: parse main cidr: %w", err)
 	}
-	serverIfaceAddr := netaddr.InterfaceAddress(mainNet)
+	mainIfaceAddr := netaddr.InterfaceAddress(mainNet)
 
 	_, inviteNet, err := net.ParseCIDR(network.InviteCidr)
 	if err != nil {
@@ -272,8 +297,8 @@ func (s *Service) StartNetwork(
 	main, err := s.wg.NewDevice(
 		network.MainName,
 		network.PrivateKey,
-		serverIfaceAddr,
-		network.ListenPort,
+		mainIfaceAddr,
+		network.MainWireguardPort,
 	)
 	if err != nil {
 		return fmt.Errorf("start network: main device: %w", err)
@@ -302,7 +327,7 @@ func (s *Service) StartNetwork(
 		network.InviteName,
 		network.PrivateKey,
 		inviteIfaceAddr,
-		network.InviteListenPort,
+		network.InviteWireguardPort,
 	)
 	if err != nil {
 		undo()
@@ -331,11 +356,11 @@ func (s *Service) StartNetwork(
 	loopCtx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	s.running[name] = &NetworkDevices{
-		Main:       main,
-		Invite:     invite,
-		MainName:   network.MainName,
-		InviteName: network.InviteName,
-		Cancel:     cancel,
+		MainName:     network.MainName,
+		MainDevice:   main,
+		InviteName:   network.InviteName,
+		InviteDevice: invite,
+		Cancel:       cancel,
 	}
 	s.mu.Unlock()
 
@@ -345,7 +370,7 @@ func (s *Service) StartNetwork(
 
 		// serve main network api
 		mainIP := netaddr.FirstAssignable(mainNet)
-		mainAddr := netaddr.Endpoint(mainIP, network.ApiPort)
+		mainAddr := netaddr.Endpoint(mainIP, network.MainApiPort)
 		mainServer := &http.Server{
 			Addr:    mainAddr,
 			Handler: handlers.Main,
@@ -358,7 +383,7 @@ func (s *Service) StartNetwork(
 
 		// serve invite network api
 		inviteIP := netaddr.FirstAssignable(inviteNet)
-		inviteAddr := netaddr.Endpoint(inviteIP, network.ApiPort)
+		inviteAddr := netaddr.Endpoint(inviteIP, network.InviteApiPort)
 		inviteServer := &http.Server{
 			Addr:    inviteAddr,
 			Handler: handlers.Invite,
@@ -414,14 +439,14 @@ func (s *Service) StopNetwork(
 		cancel()
 	}
 
-	if err := devices.Main.Down(); err != nil {
+	if err := devices.MainDevice.Down(); err != nil {
 		errs = append(errs, fmt.Errorf("main down: %w", err))
 	}
 	if err := s.wg.RemoveDevice(devices.MainName); err != nil {
 		errs = append(errs, fmt.Errorf("remove main: %w", err))
 	}
 
-	if err := devices.Invite.Down(); err != nil {
+	if err := devices.InviteDevice.Down(); err != nil {
 		errs = append(errs, fmt.Errorf("invite down: %w", err))
 	}
 	if err := s.wg.RemoveDevice(devices.InviteName); err != nil {
@@ -484,7 +509,7 @@ func (s *Service) reconcileOnce(
 		s.logf("reconcile %s: build main peers: %v", name, err)
 		return
 	}
-	if err := devices.Main.ApplyPeers(mainPeers); err != nil {
+	if err := devices.MainDevice.ApplyPeers(mainPeers); err != nil {
 		s.logf("reconcile %s: apply main peers: %v", name, err)
 	}
 
@@ -493,7 +518,7 @@ func (s *Service) reconcileOnce(
 		s.logf("reconcile %s: build invite peers: %v", name, err)
 		return
 	}
-	if err := devices.Invite.ApplyPeers(invitePeers); err != nil {
+	if err := devices.InviteDevice.ApplyPeers(invitePeers); err != nil {
 		s.logf("reconcile %s: apply invite peers: %v", name, err)
 	}
 }
@@ -554,9 +579,9 @@ func (s *Service) buildInvitePeers(
 
 	var wgpeers []wireguard.WGPeer
 	for _, invite := range invites {
-		route := netaddr.HostRoute(invite.TempIP)
+		route := netaddr.HostRoute(invite.InviteIP)
 		wgpeers = append(wgpeers, wireguard.WGPeer{
-			PublicKey:      invite.TempPubKey,
+			PublicKey:      invite.InvitePubKey,
 			AllowedIPs:     []string{route.String()},
 			EndpointPolicy: wireguard.EndpointDynamic,
 		})

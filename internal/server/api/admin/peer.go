@@ -13,16 +13,16 @@ import (
 
 type PeerDTO struct {
 	Name      string `json:"name"`
-	PublicKey string `json:"public_key,omitempty"`
-	Ip        string `json:"ip,omitempty"`
+	PublicKey string `json:"public_key"`
+	Ip        string `json:"ip"`
 	Admin     bool   `json:"admin"`
 	Enabled   bool   `json:"enabled"`
 }
 
 type AddPeerRequest struct {
-	Name  string `json:"name"`
-	Ip    string `json:"ip"`
-	Admin bool   `json:"admin"`
+	Name  string  `json:"name"`
+	Ip    *string `json:"ip,omitempty"`
+	Admin bool    `json:"admin"`
 }
 
 type RenamePeerRequest struct {
@@ -81,13 +81,7 @@ func (a *API) handlePeerAdd(
 		return
 	}
 
-	cfg := service.PeerConfig{
-		Name:  req.Name,
-		IP:    req.Ip,
-		Admin: req.Admin,
-	}
-
-	invite, err := a.service.AddPeer(network, cfg)
+	invite, err := a.service.AddPeer(network, req.Name, req.Ip, req.Admin)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -109,9 +103,7 @@ func (a *API) handlePeerRename(
 		return
 	}
 
-	updated, err := a.service.UpdatePeer(network, peer, service.UpdatePeerRequest{
-		Name: &req.Name,
-	})
+	updated, err := a.service.UpdatePeer(network, peer, &req.Name, nil, nil, nil)
 	if err != nil {
 		writeServiceError(w, err)
 		return

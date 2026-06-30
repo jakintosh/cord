@@ -24,11 +24,9 @@ func TestOnboardingLifecycle(t *testing.T) {
 		t.Fatalf("start network: %v", err)
 	}
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name:      "alice",
-		IP:        net.ParseIP("10.0.0.5"),
-		ExpiresIn: time.Hour,
-	})
+	aliceIP := net.ParseIP("10.0.0.5")
+	expiresIn := time.Hour
+	_, err := env.Service.CreateInvite("testnet", "alice", &aliceIP, false, &expiresIn)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
@@ -128,10 +126,8 @@ func TestConfirmPeer_PreservesDisabledState(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name: "bob",
-		IP:   net.ParseIP("10.0.0.6"),
-	})
+	bobIP := net.ParseIP("10.0.0.6")
+	_, err := env.Service.CreateInvite("testnet", "bob", &bobIP, false, nil)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
@@ -143,9 +139,7 @@ func TestConfirmPeer_PreservesDisabledState(t *testing.T) {
 	}
 
 	disabled := false
-	_, err = env.Service.UpdatePeer("testnet", "bob", service.UpdatePeerRequest{
-		Enabled: &disabled,
-	})
+	_, err = env.Service.UpdatePeer("testnet", "bob", nil, nil, &disabled, nil)
 	if err != nil {
 		t.Fatalf("disable peer: %v", err)
 	}
@@ -179,11 +173,9 @@ func TestPruneExpiredInvites_RemovesExpiredProvisionalPeer(t *testing.T) {
 		t.Fatalf("start network: %v", err)
 	}
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name:      "short-lived",
-		IP:        net.ParseIP("10.0.0.7"),
-		ExpiresIn: time.Hour,
-	})
+	shortIP := net.ParseIP("10.0.0.7")
+	shortExpiry := time.Hour
+	_, err := env.Service.CreateInvite("testnet", "short-lived", &shortIP, false, &shortExpiry)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
@@ -235,11 +227,9 @@ func TestPruneExpiredInvites_RetainsActiveProvisionalPeer(t *testing.T) {
 		t.Fatalf("start network: %v", err)
 	}
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name:      "still-active",
-		IP:        net.ParseIP("10.0.0.8"),
-		ExpiresIn: 24 * time.Hour,
-	})
+	stillIP := net.ParseIP("10.0.0.8")
+	stillExpiry := 24 * time.Hour
+	_, err := env.Service.CreateInvite("testnet", "still-active", &stillIP, false, &stillExpiry)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
@@ -271,10 +261,8 @@ func TestPruneExpiredInvites_RetainsConfirmedPeerWithoutInvite(t *testing.T) {
 		t.Fatalf("start network: %v", err)
 	}
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name: "confirmed",
-		IP:   net.ParseIP("10.0.0.9"),
-	})
+	confirmedIP := net.ParseIP("10.0.0.9")
+	_, err := env.Service.CreateInvite("testnet", "confirmed", &confirmedIP, false, nil)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}
@@ -312,11 +300,9 @@ func TestPruneExpiredInvites_RetainsConfirmedInviteAsAudit(t *testing.T) {
 	env := testutil.SetupServiceWithClock(t, clock.now)
 	testutil.SeedNetwork(t, env.Service)
 
-	_, err := env.Service.CreateInvite("testnet", service.CreateInviteRequest{
-		Name:      "audited",
-		IP:        net.ParseIP("10.0.0.10"),
-		ExpiresIn: time.Hour,
-	})
+	auditedIP := net.ParseIP("10.0.0.10")
+	auditedExpiry := time.Hour
+	_, err := env.Service.CreateInvite("testnet", "audited", &auditedIP, false, &auditedExpiry)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}

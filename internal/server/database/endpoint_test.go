@@ -13,16 +13,17 @@ func seedNetworkForEndpoint(t *testing.T, db *database.DB) {
 	t.Helper()
 	now := time.Now()
 	if err := db.BootstrapNetwork(&service.Network{
-		Name:             "epnet",
-		PrivateKey:       "priv",
-		PublicKey:        "pub",
-		MainCidr:         "10.0.0.0/16",
-		InviteCidr:       "10.1.0.0/24",
-		ExternalIP:       "1.1.1.1",
-		ListenPort:       51820,
-		InviteListenPort: 51821,
-		ApiPort:          8080,
-		CreatedAt:        now,
+		Name:                "epnet",
+		PrivateKey:          "priv",
+		PublicKey:           "pub",
+		MainCidr:            "10.0.0.0/16",
+		InviteCidr:          "10.1.0.0/24",
+		ExternalIP:          "1.1.1.1",
+		MainWireguardPort:   51820,
+		InviteWireguardPort: 51821,
+		MainApiPort:         80,
+		InviteApiPort:       80,
+		CreatedAt:           now,
 	}, &service.Cidr{Name: "epnet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub", Admin: true, Enabled: true, Confirmed: true}); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}

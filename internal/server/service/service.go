@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -65,10 +66,10 @@ type Service struct {
 // that stops the reconciliation loop.
 type NetworkDevices struct {
 	MainName     string
-	Main         wireguard.WGDevice
+	MainDevice   wireguard.WGDevice
 	MainServer   *http.Server
 	InviteName   string
-	Invite       wireguard.WGDevice
+	InviteDevice wireguard.WGDevice
 	InviteServer *http.Server
 	Cancel       context.CancelFunc
 }
@@ -132,4 +133,35 @@ func (s *Service) logf(format string, args ...any) {
 	if s.log != nil {
 		s.log.Printf(format, args...)
 	}
+}
+
+// ResolveInviteIdentity looks up an unredeemed, unexpired invite by
+// temporary IP within the invite network. Used by the identity middleware
+// to authenticate incoming invite-redemption requests.
+func (s *Service) ResolveInviteIdentity(
+	networkName string,
+	ip net.IP,
+) (
+	*Invite,
+	error,
+) {
+	inv, err := s.store.GetInviteByIP(networkName, ip, s.clock())
+	if err != nil {
+		return nil, fmt.Errorf("resolve invite identity: %w", mapStoreError(err))
+	}
+	return inv, nil
+}
+
+// ResolvePeerIdentity looks up a confirmed, enabled peer by IP address
+// within the network. Used by the identity middleware to authenticate
+// ordinary peer API calls (/peers, /endpoints) by WireGuard source IP.
+func (s *Service) ResolvePeerIdentity(
+	network string,
+	ip net.IP,
+) (*Peer, error) {
+	p, err := s.store.GetPeerByIP(network, ip)
+	if err != nil {
+		return nil, fmt.Errorf("resolve peer identity: %w", mapStoreError(err))
+	}
+	return p, nil
 }

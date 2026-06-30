@@ -20,23 +20,6 @@ type Peer struct {
 	Confirmed bool // whether the peer has proven reachability on the main network
 }
 
-// PeerConfig is the input for creating a peer invite. If IP is empty
-// an address is auto-assigned from the root CIDR.
-type PeerConfig struct {
-	Name  string
-	IP    string // optional; auto-assigned if empty
-	Admin bool
-}
-
-// UpdatePeerRequest carries the fields that can be changed on a peer.
-// Nil pointer means "no change."
-type UpdatePeerRequest struct {
-	Name      *string
-	Admin     *bool
-	Enabled   *bool
-	Confirmed *bool
-}
-
 // VisiblePeer is a peer as it appears to other peers on the network.
 // It includes identity plus recently witnessed endpoints but omits
 // management flags (Admin, Enabled, Confirmed).
@@ -61,20 +44,6 @@ type EndpointWitness struct {
 	Witness   string
 	Endpoint  string
 	Timestamp time.Time
-}
-
-// ResolvePeerIdentity looks up a confirmed, enabled peer by IP address
-// within the network. Used by the identity middleware to authenticate
-// ordinary peer API calls (/peers, /endpoints) by WireGuard source IP.
-func (s *Service) ResolvePeerIdentity(
-	network string,
-	ip net.IP,
-) (*Peer, error) {
-	p, err := s.store.GetPeerByIP(network, ip)
-	if err != nil {
-		return nil, fmt.Errorf("resolve peer identity: %w", mapStoreError(err))
-	}
-	return p, nil
 }
 
 // ResolveProvisionalIdentity looks up an unconfirmed, enabled peer by
@@ -171,26 +140,28 @@ func (s *Service) ListVisiblePeers(
 	return visible, nil
 }
 
-// AddPeer creates an invite for a new participant. If cfg.IP is empty
+// AddPeer creates an invite for a new participant. If ip is nil
 // an address is auto-assigned from the root CIDR. Returns the
 // PeerInvite payload to deliver out-of-band to the invitee.
 func (s *Service) AddPeer(
 	network string,
-	cfg PeerConfig,
+	name string,
+	ip *string,
+	admin bool,
 ) (
 	*PeerInvite,
 	error,
 ) {
-	if cfg.Name == "" {
+	if name == "" {
 		return nil, fmt.Errorf("%w: peer name required", ErrInvalidInput)
 	}
 
-	exists, err := s.store.PeerExists(network, cfg.Name)
+	exists, err := s.store.PeerExists(network, name)
 	if err != nil {
 		return nil, fmt.Errorf("check peer exists: %w", err)
 	}
 	if exists {
-		return nil, fmt.Errorf("%w: peer %q already exists", ErrConflict, cfg.Name)
+		return nil, fmt.Errorf("%w: peer %q already exists", ErrConflict, name)
 	}
 
 	nw, err := s.store.GetNetwork(network)
@@ -198,11 +169,11 @@ func (s *Service) AddPeer(
 		return nil, fmt.Errorf("get network: %w", mapStoreError(err))
 	}
 
-	var ip net.IP
-	if cfg.IP != "" {
-		parsedIP := net.ParseIP(cfg.IP)
+	var peerIP *net.IP
+	if ip != nil && *ip != "" {
+		parsedIP := net.ParseIP(*ip)
 		if parsedIP == nil {
-			return nil, fmt.Errorf("%w: invalid IP %q", ErrInvalidInput, cfg.IP)
+			return nil, fmt.Errorf("%w: invalid IP %q", ErrInvalidInput, *ip)
 		}
 		_, rootNet, err := net.ParseCIDR(nw.MainCidr)
 		if err != nil {
@@ -211,22 +182,19 @@ func (s *Service) AddPeer(
 		if !rootNet.Contains(parsedIP) {
 			return nil, fmt.Errorf(
 				"%w: IP %q is not within main CIDR %q",
-				ErrInvalidInput, cfg.IP, nw.MainCidr,
+				ErrInvalidInput, *ip, nw.MainCidr,
 			)
 		}
-		ip = parsedIP
+		peerIP = &parsedIP
 	} else {
-		ip, err = s.nextFreePeerIP(network, nw.MainCidr)
+		freeIP, err := s.nextFreePeerIP(network, nw.MainCidr)
 		if err != nil {
 			return nil, fmt.Errorf("auto-assign IP: %w", err)
 		}
+		peerIP = &freeIP
 	}
 
-	return s.CreateInvite(network, CreateInviteRequest{
-		Name:  cfg.Name,
-		IP:    ip,
-		Admin: cfg.Admin,
-	})
+	return s.CreateInvite(network, name, peerIP, admin, nil)
 }
 
 // RemovePeer deletes a peer and its associated invite (if any). The
@@ -244,11 +212,14 @@ func (s *Service) RemovePeer(
 }
 
 // UpdatePeer applies a partial update to a peer and returns the
-// updated record. Nil fields in the request mean no change.
+// updated record. Nil pointer fields mean no change.
 func (s *Service) UpdatePeer(
 	network string,
 	name string,
-	req UpdatePeerRequest,
+	newName *string,
+	admin *bool,
+	enabled *bool,
+	confirmed *bool,
 ) (
 	*Peer,
 	error,
@@ -258,7 +229,7 @@ func (s *Service) UpdatePeer(
 		return nil, fmt.Errorf("get peer for update: %w", mapStoreError(err))
 	}
 
-	p, err := s.store.UpdatePeer(network, name, req)
+	p, err := s.store.UpdatePeer(network, name, newName, admin, enabled, confirmed)
 	if err != nil {
 		return nil, fmt.Errorf("update peer %q: %w", name, mapStoreError(err))
 	}
@@ -273,9 +244,7 @@ func (s *Service) EnablePeer(
 	name string,
 ) error {
 	enabled := true
-	_, err := s.store.UpdatePeer(network, name, UpdatePeerRequest{
-		Enabled: &enabled,
-	})
+	_, err := s.store.UpdatePeer(network, name, nil, nil, &enabled, nil)
 	if err != nil {
 		return fmt.Errorf("enable peer %q: %w", name, mapStoreError(err))
 	}
@@ -290,9 +259,7 @@ func (s *Service) DisablePeer(
 	name string,
 ) error {
 	disabled := false
-	_, err := s.store.UpdatePeer(network, name, UpdatePeerRequest{
-		Enabled: &disabled,
-	})
+	_, err := s.store.UpdatePeer(network, name, nil, nil, &disabled, nil)
 	if err != nil {
 		return fmt.Errorf("disable peer %q: %w", name, mapStoreError(err))
 	}
@@ -316,9 +283,7 @@ func (s *Service) ConfirmPeer(
 	name string,
 ) error {
 	confirmed := true
-	_, err := s.store.UpdatePeer(network, name, UpdatePeerRequest{
-		Confirmed: &confirmed,
-	})
+	_, err := s.store.UpdatePeer(network, name, nil, nil, nil, &confirmed)
 	if err != nil {
 		return fmt.Errorf("confirm peer %q: %w", name, mapStoreError(err))
 	}
@@ -384,8 +349,8 @@ func (s *Service) nextFreePeerIP(
 		}
 	}
 	for _, inv := range invites {
-		if inv.FinalIP != nil {
-			used[netaddr.Normalize(inv.FinalIP).String()] = true
+		if inv.MainIP != nil {
+			used[netaddr.Normalize(inv.MainIP).String()] = true
 		}
 	}
 
