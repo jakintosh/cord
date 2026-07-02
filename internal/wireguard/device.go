@@ -4,87 +4,9 @@ import (
 	"fmt"
 	"net"
 	"sync"
-	"time"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
-
-	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 )
-
-// EndpointPolicy controls how Cord manages a peer's endpoint.
-type EndpointPolicy int
-
-const (
-	EndpointDynamic   EndpointPolicy = iota // cord never touches endpoint; learned from handshakes (default)
-	EndpointBootstrap                       // set only on initial add
-	EndpointFixed                           // always reconciled
-)
-
-// PeerConfig is a desired WireGuard peer. It carries only
-// configuration fields — runtime state like handshake time and byte
-// counters lives in PeerStatus.
-type PeerConfig struct {
-	PublicKey           wgtypes.Key
-	AllowedIPs          []net.IPNet
-	Endpoint            *net.UDPAddr
-	EndpointPolicy      EndpointPolicy
-	PersistentKeepalive time.Duration
-}
-
-// NewPeerConfig parses string representations into a PeerConfig.
-// endpoint may be empty. keepaliveSec is seconds; 0 means no keepalive.
-func NewPeerConfig(
-	publicKey string,
-	allowedIPs []string,
-	endpoint string,
-	keepaliveSec int,
-	policy EndpointPolicy,
-) (
-	PeerConfig,
-	error,
-) {
-	key, err := parseKey(publicKey)
-	if err != nil {
-		return PeerConfig{}, fmt.Errorf("public key %q: %w", publicKey, err)
-	}
-
-	var ips []net.IPNet
-	for _, cidr := range allowedIPs {
-		ipNet, err := netaddr.ParseInterface(cidr)
-		if err != nil {
-			return PeerConfig{}, fmt.Errorf("allowed-ip %q: %w", cidr, err)
-		}
-		ips = append(ips, ipNet)
-	}
-
-	var ep *net.UDPAddr
-	if endpoint != "" {
-		ep, err = net.ResolveUDPAddr("udp", endpoint)
-		if err != nil {
-			return PeerConfig{}, fmt.Errorf("endpoint %q: %w", endpoint, err)
-		}
-	}
-
-	return PeerConfig{
-		PublicKey:           key,
-		AllowedIPs:          ips,
-		Endpoint:            ep,
-		EndpointPolicy:      policy,
-		PersistentKeepalive: time.Duration(keepaliveSec) * time.Second,
-	}, nil
-}
-
-// PeerStatus is the observed live state of a WireGuard peer returned
-// by the backend. It includes runtime fields that PeerConfig does not.
-type PeerStatus struct {
-	PublicKey           wgtypes.Key
-	AllowedIPs          []net.IPNet
-	Endpoint            *net.UDPAddr
-	PersistentKeepalive time.Duration
-	LastHandshake       time.Time
-	ReceiveBytes        int64
-	TransmitBytes       int64
-}
 
 // DeviceConfig configures a new WireGuard device. CreateDevice
 // creates the interface, configures it, and brings it up in one
