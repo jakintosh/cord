@@ -8,15 +8,6 @@ import (
 	"fmt"
 )
 
-// EndpointPolicy controls how Cord manages a peer's endpoint.
-type EndpointPolicy int
-
-const (
-	EndpointDynamic   EndpointPolicy = iota // cord manages (default)
-	EndpointBootstrap                       // set only on initial add
-	EndpointFixed                           // always reconciled
-)
-
 const maxInterfaceNameBytes = 15
 
 // Options configures a WireGuard manager.
@@ -68,11 +59,11 @@ func (m *Manager) CreateDevice(
 	*Device,
 	error,
 ) {
-	if len(cfg.Name) > maxInterfaceNameBytes {
-		return nil, fmt.Errorf("wireguard: interface name %q exceeds %d byte limit", cfg.Name, maxInterfaceNameBytes)
+	if err := ValidateDeviceName(cfg.Name); err != nil {
+		return nil, err
 	}
 
-	privKey, err := parseKey(cfg.PrivateKey)
+	_, err := parseKey(cfg.PrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("wireguard: create device: %w", err)
 	}
@@ -82,5 +73,5 @@ func (m *Manager) CreateDevice(
 		return nil, fmt.Errorf("wireguard: create device: %w", err)
 	}
 
-	return newDevice(cfg.Name, privKey, cfg.Address, cfg.ListenPort, cfg.MTU, bd), nil
+	return newDevice(cfg.Name, bd), nil
 }

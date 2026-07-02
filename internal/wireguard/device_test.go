@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
@@ -124,17 +125,15 @@ func TestDevice_UpdateEndpoint_AppliesTargetedOperation(t *testing.T) {
 	d := createTestDevice(t, "test", backend)
 
 	k := mustGenerateKey(t)
-	p := peerConfig(k, []string{"10.0.0.1/32"}, "", wireguard.EndpointDynamic, 0)
+	p := peerConfig(k, []string{"10.0.0.1/32", "10.0.0.0/24"}, "5.6.7.8:51821", wireguard.EndpointDynamic, 25*time.Second)
 	if err := d.SetPeers(p); err != nil {
 		t.Fatalf("SetPeers: %v", err)
 	}
 
 	mdev := backend.Device("test")
-	// Clear recorded apply calls from SetPeers by creating a new tracker.
-	// After SetPeers, ApplyCalls has one entry. We record from here.
 	startLen := len(mdev.AppliedOps())
 
-	if err := d.UpdateEndpoint(k.String(), "1.2.3.4:51820"); err != nil {
+	if err := d.SetPeerEndpoint(k.String(), "1.2.3.4:51820"); err != nil {
 		t.Fatalf("UpdateEndpoint: %v", err)
 	}
 
@@ -145,8 +144,26 @@ func TestDevice_UpdateEndpoint_AppliesTargetedOperation(t *testing.T) {
 	if ops[0].Remove {
 		t.Errorf("operation is remove, want update")
 	}
+	// Endpoint must be the new value.
 	if ops[0].Config.Endpoint == nil || ops[0].Config.Endpoint.String() != "1.2.3.4:51820" {
 		t.Errorf("endpoint = %v, want 1.2.3.4:51820", ops[0].Config.Endpoint)
+	}
+	// AllowedIPs and Keepalive must be preserved from the desired entry.
+	if len(ops[0].Config.AllowedIPs) != 2 {
+		t.Errorf("allowed IPs = %d, want 2", len(ops[0].Config.AllowedIPs))
+	}
+	if ops[0].Config.PersistentKeepalive != 25*time.Second {
+		t.Errorf("keepalive = %v, want 25s", ops[0].Config.PersistentKeepalive)
+	}
+}
+
+func TestDevice_UpdateEndpoint_UnknownPeer(t *testing.T) {
+	backend := wireguardtest.NewMockBackend()
+	d := createTestDevice(t, "test", backend)
+
+	err := d.SetPeerEndpoint(mustGenerateKey(t).String(), "1.2.3.4:51820")
+	if err == nil {
+		t.Fatal("expected error for unknown peer")
 	}
 }
 
@@ -250,5 +267,64 @@ func TestDevice_ConcurrentReconcile(t *testing.T) {
 	close(start)
 	wg.Wait()
 
-	// No panics = concurrent safety.
+	// The race detector (enabled via `make test`) is what actually
+	// validates concurrent safety here; absence of panics alone is
+	// not sufficient.
+}
+
+func TestDevice_Peers_ReturnsLiveState(t *testing.T) {
+	backend := wireguardtest.NewMockBackend()
+	d := createTestDevice(t, "test", backend)
+	mdev := backend.Device("test")
+
+	k := mustGenerateKey(t)
+	mdev.SetPeers(peerStatus(k, []string{"10.0.0.1/32"}, "1.2.3.4:51820", 0))
+
+	got, err := d.Peers()
+	if err != nil {
+		t.Fatalf("Peers: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 peer, got %d", len(got))
+	}
+	if got[0].PublicKey != k {
+		t.Errorf("public key = %v, want %v", got[0].PublicKey, k)
+	}
+	if got[0].Endpoint == nil || got[0].Endpoint.String() != "1.2.3.4:51820" {
+		t.Errorf("endpoint = %v, want 1.2.3.4:51820", got[0].Endpoint)
+	}
+	if mdev.PeersCalls != 1 {
+		t.Errorf("PeersCalls = %d, want 1", mdev.PeersCalls)
+	}
+}
+
+func TestDevice_Peers_BackendError(t *testing.T) {
+	backend := wireguardtest.NewMockBackend()
+	d := createTestDevice(t, "test", backend)
+	mdev := backend.Device("test")
+	mdev.PeersErr = errors.New("status failed")
+
+	if _, err := d.Peers(); err == nil {
+		t.Fatal("expected error from observe failure")
+	}
+}
+
+func TestDevice_UpdateEndpoint_InvalidKey(t *testing.T) {
+	backend := wireguardtest.NewMockBackend()
+	d := createTestDevice(t, "test", backend)
+
+	if err := d.SetPeerEndpoint("not-a-key", "1.2.3.4:51820"); err == nil {
+		t.Fatal("expected error for invalid public key")
+	}
+}
+
+func TestDevice_UpdateEndpoint_InvalidEndpoint(t *testing.T) {
+	backend := wireguardtest.NewMockBackend()
+	d := createTestDevice(t, "test", backend)
+
+	// Valid key but malformed endpoint string.
+	key := mustGenerateKey(t).String()
+	if err := d.SetPeerEndpoint(key, "not an endpoint"); err == nil {
+		t.Fatal("expected error for invalid endpoint")
+	}
 }

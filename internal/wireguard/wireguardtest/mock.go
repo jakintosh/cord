@@ -17,9 +17,13 @@ type applyCall struct {
 // MockDevice is a BackendDevice handle for testing. Each MockDevice
 // holds its own peer map, so tests can inspect per-device state
 // independently.
+//
+// ApplyPeers merges ops into peer state to match real backends:
+// AllowedIPs and PersistentKeepalive are always replaced, Endpoint is
+// set only when non-nil, and runtime fields (LastHandshake etc.) are
+// preserved.
 type MockDevice struct {
 	mu            sync.Mutex
-	name          string
 	peers         map[string]wireguard.PeerStatus
 	PeersCalls    int
 	ApplyCalls    []applyCall
@@ -57,15 +61,16 @@ func (d *MockDevice) ApplyPeers(
 		key := op.Config.PublicKey.String()
 		if op.Remove {
 			delete(d.peers, key)
-		} else {
-			ps := wireguard.PeerStatus{
-				PublicKey:           op.Config.PublicKey,
-				AllowedIPs:          copyIPNets(op.Config.AllowedIPs),
-				Endpoint:            copyUDPAddr(op.Config.Endpoint),
-				PersistentKeepalive: op.Config.PersistentKeepalive,
-			}
-			d.peers[key] = ps
+			continue
 		}
+		existing := d.peers[key]
+		existing.PublicKey = op.Config.PublicKey
+		existing.AllowedIPs = copyIPNets(op.Config.AllowedIPs)
+		existing.PersistentKeepalive = op.Config.PersistentKeepalive
+		if op.Config.Endpoint != nil {
+			existing.Endpoint = copyUDPAddr(op.Config.Endpoint)
+		}
+		d.peers[key] = existing
 	}
 	return nil
 }
@@ -116,11 +121,13 @@ func (d *MockDevice) peersListLocked() []wireguard.PeerStatus {
 }
 
 // SetPeers replaces the mock's observed peer state for this device.
+// Unlike ApplyPeers (which merges), this is a wholesale replacement.
 func (d *MockDevice) SetPeers(
 	peers ...wireguard.PeerStatus,
 ) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
 	devPeers := make(map[string]wireguard.PeerStatus, len(peers))
 	for _, p := range peers {
 		devPeers[p.PublicKey.String()] = p
@@ -157,7 +164,6 @@ func (b *MockBackend) CreateDevice(
 	}
 	b.CreateCalls = append(b.CreateCalls, cfg)
 	dev := &MockDevice{
-		name:  cfg.Name,
 		peers: make(map[string]wireguard.PeerStatus),
 	}
 	b.devices[cfg.Name] = dev

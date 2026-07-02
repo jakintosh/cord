@@ -22,12 +22,12 @@ func (b *KernelBackend) CreateDevice(
 	BackendDevice,
 	error,
 ) {
-	link, err := kEnsureLink(cfg.Name)
+	link, err := kernelEnsureLink(cfg.Name)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := kSyncAddress(link, cfg.Address); err != nil {
+	if err := kernelSyncAddress(link, cfg.Address); err != nil {
 		return nil, err
 	}
 
@@ -43,7 +43,7 @@ func (b *KernelBackend) CreateDevice(
 	if err != nil {
 		return nil, fmt.Errorf("wireguard: parse key: %w", err)
 	}
-	if err := kApplyDeviceConfig(cfg.Name, privKey, int(cfg.ListenPort)); err != nil {
+	if err := kernelApplyDeviceConfig(cfg.Name, privKey, int(cfg.ListenPort)); err != nil {
 		return nil, err
 	}
 
@@ -102,7 +102,7 @@ func (h *kernelDeviceHandle) ApplyPeers(
 		return fmt.Errorf("wireguard: %s is not up", h.name)
 	}
 
-	return kApplyPeerOperations(h.name, ops)
+	return kernelApplyPeerOperations(h.name, ops)
 }
 
 func (h *kernelDeviceHandle) Close() error {
@@ -121,7 +121,7 @@ func (h *kernelDeviceHandle) Close() error {
 	return nil
 }
 
-func kApplyPeerOperations(
+func kernelApplyPeerOperations(
 	name string,
 	operations []PeerOp,
 ) error {
@@ -139,7 +139,7 @@ func kApplyPeerOperations(
 	return client.ConfigureDevice(name, wgtypes.Config{Peers: peerConfigs})
 }
 
-func kEnsureLink(
+func kernelEnsureLink(
 	name string,
 ) (
 	netlink.Link,
@@ -166,7 +166,7 @@ func kEnsureLink(
 	return wg, nil
 }
 
-func kSyncAddress(
+func kernelSyncAddress(
 	link netlink.Link,
 	addr net.IPNet,
 ) error {
@@ -196,7 +196,7 @@ func kSyncAddress(
 	return nil
 }
 
-func kApplyDeviceConfig(
+func kernelApplyDeviceConfig(
 	name string,
 	key wgtypes.Key,
 	port int,

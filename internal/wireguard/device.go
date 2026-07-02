@@ -11,7 +11,14 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 )
 
-const defaultMTU = 1420
+// EndpointPolicy controls how Cord manages a peer's endpoint.
+type EndpointPolicy int
+
+const (
+	EndpointDynamic   EndpointPolicy = iota // cord never touches endpoint; learned from handshakes (default)
+	EndpointBootstrap                       // set only on initial add
+	EndpointFixed                           // always reconciled
+)
 
 // PeerConfig is a desired WireGuard peer. It carries only
 // configuration fields — runtime state like handshake time and byte
@@ -92,13 +99,9 @@ type DeviceConfig struct {
 
 // Device is a live WireGuard network device backed by a BackendDevice.
 // All methods are safe for concurrent use; the Device serializes access
-// with a single mutex.
+// with a single mutex held across backend calls.
 type Device struct {
 	name    string
-	address net.IPNet
-	port    uint16
-	mtu     int
-
 	mu      sync.Mutex
 	backend BackendDevice
 	desired map[wgtypes.Key]PeerConfig
@@ -106,20 +109,10 @@ type Device struct {
 
 func newDevice(
 	name string,
-	privateKey wgtypes.Key,
-	address net.IPNet,
-	port uint16,
-	mtu int,
 	backend BackendDevice,
 ) *Device {
-	if mtu <= 0 {
-		mtu = defaultMTU
-	}
 	return &Device{
 		name:    name,
-		address: address,
-		port:    port,
-		mtu:     mtu,
 		backend: backend,
 		desired: make(map[wgtypes.Key]PeerConfig),
 	}
@@ -130,17 +123,30 @@ func (d *Device) Name() string {
 }
 
 // SetPeers replaces the desired peer set and reconciles it against
-// the live WireGuard state.
-func (d *Device) SetPeers(peers ...PeerConfig) error {
+// the live WireGuard state. The mutex is held across the entire
+// observe→plan→apply cycle so that concurrent calls are serialized.
+func (d *Device) SetPeers(
+	peers ...PeerConfig,
+) error {
 	d.mu.Lock()
-	desired := make(map[wgtypes.Key]PeerConfig, len(peers))
-	for _, p := range peers {
-		desired[p.PublicKey] = p
-	}
-	d.desired = desired
-	d.mu.Unlock()
+	defer d.mu.Unlock()
 
-	return d.reconcile()
+	d.desired = make(map[wgtypes.Key]PeerConfig, len(peers))
+	desiredSlice := make([]PeerConfig, len(peers))
+	for i, p := range peers {
+		d.desired[p.PublicKey] = p
+		desiredSlice[i] = p
+	}
+
+	observed, err := d.backend.Peers()
+	if err != nil {
+		return fmt.Errorf("wireguard: reconcile observe: %w", err)
+	}
+	ops := planPeerReconciliation(desiredSlice, observed)
+	if len(ops) == 0 {
+		return nil
+	}
+	return d.backend.ApplyPeers(ops)
 }
 
 // Peers returns the live peer state from the WireGuard device.
@@ -149,16 +155,16 @@ func (d *Device) Peers() (
 	error,
 ) {
 	d.mu.Lock()
-	bd := d.backend
-	d.mu.Unlock()
+	defer d.mu.Unlock()
 
-	return bd.Peers()
+	return d.backend.Peers()
 }
 
-// UpdateEndpoint sets the endpoint for a single existing peer,
+// SetPeerEndpoint updates the endpoint for a single existing peer,
 // bypassing the normal reconciliation flow. It updates the desired
-// entry's endpoint and applies a targeted operation.
-func (d *Device) UpdateEndpoint(
+// entry's endpoint and applies a targeted op with the full peer config
+// so that routing is preserved.
+func (d *Device) SetPeerEndpoint(
 	pubKey string,
 	endpoint string,
 ) error {
@@ -173,57 +179,23 @@ func (d *Device) UpdateEndpoint(
 	}
 
 	d.mu.Lock()
-	if dp, ok := d.desired[key]; ok {
-		dp.Endpoint = addr
-		d.desired[key] = dp
-	}
-	bd := d.backend
-	d.mu.Unlock()
+	defer d.mu.Unlock()
 
-	op := PeerOp{
-		Config: PeerConfig{
-			// AllowedIPs and Keepalive are zero-value; the backend will not set
-			// them from this op since they use the zero-value. Only Endpoint is set.
-			PublicKey: key,
-			Endpoint:  addr,
-		},
+	peer, ok := d.desired[key]
+	if !ok {
+		return fmt.Errorf("wireguard: update endpoint: peer %s not found", pubKey)
 	}
+	peer.Endpoint = addr
+	d.desired[key] = peer
 
-	return bd.ApplyPeers([]PeerOp{op})
+	return d.backend.ApplyPeers([]PeerOp{{Config: peer}})
 }
 
 // Close brings the device down and removes it.
 func (d *Device) Close() error {
 	d.mu.Lock()
-	bd := d.backend
-	d.mu.Unlock()
-	return bd.Close()
-}
-
-// reconcile observes the live device, plans changes, and applies
-// only the operations needed to match the desired peer set.
-func (d *Device) reconcile() error {
-	d.mu.Lock()
-	desired := d.desired
-	bd := d.backend
-	d.mu.Unlock()
-
-	desiredSlice := make([]PeerConfig, 0, len(desired))
-	for _, p := range desired {
-		desiredSlice = append(desiredSlice, p)
-	}
-
-	observed, err := bd.Peers()
-	if err != nil {
-		return fmt.Errorf("wireguard: reconcile observe: %w", err)
-	}
-
-	ops := planPeerReconciliation(desiredSlice, observed)
-	if len(ops) == 0 {
-		return nil
-	}
-
-	return bd.ApplyPeers(ops)
+	defer d.mu.Unlock()
+	return d.backend.Close()
 }
 
 // ValidateDeviceName checks that a device name fits within the kernel

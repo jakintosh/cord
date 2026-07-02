@@ -923,7 +923,7 @@ func (s *Service) tickDegraded(
 
 	// Rotate to next candidate.
 	endpoint := peer.Candidates[peer.Index]
-	if err := ln.Device.UpdateEndpoint(pubKey, endpoint); err != nil {
+	if err := ln.Device.SetPeerEndpoint(pubKey, endpoint); err != nil {
 		s.logf("tick %s: update endpoint for %q to %q: %v",
 			networkName, pubKey, endpoint, err)
 	}

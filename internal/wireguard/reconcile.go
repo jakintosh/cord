@@ -108,7 +108,18 @@ func planPeerReconciliation(
 func normalizeAllowedIPs(
 	ips []net.IPNet,
 ) []net.IPNet {
-	normalized := append([]net.IPNet(nil), ips...)
+	normalized := make([]net.IPNet, len(ips))
+	for i, ip := range ips {
+		// Allowed IPs are routing prefixes, so the host bits are
+		// meaningless. Mask them off so that a desired entry carrying
+		// host bits (e.g. from netaddr.ParseInterface) compares equal
+		// to the network-form value backends report. Without this,
+		// every reconcile cycle would emit a spurious update.
+		normalized[i] = net.IPNet{
+			IP:   ip.IP.Mask(ip.Mask),
+			Mask: append(net.IPMask(nil), ip.Mask...),
+		}
+	}
 	sort.Slice(normalized, func(i, j int) bool {
 		return normalized[i].String() < normalized[j].String()
 	})

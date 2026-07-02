@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const defaultMTU = 1420
+
 // BackendType selects which WireGuard implementation drives a device.
 type BackendType string
 

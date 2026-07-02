@@ -274,6 +274,9 @@ func TestNewPeerConfig(t *testing.T) {
 	if p.EndpointPolicy != wireguard.EndpointFixed {
 		t.Errorf("endpoint policy = %v, want fixed", p.EndpointPolicy)
 	}
+	if p.PersistentKeepalive != 25*time.Second {
+		t.Errorf("keepalive = %v, want 25s", p.PersistentKeepalive)
+	}
 }
 
 func TestNewPeerConfig_InvalidInputs(t *testing.T) {
