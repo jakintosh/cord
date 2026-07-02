@@ -6,99 +6,125 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-func TestParseUAPIStatus_Empty(t *testing.T) {
-	status, err := parseUAPIStatus("wg0", "")
+func mustGenerateKey(t *testing.T) wgtypes.Key {
+	t.Helper()
+	key, err := wgtypes.GeneratePrivateKey()
 	if err != nil {
-		t.Fatalf("parseUAPIStatus: %v", err)
+		t.Fatalf("generate key: %v", err)
 	}
-	if status.Name != "wg0" {
-		t.Errorf("name = %q, want wg0", status.Name)
+	return key
+}
+
+func mustParseCIDR(t *testing.T, s string) net.IPNet {
+	t.Helper()
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		t.Fatalf("parse CIDR %q: %v", s, err)
 	}
-	if len(status.Peers) != 0 {
-		t.Errorf("expected 0 peers, got %d", len(status.Peers))
+	return *n
+}
+
+func mustResolveUDP(t *testing.T, s string) *net.UDPAddr {
+	t.Helper()
+	addr, err := net.ResolveUDPAddr("udp", s)
+	if err != nil {
+		t.Fatalf("resolve UDP %q: %v", s, err)
+	}
+	return addr
+}
+
+func TestParseUAPIPeers_Empty(t *testing.T) {
+	peers, err := parseUAPIPeers("")
+	if err != nil {
+		t.Fatalf("parseUAPIPeers: %v", err)
+	}
+	if len(peers) != 0 {
+		t.Errorf("expected 0 peers, got %d", len(peers))
 	}
 }
 
-func TestParseUAPIStatus_ListenPort(t *testing.T) {
+func TestParseUAPIPeers_IgnoresListenPort(t *testing.T) {
 	raw := "listen_port=51820\n"
-	status, err := parseUAPIStatus("wg0", raw)
+	peers, err := parseUAPIPeers(raw)
 	if err != nil {
-		t.Fatalf("parseUAPIStatus: %v", err)
+		t.Fatalf("parseUAPIPeers: %v", err)
 	}
-	if status.ListenPort != 51820 {
-		t.Errorf("listen port = %d, want 51820", status.ListenPort)
+	if len(peers) != 0 {
+		t.Errorf("expected 0 peers, got %d", len(peers))
 	}
 }
 
-func TestParseUAPIStatus_SinglePeer(t *testing.T) {
+func TestParseUAPIPeers_SinglePeer(t *testing.T) {
 	k := mustGenerateKey(t)
 	keyHex := hex.EncodeToString(k[:])
 	raw := "public_key=" + keyHex + "\n"
-	status, err := parseUAPIStatus("wg0", raw)
+	peers, err := parseUAPIPeers(raw)
 	if err != nil {
-		t.Fatalf("parseUAPIStatus: %v", err)
+		t.Fatalf("parseUAPIPeers: %v", err)
 	}
-	if len(status.Peers) != 1 {
-		t.Fatalf("expected 1 peer, got %d", len(status.Peers))
+	if len(peers) != 1 {
+		t.Fatalf("expected 1 peer, got %d", len(peers))
 	}
-	if status.Peers[0].PublicKey != k {
+	if peers[0].PublicKey != k {
 		t.Error("public key mismatch")
 	}
 }
 
-func TestParseUAPIStatus_PeerWithEndpoint(t *testing.T) {
+func TestParseUAPIPeers_PeerWithEndpoint(t *testing.T) {
 	k := mustGenerateKey(t)
 	keyHex := hex.EncodeToString(k[:])
 	raw := "public_key=" + keyHex + "\nendpoint=1.2.3.4:51820\n"
-	status, err := parseUAPIStatus("wg0", raw)
+	peers, err := parseUAPIPeers(raw)
 	if err != nil {
-		t.Fatalf("parseUAPIStatus: %v", err)
+		t.Fatalf("parseUAPIPeers: %v", err)
 	}
-	peer := status.Peers[0]
+	peer := peers[0]
 	if peer.Endpoint.String() != "1.2.3.4:51820" {
 		t.Errorf("endpoint = %v, want 1.2.3.4:51820", peer.Endpoint)
 	}
 }
 
-func TestParseUAPIStatus_PeerWithHandshake(t *testing.T) {
+func TestParseUAPIPeers_PeerWithHandshake(t *testing.T) {
 	k := mustGenerateKey(t)
 	keyHex := hex.EncodeToString(k[:])
 	raw := "public_key=" + keyHex + "\nlast_handshake_time_sec=1700000000\nlast_handshake_time_nsec=500000000\n"
-	status, err := parseUAPIStatus("wg0", raw)
+	peers, err := parseUAPIPeers(raw)
 	if err != nil {
-		t.Fatalf("parseUAPIStatus: %v", err)
+		t.Fatalf("parseUAPIPeers: %v", err)
 	}
-	peer := status.Peers[0]
+	peer := peers[0]
 	expected := time.Unix(1700000000, 500000000)
 	if !peer.LastHandshake.Equal(expected) {
 		t.Errorf("last handshake = %v, want %v", peer.LastHandshake, expected)
 	}
 }
 
-func TestParseUAPIStatus_PeerWithKeepalive(t *testing.T) {
+func TestParseUAPIPeers_PeerWithKeepalive(t *testing.T) {
 	k := mustGenerateKey(t)
 	keyHex := hex.EncodeToString(k[:])
 	raw := "public_key=" + keyHex + "\npersistent_keepalive_interval=30\n"
-	status, err := parseUAPIStatus("wg0", raw)
+	peers, err := parseUAPIPeers(raw)
 	if err != nil {
-		t.Fatalf("parseUAPIStatus: %v", err)
+		t.Fatalf("parseUAPIPeers: %v", err)
 	}
-	if status.Peers[0].PersistentKeepalive != 30*time.Second {
-		t.Errorf("keepalive = %v, want 30s", status.Peers[0].PersistentKeepalive)
+	if peers[0].PersistentKeepalive != 30*time.Second {
+		t.Errorf("keepalive = %v, want 30s", peers[0].PersistentKeepalive)
 	}
 }
 
-func TestParseUAPIStatus_PeerWithAllowedIPs(t *testing.T) {
+func TestParseUAPIPeers_PeerWithAllowedIPs(t *testing.T) {
 	k := mustGenerateKey(t)
 	keyHex := hex.EncodeToString(k[:])
 	raw := "public_key=" + keyHex + "\nallowed_ip=10.0.0.1/32\nallowed_ip=10.0.1.0/24\n"
-	status, err := parseUAPIStatus("wg0", raw)
+	peers, err := parseUAPIPeers(raw)
 	if err != nil {
-		t.Fatalf("parseUAPIStatus: %v", err)
+		t.Fatalf("parseUAPIPeers: %v", err)
 	}
-	peer := status.Peers[0]
+	peer := peers[0]
 	if len(peer.AllowedIPs) != 2 {
 		t.Fatalf("expected 2 allowed IPs, got %d", len(peer.AllowedIPs))
 	}
@@ -110,15 +136,15 @@ func TestParseUAPIStatus_PeerWithAllowedIPs(t *testing.T) {
 	}
 }
 
-func TestParseUAPIStatus_PeerWithCounters(t *testing.T) {
+func TestParseUAPIPeers_PeerWithCounters(t *testing.T) {
 	k := mustGenerateKey(t)
 	keyHex := hex.EncodeToString(k[:])
 	raw := "public_key=" + keyHex + "\nrx_bytes=1024\ntx_bytes=2048\n"
-	status, err := parseUAPIStatus("wg0", raw)
+	peers, err := parseUAPIPeers(raw)
 	if err != nil {
-		t.Fatalf("parseUAPIStatus: %v", err)
+		t.Fatalf("parseUAPIPeers: %v", err)
 	}
-	peer := status.Peers[0]
+	peer := peers[0]
 	if peer.ReceiveBytes != 1024 {
 		t.Errorf("rx_bytes = %d, want 1024", peer.ReceiveBytes)
 	}
@@ -127,64 +153,64 @@ func TestParseUAPIStatus_PeerWithCounters(t *testing.T) {
 	}
 }
 
-func TestParseUAPIStatus_MultiplePeers(t *testing.T) {
+func TestParseUAPIPeers_MultiplePeers(t *testing.T) {
 	k1, k2 := mustGenerateKey(t), mustGenerateKey(t)
 	raw := "public_key=" + hex.EncodeToString(k1[:]) + "\n" +
 		"public_key=" + hex.EncodeToString(k2[:]) + "\n"
-	status, err := parseUAPIStatus("wg0", raw)
+	peers, err := parseUAPIPeers(raw)
 	if err != nil {
-		t.Fatalf("parseUAPIStatus: %v", err)
+		t.Fatalf("parseUAPIPeers: %v", err)
 	}
-	if len(status.Peers) != 2 {
-		t.Errorf("expected 2 peers, got %d", len(status.Peers))
+	if len(peers) != 2 {
+		t.Errorf("expected 2 peers, got %d", len(peers))
 	}
 }
 
-func TestParseUAPIStatus_InvalidPublicKey(t *testing.T) {
+func TestParseUAPIPeers_InvalidPublicKey(t *testing.T) {
 	raw := "public_key=nothex\n"
-	_, err := parseUAPIStatus("wg0", raw)
+	_, err := parseUAPIPeers(raw)
 	if err == nil {
 		t.Error("expected error for invalid public key")
 	}
 }
 
-func TestParseUAPIStatus_WrongLengthPublicKey(t *testing.T) {
+func TestParseUAPIPeers_WrongLengthPublicKey(t *testing.T) {
 	raw := "public_key=" + strings.Repeat("00", 16) + "\n"
-	_, err := parseUAPIStatus("wg0", raw)
+	_, err := parseUAPIPeers(raw)
 	if err == nil {
 		t.Error("expected error for wrong-length public key")
 	}
 }
 
-func TestParseUAPIStatus_SkipsLinesWithoutEquals(t *testing.T) {
+func TestParseUAPIPeers_SkipsLinesWithoutEquals(t *testing.T) {
 	raw := "garbage\nlisten_port=12345\n"
-	status, err := parseUAPIStatus("wg0", raw)
+	peers, err := parseUAPIPeers(raw)
 	if err != nil {
-		t.Fatalf("parseUAPIStatus: %v", err)
+		t.Fatalf("parseUAPIPeers: %v", err)
 	}
-	if status.ListenPort != 12345 {
-		t.Errorf("listen port = %d, want 12345", status.ListenPort)
+	if len(peers) != 0 {
+		t.Errorf("expected 0 peers, got %d", len(peers))
 	}
 }
 
-func TestParseUAPIStatus_FlushBetweenPeers(t *testing.T) {
+func TestParseUAPIPeers_FlushBetweenPeers(t *testing.T) {
 	k1, k2 := mustGenerateKey(t), mustGenerateKey(t)
 	raw := "public_key=" + hex.EncodeToString(k1[:]) + "\n" +
 		"last_handshake_time_sec=100\nlast_handshake_time_nsec=0\n" +
 		"public_key=" + hex.EncodeToString(k2[:]) + "\n" +
 		"last_handshake_time_sec=200\nlast_handshake_time_nsec=0\n"
-	status, err := parseUAPIStatus("wg0", raw)
+	peers, err := parseUAPIPeers(raw)
 	if err != nil {
-		t.Fatalf("parseUAPIStatus: %v", err)
+		t.Fatalf("parseUAPIPeers: %v", err)
 	}
-	if len(status.Peers) != 2 {
-		t.Fatalf("expected 2 peers, got %d", len(status.Peers))
+	if len(peers) != 2 {
+		t.Fatalf("expected 2 peers, got %d", len(peers))
 	}
-	if !status.Peers[0].LastHandshake.Equal(time.Unix(100, 0)) {
-		t.Errorf("peer 0 handshake = %v, want 100", status.Peers[0].LastHandshake)
+	if !peers[0].LastHandshake.Equal(time.Unix(100, 0)) {
+		t.Errorf("peer 0 handshake = %v, want 100", peers[0].LastHandshake)
 	}
-	if !status.Peers[1].LastHandshake.Equal(time.Unix(200, 0)) {
-		t.Errorf("peer 1 handshake = %v, want 200", status.Peers[1].LastHandshake)
+	if !peers[1].LastHandshake.Equal(time.Unix(200, 0)) {
+		t.Errorf("peer 1 handshake = %v, want 200", peers[1].LastHandshake)
 	}
 }
 
@@ -192,7 +218,7 @@ func TestPeerOperationsUAPI_Add(t *testing.T) {
 	k := mustGenerateKey(t)
 	op := PeerOperation{
 		Type: PeerAdd,
-		Peer: desiredPeer{
+		Peer: Peer{
 			PublicKey:           k,
 			AllowedIPs:          []net.IPNet{mustParseCIDR(t, "10.0.0.1/32")},
 			EndpointPolicy:      EndpointFixed,
@@ -223,7 +249,7 @@ func TestPeerOperationsUAPI_AddDynamicEndpoint(t *testing.T) {
 	k := mustGenerateKey(t)
 	op := PeerOperation{
 		Type: PeerAdd,
-		Peer: desiredPeer{
+		Peer: Peer{
 			PublicKey:           k,
 			AllowedIPs:          []net.IPNet{mustParseCIDR(t, "10.0.0.1/32")},
 			EndpointPolicy:      EndpointDynamic,
@@ -242,7 +268,7 @@ func TestPeerOperationsUAPI_Remove(t *testing.T) {
 	k := mustGenerateKey(t)
 	op := PeerOperation{
 		Type: PeerRemove,
-		Peer: desiredPeer{PublicKey: k},
+		Peer: Peer{PublicKey: k},
 	}
 
 	result := peerOperationsUAPI([]PeerOperation{op})
@@ -259,7 +285,7 @@ func TestPeerOperationsUAPI_Update_AllowedIPs(t *testing.T) {
 	op := PeerOperation{
 		Type:             PeerUpdate,
 		UpdateAllowedIPs: true,
-		Peer: desiredPeer{
+		Peer: Peer{
 			PublicKey:  k,
 			AllowedIPs: []net.IPNet{mustParseCIDR(t, "10.0.1.0/24")},
 		},
@@ -282,7 +308,7 @@ func TestPeerOperationsUAPI_Update_Endpoint(t *testing.T) {
 	op := PeerOperation{
 		Type:           PeerUpdate,
 		UpdateEndpoint: true,
-		Peer: desiredPeer{
+		Peer: Peer{
 			PublicKey: k,
 			Endpoint:  mustResolveUDP(t, "5.6.7.8:51821"),
 		},
@@ -299,7 +325,7 @@ func TestPeerOperationsUAPI_Update_Keepalive(t *testing.T) {
 	op := PeerOperation{
 		Type:            PeerUpdate,
 		UpdateKeepalive: true,
-		Peer: desiredPeer{
+		Peer: Peer{
 			PublicKey:           k,
 			PersistentKeepalive: 15 * time.Second,
 		},
@@ -318,7 +344,7 @@ func TestPeerOperationsUAPI_Update_MultipleFields(t *testing.T) {
 		UpdateAllowedIPs: true,
 		UpdateEndpoint:   true,
 		UpdateKeepalive:  true,
-		Peer: desiredPeer{
+		Peer: Peer{
 			PublicKey:           k,
 			AllowedIPs:          []net.IPNet{mustParseCIDR(t, "10.0.0.0/16")},
 			Endpoint:            mustResolveUDP(t, "1.1.1.1:1111"),

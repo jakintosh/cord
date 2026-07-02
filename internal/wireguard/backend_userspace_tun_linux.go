@@ -8,7 +8,12 @@ import (
 	"os/exec"
 )
 
-func configureTunOS(name string, addr net.IPNet, mtu int, _ bool) error {
+func configureTunOS(
+	name string,
+	addr net.IPNet,
+	mtu int,
+	_ bool,
+) error {
 	cmd := exec.Command("ip", "addr", "replace", addr.String(), "dev", name)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("wireguard: set addr on %s: %w (%s)", name, err, out)

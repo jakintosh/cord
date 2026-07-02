@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 // Registration is the server-side stored representation of a pending peer
@@ -123,12 +124,12 @@ func (s *Service) CreateRegistration(
 		peerMainAssignedIP = freeIP
 	}
 
-	peerTempPrivKey, err := s.wg.GenerateKey()
+	peerTempPrivKey, err := wireguard.GenerateKey()
 	if err != nil {
 		return nil, fmt.Errorf("generate temp key: %w", err)
 	}
 
-	peerTempPubKey, err := s.wg.PublicKey(peerTempPrivKey)
+	peerTempPubKey, err := wireguard.PublicKey(peerTempPrivKey)
 	if err != nil {
 		return nil, fmt.Errorf("derive temp public key: %w", err)
 	}

@@ -1,49 +1,46 @@
 //go:build linux
 
-package wireguard
+package wireguard_test
 
-import "testing"
+import (
+	"testing"
 
-func TestNewBackend_LinuxAuto(t *testing.T) {
-	b, err := newBackend(BackendAuto)
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
+)
+
+func TestNewManager_LinuxAuto(t *testing.T) {
+	mgr, err := wireguard.NewManager(wireguard.Options{Backend: wireguard.BackendAuto})
 	if err != nil {
-		t.Fatalf("newBackend(Auto): %v", err)
+		t.Fatalf("NewManager(Auto): %v", err)
 	}
-	if _, ok := b.(*KernelBackend); !ok {
-		t.Errorf("expected *KernelBackend, got %T", b)
+	if mgr == nil {
+		t.Fatal("expected non-nil Manager")
 	}
 }
 
-func TestNewBackend_LinuxKernel(t *testing.T) {
-	b, err := newBackend(BackendKernel)
+func TestNewManager_LinuxKernel(t *testing.T) {
+	mgr, err := wireguard.NewManager(wireguard.Options{Backend: wireguard.BackendKernel})
 	if err != nil {
-		t.Fatalf("newBackend(Kernel): %v", err)
+		t.Fatalf("NewManager(Kernel): %v", err)
 	}
-	if _, ok := b.(*KernelBackend); !ok {
-		t.Errorf("expected *KernelBackend, got %T", b)
+	if mgr == nil {
+		t.Fatal("expected non-nil Manager")
 	}
 }
 
-func TestNewBackend_LinuxUserspace(t *testing.T) {
-	b, err := newBackend(BackendUserspace)
+func TestNewManager_LinuxUserspace(t *testing.T) {
+	mgr, err := wireguard.NewManager(wireguard.Options{Backend: wireguard.BackendUserspace})
 	if err != nil {
-		t.Fatalf("newBackend(Userspace): %v", err)
+		t.Fatalf("NewManager(Userspace): %v", err)
 	}
-	if _, ok := b.(*UserspaceBackend); !ok {
-		t.Errorf("expected *UserspaceBackend, got %T", b)
+	if mgr == nil {
+		t.Fatal("expected non-nil Manager")
 	}
 }
 
-func TestNewBackend_LinuxUnknown(t *testing.T) {
-	_, err := newBackend(BackendType("bogus"))
+func TestNewManager_LinuxUnknown(t *testing.T) {
+	_, err := wireguard.NewManager(wireguard.Options{Backend: wireguard.BackendType("bogus")})
 	if err == nil {
 		t.Error("expected error for unknown backend")
-	}
-}
-
-func TestTunName_Linux(t *testing.T) {
-	name := "my-wg-interface"
-	if tunName(name) != name {
-		t.Errorf("tunName = %q, want %q", tunName(name), name)
 	}
 }

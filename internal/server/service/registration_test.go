@@ -11,6 +11,7 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 func TestCreateRegistration_Success(t *testing.T) {
@@ -94,18 +95,23 @@ func TestCreateRegistration_ReconcilesRunningInviteDeviceWithHostRoute(t *testin
 		t.Fatalf("create registration: %v", err)
 	}
 
-	inviteDev := env.WireGuard.Devices["testnet-i"]
-	if inviteDev == nil {
+	_, ok := env.Backend.UpConfigs["testnet-i"]
+	if !ok {
 		t.Fatal("expected invite device")
 	}
-	peers := inviteDev.AppliedPeers()
+	peers := env.Backend.LastAppliedOpsFor("testnet-i")
 	if len(peers) != 1 {
 		t.Fatalf("invite peers = %d, want 1", len(peers))
 	}
-	if peers[0].PublicKey != inv.Peer.PrivateKey+"-pub" {
-		t.Fatalf("public key = %q, want temp registration public key", peers[0].PublicKey)
+	expectedPub, err := wireguard.PublicKey(inv.Peer.PrivateKey)
+	if err != nil {
+		t.Fatalf("derive expected pub key: %v", err)
 	}
-	if got := peers[0].AllowedIPs; len(got) != 1 || got[0] != "10.1.0.2/32" {
+	if peers[0].Peer.PublicKey.String() != expectedPub {
+		t.Fatalf("public key = %q, want temp registration public key %q",
+			peers[0].Peer.PublicKey.String(), expectedPub)
+	}
+	if got := peers[0].Peer.AllowedIPs; len(got) != 1 || got[0].String() != "10.1.0.2/32" {
 		t.Fatalf("allowed IPs = %v, want [10.1.0.2/32]", got)
 	}
 }
@@ -229,12 +235,14 @@ func TestRedeemRegistration_MultipleRegistrations(t *testing.T) {
 	}
 	tempKey2 := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.Service.RedeemRegistration("testnet", tempKey1, "key-a")
+	keyA := mustGenKey(t)
+	keyB := mustGenKey(t)
+	_, err = env.Service.RedeemRegistration("testnet", tempKey1, keyA)
 	if err != nil {
 		t.Fatalf("redeem a: %v", err)
 	}
 
-	_, err = env.Service.RedeemRegistration("testnet", tempKey2, "key-b")
+	_, err = env.Service.RedeemRegistration("testnet", tempKey2, keyB)
 	if err != nil {
 		t.Fatalf("redeem b: %v", err)
 	}
@@ -262,7 +270,8 @@ func TestRedeemRegistration_ReconcilesRunningDevices(t *testing.T) {
 	}
 
 	tempKey := lastTempKey(t, env.Service, "testnet")
-	_, err = env.Service.RedeemRegistration("testnet", tempKey, "perm-live-key")
+	permKey := mustGenKey(t)
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, permKey)
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -270,23 +279,21 @@ func TestRedeemRegistration_ReconcilesRunningDevices(t *testing.T) {
 	// After redeem, the peer is added to the main device but the temp
 	// peer stays on the invite device so the client can retry if the
 	// response was lost.
-	inviteDev := env.WireGuard.Devices["testnet-i"]
-	if inviteDev == nil {
+	if _, ok := env.Backend.UpConfigs["testnet-i"]; !ok {
 		t.Fatal("expected invite device")
 	}
-	if peers := inviteDev.AppliedPeers(); len(peers) != 1 {
+	if peers := env.Backend.LastAppliedOpsFor("testnet-i"); len(peers) != 1 {
 		t.Fatalf("invite peers after redeem = %d, want 1 (temp peer still active)", len(peers))
 	}
 
-	mainDev := env.WireGuard.Devices["testnet"]
-	if mainDev == nil {
+	if _, ok := env.Backend.UpConfigs["testnet"]; !ok {
 		t.Fatal("expected main device")
 	}
 	var found bool
-	for _, peer := range mainDev.AppliedPeers() {
-		if peer.PublicKey == "perm-live-key" {
+	for _, op := range env.Backend.LastAppliedOpsFor("testnet") {
+		if op.Peer.PublicKey.String() == permKey {
 			found = true
-			if got := peer.AllowedIPs; len(got) != 1 || got[0] != "10.0.0.5/32" {
+			if got := op.Peer.AllowedIPs; len(got) != 1 || got[0].String() != "10.0.0.5/32" {
 				t.Fatalf("redeemed peer allowed IPs = %v, want [10.0.0.5/32]", got)
 			}
 		}

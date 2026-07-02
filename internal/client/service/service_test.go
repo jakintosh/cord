@@ -20,16 +20,13 @@ func TestClose_StopsRunningNetworks(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	// Device should have been cleaned up
-	d, ok := env.WireGuard.Devices["close-me"]
-	if !ok {
+	if _, ok := env.Backend.UpConfigs["close-me"]; !ok {
 		t.Fatal("expected device was created")
 	}
-	if d.DownCalls != 1 {
-		t.Errorf("down calls = %d, want 1", d.DownCalls)
+	if c := env.Backend.DownCount("close-me"); c != 1 {
+		t.Errorf("down calls = %d, want 1", c)
 	}
 
-	// Status should show not running
 	statuses, err := env.Service.Status()
 	if err != nil {
 		t.Fatalf("status: %v", err)

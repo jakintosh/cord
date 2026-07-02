@@ -10,7 +10,17 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
+
+func mustGenKey(t *testing.T) string {
+	t.Helper()
+	k, err := wireguard.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	return k
+}
 
 // TestBeginInstall_PersistsPermanentKey verifies that BeginInstall
 // generates a permanent keypair and persists it in the network record.
@@ -100,6 +110,7 @@ func TestBeginInstall_ExistingConfirmedNetwork(t *testing.T) {
 func TestInstall_ResumesFromInvited(t *testing.T) {
 	mux := http.NewServeMux()
 	var redeemPubKey string
+	srvPubKey := mustGenKey(t)
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
 		var req serverapi.RedeemInvitationRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -109,7 +120,7 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 		redeemPubKey = req.PermPubKey
 		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
 			Network: serverapi.NetworkInfoDTO{
-				PublicKey:   "server-pub-key",
+				PublicKey:   srvPubKey,
 				Endpoint:    "1.2.3.4:51820",
 				APIEndpoint: r.Host,
 			},
@@ -126,9 +137,9 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 
 	invite := service.Invite{
 		NetworkName:          "resume-test",
-		TempPeerPrivKey:      "temp-key",
+		TempPeerPrivKey:      mustGenKey(t),
 		TempPeerAssignedCidr: "10.43.0.2/24",
-		InviteServerPubkey:   "srv-pub",
+		InviteServerPubkey:   srvPubKey,
 		InviteServerEndpoint: "5.6.7.8:51821",
 		InviteServerAddr:     env.Server.Listener.Addr().String(),
 	}
@@ -163,10 +174,11 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 func TestInstall_ResumesFromRedeemed(t *testing.T) {
 	mux := http.NewServeMux()
 	confirmCalled := false
+	srvPubKey := mustGenKey(t)
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
 		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
 			Network: serverapi.NetworkInfoDTO{
-				PublicKey:   "server-pub-key",
+				PublicKey:   srvPubKey,
 				Endpoint:    "1.2.3.4:51820",
 				APIEndpoint: r.Host,
 			},
@@ -184,9 +196,9 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 
 	invite := service.Invite{
 		NetworkName:          "res-redeemed",
-		TempPeerPrivKey:      "temp-key",
+		TempPeerPrivKey:      mustGenKey(t),
 		TempPeerAssignedCidr: "10.43.0.2/24",
-		InviteServerPubkey:   "srv-pub",
+		InviteServerPubkey:   srvPubKey,
 		InviteServerEndpoint: "5.6.7.8:51821",
 		InviteServerAddr:     env.Server.Listener.Addr().String(),
 	}
@@ -220,10 +232,11 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 // temporary install scratch fields are cleared.
 func TestConfirm_ClearsInstallFields(t *testing.T) {
 	mux := http.NewServeMux()
+	srvPubKey := mustGenKey(t)
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
 		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
 			Network: serverapi.NetworkInfoDTO{
-				PublicKey:   "server-pub-key",
+				PublicKey:   srvPubKey,
 				Endpoint:    "1.2.3.4:51820",
 				APIEndpoint: r.Host,
 			},
@@ -240,9 +253,9 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 
 	invite := service.Invite{
 		NetworkName:          "clear-test",
-		TempPeerPrivKey:      "temp-key",
+		TempPeerPrivKey:      mustGenKey(t),
 		TempPeerAssignedCidr: "10.43.0.2/24",
-		InviteServerPubkey:   "srv-pub",
+		InviteServerPubkey:   srvPubKey,
 		InviteServerEndpoint: "5.6.7.8:51821",
 		InviteServerAddr:     env.Server.Listener.Addr().String(),
 	}

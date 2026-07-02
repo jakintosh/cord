@@ -36,20 +36,11 @@ func (t PeerOperationType) String() string {
 // live device's peer set against the desired configuration.
 type PeerOperation struct {
 	Type PeerOperationType
-	Peer desiredPeer
+	Peer Peer
 
 	UpdateAllowedIPs bool
 	UpdateEndpoint   bool
 	UpdateKeepalive  bool
-}
-
-// desiredPeer is the cord-authored configuration for one peer.
-type desiredPeer struct {
-	PublicKey           wgtypes.Key
-	AllowedIPs          []net.IPNet
-	Endpoint            *net.UDPAddr
-	EndpointPolicy      EndpointPolicy
-	PersistentKeepalive time.Duration
 }
 
 // ReconcilePlan is the deterministic set of operations needed to
@@ -60,7 +51,11 @@ type ReconcilePlan struct {
 
 // OperationCounts returns the number of adds, updates, and removes
 // in the plan.
-func (p ReconcilePlan) OperationCounts() (adds, updates, removes int) {
+func (p ReconcilePlan) OperationCounts() (
+	adds int,
+	updates int,
+	removes int,
+) {
 	for _, op := range p.Operations {
 		switch op.Type {
 		case PeerAdd:
@@ -133,11 +128,11 @@ func (s ReconcileStatus) Degraded() bool {
 // PlanPeerReconciliation compares desired peers with live peer state
 // and produces a targeted reconciliation plan.
 func PlanPeerReconciliation(
-	desired []desiredPeer,
-	observed []ObservedPeer,
+	desired []Peer,
+	observed []Peer,
 ) ReconcilePlan {
-	desiredByKey := make(map[wgtypes.Key]desiredPeer, len(desired))
-	observedByKey := make(map[wgtypes.Key]ObservedPeer, len(observed))
+	desiredByKey := make(map[wgtypes.Key]Peer, len(desired))
+	observedByKey := make(map[wgtypes.Key]Peer, len(observed))
 	keySet := make(map[wgtypes.Key]struct{}, len(desired)+len(observed))
 
 	for _, p := range desired {
@@ -167,7 +162,7 @@ func PlanPeerReconciliation(
 		case !wanted && exists:
 			removes = append(removes, PeerOperation{
 				Type: PeerRemove,
-				Peer: desiredPeer{PublicKey: key},
+				Peer: Peer{PublicKey: key},
 			})
 		case wanted && !exists:
 			adds = append(adds, PeerOperation{Type: PeerAdd, Peer: want})

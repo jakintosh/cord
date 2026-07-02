@@ -13,8 +13,8 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-// defaultDndpointTTL is how long an endpoint sighting is considered current.
-const defaultDndpointTTL = 24 * time.Hour
+// defaultEndpointTTL is how long an endpoint sighting is considered current.
+const defaultEndpointTTL = 24 * time.Hour
 
 // Options configures the domain core for the cord server. All fields are
 // required for full operation but may be nil during early development.
@@ -22,8 +22,8 @@ type Options struct {
 	// Store is the persistence adapter for server-side network state.
 	Store Store
 
-	// WG is the WireGuard manager for managing network devices.
-	WG wireguard.WG
+	// WireGuard is the WireGuard manager for managing network devices.
+	WireGuard *wireguard.Manager
 
 	// Clock returns the current time. Defaults to time.Now when nil.
 	Clock func() time.Time
@@ -53,7 +53,7 @@ type APIHandlers struct {
 // durable state through the Store and live WireGuard state through WG.
 type Service struct {
 	store             Store
-	wg                wireguard.WG
+	wireguard         *wireguard.Manager
 	clock             func() time.Time
 	log               *log.Logger
 	mu                sync.Mutex
@@ -69,10 +69,10 @@ type Service struct {
 // that stops the reconciliation loop.
 type NetworkDevices struct {
 	MainName     string
-	MainDevice   wireguard.WGDevice
+	MainDevice   *wireguard.Device
 	MainServer   *http.Server
 	InviteName   string
-	InviteDevice wireguard.WGDevice
+	InviteDevice *wireguard.Device
 	InviteServer *http.Server
 	Cancel       context.CancelFunc
 }
@@ -86,7 +86,7 @@ func New(
 	*Service,
 	error,
 ) {
-	if opts.WG == nil {
+	if opts.WireGuard == nil {
 		return nil, fmt.Errorf("server: wireguard manager required")
 	}
 
@@ -102,7 +102,7 @@ func New(
 
 	return &Service{
 		store:             opts.Store,
-		wg:                opts.WG,
+		wireguard:         opts.WireGuard,
 		clock:             clock,
 		log:               opts.Logger,
 		running:           make(map[string]*NetworkDevices),

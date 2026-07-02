@@ -439,19 +439,19 @@ func TestStartNetwork_UsesNetworkPrefixInterfaceAddresses(t *testing.T) {
 		t.Fatalf("start network: %v", err)
 	}
 
-	main := env.WireGuard.Devices["testnet"]
-	if main == nil {
+	mainCfg, ok := env.Backend.UpConfigs["testnet"]
+	if !ok {
 		t.Fatal("expected main device")
 	}
-	if main.Address != "10.0.0.1/16" {
-		t.Fatalf("main address = %q, want 10.0.0.1/16", main.Address)
+	if mainCfg.Address.String() != "10.0.0.1/16" {
+		t.Fatalf("main address = %q, want 10.0.0.1/16", mainCfg.Address.String())
 	}
 
-	invite := env.WireGuard.Devices["testnet-i"]
-	if invite == nil {
+	inviteCfg, ok := env.Backend.UpConfigs["testnet-i"]
+	if !ok {
 		t.Fatal("expected invite device")
 	}
-	if invite.Address != "10.1.0.1/24" {
-		t.Fatalf("invite address = %q, want 10.1.0.1/24", invite.Address)
+	if inviteCfg.Address.String() != "10.1.0.1/24" {
+		t.Fatalf("invite address = %q, want 10.1.0.1/24", inviteCfg.Address.String())
 	}
 }

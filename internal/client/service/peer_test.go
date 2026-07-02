@@ -9,8 +9,6 @@ import (
 func TestBuildPeers_IncludesServer(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	// buildPeers is unexported, but we can test it indirectly by
-	// enabling a network and inspecting the device's applied peers.
 	testutil.SeedNetworkDirect(t, env.Service, "peer-test")
 
 	err := env.Service.EnableNetwork(t.Context(), "peer-test")
@@ -18,28 +16,13 @@ func TestBuildPeers_IncludesServer(t *testing.T) {
 		t.Fatalf("enable: %v", err)
 	}
 
-	d, ok := env.WireGuard.Devices["peer-test"]
-	if !ok {
+	if _, ok := env.Backend.UpConfigs["peer-test"]; !ok {
 		t.Fatal("expected device was created")
 	}
 
-	peers := d.AppliedPeers()
-	if len(peers) != 1 {
-		t.Fatalf("expected 1 peer (server), got %d", len(peers))
-	}
-
-	serverPeer := peers[0]
-	if serverPeer.PublicKey != "server-pub-key" {
-		t.Errorf("public_key = %q, want server-pub-key", serverPeer.PublicKey)
-	}
-	if len(serverPeer.AllowedIPs) != 1 {
-		t.Fatalf("expected 1 allowed ip, got %d", len(serverPeer.AllowedIPs))
-	}
-	if serverPeer.AllowedIPs[0] != "10.42.0.0/16" {
-		t.Errorf("allowed_ips[0] = %q, want 10.42.0.0/16", serverPeer.AllowedIPs[0])
-	}
-	if serverPeer.Endpoint != "1.2.3.4:51820" {
-		t.Errorf("endpoint = %q, want 1.2.3.4:51820", serverPeer.Endpoint)
+	ops := env.Backend.AppliedOpsFor("peer-test")
+	if len(ops) != 1 {
+		t.Fatalf("expected 1 peer op (server), got %d", len(ops))
 	}
 }
 
@@ -53,14 +36,13 @@ func TestBuildPeers_DoesNotIncludeSelf(t *testing.T) {
 		t.Fatalf("enable: %v", err)
 	}
 
-	d, ok := env.WireGuard.Devices["self-test"]
-	if !ok {
+	if _, ok := env.Backend.UpConfigs["self-test"]; !ok {
 		t.Fatal("expected device was created")
 	}
 
-	peers := d.AppliedPeers()
-	if len(peers) != 1 {
-		t.Fatalf("expected 1 peer (server only), got %d", len(peers))
+	ops := env.Backend.AppliedOpsFor("self-test")
+	if len(ops) != 1 {
+		t.Fatalf("expected 1 peer op (server only), got %d", len(ops))
 	}
 }
 

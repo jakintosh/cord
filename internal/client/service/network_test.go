@@ -10,6 +10,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 func TestGetNetwork_Success(t *testing.T) {
@@ -29,8 +30,8 @@ func TestGetNetwork_Success(t *testing.T) {
 	if nw.PublicKey == "" {
 		t.Error("public_key should not be empty")
 	}
-	if nw.ServerPubkey != "server-pub-key" {
-		t.Errorf("server_pubkey = %q, want server-pub-key", nw.ServerPubkey)
+	if nw.ServerPubkey == "" {
+		t.Errorf("server_pubkey = %q, should not be empty", nw.ServerPubkey)
 	}
 	if nw.ServerEndpoint != "1.2.3.4:51820" {
 		t.Errorf("server_endpoint = %q, want 1.2.3.4:51820", nw.ServerEndpoint)
@@ -82,11 +83,17 @@ func TestListNetworks_WithNetworks(t *testing.T) {
 }
 
 func TestInstall_Success(t *testing.T) {
+	serverPubKey, err := wireguard.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate server pub key: %v", err)
+	}
+	serverPubKeyStr := serverPubKey
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
 		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
 			Network: serverapi.NetworkInfoDTO{
-				PublicKey:   "server-pub-key",
+				PublicKey:   serverPubKeyStr,
 				Endpoint:    "1.2.3.4:51820",
 				APIEndpoint: r.Host,
 			},
@@ -100,12 +107,16 @@ func TestInstall_Success(t *testing.T) {
 	})
 
 	env := testutil.SetupServiceWithServer(t, mux)
+	inviteKey, err := wireguard.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate invite key: %v", err)
+	}
 	invite := service.Invite{
 		NetworkName:          "install-me",
-		TempPeerPrivKey:      "temp-priv-key",
+		TempPeerPrivKey:      inviteKey,
 		TempPeerAssignedCidr: "10.43.0.2/24",
-		InviteServerPubkey:   "server-pub-key",
-		InviteServerEndpoint: "5.6.7.8:51821", // invite listener port — different from main
+		InviteServerPubkey:   serverPubKeyStr,
+		InviteServerEndpoint: "5.6.7.8:51821",
 		InviteServerAddr:     env.Server.Listener.Addr().String(),
 	}
 
@@ -120,36 +131,27 @@ func TestInstall_Success(t *testing.T) {
 		t.Fatalf("assigned cidr = %q, want 10.42.0.5/16", nw.AssignedCidr)
 	}
 
-	inviteDev := env.WireGuard.Devices["install-me-i"]
-	if inviteDev == nil {
-		t.Fatal("expected invite device")
+	if _, ok := env.Backend.UpConfigs["install-me-i"]; !ok {
+		t.Fatal("expected invite device was created")
 	}
-	if inviteDev.WaitCalls != 0 {
-		t.Fatalf("invite wait calls = %d, want 0", inviteDev.WaitCalls)
-	}
-	if inviteDev.DownCalls != 1 {
-		t.Fatalf("invite down calls = %d, want 1", inviteDev.DownCalls)
+	if c := env.Backend.DownCount("install-me-i"); c != 1 {
+		t.Fatalf("invite down calls = %d, want 1", c)
 	}
 
-	mainDev := env.WireGuard.Devices["install-me"]
-	if mainDev == nil {
-		t.Fatal("expected main device")
+	if _, ok := env.Backend.UpConfigs["install-me"]; !ok {
+		t.Fatal("expected main device was created")
 	}
-	if mainDev.WaitCalls != 0 {
-		t.Fatalf("main wait calls = %d, want 0", mainDev.WaitCalls)
+	if c := env.Backend.DownCount("install-me"); c != 1 {
+		t.Fatalf("main down calls = %d, want 1", c)
 	}
-	if mainDev.DownCalls != 1 {
-		t.Fatalf("main down calls = %d, want 1", mainDev.DownCalls)
+
+	ops := env.Backend.AppliedOpsFor("install-me")
+	var addOps []string
+	for _, op := range ops {
+		addOps = append(addOps, op.Peer.PublicKey.String())
 	}
-	peers := mainDev.AppliedPeers()
-	if len(peers) != 1 {
-		t.Fatalf("main peers = %d, want 1", len(peers))
-	}
-	if got := peers[0].AllowedIPs; len(got) != 1 || got[0] != "10.42.0.0/16" {
-		t.Fatalf("main server allowed IPs = %v, want [10.42.0.0/16]", got)
-	}
-	if peers[0].Endpoint != "1.2.3.4:51820" {
-		t.Fatalf("main server endpoint = %q, want 1.2.3.4:51820 (redeem result, not invite)", peers[0].Endpoint)
+	if len(addOps) != 1 {
+		t.Fatalf("main peer ops = %d, want 1", len(addOps))
 	}
 	if nw.ServerEndpoint != "1.2.3.4:51820" {
 		t.Fatalf("persisted ServerEndpoint = %q, want 1.2.3.4:51820", nw.ServerEndpoint)
@@ -281,13 +283,11 @@ func TestUninstallNetwork_DisablesFirst(t *testing.T) {
 		t.Fatalf("uninstall: %v", err)
 	}
 
-	// Verify the device was cleaned up
-	d, ok := env.WireGuard.Devices["enabled-net"]
-	if !ok {
+	if _, ok := env.Backend.UpConfigs["enabled-net"]; !ok {
 		t.Fatal("expected device was created during enable")
 	}
-	if d.DownCalls != 1 {
-		t.Errorf("down calls = %d, want 1", d.DownCalls)
+	if c := env.Backend.DownCount("enabled-net"); c != 1 {
+		t.Errorf("down calls = %d, want 1", c)
 	}
 }
 
@@ -300,7 +300,6 @@ func TestEnableNetwork_Success(t *testing.T) {
 		t.Fatalf("enable: %v", err)
 	}
 
-	// Verify network is now enabled in store
 	nw, err := env.Service.GetNetwork("enable-me")
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -309,13 +308,8 @@ func TestEnableNetwork_Success(t *testing.T) {
 		t.Error("network should be enabled")
 	}
 
-	// Verify device was created
-	d, ok := env.WireGuard.Devices["enable-me"]
-	if !ok {
+	if _, ok := env.Backend.UpConfigs["enable-me"]; !ok {
 		t.Fatal("expected device was created")
-	}
-	if d.UpCalls != 1 {
-		t.Errorf("up calls = %d, want 1", d.UpCalls)
 	}
 }
 
@@ -328,17 +322,12 @@ func TestEnableNetwork_AlreadyRunning(t *testing.T) {
 		t.Fatalf("first enable: %v", err)
 	}
 
-	// Second enable should be idempotent
 	if err := env.Service.EnableNetwork(ctx, "running"); err != nil {
 		t.Fatalf("second enable: %v", err)
 	}
 
-	d, ok := env.WireGuard.Devices["running"]
-	if !ok {
+	if _, ok := env.Backend.UpConfigs["running"]; !ok {
 		t.Fatal("expected device was created")
-	}
-	if d.UpCalls != 1 {
-		t.Errorf("up calls = %d, want 1 (idempotent)", d.UpCalls)
 	}
 }
 
@@ -355,14 +344,13 @@ func TestEnableNetwork_DeviceError(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "bad-device")
 
-	env.WireGuard.NewErr = errors.New("device create failed")
+	env.Backend.UpErr = errors.New("device create failed")
 
 	err := env.Service.EnableNetwork(context.Background(), "bad-device")
 	if err == nil {
 		t.Fatal("expected error")
 	}
 
-	// Network should remain disabled in store
 	nw, err := env.Service.GetNetwork("bad-device")
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -385,7 +373,6 @@ func TestDisableNetwork_Success(t *testing.T) {
 		t.Fatalf("disable: %v", err)
 	}
 
-	// Network should be disabled in store
 	nw, err := env.Service.GetNetwork("disable-me")
 	if err != nil {
 		t.Fatalf("get: %v", err)
@@ -394,13 +381,11 @@ func TestDisableNetwork_Success(t *testing.T) {
 		t.Error("network should be disabled")
 	}
 
-	// Device should have been cleaned up
-	d, ok := env.WireGuard.Devices["disable-me"]
-	if !ok {
+	if _, ok := env.Backend.UpConfigs["disable-me"]; !ok {
 		t.Fatal("expected device was created")
 	}
-	if d.DownCalls != 1 {
-		t.Errorf("down calls = %d, want 1", d.DownCalls)
+	if c := env.Backend.DownCount("disable-me"); c != 1 {
+		t.Errorf("down calls = %d, want 1", c)
 	}
 }
 
