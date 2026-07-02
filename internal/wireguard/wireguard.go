@@ -68,10 +68,10 @@ func (m *Manager) CreateDevice(
 		return nil, fmt.Errorf("wireguard: create device: %w", err)
 	}
 
-	bd, err := m.backend.CreateDevice(cfg)
+	wgDevice, err := m.backend.CreateDevice(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("wireguard: create device: %w", err)
 	}
 
-	return newDevice(cfg.Name, bd), nil
+	return newDevice(cfg.Name, wgDevice), nil
 }

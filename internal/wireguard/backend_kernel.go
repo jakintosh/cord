@@ -19,7 +19,7 @@ type KernelBackend struct{}
 func (b *KernelBackend) CreateDevice(
 	cfg DeviceConfig,
 ) (
-	BackendDevice,
+	WgDevice,
 	error,
 ) {
 	link, err := kernelEnsureLink(cfg.Name)
@@ -55,7 +55,7 @@ func (b *KernelBackend) CreateDevice(
 	return &kernelDeviceHandle{name: cfg.Name}, nil
 }
 
-// kernelDeviceHandle is a BackendDevice backed by the kernel WireGuard
+// kernelDeviceHandle is a WgDevice backed by the kernel WireGuard
 // module. It holds the interface link name.
 type kernelDeviceHandle struct {
 	name string

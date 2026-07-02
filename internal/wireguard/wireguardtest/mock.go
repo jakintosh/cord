@@ -14,7 +14,7 @@ type applyCall struct {
 	Ops []wireguard.PeerOp
 }
 
-// MockDevice is a BackendDevice handle for testing. Each MockDevice
+// MockDevice is a WgDevice handle for testing. Each MockDevice
 // holds its own peer map, so tests can inspect per-device state
 // independently.
 //
@@ -154,7 +154,7 @@ func NewMockBackend() *MockBackend {
 func (b *MockBackend) CreateDevice(
 	cfg wireguard.DeviceConfig,
 ) (
-	wireguard.BackendDevice,
+	wireguard.WgDevice,
 	error,
 ) {
 	b.mu.Lock()

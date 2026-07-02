@@ -17,7 +17,7 @@ type UserspaceBackend struct{}
 func (b *UserspaceBackend) CreateDevice(
 	cfg DeviceConfig,
 ) (
-	BackendDevice,
+	WgDevice,
 	error,
 ) {
 	mtu := cfg.MTU
@@ -70,7 +70,7 @@ func (b *UserspaceBackend) CreateDevice(
 	}, nil
 }
 
-// userspaceDeviceHandle is a BackendDevice backed by wireguard-go.
+// userspaceDeviceHandle is a WgDevice backed by wireguard-go.
 type userspaceDeviceHandle struct {
 	name string
 	wg   *device.Device

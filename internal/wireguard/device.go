@@ -19,19 +19,19 @@ type DeviceConfig struct {
 	MTU        int // 0 uses the default
 }
 
-// Device is a live WireGuard network device backed by a BackendDevice.
+// Device is a live WireGuard network device backed by a WgDevice.
 // All methods are safe for concurrent use; the Device serializes access
 // with a single mutex held across backend calls.
 type Device struct {
 	name    string
 	mu      sync.Mutex
-	backend BackendDevice
+	backend WgDevice
 	desired map[wgtypes.Key]PeerConfig
 }
 
 func newDevice(
 	name string,
-	backend BackendDevice,
+	backend WgDevice,
 ) *Device {
 	return &Device{
 		name:    name,

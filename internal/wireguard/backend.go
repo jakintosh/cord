@@ -37,17 +37,17 @@ func ParseBackendType(
 	}
 }
 
-// BackendDevice is a live WireGuard interface handle returned by Backend.
-// Each BackendDevice is owned by exactly one Device, which serializes access.
-type BackendDevice interface {
-	Peers() ([]PeerStatus, error)
-	ApplyPeers(ops []PeerOp) error
-	Close() error
-}
-
 // Backend creates per-device handles. Implementations manage the
 // platform-specific WireGuard resource lifecycle (kernel netlink or
 // userspace wireguard-go).
 type Backend interface {
-	CreateDevice(cfg DeviceConfig) (BackendDevice, error)
+	CreateDevice(cfg DeviceConfig) (WgDevice, error)
+}
+
+// WgDevice is a live WireGuard interface handle returned by Backend.
+// Each WgDevice is owned by exactly one Device, which serializes access.
+type WgDevice interface {
+	Peers() ([]PeerStatus, error)
+	ApplyPeers(ops []PeerOp) error
+	Close() error
 }
