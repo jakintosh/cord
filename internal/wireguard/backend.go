@@ -1,30 +1,51 @@
 package wireguard
 
 import (
-	"net"
-
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+	"fmt"
+	"strings"
 )
 
-// Backend defines the operations a WireGuard implementation must
-// provide. This abstraction supports both kernel-based WireGuard
-// (on Linux) and userspace implementations (on macOS and Linux).
+// BackendType selects which WireGuard implementation drives a device.
+type BackendType string
+
+const (
+	BackendAuto      BackendType = "auto"
+	BackendKernel    BackendType = "kernel"
+	BackendUserspace BackendType = "userspace"
+)
+
+// ParseBackendType converts a string to a BackendType, normalizing
+// case and whitespace. An empty string returns BackendAuto. Returns
+// an error for unrecognized values.
+func ParseBackendType(
+	s string,
+) (
+	BackendType,
+	error,
+) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "auto", "":
+		return BackendAuto, nil
+	case "kernel":
+		return BackendKernel, nil
+	case "userspace":
+		return BackendUserspace, nil
+	default:
+		return "", fmt.Errorf("unknown wireguard backend %q; valid: auto, kernel, userspace", s)
+	}
+}
+
+// BackendDevice is a live WireGuard interface handle returned by Backend.
+// Each BackendDevice is owned by exactly one Device, which serializes access.
+type BackendDevice interface {
+	Peers() ([]PeerStatus, error)
+	ApplyPeers(ops []PeerOp) error
+	Close() error
+}
+
+// Backend creates per-device handles. Implementations manage the
+// platform-specific WireGuard resource lifecycle (kernel netlink or
+// userspace wireguard-go).
 type Backend interface {
-	// Up creates the network device if it doesn't exist, configures
-	// it with the given parameters, and brings it up.
-	Up(name string, privateKey wgtypes.Key, address net.IPNet, listenPort int, mtu int, noRoutes bool) error
-
-	// Down brings the device down and optionally deletes it.
-	Down(name string) error
-
-	// Delete removes the device from the system.
-	Delete(name string) error
-
-	// GetPeers returns the live peers observed on this device,
-	// including their endpoints and last handshake times.
-	GetPeers(name string) ([]Peer, error)
-
-	// ModifyPeers applies targeted peer changes without
-	// disturbing peers absent from operations.
-	ModifyPeers(name string, operations []PeerOperation) error
+	CreateDevice(cfg DeviceConfig) (BackendDevice, error)
 }

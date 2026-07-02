@@ -3,136 +3,43 @@ package wireguard
 import (
 	"net"
 	"sort"
-	"strings"
-	"time"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-// PeerOperationType identifies one targeted change to a live
-// WireGuard peer.
-type PeerOperationType int
-
-const (
-	PeerAdd PeerOperationType = iota
-	PeerUpdate
-	PeerRemove
-)
-
-func (t PeerOperationType) String() string {
-	switch t {
-	case PeerAdd:
-		return "add"
-	case PeerUpdate:
-		return "update"
-	case PeerRemove:
-		return "remove"
-	default:
-		return "unknown"
-	}
+// PeerOp is a single operation that makes a live peer match a desired
+// state. When Remove is true the peer identified by Config.PublicKey
+// is removed and the rest of Config is ignored. When Remove is false,
+// the backend makes the peer look like Config — AllowedIPs and
+// PersistentKeepalive are always applied, and Endpoint is set only
+// when non-nil.
+//
+// The planner (planPeerReconciliation) is the only place that
+// understands EndpointPolicy. By the time an op reaches the backend,
+// policy has been resolved: the Config.Endpoint field is either nil
+// ("don't touch") or the concrete address to set.
+type PeerOp struct {
+	Remove bool
+	Config PeerConfig
 }
 
-// PeerOperation is one targeted operation needed to reconcile a
-// live device's peer set against the desired configuration.
-type PeerOperation struct {
-	Type PeerOperationType
-	Peer Peer
-
-	UpdateAllowedIPs bool
-	UpdateEndpoint   bool
-	UpdateKeepalive  bool
-}
-
-// ReconcilePlan is the deterministic set of operations needed to
-// make live WireGuard peer configuration match the desired set.
-type ReconcilePlan struct {
-	Operations []PeerOperation
-}
-
-// OperationCounts returns the number of adds, updates, and removes
-// in the plan.
-func (p ReconcilePlan) OperationCounts() (
-	adds int,
-	updates int,
-	removes int,
-) {
-	for _, op := range p.Operations {
-		switch op.Type {
-		case PeerAdd:
-			adds++
-		case PeerUpdate:
-			updates++
-		case PeerRemove:
-			removes++
-		}
-	}
-	return
-}
-
-// Fields summarizes the durable peer fields affected by an operation.
-func (o PeerOperation) Fields() string {
-	switch o.Type {
-	case PeerAdd:
-		fields := []string{"allowed-ips", "keepalive"}
-		if o.Peer.EndpointPolicy != EndpointDynamic && o.Peer.Endpoint != nil {
-			fields = append(fields, "endpoint")
-		}
-		return strings.Join(fields, ",")
-	case PeerRemove:
-		return "peer"
-	case PeerUpdate:
-		var fields []string
-		if o.UpdateAllowedIPs {
-			fields = append(fields, "allowed-ips")
-		}
-		if o.UpdateEndpoint {
-			fields = append(fields, "endpoint")
-		}
-		if o.UpdateKeepalive {
-			fields = append(fields, "keepalive")
-		}
-		return strings.Join(fields, ",")
-	default:
-		return "unknown"
-	}
-}
-
-// ReconciliationStage identifies which phase of reconciliation failed.
-type ReconciliationStage int
-
-const (
-	StageObserve ReconciliationStage = iota
-	StageApply
-)
-
-// ReconcileError records the stage that failed and why.
-type ReconcileError struct {
-	Stage   ReconciliationStage
-	Message string
-}
-
-// ReconcileStatus is the most recent reconciliation state.
-type ReconcileStatus struct {
-	LastAttempt time.Time
-	LastSuccess time.Time
-	Desired     int
-	Observed    int
-	Error       *ReconcileError
-}
-
-// Degraded reports whether the last reconciliation attempt failed.
-func (s ReconcileStatus) Degraded() bool {
-	return s.LastSuccess.IsZero() || s.LastSuccess.Before(s.LastAttempt)
-}
-
-// PlanPeerReconciliation compares desired peers with live peer state
-// and produces a targeted reconciliation plan.
-func PlanPeerReconciliation(
-	desired []Peer,
-	observed []Peer,
-) ReconcilePlan {
-	desiredByKey := make(map[wgtypes.Key]Peer, len(desired))
-	observedByKey := make(map[wgtypes.Key]Peer, len(observed))
+// planPeerReconciliation compares desired peers with live peer state
+// and produces a targeted set of PeerOps. Operations are ordered:
+// removes first, then adds, then updates. This ordering prevents
+// temporary conflicts (e.g. replacing a peer's allowed-IPs by
+// removing and re-adding).
+//
+// The reason for observe→plan→apply instead of replace-all is that
+// removing and re-adding a peer destroys its session and roamed
+// endpoint; targeted ops leave established tunnels undisturbed, and
+// Dynamic/Bootstrap endpoints are never rewritten on update so
+// WireGuard roaming can do its job.
+func planPeerReconciliation(
+	desired []PeerConfig,
+	observed []PeerStatus,
+) []PeerOp {
+	desiredByKey := make(map[wgtypes.Key]PeerConfig, len(desired))
+	observedByKey := make(map[wgtypes.Key]PeerStatus, len(observed))
 	keySet := make(map[wgtypes.Key]struct{}, len(desired)+len(observed))
 
 	for _, p := range desired {
@@ -154,33 +61,48 @@ func PlanPeerReconciliation(
 		return keys[i].String() < keys[j].String()
 	})
 
-	var removes, adds, updates []PeerOperation
+	var removes, adds, updates []PeerOp
 	for _, key := range keys {
 		want, wanted := desiredByKey[key]
 		have, exists := observedByKey[key]
 		switch {
 		case !wanted && exists:
-			removes = append(removes, PeerOperation{
-				Type: PeerRemove,
-				Peer: Peer{PublicKey: key},
+			removes = append(removes, PeerOp{
+				Remove: true,
+				Config: PeerConfig{PublicKey: key},
 			})
 		case wanted && !exists:
-			adds = append(adds, PeerOperation{Type: PeerAdd, Peer: want})
-		case wanted && exists:
-			op := PeerOperation{Type: PeerUpdate, Peer: want}
-			op.UpdateAllowedIPs = !allowedIPsEqual(want.AllowedIPs, have.AllowedIPs)
-			op.UpdateKeepalive = want.PersistentKeepalive != have.PersistentKeepalive
-			op.UpdateEndpoint = want.EndpointPolicy == EndpointFixed &&
-				!endpointsEqual(want.Endpoint, have.Endpoint)
-			if op.UpdateAllowedIPs || op.UpdateKeepalive || op.UpdateEndpoint {
-				updates = append(updates, op)
+			op := PeerOp{Config: want}
+			// Strip endpoint for Dynamic peers — WireGuard will learn
+			// it from incoming handshakes.
+			if want.EndpointPolicy == EndpointDynamic {
+				op.Config.Endpoint = nil
 			}
+			adds = append(adds, op)
+		case wanted && exists:
+			// Emit an update only when something actually changed.
+			// AllowedIPs and Keepalive are always included when we emit
+			// (idempotent, cheap). Endpoint is included only for Fixed
+			// peers whose live endpoint drifted.
+			needUpdate := !allowedIPsEqual(want.AllowedIPs, have.AllowedIPs) ||
+				want.PersistentKeepalive != have.PersistentKeepalive ||
+				(want.EndpointPolicy == EndpointFixed && !endpointsEqual(want.Endpoint, have.Endpoint))
+			if !needUpdate {
+				continue
+			}
+			cfg := want
+			if cfg.EndpointPolicy != EndpointFixed || endpointsEqual(cfg.Endpoint, have.Endpoint) {
+				cfg.Endpoint = nil
+			}
+			updates = append(updates, PeerOp{Config: cfg})
 		}
 	}
 
-	return ReconcilePlan{
-		Operations: append(append(removes, adds...), updates...),
-	}
+	out := make([]PeerOp, 0, len(removes)+len(adds)+len(updates))
+	out = append(out, removes...)
+	out = append(out, adds...)
+	out = append(out, updates...)
+	return out
 }
 
 func normalizeAllowedIPs(
@@ -216,48 +138,4 @@ func endpointsEqual(
 		return left == nil && right == nil
 	}
 	return left.String() == right.String()
-}
-
-func shortKey(
-	key wgtypes.Key,
-) string {
-	s := key.String()
-	if len(s) <= 8 {
-		return s
-	}
-	return s[:8] + "..."
-}
-
-func wgPeerConfig(
-	op PeerOperation,
-) wgtypes.PeerConfig {
-	peer := op.Peer
-	cfg := wgtypes.PeerConfig{PublicKey: peer.PublicKey}
-	switch op.Type {
-	case PeerRemove:
-		cfg.Remove = true
-	case PeerAdd:
-		cfg.ReplaceAllowedIPs = true
-		cfg.AllowedIPs = peer.AllowedIPs
-		switch peer.EndpointPolicy {
-		case EndpointBootstrap, EndpointFixed:
-			cfg.Endpoint = peer.Endpoint
-		}
-		keepalive := peer.PersistentKeepalive
-		cfg.PersistentKeepaliveInterval = &keepalive
-	case PeerUpdate:
-		cfg.UpdateOnly = true
-		if op.UpdateAllowedIPs {
-			cfg.ReplaceAllowedIPs = true
-			cfg.AllowedIPs = peer.AllowedIPs
-		}
-		if op.UpdateEndpoint {
-			cfg.Endpoint = peer.Endpoint
-		}
-		if op.UpdateKeepalive {
-			keepalive := peer.PersistentKeepalive
-			cfg.PersistentKeepaliveInterval = &keepalive
-		}
-	}
-	return cfg
 }

@@ -95,8 +95,7 @@ func TestCreateRegistration_ReconcilesRunningInviteDeviceWithHostRoute(t *testin
 		t.Fatalf("create registration: %v", err)
 	}
 
-	_, ok := env.Backend.UpConfigs["testnet-i"]
-	if !ok {
+	if env.Backend.Device("testnet-i") == nil {
 		t.Fatal("expected invite device")
 	}
 	peers := env.Backend.LastAppliedOpsFor("testnet-i")
@@ -107,11 +106,11 @@ func TestCreateRegistration_ReconcilesRunningInviteDeviceWithHostRoute(t *testin
 	if err != nil {
 		t.Fatalf("derive expected pub key: %v", err)
 	}
-	if peers[0].Peer.PublicKey.String() != expectedPub {
+	if peers[0].Config.PublicKey.String() != expectedPub {
 		t.Fatalf("public key = %q, want temp registration public key %q",
-			peers[0].Peer.PublicKey.String(), expectedPub)
+			peers[0].Config.PublicKey.String(), expectedPub)
 	}
-	if got := peers[0].Peer.AllowedIPs; len(got) != 1 || got[0].String() != "10.1.0.2/32" {
+	if got := peers[0].Config.AllowedIPs; len(got) != 1 || got[0].String() != "10.1.0.2/32" {
 		t.Fatalf("allowed IPs = %v, want [10.1.0.2/32]", got)
 	}
 }
@@ -279,21 +278,21 @@ func TestRedeemRegistration_ReconcilesRunningDevices(t *testing.T) {
 	// After redeem, the peer is added to the main device but the temp
 	// peer stays on the invite device so the client can retry if the
 	// response was lost.
-	if _, ok := env.Backend.UpConfigs["testnet-i"]; !ok {
+	if env.Backend.Device("testnet-i") == nil {
 		t.Fatal("expected invite device")
 	}
 	if peers := env.Backend.LastAppliedOpsFor("testnet-i"); len(peers) != 1 {
 		t.Fatalf("invite peers after redeem = %d, want 1 (temp peer still active)", len(peers))
 	}
 
-	if _, ok := env.Backend.UpConfigs["testnet"]; !ok {
+	if env.Backend.Device("testnet") == nil {
 		t.Fatal("expected main device")
 	}
 	var found bool
 	for _, op := range env.Backend.LastAppliedOpsFor("testnet") {
-		if op.Peer.PublicKey.String() == permKey {
+		if op.Config.PublicKey.String() == permKey {
 			found = true
-			if got := op.Peer.AllowedIPs; len(got) != 1 || got[0].String() != "10.0.0.5/32" {
+			if got := op.Config.AllowedIPs; len(got) != 1 || got[0].String() != "10.0.0.5/32" {
 				t.Fatalf("redeemed peer allowed IPs = %v, want [10.0.0.5/32]", got)
 			}
 		}

@@ -238,31 +238,31 @@ func (s *Service) Redeem(
 		return nil, fmt.Errorf("%w: invalid temp CIDR %q", ErrInvalidInput, network.TempPeerAssignedCidr)
 	}
 
-	inviteDev, err := s.wireguard.NewDevice(network.InviteInterfaceName, network.TempPeerPrivKey, inviteIfaceAddr, 0)
+	inviteDevCfg := wireguard.DeviceConfig{
+		Name:       network.InviteInterfaceName,
+		PrivateKey: network.TempPeerPrivKey,
+		Address:    inviteIfaceAddr,
+	}
+	inviteDev, err := s.wireguard.CreateDevice(inviteDevCfg)
 	if err != nil {
 		return nil, fmt.Errorf("create invite device: %w", err)
 	}
 	cleanup := func() {
 		if inviteDev != nil {
-			_ = inviteDev.Down()
-			_ = s.wireguard.RemoveDevice(network.InviteInterfaceName)
+			_ = inviteDev.Close()
 			inviteDev = nil
 		}
 	}
 	defer cleanup()
 
-	if err := inviteDev.Up(); err != nil {
-		return nil, fmt.Errorf("bring up invite device: %w", err)
-	}
-
-	// TempCidr carries the peer's invite address and the invite
-	// network prefix. Extract the network so the invite server
-	// peer routes the whole invite overlay.
+	// TempPeerAssignedCidr carries the peer's invite address and the invite
+	// network prefix. Extract the network so the invite server peer routes
+	// the whole invite overlay.
 	inviteServerRoute, err := networkRoute(network.TempPeerAssignedCidr)
 	if err != nil {
 		return nil, fmt.Errorf("invite server route: %w", err)
 	}
-	inviteServerPeer, err := wireguard.NewPeer(
+	inviteServerPeer, err := wireguard.NewPeerConfig(
 		network.InviteServerPubkey,
 		[]string{inviteServerRoute},
 		network.InviteServerEndpoint,
@@ -320,22 +320,21 @@ func (s *Service) Confirm(
 		return fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, network.AssignedCidr)
 	}
 
-	mainDev, err := s.wireguard.NewDevice(network.MainInterfaceName, network.PrivateKey, mainIfaceAddr, 0)
+	mainDev, err := s.wireguard.CreateDevice(wireguard.DeviceConfig{
+		Name:       network.MainInterfaceName,
+		PrivateKey: network.PrivateKey,
+		Address:    mainIfaceAddr,
+	})
 	if err != nil {
 		return fmt.Errorf("create main device: %w", err)
 	}
 	cleanup := func() {
 		if mainDev != nil {
-			_ = mainDev.Down()
-			_ = s.wireguard.RemoveDevice(network.MainInterfaceName)
+			_ = mainDev.Close()
 			mainDev = nil
 		}
 	}
 	defer cleanup()
-
-	if err := mainDev.Up(); err != nil {
-		return fmt.Errorf("bring up main device: %w", err)
-	}
 
 	// AssignedCidr is the peer's own address (e.g. 10.42.0.5/16);
 	// the prefix encodes the overlay network size. Extract the
@@ -344,7 +343,7 @@ func (s *Service) Confirm(
 	if err != nil {
 		return fmt.Errorf("main server route: %w", err)
 	}
-	serverPeer, err := wireguard.NewPeer(
+	serverPeer, err := wireguard.NewPeerConfig(
 		network.ServerPubkey,
 		[]string{serverRoute},
 		network.ServerEndpoint,
@@ -468,7 +467,11 @@ func (s *Service) EnableNetwork(
 		return fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, network.AssignedCidr)
 	}
 
-	device, err := s.wireguard.NewDevice(network.MainInterfaceName, network.PrivateKey, ifaceAddr, 0)
+	device, err := s.wireguard.CreateDevice(wireguard.DeviceConfig{
+		Name:       network.MainInterfaceName,
+		PrivateKey: network.PrivateKey,
+		Address:    ifaceAddr,
+	})
 	if err != nil {
 		return err
 	}
@@ -486,10 +489,6 @@ func (s *Service) EnableNetwork(
 			_ = s.store.SetNetworkEnabled(networkName, false)
 		}
 	}()
-
-	if err := device.Up(); err != nil {
-		return err
-	}
 
 	if err := s.reconcilePeers(device, network); err != nil {
 		return err
@@ -637,8 +636,7 @@ func (s *Service) stopLive(
 	if ln.Cancel != nil {
 		ln.Cancel()
 	}
-	_ = ln.Device.Down()
-	_ = s.wireguard.RemoveDevice(networkName)
+	_ = ln.Device.Close()
 	s.mu.Lock()
 	delete(s.running, networkName)
 	s.mu.Unlock()
@@ -806,7 +804,7 @@ func (s *Service) scanAndTickBlock(
 	liveNet *LiveNetwork,
 	now time.Time,
 ) []serverapi.EndpointSightingDTO {
-	devicePeers, err := liveNet.Device.GetPeers()
+	devicePeers, err := liveNet.Device.Peers()
 	if err != nil {
 		s.logf("scan %s: peers: %v", networkName, err)
 		return nil
@@ -967,8 +965,8 @@ func (s *Service) reconcilePeers(
 		return fmt.Errorf("server route: %w", err)
 	}
 
-	wgPeers := make([]wireguard.Peer, 0, len(peers)+1)
-	serverPeer, err := wireguard.NewPeer(
+	wgPeers := make([]wireguard.PeerConfig, 0, len(peers)+1)
+	serverPeer, err := wireguard.NewPeerConfig(
 		network.ServerPubkey,
 		[]string{serverRoute},
 		network.ServerEndpoint,
@@ -985,7 +983,7 @@ func (s *Service) reconcilePeers(
 		if err != nil {
 			return fmt.Errorf("parse peer cidr %q: %w", peer.Cidr, err)
 		}
-		p, err := wireguard.NewPeer(
+		p, err := wireguard.NewPeerConfig(
 			peer.PublicKey,
 			[]string{peerRoute.String()},
 			peer.Endpoint,

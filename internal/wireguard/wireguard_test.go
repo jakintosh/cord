@@ -43,13 +43,13 @@ func mustResolveUDP(t *testing.T, s string) *net.UDPAddr {
 	return addr
 }
 
-func peer(
+func peerConfig(
 	key wgtypes.Key,
 	allowedIPs []string,
 	endpoint string,
 	policy wireguard.EndpointPolicy,
 	keepalive time.Duration,
-) wireguard.Peer {
+) wireguard.PeerConfig {
 	var ep *net.UDPAddr
 	if endpoint != "" {
 		addr, err := net.ResolveUDPAddr("udp", endpoint)
@@ -68,7 +68,7 @@ func peer(
 		ips = append(ips, *n)
 	}
 
-	return wireguard.Peer{
+	return wireguard.PeerConfig{
 		PublicKey:           key,
 		AllowedIPs:          ips,
 		Endpoint:            ep,
@@ -77,43 +77,51 @@ func peer(
 	}
 }
 
-func newStartedTestDevice(
-	t *testing.T,
-	name string,
-	backend wireguard.Backend,
-) *wireguard.Device {
-	t.Helper()
-
-	mgr := wireguard.NewManagerWithBackend(backend)
-	d := newStoppedDeviceFromManager(t, mgr, name, 0)
-	if err := d.Up(); err != nil {
-		t.Fatalf("Up: %v", err)
+func peerStatus(
+	key wgtypes.Key,
+	allowedIPs []string,
+	endpoint string,
+	keepalive time.Duration,
+) wireguard.PeerStatus {
+	var ep *net.UDPAddr
+	if endpoint != "" {
+		addr, err := net.ResolveUDPAddr("udp", endpoint)
+		if err != nil {
+			panic(err)
+		}
+		ep = addr
 	}
-	return d
+
+	ips := make([]net.IPNet, 0, len(allowedIPs))
+	for _, cidr := range allowedIPs {
+		_, n, err := net.ParseCIDR(cidr)
+		if err != nil {
+			panic(err)
+		}
+		ips = append(ips, *n)
+	}
+
+	return wireguard.PeerStatus{
+		PublicKey:           key,
+		AllowedIPs:          ips,
+		Endpoint:            ep,
+		PersistentKeepalive: keepalive,
+	}
 }
 
-func newStoppedTestDevice(
-	t *testing.T,
-	name string,
-	backend wireguard.Backend,
-) *wireguard.Device {
+func createTestDevice(t *testing.T, name string, backend *wireguardtest.MockBackend) *wireguard.Device {
 	t.Helper()
 	mgr := wireguard.NewManagerWithBackend(backend)
-	return newStoppedDeviceFromManager(t, mgr, name, 0)
-}
-
-func newStoppedDeviceFromManager(
-	t *testing.T,
-	mgr *wireguard.Manager,
-	name string,
-	port uint16,
-) *wireguard.Device {
-	t.Helper()
-	d, err := mgr.NewDevice(name, mustGeneratePrivateKey(t), mustParseCIDR(t, "10.0.0.1/32"), port)
+	cfg := wireguard.DeviceConfig{
+		Name:       name,
+		PrivateKey: mustGeneratePrivateKey(t),
+		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+	}
+	dev, err := mgr.CreateDevice(cfg)
 	if err != nil {
-		t.Fatalf("NewDevice: %v", err)
+		t.Fatalf("CreateDevice: %v", err)
 	}
-	return d
+	return dev
 }
 
 func TestParseBackendType(t *testing.T) {
@@ -168,36 +176,56 @@ func TestNewManager_ReturnsManager(t *testing.T) {
 	}
 }
 
-func TestNewDevice_ValidatesNameLength(t *testing.T) {
-	mgr := wireguard.NewManagerWithBackend(wireguardtest.NewMockBackend())
+func TestCreateDevice_ValidatesNameLength(t *testing.T) {
+	backend := wireguardtest.NewMockBackend()
+	mgr := wireguard.NewManagerWithBackend(backend)
 	key := mustGeneratePrivateKey(t)
 
-	_, err := mgr.NewDevice("123456789012345", key, mustParseCIDR(t, "10.0.0.1/32"), 0)
+	_, err := mgr.CreateDevice(wireguard.DeviceConfig{
+		Name:       "123456789012345",
+		PrivateKey: key,
+		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+	})
 	if err != nil {
 		t.Errorf("15-byte name should succeed: %v", err)
 	}
 
-	_, err = mgr.NewDevice("1234567890123456", key, mustParseCIDR(t, "10.0.0.1/32"), 0)
+	_, err = mgr.CreateDevice(wireguard.DeviceConfig{
+		Name:       "1234567890123456",
+		PrivateKey: key,
+		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+	})
 	if err == nil {
 		t.Error("16-byte name should fail")
 	}
 }
 
-func TestNewDevice_InvalidPrivateKey(t *testing.T) {
-	mgr := wireguard.NewManagerWithBackend(wireguardtest.NewMockBackend())
+func TestCreateDevice_InvalidPrivateKey(t *testing.T) {
+	backend := wireguardtest.NewMockBackend()
+	mgr := wireguard.NewManagerWithBackend(backend)
 
-	_, err := mgr.NewDevice("test", "not-a-key", mustParseCIDR(t, "10.0.0.1/32"), 0)
+	_, err := mgr.CreateDevice(wireguard.DeviceConfig{
+		Name:       "test",
+		PrivateKey: "not-a-key",
+		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+	})
 	if err == nil {
 		t.Error("expected error for invalid private key")
 	}
 }
 
-func TestNewDevice_Valid(t *testing.T) {
-	mgr := wireguard.NewManagerWithBackend(wireguardtest.NewMockBackend())
+func TestCreateDevice_Valid(t *testing.T) {
+	backend := wireguardtest.NewMockBackend()
+	mgr := wireguard.NewManagerWithBackend(backend)
 
-	dev, err := mgr.NewDevice("test", mustGeneratePrivateKey(t), mustParseCIDR(t, "10.0.0.1/32"), 51820)
+	dev, err := mgr.CreateDevice(wireguard.DeviceConfig{
+		Name:       "test",
+		PrivateKey: mustGeneratePrivateKey(t),
+		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+		ListenPort: 51820,
+	})
 	if err != nil {
-		t.Fatalf("NewDevice: %v", err)
+		t.Fatalf("CreateDevice: %v", err)
 	}
 	if dev == nil {
 		t.Fatal("expected non-nil Device")
@@ -207,54 +235,24 @@ func TestNewDevice_Valid(t *testing.T) {
 	}
 }
 
-func TestRemoveDevice_Existing(t *testing.T) {
+func TestCreateDevice_BackendError(t *testing.T) {
 	backend := wireguardtest.NewMockBackend()
+	backend.CreateErr = errors.New("create failed")
 	mgr := wireguard.NewManagerWithBackend(backend)
 
-	_, err := mgr.NewDevice("test", mustGeneratePrivateKey(t), mustParseCIDR(t, "10.0.0.1/32"), 0)
-	if err != nil {
-		t.Fatalf("NewDevice: %v", err)
-	}
-
-	if err := mgr.RemoveDevice("test"); err != nil {
-		t.Errorf("RemoveDevice: %v", err)
-	}
-	if got := backend.DeleteCount("test"); got != 1 {
-		t.Errorf("delete count = %d, want 1", got)
-	}
-}
-
-func TestRemoveDevice_BackendError(t *testing.T) {
-	backend := wireguardtest.NewMockBackend()
-	backend.DeleteErr = errors.New("delete failed")
-	mgr := wireguard.NewManagerWithBackend(backend)
-
-	_, err := mgr.NewDevice("test", mustGeneratePrivateKey(t), mustParseCIDR(t, "10.0.0.1/32"), 0)
-	if err != nil {
-		t.Fatalf("NewDevice: %v", err)
-	}
-
-	if err := mgr.RemoveDevice("test"); err == nil {
-		t.Error("expected backend delete error")
-	}
-}
-
-func TestRemoveDevice_NotFound(t *testing.T) {
-	backend := wireguardtest.NewMockBackend()
-	mgr := wireguard.NewManagerWithBackend(backend)
-
-	err := mgr.RemoveDevice("nonexistent")
+	_, err := mgr.CreateDevice(wireguard.DeviceConfig{
+		Name:       "test",
+		PrivateKey: mustGeneratePrivateKey(t),
+		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+	})
 	if err == nil {
-		t.Error("expected error for nonexistent device")
-	}
-	if got := backend.DeleteCount("nonexistent"); got != 0 {
-		t.Errorf("delete count = %d, want 0", got)
+		t.Error("expected backend create error")
 	}
 }
 
-func TestNewPeer(t *testing.T) {
+func TestNewPeerConfig(t *testing.T) {
 	key := mustGenerateKey(t)
-	p, err := wireguard.NewPeer(
+	p, err := wireguard.NewPeerConfig(
 		key.String(),
 		[]string{"10.0.0.5/32", "10.0.1.0/24"},
 		"1.2.3.4:51820",
@@ -262,7 +260,7 @@ func TestNewPeer(t *testing.T) {
 		wireguard.EndpointFixed,
 	)
 	if err != nil {
-		t.Fatalf("NewPeer: %v", err)
+		t.Fatalf("NewPeerConfig: %v", err)
 	}
 	if p.PublicKey != key {
 		t.Error("public key mismatch")
@@ -278,7 +276,7 @@ func TestNewPeer(t *testing.T) {
 	}
 }
 
-func TestNewPeer_InvalidInputs(t *testing.T) {
+func TestNewPeerConfig_InvalidInputs(t *testing.T) {
 	key := mustGenerateKey(t).String()
 
 	tests := []struct {
@@ -294,7 +292,7 @@ func TestNewPeer_InvalidInputs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := wireguard.NewPeer(
+			_, err := wireguard.NewPeerConfig(
 				tt.publicKey,
 				tt.allowedIPs,
 				tt.endpoint,

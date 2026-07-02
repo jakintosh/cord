@@ -65,7 +65,7 @@ func TestOnboardingLifecycle(t *testing.T) {
 		t.Errorf("resolve peer identity before confirm: err = %v, want ErrNotFound", err)
 	}
 
-	if _, ok := env.Backend.UpConfigs["testnet"]; !ok {
+	if env.Backend.Device("testnet") == nil {
 		t.Fatal("expected main device")
 	}
 	mainOps := env.Backend.AppliedOpsFor("testnet")
@@ -73,7 +73,7 @@ func TestOnboardingLifecycle(t *testing.T) {
 		t.Error("main device missing provisional peer after redeem")
 	}
 
-	if _, ok := env.Backend.UpConfigs["testnet-i"]; !ok {
+	if env.Backend.Device("testnet-i") == nil {
 		t.Fatal("expected invite device")
 	}
 	inviteOps := env.Backend.AppliedOpsFor("testnet-i")
@@ -211,7 +211,7 @@ func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
 		t.Errorf("get registration after expiry+reconcile: err = %v, want ErrNotFound", err)
 	}
 
-	if _, ok := env.Backend.UpConfigs["testnet"]; !ok {
+	if env.Backend.Device("testnet") == nil {
 		t.Fatal("expected main device")
 	}
 	mainOps := env.Backend.LastAppliedOpsFor("testnet")
@@ -359,9 +359,9 @@ func mustGenKey(t *testing.T) string {
 	return pub
 }
 
-func hasPeerOp(ops []wireguard.PeerOperation, pubKey string) bool {
+func hasPeerOp(ops []wireguard.PeerOp, pubKey string) bool {
 	for _, op := range ops {
-		if op.Type != wireguard.PeerRemove && op.Peer.PublicKey.String() == pubKey {
+		if !op.Remove && op.Config.PublicKey.String() == pubKey {
 			return true
 		}
 	}

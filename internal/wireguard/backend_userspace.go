@@ -7,7 +7,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.zx2c4.com/wireguard/conn"
@@ -16,195 +15,125 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-// userspaceDevice bundles a wireguard-go Device with its TUN.
-type userspaceDevice struct {
-	wg  *device.Device
-	tun tun.Device
-}
+// UserspaceBackend implements Backend using wireguard-go.
+type UserspaceBackend struct{}
 
-// UserspaceBackend implements Backend using wireguard-go. Each device
-// lives inside this process, keyed by name.
-type UserspaceBackend struct {
-	devices map[string]*userspaceDevice
-	mu      sync.Mutex
-}
-
-func (b *UserspaceBackend) Up(
-	name string,
-	privateKey wgtypes.Key,
-	address net.IPNet,
-	listenPort int,
-	mtu int,
-	noRoutes bool,
-) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if b.devices == nil {
-		b.devices = make(map[string]*userspaceDevice)
-	}
-
-	if existing, ok := b.devices[name]; ok {
-		return b.applyDeviceConfig(existing.wg, privateKey, listenPort)
-	}
-
+func (b *UserspaceBackend) CreateDevice(
+	cfg DeviceConfig,
+) (
+	BackendDevice,
+	error,
+) {
+	mtu := cfg.MTU
 	if mtu <= 0 {
 		mtu = defaultMTU
 	}
 
-	tunDev, err := tun.CreateTUN(name, mtu)
+	tunDev, err := tun.CreateTUN(cfg.Name, mtu)
 	if err != nil {
-		return fmt.Errorf("wireguard: create tun: %w", err)
+		return nil, fmt.Errorf("wireguard: create tun: %w", err)
 	}
 
 	realName, err := tunDev.Name()
 	if err != nil {
 		tunDev.Close()
-		return fmt.Errorf("wireguard: get tun name: %w", err)
+		return nil, fmt.Errorf("wireguard: get tun name: %w", err)
 	}
 
-	if err := configureTunOS(realName, address, mtu, noRoutes); err != nil {
+	if err := configureTunOS(realName, cfg.Address, mtu); err != nil {
 		tunDev.Close()
-		return fmt.Errorf("wireguard: configure tun: %w", err)
+		return nil, fmt.Errorf("wireguard: configure tun: %w", err)
 	}
 
 	logger := device.NewLogger(device.LogLevelError, fmt.Sprintf("(%s) ", realName))
 	dev := device.NewDevice(tunDev, conn.NewDefaultBind(), logger)
 
-	if err := b.applyDeviceConfig(dev, privateKey, listenPort); err != nil {
+	privKey, err := parseKey(cfg.PrivateKey)
+	if err != nil {
 		dev.Close()
 		tunDev.Close()
-		return fmt.Errorf("wireguard: apply device config: %w", err)
+		return nil, fmt.Errorf("wireguard: parse key: %w", err)
+	}
+
+	if err := applyDeviceConfig(dev, privKey, int(cfg.ListenPort)); err != nil {
+		dev.Close()
+		tunDev.Close()
+		return nil, fmt.Errorf("wireguard: apply device config: %w", err)
 	}
 
 	if err := dev.Up(); err != nil {
 		dev.Close()
 		tunDev.Close()
-		return fmt.Errorf("wireguard: bring device up: %w", err)
+		return nil, fmt.Errorf("wireguard: bring device up: %w", err)
 	}
 
-	b.devices[name] = &userspaceDevice{
-		wg:  dev,
-		tun: tunDev,
-	}
-	return nil
+	return &userspaceDeviceHandle{
+		name: realName,
+		wg:   dev,
+		tun:  tunDev,
+	}, nil
 }
 
-func (b *UserspaceBackend) Down(
-	name string,
-) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	d, ok := b.devices[name]
-	if !ok {
-		return nil
-	}
-
-	d.wg.Close()
-	delete(b.devices, name)
-	return nil
+// userspaceDeviceHandle is a BackendDevice backed by wireguard-go.
+type userspaceDeviceHandle struct {
+	name string
+	wg   *device.Device
+	tun  tun.Device
 }
 
-func (b *UserspaceBackend) Delete(
-	name string,
-) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	d, ok := b.devices[name]
-	if !ok {
-		return nil
-	}
-
-	d.wg.Close()
-	delete(b.devices, name)
-	return nil
-}
-
-func (b *UserspaceBackend) GetPeers(
-	name string,
-) (
-	[]Peer,
+func (h *userspaceDeviceHandle) Peers() (
+	[]PeerStatus,
 	error,
 ) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	d, ok := b.devices[name]
-	if !ok {
-		return nil, fmt.Errorf("wireguard: device not running")
-	}
-
-	raw, err := d.wg.IpcGet()
+	raw, err := h.wg.IpcGet()
 	if err != nil {
 		return nil, fmt.Errorf("wireguard: ipc get: %w", err)
 	}
-
 	return parseUAPIPeers(raw)
 }
 
-func (b *UserspaceBackend) ModifyPeers(
-	name string,
-	operations []PeerOperation,
+func (h *userspaceDeviceHandle) ApplyPeers(
+	ops []PeerOp,
 ) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	d, ok := b.devices[name]
-	if !ok {
-		return fmt.Errorf("wireguard: device not running")
-	}
-
-	return d.wg.IpcSet(peerOperationsUAPI(operations))
+	return h.wg.IpcSet(peerOperationsUAPI(ops))
 }
 
-func (b *UserspaceBackend) applyDeviceConfig(
+func (h *userspaceDeviceHandle) Close() error {
+	h.wg.Close()
+	h.tun.Close()
+	return nil
+}
+
+func applyDeviceConfig(
 	dev *device.Device,
 	privateKey wgtypes.Key,
 	listenPort int,
 ) error {
 	var sb strings.Builder
-
 	fmt.Fprintf(&sb, "private_key=%s\n", hex.EncodeToString(privateKey[:]))
-
 	if listenPort > 0 {
 		fmt.Fprintf(&sb, "listen_port=%d\n", listenPort)
 	}
-
 	return dev.IpcSet(sb.String())
 }
 
 func peerOperationsUAPI(
-	operations []PeerOperation,
+	operations []PeerOp,
 ) string {
 	var sb strings.Builder
 	for _, op := range operations {
-		peer := op.Peer
-		fmt.Fprintf(&sb, "public_key=%s\n", hex.EncodeToString(peer.PublicKey[:]))
-		switch op.Type {
-		case PeerRemove:
+		key := op.Config.PublicKey
+		fmt.Fprintf(&sb, "public_key=%s\n", hex.EncodeToString(key[:]))
+		if op.Remove {
 			sb.WriteString("remove=true\n")
-		case PeerAdd:
-			sb.WriteString("replace_allowed_ips=true\n")
-			writeAllowedIPs(&sb, peer.AllowedIPs)
-			if peer.EndpointPolicy != EndpointDynamic && peer.Endpoint != nil {
-				fmt.Fprintf(&sb, "endpoint=%s\n", peer.Endpoint.String())
-			}
-			fmt.Fprintf(&sb, "persistent_keepalive_interval=%d\n", int(peer.PersistentKeepalive.Seconds()))
-		case PeerUpdate:
-			sb.WriteString("update_only=true\n")
-			if op.UpdateAllowedIPs {
-				sb.WriteString("replace_allowed_ips=true\n")
-				writeAllowedIPs(&sb, peer.AllowedIPs)
-			}
-			if op.UpdateEndpoint && peer.Endpoint != nil {
-				fmt.Fprintf(&sb, "endpoint=%s\n", peer.Endpoint.String())
-			}
-			if op.UpdateKeepalive {
-				fmt.Fprintf(&sb, "persistent_keepalive_interval=%d\n", int(peer.PersistentKeepalive.Seconds()))
-			}
+			continue
 		}
+		sb.WriteString("replace_allowed_ips=true\n")
+		writeAllowedIPs(&sb, op.Config.AllowedIPs)
+		if op.Config.Endpoint != nil {
+			fmt.Fprintf(&sb, "endpoint=%s\n", op.Config.Endpoint.String())
+		}
+		fmt.Fprintf(&sb, "persistent_keepalive_interval=%d\n", int(op.Config.PersistentKeepalive.Seconds()))
 	}
 	return sb.String()
 }
@@ -221,12 +150,12 @@ func writeAllowedIPs(
 func parseUAPIPeers(
 	raw string,
 ) (
-	[]Peer,
+	[]PeerStatus,
 	error,
 ) {
-	var peers []Peer
+	var peers []PeerStatus
 
-	var peer *Peer
+	var peer *PeerStatus
 	var handshakeSec int64
 	var handshakeNsec int64
 
@@ -261,7 +190,7 @@ func parseUAPIPeers(
 			if err != nil || len(keyBytes) != wgtypes.KeyLen {
 				return nil, fmt.Errorf("wireguard: invalid public key in status: %s", value)
 			}
-			peer = &Peer{
+			peer = &PeerStatus{
 				PublicKey: wgtypes.Key(keyBytes),
 			}
 

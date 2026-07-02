@@ -216,18 +216,16 @@ func TestParseUAPIPeers_FlushBetweenPeers(t *testing.T) {
 
 func TestPeerOperationsUAPI_Add(t *testing.T) {
 	k := mustGenerateKey(t)
-	op := PeerOperation{
-		Type: PeerAdd,
-		Peer: Peer{
+	op := PeerOp{
+		Config: PeerConfig{
 			PublicKey:           k,
 			AllowedIPs:          []net.IPNet{mustParseCIDR(t, "10.0.0.1/32")},
-			EndpointPolicy:      EndpointFixed,
 			Endpoint:            mustResolveUDP(t, "1.2.3.4:51820"),
 			PersistentKeepalive: 30 * time.Second,
 		},
 	}
 
-	result := peerOperationsUAPI([]PeerOperation{op})
+	result := peerOperationsUAPI([]PeerOp{op})
 	if !strings.Contains(result, "public_key=") {
 		t.Error("missing public_key line")
 	}
@@ -245,33 +243,30 @@ func TestPeerOperationsUAPI_Add(t *testing.T) {
 	}
 }
 
-func TestPeerOperationsUAPI_AddDynamicEndpoint(t *testing.T) {
+func TestPeerOperationsUAPI_AddNoEndpoint(t *testing.T) {
 	k := mustGenerateKey(t)
-	op := PeerOperation{
-		Type: PeerAdd,
-		Peer: Peer{
+	op := PeerOp{
+		Config: PeerConfig{
 			PublicKey:           k,
 			AllowedIPs:          []net.IPNet{mustParseCIDR(t, "10.0.0.1/32")},
-			EndpointPolicy:      EndpointDynamic,
-			Endpoint:            mustResolveUDP(t, "1.2.3.4:51820"),
 			PersistentKeepalive: 0,
 		},
 	}
 
-	result := peerOperationsUAPI([]PeerOperation{op})
+	result := peerOperationsUAPI([]PeerOp{op})
 	if strings.Contains(result, "endpoint=") {
-		t.Error("should not contain endpoint for EndpointDynamic")
+		t.Error("should not contain endpoint when nil")
 	}
 }
 
 func TestPeerOperationsUAPI_Remove(t *testing.T) {
 	k := mustGenerateKey(t)
-	op := PeerOperation{
-		Type: PeerRemove,
-		Peer: Peer{PublicKey: k},
+	op := PeerOp{
+		Remove: true,
+		Config: PeerConfig{PublicKey: k},
 	}
 
-	result := peerOperationsUAPI([]PeerOperation{op})
+	result := peerOperationsUAPI([]PeerOp{op})
 	if !strings.Contains(result, "remove=true") {
 		t.Error("missing remove=true")
 	}
@@ -280,90 +275,19 @@ func TestPeerOperationsUAPI_Remove(t *testing.T) {
 	}
 }
 
-func TestPeerOperationsUAPI_Update_AllowedIPs(t *testing.T) {
+func TestPeerOperationsUAPI_MultipleOps(t *testing.T) {
 	k := mustGenerateKey(t)
-	op := PeerOperation{
-		Type:             PeerUpdate,
-		UpdateAllowedIPs: true,
-		Peer: Peer{
-			PublicKey:  k,
-			AllowedIPs: []net.IPNet{mustParseCIDR(t, "10.0.1.0/24")},
-		},
+	ops := []PeerOp{
+		{Config: PeerConfig{PublicKey: k, AllowedIPs: []net.IPNet{mustParseCIDR(t, "10.0.0.1/32")}}},
+		{Remove: true, Config: PeerConfig{PublicKey: k}},
 	}
 
-	result := peerOperationsUAPI([]PeerOperation{op})
-	if !strings.Contains(result, "update_only=true") {
-		t.Error("missing update_only")
-	}
+	result := peerOperationsUAPI(ops)
 	if !strings.Contains(result, "replace_allowed_ips=true") {
-		t.Error("missing replace_allowed_ips")
+		t.Error("missing replace_allowed_ips for add")
 	}
-	if !strings.Contains(result, "allowed_ip=10.0.1.0/24") {
-		t.Error("missing allowed_ip")
-	}
-}
-
-func TestPeerOperationsUAPI_Update_Endpoint(t *testing.T) {
-	k := mustGenerateKey(t)
-	op := PeerOperation{
-		Type:           PeerUpdate,
-		UpdateEndpoint: true,
-		Peer: Peer{
-			PublicKey: k,
-			Endpoint:  mustResolveUDP(t, "5.6.7.8:51821"),
-		},
-	}
-
-	result := peerOperationsUAPI([]PeerOperation{op})
-	if !strings.Contains(result, "endpoint=5.6.7.8:51821") {
-		t.Error("missing endpoint")
-	}
-}
-
-func TestPeerOperationsUAPI_Update_Keepalive(t *testing.T) {
-	k := mustGenerateKey(t)
-	op := PeerOperation{
-		Type:            PeerUpdate,
-		UpdateKeepalive: true,
-		Peer: Peer{
-			PublicKey:           k,
-			PersistentKeepalive: 15 * time.Second,
-		},
-	}
-
-	result := peerOperationsUAPI([]PeerOperation{op})
-	if !strings.Contains(result, "persistent_keepalive_interval=15") {
-		t.Error("missing keepalive")
-	}
-}
-
-func TestPeerOperationsUAPI_Update_MultipleFields(t *testing.T) {
-	k := mustGenerateKey(t)
-	op := PeerOperation{
-		Type:             PeerUpdate,
-		UpdateAllowedIPs: true,
-		UpdateEndpoint:   true,
-		UpdateKeepalive:  true,
-		Peer: Peer{
-			PublicKey:           k,
-			AllowedIPs:          []net.IPNet{mustParseCIDR(t, "10.0.0.0/16")},
-			Endpoint:            mustResolveUDP(t, "1.1.1.1:1111"),
-			PersistentKeepalive: 60 * time.Second,
-		},
-	}
-
-	result := peerOperationsUAPI([]PeerOperation{op})
-	if !strings.Contains(result, "update_only=true") {
-		t.Error("missing update_only")
-	}
-	if !strings.Contains(result, "allowed_ip=10.0.0.0/16") {
-		t.Error("missing allowed_ip")
-	}
-	if !strings.Contains(result, "endpoint=1.1.1.1:1111") {
-		t.Error("missing endpoint")
-	}
-	if !strings.Contains(result, "persistent_keepalive_interval=60") {
-		t.Error("missing keepalive")
+	if !strings.Contains(result, "remove=true") {
+		t.Error("missing remove=true for remove")
 	}
 }
 

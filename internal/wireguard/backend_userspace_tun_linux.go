@@ -12,7 +12,6 @@ func configureTunOS(
 	name string,
 	addr net.IPNet,
 	mtu int,
-	_ bool,
 ) error {
 	cmd := exec.Command("ip", "addr", "replace", addr.String(), "dev", name)
 	if out, err := cmd.CombinedOutput(); err != nil {

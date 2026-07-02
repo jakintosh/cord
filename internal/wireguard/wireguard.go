@@ -5,85 +5,29 @@
 package wireguard
 
 import (
-	"errors"
 	"fmt"
-	"net"
-	"strings"
-	"sync"
 )
-
-// ErrDeviceNotUp is returned when an operation requiring a live
-// WireGuard device is attempted before the device is brought up.
-var ErrDeviceNotUp = errors.New("wireguard: device not up")
 
 // EndpointPolicy controls how Cord manages a peer's endpoint.
 type EndpointPolicy int
 
 const (
-	EndpointDynamic EndpointPolicy = iota
-	EndpointBootstrap
-	EndpointFixed
+	EndpointDynamic   EndpointPolicy = iota // cord manages (default)
+	EndpointBootstrap                       // set only on initial add
+	EndpointFixed                           // always reconciled
 )
 
 const maxInterfaceNameBytes = 15
-
-// BackendType selects which WireGuard implementation drives a device.
-type BackendType string
-
-const (
-	BackendAuto      BackendType = "auto"
-	BackendKernel    BackendType = "kernel"
-	BackendUserspace BackendType = "userspace"
-)
-
-// ParseBackendType converts a string to a BackendType, normalizing
-// case and whitespace. An empty string returns BackendAuto. Returns
-// an error for unrecognized values.
-func ParseBackendType(
-	s string,
-) (
-	BackendType,
-	error,
-) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "auto", "":
-		return BackendAuto, nil
-	case "kernel":
-		return BackendKernel, nil
-	case "userspace":
-		return BackendUserspace, nil
-	default:
-		return "", fmt.Errorf("unknown wireguard backend %q; valid: auto, kernel, userspace", s)
-	}
-}
-
-// ValidateDeviceName checks that a device name fits within the kernel
-// interface name length limit.
-func ValidateDeviceName(
-	name string,
-) error {
-	if len(name) > maxInterfaceNameBytes {
-		return fmt.Errorf(
-			"wireguard: device name %q exceeds %d byte limit",
-			name,
-			maxInterfaceNameBytes,
-		)
-	}
-	return nil
-}
 
 // Options configures a WireGuard manager.
 type Options struct {
 	Backend BackendType
 }
 
-// Manager creates and tracks WireGuard devices. A single Manager
-// instance can manage multiple devices, one per network, all sharing
-// the same Backend.
+// Manager creates WireGuard devices. It is stateless beyond the
+// shared Backend — it does not track devices.
 type Manager struct {
 	backend Backend
-	devices map[string]*Device
-	mu      sync.Mutex
 }
 
 // NewManager returns a Manager backed by the selected WireGuard
@@ -111,61 +55,32 @@ func NewManagerWithBackend(
 ) *Manager {
 	return &Manager{
 		backend: backend,
-		devices: make(map[string]*Device),
 	}
 }
 
-// NewDevice creates a new WireGuard device (interface) with the
-// given name, private key, interface address, and listen port. The
-// address is the device's own address with its on-link prefix
-// (e.g. 10.0.0.1/16), not a masked network — callers parsing a CIDR
-// string should use netaddr.ParseInterface to preserve the host
-// bits. The device is not yet brought up. The name must not exceed
-// maxInterfaceNameBytes bytes (kernel limit).
-func (m *Manager) NewDevice(
-	name string,
-	privateKey string,
-	ifaceAddr net.IPNet,
-	port uint16,
+// CreateDevice creates a new WireGuard device, brings it up, and
+// returns the handle. Creating a device implies bringing it up —
+// there is no separate "up" step. Call Close on the returned Device
+// to tear it down.
+func (m *Manager) CreateDevice(
+	cfg DeviceConfig,
 ) (
 	*Device,
 	error,
 ) {
-	if len(name) > maxInterfaceNameBytes {
-		return nil, fmt.Errorf(
-			"wireguard: interface name %q exceeds %d byte limit",
-			name,
-			maxInterfaceNameBytes,
-		)
+	if len(cfg.Name) > maxInterfaceNameBytes {
+		return nil, fmt.Errorf("wireguard: interface name %q exceeds %d byte limit", cfg.Name, maxInterfaceNameBytes)
 	}
 
-	key, err := parseKey(privateKey)
+	privKey, err := parseKey(cfg.PrivateKey)
 	if err != nil {
-		return nil, fmt.Errorf("wireguard: new device: %w", err)
+		return nil, fmt.Errorf("wireguard: create device: %w", err)
 	}
 
-	device := newDevice(name, key, ifaceAddr, port, 0, false, m.backend)
-
-	m.mu.Lock()
-	m.devices[name] = device
-	m.mu.Unlock()
-
-	return device, nil
-}
-
-// RemoveDevice destroys a WireGuard device by name. The device must
-// be down before removal.
-func (m *Manager) RemoveDevice(
-	name string,
-) error {
-	m.mu.Lock()
-	_, ok := m.devices[name]
-	delete(m.devices, name)
-	m.mu.Unlock()
-
-	if !ok {
-		return fmt.Errorf("wireguard: remove device: %q not found", name)
+	bd, err := m.backend.CreateDevice(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("wireguard: create device: %w", err)
 	}
 
-	return m.backend.Delete(name)
+	return newDevice(cfg.Name, privKey, cfg.Address, cfg.ListenPort, cfg.MTU, bd), nil
 }

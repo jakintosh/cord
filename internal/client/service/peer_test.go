@@ -16,7 +16,7 @@ func TestBuildPeers_IncludesServer(t *testing.T) {
 		t.Fatalf("enable: %v", err)
 	}
 
-	if _, ok := env.Backend.UpConfigs["peer-test"]; !ok {
+	if env.Backend.Device("peer-test") == nil {
 		t.Fatal("expected device was created")
 	}
 
@@ -36,7 +36,7 @@ func TestBuildPeers_DoesNotIncludeSelf(t *testing.T) {
 		t.Fatalf("enable: %v", err)
 	}
 
-	if _, ok := env.Backend.UpConfigs["self-test"]; !ok {
+	if env.Backend.Device("self-test") == nil {
 		t.Fatal("expected device was created")
 	}
 

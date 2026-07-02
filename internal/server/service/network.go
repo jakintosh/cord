@@ -294,24 +294,18 @@ func (s *Service) StartNetwork(
 		}
 	}
 
-	main, err := s.wireguard.NewDevice(
-		network.MainName,
-		network.PrivateKey,
-		mainIfaceAddr,
-		network.MainWireguardPort,
-	)
+	main, err := s.wireguard.CreateDevice(wireguard.DeviceConfig{
+		Name:       network.MainName,
+		PrivateKey: network.PrivateKey,
+		Address:    mainIfaceAddr,
+		ListenPort: network.MainWireguardPort,
+	})
 	if err != nil {
 		return fmt.Errorf("start network: main device: %w", err)
 	}
 	cleanups = append(cleanups, func() {
-		_ = main.Down()
-		_ = s.wireguard.RemoveDevice(network.MainName)
+		_ = main.Close()
 	})
-
-	if err := main.Up(); err != nil {
-		undo()
-		return fmt.Errorf("start network: main up: %w", err)
-	}
 
 	mainPeers, err := s.buildMainPeers(name)
 	if err != nil {
@@ -323,25 +317,19 @@ func (s *Service) StartNetwork(
 		return fmt.Errorf("start network: apply main peers: %w", err)
 	}
 
-	invite, err := s.wireguard.NewDevice(
-		network.InviteName,
-		network.PrivateKey,
-		inviteIfaceAddr,
-		network.InviteWireguardPort,
-	)
+	invite, err := s.wireguard.CreateDevice(wireguard.DeviceConfig{
+		Name:       network.InviteName,
+		PrivateKey: network.PrivateKey,
+		Address:    inviteIfaceAddr,
+		ListenPort: network.InviteWireguardPort,
+	})
 	if err != nil {
 		undo()
 		return fmt.Errorf("start network: invite device: %w", err)
 	}
 	cleanups = append(cleanups, func() {
-		_ = invite.Down()
-		_ = s.wireguard.RemoveDevice(network.InviteName)
+		_ = invite.Close()
 	})
-
-	if err := invite.Up(); err != nil {
-		undo()
-		return fmt.Errorf("start network: invite up: %w", err)
-	}
 
 	invitePeers, err := s.buildInvitePeers(name)
 	if err != nil {
@@ -439,18 +427,11 @@ func (s *Service) StopNetwork(
 		cancel()
 	}
 
-	if err := devices.MainDevice.Down(); err != nil {
-		errs = append(errs, fmt.Errorf("main down: %w", err))
+	if err := devices.MainDevice.Close(); err != nil {
+		errs = append(errs, fmt.Errorf("main close: %w", err))
 	}
-	if err := s.wireguard.RemoveDevice(devices.MainName); err != nil {
-		errs = append(errs, fmt.Errorf("remove main: %w", err))
-	}
-
-	if err := devices.InviteDevice.Down(); err != nil {
-		errs = append(errs, fmt.Errorf("invite down: %w", err))
-	}
-	if err := s.wireguard.RemoveDevice(devices.InviteName); err != nil {
-		errs = append(errs, fmt.Errorf("remove invite: %w", err))
+	if err := devices.InviteDevice.Close(); err != nil {
+		errs = append(errs, fmt.Errorf("invite close: %w", err))
 	}
 
 	return errors.Join(errs...)
@@ -529,7 +510,7 @@ func (s *Service) reconcileOnce(
 func (s *Service) buildMainPeers(
 	network string,
 ) (
-	[]wireguard.Peer,
+	[]wireguard.PeerConfig,
 	error,
 ) {
 	if err := s.store.PruneExpiredRegistrations(network, s.clock()); err != nil {
@@ -541,7 +522,7 @@ func (s *Service) buildMainPeers(
 		return nil, fmt.Errorf("list peers: %w", err)
 	}
 
-	var wgpeers []wireguard.Peer
+	var wgpeers []wireguard.PeerConfig
 	for _, peer := range peers {
 		if !peer.Enabled {
 			continue
@@ -550,7 +531,7 @@ func (s *Service) buildMainPeers(
 		if err != nil {
 			return nil, fmt.Errorf("parse peer CIDR %q: %w", peer.Cidr, err)
 		}
-		p, err := wireguard.NewPeer(
+		p, err := wireguard.NewPeerConfig(
 			peer.PublicKey,
 			[]string{peerCidr.String()},
 			"",
@@ -571,7 +552,7 @@ func (s *Service) buildMainPeers(
 func (s *Service) buildInvitePeers(
 	network string,
 ) (
-	[]wireguard.Peer,
+	[]wireguard.PeerConfig,
 	error,
 ) {
 	if err := s.store.PruneExpiredRegistrations(network, s.clock()); err != nil {
@@ -583,10 +564,10 @@ func (s *Service) buildInvitePeers(
 		return nil, fmt.Errorf("list active registrations: %w", err)
 	}
 
-	var wgpeers []wireguard.Peer
+	var wgpeers []wireguard.PeerConfig
 	for _, reg := range regs {
 		route := netaddr.HostRoute(reg.InviteIP)
-		p, err := wireguard.NewPeer(
+		p, err := wireguard.NewPeerConfig(
 			reg.InvitePublicKey,
 			[]string{route.String()},
 			"",

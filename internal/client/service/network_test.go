@@ -131,24 +131,26 @@ func TestInstall_Success(t *testing.T) {
 		t.Fatalf("assigned cidr = %q, want 10.42.0.5/16", nw.AssignedCidr)
 	}
 
-	if _, ok := env.Backend.UpConfigs["install-me-i"]; !ok {
+	d := env.Backend.Device("install-me-i")
+	if d == nil {
 		t.Fatal("expected invite device was created")
 	}
-	if c := env.Backend.DownCount("install-me-i"); c != 1 {
-		t.Fatalf("invite down calls = %d, want 1", c)
+	if d.CloseCalls != 1 {
+		t.Fatalf("invite down calls = %d, want 1", d.CloseCalls)
 	}
 
-	if _, ok := env.Backend.UpConfigs["install-me"]; !ok {
+	d2 := env.Backend.Device("install-me")
+	if d2 == nil {
 		t.Fatal("expected main device was created")
 	}
-	if c := env.Backend.DownCount("install-me"); c != 1 {
-		t.Fatalf("main down calls = %d, want 1", c)
+	if d2.CloseCalls != 1 {
+		t.Fatalf("main down calls = %d, want 1", d2.CloseCalls)
 	}
 
 	ops := env.Backend.AppliedOpsFor("install-me")
 	var addOps []string
 	for _, op := range ops {
-		addOps = append(addOps, op.Peer.PublicKey.String())
+		addOps = append(addOps, op.Config.PublicKey.String())
 	}
 	if len(addOps) != 1 {
 		t.Fatalf("main peer ops = %d, want 1", len(addOps))
@@ -283,11 +285,12 @@ func TestUninstallNetwork_DisablesFirst(t *testing.T) {
 		t.Fatalf("uninstall: %v", err)
 	}
 
-	if _, ok := env.Backend.UpConfigs["enabled-net"]; !ok {
+	d := env.Backend.Device("enabled-net")
+	if d == nil {
 		t.Fatal("expected device was created during enable")
 	}
-	if c := env.Backend.DownCount("enabled-net"); c != 1 {
-		t.Errorf("down calls = %d, want 1", c)
+	if d.CloseCalls != 1 {
+		t.Errorf("down calls = %d, want 1", d.CloseCalls)
 	}
 }
 
@@ -308,7 +311,7 @@ func TestEnableNetwork_Success(t *testing.T) {
 		t.Error("network should be enabled")
 	}
 
-	if _, ok := env.Backend.UpConfigs["enable-me"]; !ok {
+	if env.Backend.Device("enable-me") == nil {
 		t.Fatal("expected device was created")
 	}
 }
@@ -326,7 +329,7 @@ func TestEnableNetwork_AlreadyRunning(t *testing.T) {
 		t.Fatalf("second enable: %v", err)
 	}
 
-	if _, ok := env.Backend.UpConfigs["running"]; !ok {
+	if env.Backend.Device("running") == nil {
 		t.Fatal("expected device was created")
 	}
 }
@@ -344,7 +347,7 @@ func TestEnableNetwork_DeviceError(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "bad-device")
 
-	env.Backend.UpErr = errors.New("device create failed")
+	env.Backend.CreateErr = errors.New("device create failed")
 
 	err := env.Service.EnableNetwork(context.Background(), "bad-device")
 	if err == nil {
@@ -381,11 +384,12 @@ func TestDisableNetwork_Success(t *testing.T) {
 		t.Error("network should be disabled")
 	}
 
-	if _, ok := env.Backend.UpConfigs["disable-me"]; !ok {
+	d := env.Backend.Device("disable-me")
+	if d == nil {
 		t.Fatal("expected device was created")
 	}
-	if c := env.Backend.DownCount("disable-me"); c != 1 {
-		t.Errorf("down calls = %d, want 1", c)
+	if d.CloseCalls != 1 {
+		t.Errorf("down calls = %d, want 1", d.CloseCalls)
 	}
 }
 

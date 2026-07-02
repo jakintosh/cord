@@ -20,11 +20,12 @@ func TestClose_StopsRunningNetworks(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	if _, ok := env.Backend.UpConfigs["close-me"]; !ok {
+	dev := env.Backend.Device("close-me")
+	if dev == nil {
 		t.Fatal("expected device was created")
 	}
-	if c := env.Backend.DownCount("close-me"); c != 1 {
-		t.Errorf("down calls = %d, want 1", c)
+	if dev.CloseCalls != 1 {
+		t.Errorf("close calls = %d, want 1", dev.CloseCalls)
 	}
 
 	statuses, err := env.Service.Status()
