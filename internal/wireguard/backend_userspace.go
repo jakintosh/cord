@@ -1,12 +1,8 @@
 package wireguard
 
 import (
-	"bufio"
-	"encoding/hex"
 	"fmt"
 	"net"
-	"strconv"
-	"strings"
 	"time"
 
 	"golang.zx2c4.com/wireguard/conn"
@@ -81,26 +77,27 @@ type userspaceDeviceHandle struct {
 	tun  tun.Device
 }
 
-func (h *userspaceDeviceHandle) Peers() (
+func (d *userspaceDeviceHandle) Peers() (
 	[]PeerStatus,
 	error,
 ) {
-	raw, err := h.wg.IpcGet()
+	raw, err := d.wg.IpcGet()
 	if err != nil {
 		return nil, fmt.Errorf("wireguard: ipc get: %w", err)
 	}
-	return parseUAPIPeers(raw)
+
+	return parsePeersUAPI(raw)
 }
 
-func (h *userspaceDeviceHandle) ApplyPeers(
+func (d *userspaceDeviceHandle) ApplyPeers(
 	ops []PeerOp,
 ) error {
-	return h.wg.IpcSet(peerOperationsUAPI(ops))
+	return d.wg.IpcSet(buildOpsUAPI(ops))
 }
 
-func (h *userspaceDeviceHandle) Close() error {
-	h.wg.Close()
-	h.tun.Close()
+func (d *userspaceDeviceHandle) Close() error {
+	d.wg.Close()
+	d.tun.Close()
 	return nil
 }
 
@@ -109,52 +106,43 @@ func applyDeviceConfig(
 	privateKey wgtypes.Key,
 	listenPort int,
 ) error {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "private_key=%s\n", hex.EncodeToString(privateKey[:]))
+	var w uapiWriter
+	w.SetHex("private_key", privateKey[:])
 	if listenPort > 0 {
-		fmt.Fprintf(&sb, "listen_port=%d\n", listenPort)
+		w.SetInt("listen_port", listenPort)
 	}
-	return dev.IpcSet(sb.String())
+	return dev.IpcSet(w.String())
 }
 
-func peerOperationsUAPI(
+func buildOpsUAPI(
 	operations []PeerOp,
 ) string {
-	var sb strings.Builder
+	var w uapiWriter
 	for _, op := range operations {
-		key := op.Config.PublicKey
-		fmt.Fprintf(&sb, "public_key=%s\n", hex.EncodeToString(key[:]))
+		w.SetHex("public_key", op.Config.PublicKey[:])
 		if op.Remove {
-			sb.WriteString("remove=true\n")
+			w.Set("remove", "true")
 			continue
 		}
-		sb.WriteString("replace_allowed_ips=true\n")
-		writeAllowedIPs(&sb, op.Config.AllowedIPs)
-		if op.Config.Endpoint != nil {
-			fmt.Fprintf(&sb, "endpoint=%s\n", op.Config.Endpoint.String())
+		w.Set("replace_allowed_ips", "true")
+		for _, ip := range op.Config.AllowedIPs {
+			w.Set("allowed_ip", ip.String())
 		}
-		fmt.Fprintf(&sb, "persistent_keepalive_interval=%d\n", int(op.Config.PersistentKeepalive.Seconds()))
+		if op.Config.Endpoint != nil {
+			w.Set("endpoint", op.Config.Endpoint.String())
+		}
+		w.SetInt("persistent_keepalive_interval", int(op.Config.PersistentKeepalive.Seconds()))
 	}
-	return sb.String()
+	return w.String()
 }
 
-func writeAllowedIPs(
-	sb *strings.Builder,
-	allowedIPs []net.IPNet,
-) {
-	for _, ip := range allowedIPs {
-		fmt.Fprintf(sb, "allowed_ip=%s\n", ip.String())
-	}
-}
-
-func parseUAPIPeers(
+func parsePeersUAPI(
 	raw string,
 ) (
 	[]PeerStatus,
 	error,
 ) {
 	var peers []PeerStatus
-
 	var peer *PeerStatus
 	var handshakeSec int64
 	var handshakeNsec int64
@@ -171,24 +159,17 @@ func parseUAPIPeers(
 		handshakeNsec = 0
 	}
 
-	reader := strings.NewReader(raw)
-	scanner := bufio.NewScanner(reader)
-	for scanner.Scan() {
-		line := scanner.Text()
-		key, value, found := strings.Cut(line, "=")
-		if !found {
-			continue
-		}
-
-		switch key {
+	p := newUAPIParser(raw)
+	for p.Next() {
+		switch p.Key() {
 		case "listen_port":
 			continue
 
 		case "public_key":
 			flushPeer()
-			keyBytes, err := hex.DecodeString(value)
-			if err != nil || len(keyBytes) != wgtypes.KeyLen {
-				return nil, fmt.Errorf("wireguard: invalid public key in status: %s", value)
+			var keyBytes []byte
+			if err := p.DecodeHex(&keyBytes); err != nil || len(keyBytes) != wgtypes.KeyLen {
+				return nil, fmt.Errorf("wireguard: invalid public key in status: %s", p.Value())
 			}
 			peer = &PeerStatus{
 				PublicKey: wgtypes.Key(keyBytes),
@@ -196,48 +177,49 @@ func parseUAPIPeers(
 
 		case "endpoint":
 			if peer != nil {
-				if addr, err := net.ResolveUDPAddr("udp", value); err == nil {
-					peer.Endpoint = addr
-				}
+				_ = p.DecodeUDPAddr(&peer.Endpoint)
 			}
 
 		case "last_handshake_time_sec":
-			if sec, err := strconv.ParseInt(value, 10, 64); err == nil {
-				handshakeSec = sec
+			if peer != nil {
+				_ = p.DecodeInt64(&handshakeSec)
 			}
 
 		case "last_handshake_time_nsec":
-			if nsec, err := strconv.ParseInt(value, 10, 64); err == nil {
-				handshakeNsec = nsec
+			if peer != nil {
+				_ = p.DecodeInt64(&handshakeNsec)
 			}
 
 		case "persistent_keepalive_interval":
 			if peer != nil {
-				if seconds, err := strconv.Atoi(value); err == nil {
+				var seconds int
+				if err := p.DecodeInt(&seconds); err == nil {
 					peer.PersistentKeepalive = time.Duration(seconds) * time.Second
 				}
 			}
 
 		case "allowed_ip":
 			if peer != nil {
-				if _, allowed, err := net.ParseCIDR(value); err == nil {
-					peer.AllowedIPs = append(peer.AllowedIPs, *allowed)
+				var ipNet net.IPNet
+				if err := p.DecodeCIDR(&ipNet); err == nil {
+					peer.AllowedIPs = append(peer.AllowedIPs, ipNet)
 				}
 			}
 
 		case "rx_bytes":
 			if peer != nil {
-				peer.ReceiveBytes, _ = strconv.ParseInt(value, 10, 64)
+				_ = p.DecodeInt64(&peer.ReceiveBytes)
 			}
 
 		case "tx_bytes":
 			if peer != nil {
-				peer.TransmitBytes, _ = strconv.ParseInt(value, 10, 64)
+				_ = p.DecodeInt64(&peer.TransmitBytes)
 			}
 		}
 	}
+
 	flushPeer()
-	if err := scanner.Err(); err != nil {
+	if err := p.Err(); err != nil {
 		return nil, fmt.Errorf("wireguard: scan status: %w", err)
 	}
 

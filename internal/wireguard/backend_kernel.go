@@ -43,6 +43,7 @@ func (b *KernelBackend) CreateDevice(
 	if err != nil {
 		return nil, fmt.Errorf("wireguard: parse key: %w", err)
 	}
+
 	if err := kernelApplyDeviceConfig(cfg.Name, privKey, int(cfg.ListenPort)); err != nil {
 		return nil, err
 	}
@@ -108,8 +109,7 @@ func (h *kernelDeviceHandle) ApplyPeers(
 func (h *kernelDeviceHandle) Close() error {
 	link, err := netlink.LinkByName(h.name)
 	if err != nil {
-		var notFound netlink.LinkNotFoundError
-		if errors.As(err, &notFound) {
+		if _, ok := errors.AsType[netlink.LinkNotFoundError](err); ok {
 			return nil
 		}
 		return fmt.Errorf("wireguard: get link %s: %w", h.name, err)
@@ -146,14 +146,19 @@ func kernelEnsureLink(
 	error,
 ) {
 	link, err := netlink.LinkByName(name)
+
+	// if link found
 	if err == nil {
 		return link, nil
 	}
 
+	// if link errored, but not with notFound error
 	var notFound netlink.LinkNotFoundError
 	if !errors.As(err, &notFound) {
 		return nil, fmt.Errorf("wireguard: get link %s: %w", name, err)
 	}
+
+	// link not found, create it
 
 	attr := netlink.NewLinkAttrs()
 	attr.Name = name

@@ -38,7 +38,7 @@ func mustResolveUDP(t *testing.T, s string) *net.UDPAddr {
 }
 
 func TestParseUAPIPeers_Empty(t *testing.T) {
-	peers, err := parseUAPIPeers("")
+	peers, err := parsePeersUAPI("")
 	if err != nil {
 		t.Fatalf("parseUAPIPeers: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestParseUAPIPeers_Empty(t *testing.T) {
 
 func TestParseUAPIPeers_IgnoresListenPort(t *testing.T) {
 	raw := "listen_port=51820\n"
-	peers, err := parseUAPIPeers(raw)
+	peers, err := parsePeersUAPI(raw)
 	if err != nil {
 		t.Fatalf("parseUAPIPeers: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestParseUAPIPeers_SinglePeer(t *testing.T) {
 	k := mustGenerateKey(t)
 	keyHex := hex.EncodeToString(k[:])
 	raw := "public_key=" + keyHex + "\n"
-	peers, err := parseUAPIPeers(raw)
+	peers, err := parsePeersUAPI(raw)
 	if err != nil {
 		t.Fatalf("parseUAPIPeers: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestParseUAPIPeers_PeerWithEndpoint(t *testing.T) {
 	k := mustGenerateKey(t)
 	keyHex := hex.EncodeToString(k[:])
 	raw := "public_key=" + keyHex + "\nendpoint=1.2.3.4:51820\n"
-	peers, err := parseUAPIPeers(raw)
+	peers, err := parsePeersUAPI(raw)
 	if err != nil {
 		t.Fatalf("parseUAPIPeers: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestParseUAPIPeers_PeerWithHandshake(t *testing.T) {
 	k := mustGenerateKey(t)
 	keyHex := hex.EncodeToString(k[:])
 	raw := "public_key=" + keyHex + "\nlast_handshake_time_sec=1700000000\nlast_handshake_time_nsec=500000000\n"
-	peers, err := parseUAPIPeers(raw)
+	peers, err := parsePeersUAPI(raw)
 	if err != nil {
 		t.Fatalf("parseUAPIPeers: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestParseUAPIPeers_PeerWithKeepalive(t *testing.T) {
 	k := mustGenerateKey(t)
 	keyHex := hex.EncodeToString(k[:])
 	raw := "public_key=" + keyHex + "\npersistent_keepalive_interval=30\n"
-	peers, err := parseUAPIPeers(raw)
+	peers, err := parsePeersUAPI(raw)
 	if err != nil {
 		t.Fatalf("parseUAPIPeers: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestParseUAPIPeers_PeerWithAllowedIPs(t *testing.T) {
 	k := mustGenerateKey(t)
 	keyHex := hex.EncodeToString(k[:])
 	raw := "public_key=" + keyHex + "\nallowed_ip=10.0.0.1/32\nallowed_ip=10.0.1.0/24\n"
-	peers, err := parseUAPIPeers(raw)
+	peers, err := parsePeersUAPI(raw)
 	if err != nil {
 		t.Fatalf("parseUAPIPeers: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestParseUAPIPeers_PeerWithCounters(t *testing.T) {
 	k := mustGenerateKey(t)
 	keyHex := hex.EncodeToString(k[:])
 	raw := "public_key=" + keyHex + "\nrx_bytes=1024\ntx_bytes=2048\n"
-	peers, err := parseUAPIPeers(raw)
+	peers, err := parsePeersUAPI(raw)
 	if err != nil {
 		t.Fatalf("parseUAPIPeers: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestParseUAPIPeers_MultiplePeers(t *testing.T) {
 	k1, k2 := mustGenerateKey(t), mustGenerateKey(t)
 	raw := "public_key=" + hex.EncodeToString(k1[:]) + "\n" +
 		"public_key=" + hex.EncodeToString(k2[:]) + "\n"
-	peers, err := parseUAPIPeers(raw)
+	peers, err := parsePeersUAPI(raw)
 	if err != nil {
 		t.Fatalf("parseUAPIPeers: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestParseUAPIPeers_MultiplePeers(t *testing.T) {
 
 func TestParseUAPIPeers_InvalidPublicKey(t *testing.T) {
 	raw := "public_key=nothex\n"
-	_, err := parseUAPIPeers(raw)
+	_, err := parsePeersUAPI(raw)
 	if err == nil {
 		t.Error("expected error for invalid public key")
 	}
@@ -176,7 +176,7 @@ func TestParseUAPIPeers_InvalidPublicKey(t *testing.T) {
 
 func TestParseUAPIPeers_WrongLengthPublicKey(t *testing.T) {
 	raw := "public_key=" + strings.Repeat("00", 16) + "\n"
-	_, err := parseUAPIPeers(raw)
+	_, err := parsePeersUAPI(raw)
 	if err == nil {
 		t.Error("expected error for wrong-length public key")
 	}
@@ -184,7 +184,7 @@ func TestParseUAPIPeers_WrongLengthPublicKey(t *testing.T) {
 
 func TestParseUAPIPeers_SkipsLinesWithoutEquals(t *testing.T) {
 	raw := "garbage\nlisten_port=12345\n"
-	peers, err := parseUAPIPeers(raw)
+	peers, err := parsePeersUAPI(raw)
 	if err != nil {
 		t.Fatalf("parseUAPIPeers: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestParseUAPIPeers_FlushBetweenPeers(t *testing.T) {
 		"last_handshake_time_sec=100\nlast_handshake_time_nsec=0\n" +
 		"public_key=" + hex.EncodeToString(k2[:]) + "\n" +
 		"last_handshake_time_sec=200\nlast_handshake_time_nsec=0\n"
-	peers, err := parseUAPIPeers(raw)
+	peers, err := parsePeersUAPI(raw)
 	if err != nil {
 		t.Fatalf("parseUAPIPeers: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestPeerOperationsUAPI_Add(t *testing.T) {
 		},
 	}
 
-	result := peerOperationsUAPI([]PeerOp{op})
+	result := buildOpsUAPI([]PeerOp{op})
 	if !strings.Contains(result, "public_key=") {
 		t.Error("missing public_key line")
 	}
@@ -253,7 +253,7 @@ func TestPeerOperationsUAPI_AddNoEndpoint(t *testing.T) {
 		},
 	}
 
-	result := peerOperationsUAPI([]PeerOp{op})
+	result := buildOpsUAPI([]PeerOp{op})
 	if strings.Contains(result, "endpoint=") {
 		t.Error("should not contain endpoint when nil")
 	}
@@ -266,7 +266,7 @@ func TestPeerOperationsUAPI_Remove(t *testing.T) {
 		Config: PeerConfig{PublicKey: k},
 	}
 
-	result := peerOperationsUAPI([]PeerOp{op})
+	result := buildOpsUAPI([]PeerOp{op})
 	if !strings.Contains(result, "remove=true") {
 		t.Error("missing remove=true")
 	}
@@ -282,7 +282,7 @@ func TestPeerOperationsUAPI_MultipleOps(t *testing.T) {
 		{Remove: true, Config: PeerConfig{PublicKey: k}},
 	}
 
-	result := peerOperationsUAPI(ops)
+	result := buildOpsUAPI(ops)
 	if !strings.Contains(result, "replace_allowed_ips=true") {
 		t.Error("missing replace_allowed_ips for add")
 	}
@@ -292,28 +292,8 @@ func TestPeerOperationsUAPI_MultipleOps(t *testing.T) {
 }
 
 func TestPeerOperationsUAPI_Empty(t *testing.T) {
-	result := peerOperationsUAPI(nil)
+	result := buildOpsUAPI(nil)
 	if result != "" {
 		t.Errorf("expected empty string, got %q", result)
-	}
-}
-
-func TestWriteAllowedIPs(t *testing.T) {
-	ips := []net.IPNet{
-		mustParseCIDR(t, "10.0.0.1/32"),
-		mustParseCIDR(t, "10.0.1.0/24"),
-	}
-	var sb strings.Builder
-	writeAllowedIPs(&sb, ips)
-	result := sb.String()
-
-	if strings.Count(result, "allowed_ip=") != 2 {
-		t.Errorf("expected 2 allowed_ip lines, got:\n%s", result)
-	}
-	if !strings.Contains(result, "allowed_ip=10.0.0.1/32") {
-		t.Error("missing 10.0.0.1/32")
-	}
-	if !strings.Contains(result, "allowed_ip=10.0.1.0/24") {
-		t.Error("missing 10.0.1.0/24")
 	}
 }
