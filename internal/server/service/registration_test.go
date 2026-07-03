@@ -2,7 +2,6 @@ package service_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -75,7 +74,6 @@ func TestCreateRegistration_AutoAssignsIP(t *testing.T) {
 		t.Fatalf("create registration: %v", err)
 	}
 
-	// First auto-assigned IP should be 10.0.0.2 (10.0.0.0 = network, 10.0.0.1 = server)
 	if inv.Peer.CIDR != "10.1.0.2/24" {
 		t.Errorf("cidr = %q, want 10.1.0.2/24", inv.Peer.CIDR)
 	}
@@ -85,8 +83,8 @@ func TestCreateRegistration_ReconcilesRunningInviteDeviceWithHostRoute(t *testin
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
-		t.Fatalf("start network: %v", err)
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable network: %v", err)
 	}
 
 	ip := net.ParseIP("10.0.0.5")
@@ -259,8 +257,8 @@ func TestRedeemRegistration_ReconcilesRunningDevices(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
-		t.Fatalf("start network: %v", err)
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable network: %v", err)
 	}
 	ip := net.ParseIP("10.0.0.5")
 	_, err := env.Service.CreateRegistration("testnet", "live-redeem", &ip, false, nil)
@@ -275,9 +273,6 @@ func TestRedeemRegistration_ReconcilesRunningDevices(t *testing.T) {
 		t.Fatalf("redeem: %v", err)
 	}
 
-	// After redeem, the peer is added to the main device but the temp
-	// peer stays on the invite device so the client can retry if the
-	// response was lost.
 	if env.Backend.Device("testnet-i") == nil {
 		t.Fatal("expected invite device")
 	}
@@ -346,10 +341,6 @@ func TestListRegistrations_Mixed(t *testing.T) {
 	if active != 1 {
 		t.Errorf("expected 1 active, got %d", active)
 	}
-	// After redeem, the registration is marked as redeemed but the mere
-	// existence of the record keeps the temp peer on the invite device
-	// so the client can retry if the response was lost. ConfirmPeer
-	// marks it confirmed, removing it from the invite device.
 	for _, reg := range regs {
 		if reg.RedeemedKey != "" && !reg.Redeemed {
 			t.Errorf("registration %q: should be redeemed after RedeemRegistration", reg.Name)

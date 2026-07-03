@@ -8,8 +8,8 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api/invite"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api/peer"
+	inviteApi "git.studiopollinator.com/pollinator/cord/internal/server/api/invite"
+	peerApi "git.studiopollinator.com/pollinator/cord/internal/server/api/peer"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
@@ -22,8 +22,7 @@ const DefaultSocketPath = "/tmp/cord-server.sock"
 // DefaultDBPath is the default database path used when none is provided.
 const DefaultDBPath = "data/server.db"
 
-// Options configures the server composition root. Both fields are
-// required for full operation.
+// Options configures the server composition root.
 type Options struct {
 	// SocketPath is the Unix socket path for the daemon control API.
 	SocketPath string
@@ -34,10 +33,6 @@ type Options struct {
 	// Backend selects the WireGuard implementation: "auto" (default),
 	// "kernel", or "userspace".
 	Backend string
-
-	// ReconcileInterval controls the server reconciliation interval.
-	// Defaults to 10s when zero.
-	ReconcileInterval time.Duration
 }
 
 // Serve is the production composition root for the cord server daemon.
@@ -78,18 +73,15 @@ func Serve(
 
 	var svc *service.Service
 	svcOpts := service.Options{
-		Store:             db,
-		WireGuard:         wg,
-		Clock:             time.Now,
-		Logger:            log.Default(),
-		ReconcileInterval: opts.ReconcileInterval,
+		Store:     db,
+		WireGuard: wg,
+		Clock:     time.Now,
+		Logger:    log.Default(),
+		// TODO: I don't like the way the APIFactory has this circular dependency
 		APIFactory: func(network string) service.APIHandlers {
-			peerAPI := peer.New(svc, network, log.Default())
-			inviteAPI := invite.New(svc, network, log.Default())
-
 			return service.APIHandlers{
-				Main:   peerAPI.Router(),
-				Invite: inviteAPI.Router(),
+				Main:   peerApi.New(svc, network, log.Default()).Router(),
+				Invite: inviteApi.New(svc, network, log.Default()).Router(),
 			}
 		},
 	}
@@ -98,7 +90,7 @@ func Serve(
 		return fmt.Errorf("server: new service: %w", err)
 	}
 
-	if err := startEnabledNetworks(ctx, svc); err != nil {
+	if err := svc.Start(); err != nil {
 		return fmt.Errorf("server: start networks: %w", err)
 	}
 
@@ -116,35 +108,4 @@ func Serve(
 	}
 
 	return d.Run(ctx)
-}
-
-// startEnabledNetworks iterates all persisted networks and starts
-// those marked as enabled. Non-fatal: a single network failure is
-// logged but does not prevent others from starting.
-func startEnabledNetworks(
-	ctx context.Context,
-	svc *service.Service,
-) error {
-	names, err := svc.ListNetworks()
-	if err != nil {
-		return fmt.Errorf("list networks: %w", err)
-	}
-
-	var lastErr error
-	for _, name := range names {
-		nw, err := svc.GetNetwork(name)
-		if err != nil {
-			log.Printf("start networks: get %q: %v", name, err)
-			lastErr = err
-			continue
-		}
-		if !nw.Enabled {
-			continue
-		}
-		if err := svc.StartNetwork(ctx, name); err != nil {
-			log.Printf("start networks: start %q: %v", name, err)
-			lastErr = err
-		}
-	}
-	return lastErr
 }

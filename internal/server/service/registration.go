@@ -113,11 +113,29 @@ func (s *Service) CreateRegistration(
 		return nil, fmt.Errorf("%w: registration name required", ErrInvalidInput)
 	}
 
+	exists, err := s.store.PeerExists(networkName, name)
+	if err != nil {
+		return nil, fmt.Errorf("check peer exists: %w", err)
+	}
+	if exists {
+		return nil, fmt.Errorf("%w: peer %q already exists", ErrConflict, name)
+	}
+
 	var peerMainAssignedIP net.IP
 	if ip != nil {
 		peerMainAssignedIP = netaddr.Normalize(*ip)
+		_, mainNet, err := net.ParseCIDR(network.Main.Cidr)
+		if err != nil {
+			return nil, fmt.Errorf("parse main CIDR: %w", err)
+		}
+		if !mainNet.Contains(peerMainAssignedIP) {
+			return nil, fmt.Errorf(
+				"%w: requested IP %s is not within main CIDR %s",
+				ErrInvalidInput, peerMainAssignedIP, network.Main.Cidr,
+			)
+		}
 	} else {
-		freeIP, err := s.nextFreePeerIP(networkName, network.MainCidr)
+		freeIP, err := s.nextFreePeerIP(networkName, network.Main.Cidr)
 		if err != nil {
 			return nil, fmt.Errorf("auto-assign permanent IP: %w", err)
 		}
@@ -134,7 +152,7 @@ func (s *Service) CreateRegistration(
 		return nil, fmt.Errorf("derive temp public key: %w", err)
 	}
 
-	peerTempAssignedIP, err := s.nextFreeRegistrationIP(networkName, network.InviteCidr)
+	peerTempAssignedIP, err := s.nextFreeRegistrationIP(networkName, network.Invite.Cidr)
 	if err != nil {
 		return nil, fmt.Errorf("allocate invite IP: %w", err)
 	}
@@ -158,21 +176,21 @@ func (s *Service) CreateRegistration(
 	if err := s.store.InsertRegistration(networkName, reg); err != nil {
 		return nil, fmt.Errorf("insert registration: %w", mapStoreError(err))
 	}
-	s.reconcileOnce(networkName)
+	s.reconcile(networkName)
 
-	_, inviteNet, err := net.ParseCIDR(network.InviteCidr)
+	_, inviteNet, err := net.ParseCIDR(network.Invite.Cidr)
 	if err != nil {
-		return nil, fmt.Errorf("parse invite CIDR %q: %w", network.InviteCidr, err)
+		return nil, fmt.Errorf("parse invite CIDR %q: %w", network.Invite.Cidr, err)
 	}
 	inviteNetPrefix, _ := inviteNet.Mask.Size()
 
 	peerInviteNet := fmt.Sprintf("%s/%d", peerTempAssignedIP.String(), inviteNetPrefix)
 
 	serverExternalIP := net.ParseIP(network.ExternalIP)
-	serverInviteExternalAddr := netaddr.Endpoint(serverExternalIP, network.InviteWireguardPort)
+	serverInviteExternalAddr := netaddr.Endpoint(serverExternalIP, network.Invite.WireguardPort)
 
 	serverInternalIP := netaddr.FirstAssignable(inviteNet)
-	serverInviteInternalAddr := netaddr.Endpoint(serverInternalIP, network.InviteApiPort)
+	serverInviteInternalAddr := netaddr.Endpoint(serverInternalIP, network.Invite.ApiPort)
 
 	payload := &Invitation{
 		Network: NetworkInfo{
@@ -210,12 +228,12 @@ func (s *Service) RedeemRegistration(
 	if err != nil {
 		peer, lookupErr := s.store.GetPeerByKey(networkName, permPubKey)
 		if lookupErr == nil && !peer.Confirmed {
-			s.reconcileOnce(networkName)
+			s.reconcile(networkName)
 			return s.buildInvitation(network, peer)
 		}
 		return nil, fmt.Errorf("redeem registration: %w", mapStoreError(err))
 	}
-	s.reconcileOnce(networkName)
+	s.reconcile(networkName)
 
 	peer, err := s.store.GetPeerByKey(networkName, permPubKey)
 	if err != nil {
@@ -235,21 +253,22 @@ func (s *Service) RevokeRegistration(
 	if err := s.store.DeleteRegistration(network, name); err != nil {
 		return fmt.Errorf("delete registration %q: %w", name, mapStoreError(err))
 	}
-	s.reconcileOnce(network)
+	s.reconcile(network)
 	return nil
 }
 
-// buildInvitation constructs an Invitation from a network and a redeemed peer.
+// buildInvitation constructs an Invitation from a network config and a
+// redeemed peer.
 func (s *Service) buildInvitation(
-	network *Network,
+	network *NetworkConfig,
 	peer *Peer,
 ) (
 	*Invitation,
 	error,
 ) {
-	_, rootNet, err := net.ParseCIDR(network.MainCidr)
+	_, rootNet, err := net.ParseCIDR(network.Main.Cidr)
 	if err != nil {
-		return nil, fmt.Errorf("parse main CIDR %q: %w", network.MainCidr, err)
+		return nil, fmt.Errorf("parse main CIDR %q: %w", network.Main.Cidr, err)
 	}
 	networkPrefix, _ := rootNet.Mask.Size()
 
@@ -262,8 +281,8 @@ func (s *Service) buildInvitation(
 		Network: NetworkInfo{
 			Name:        network.Name,
 			PublicKey:   network.PublicKey,
-			Endpoint:    netaddr.Endpoint(net.ParseIP(network.ExternalIP), network.MainWireguardPort),
-			APIEndpoint: netaddr.Endpoint(netaddr.FirstAssignable(rootNet), network.MainApiPort),
+			Endpoint:    netaddr.Endpoint(net.ParseIP(network.ExternalIP), network.Main.WireguardPort),
+			APIEndpoint: netaddr.Endpoint(netaddr.FirstAssignable(rootNet), network.Main.ApiPort),
 		},
 		Peer: PeerIdentity{
 			CIDR: fmt.Sprintf("%s/%d", peerIP.String(), networkPrefix),
@@ -309,4 +328,56 @@ func (s *Service) nextFreeRegistrationIP(
 	}
 
 	return nil, fmt.Errorf("%w: no free addresses in invite CIDR %s", ErrInvalidInput, inviteCidr)
+}
+
+// nextFreePeerIP finds the lowest free address in the root CIDR,
+// skipping the network address, the server address, and addresses
+// held by existing peers or active registrations.
+func (s *Service) nextFreePeerIP(
+	network string,
+	rootCidr string,
+) (
+	net.IP,
+	error,
+) {
+	_, ipNet, err := net.ParseCIDR(rootCidr)
+	if err != nil {
+		return nil, fmt.Errorf("parse root CIDR: %w", err)
+	}
+
+	peers, err := s.store.ListPeers(network)
+	if err != nil {
+		return nil, fmt.Errorf("list peers: %w", err)
+	}
+
+	regs, err := s.store.ListActiveRegistrations(network, s.clock())
+	if err != nil {
+		return nil, fmt.Errorf("list active registrations: %w", err)
+	}
+
+	used := map[string]bool{}
+	for _, p := range peers {
+		ip, _, _ := net.ParseCIDR(p.Cidr)
+		if ip != nil {
+			used[netaddr.Normalize(ip).String()] = true
+		}
+	}
+	for _, reg := range regs {
+		if reg.MainIP != nil {
+			used[netaddr.Normalize(reg.MainIP).String()] = true
+		}
+	}
+
+	first := netaddr.FirstAssignable(ipNet)
+	_, last := netaddr.Range(ipNet)
+
+	candidate := netaddr.Increment(first)
+	for ipNet.Contains(candidate) && !candidate.Equal(last) {
+		if !used[netaddr.Normalize(candidate).String()] {
+			return netaddr.Normalize(candidate), nil
+		}
+		candidate = netaddr.Increment(candidate)
+	}
+
+	return nil, fmt.Errorf("%w: no free addresses in %s", ErrInvalidInput, rootCidr)
 }

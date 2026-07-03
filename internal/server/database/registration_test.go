@@ -12,20 +12,43 @@ import (
 
 func seedNetworkForRegistration(t *testing.T, db *database.DB) {
 	t.Helper()
-	now := time.Now()
-	if err := db.BootstrapNetwork(&service.Network{
-		Name:                "regnet",
-		PrivateKey:          "priv",
-		PublicKey:           "pub",
-		MainCidr:            "10.0.0.0/16",
-		InviteCidr:          "10.1.0.0/24",
-		ExternalIP:          "1.1.1.1",
-		MainWireguardPort:   51820,
-		InviteWireguardPort: 51821,
-		MainApiPort:         80,
-		InviteApiPort:       80,
-		CreatedAt:           now,
-	}, &service.Cidr{Name: "regnet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub", Admin: true, Enabled: true, Confirmed: true}); err != nil {
+
+	name := "regnet"
+	if err := db.BootstrapNetwork(
+		&service.NetworkConfig{
+			Name:       name,
+			PrivateKey: "priv-" + name,
+			PublicKey:  "pub-" + name,
+			ExternalIP: "1.1.1.1",
+			Main: service.PlaneConfig{
+				Name:          name,
+				Cidr:          "10.0.0.0/16",
+				WireguardPort: 51820,
+				ApiPort:       80,
+			},
+			Invite: service.PlaneConfig{
+				Name:          name + "-i",
+				Cidr:          "10.1.0.0/24",
+				WireguardPort: 51821,
+				ApiPort:       80,
+			},
+			CreatedAt: time.Now(),
+		},
+		&service.Cidr{
+			Name:   "regnet",
+			Cidr:   "10.0.0.0/16",
+			Length: 16,
+			Prefix: 32,
+		},
+		&service.Peer{
+			Name:      "cord-server",
+			Cidr:      "10.0.0.1/32",
+			PublicKey: "pub",
+			Admin:     true,
+			Enabled:   true,
+			Confirmed: true,
+		},
+	); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
 }
@@ -138,14 +161,22 @@ func TestListRegistrations(t *testing.T) {
 	now := time.Now()
 	expires := now.Add(24 * time.Hour)
 	if err := db.InsertRegistration("regnet", &service.Registration{
-		Name: "zzz", InvitePublicKey: "z-key", InviteIP: net.IPv4(10, 1, 0, 1),
-		MainIP: net.IPv4(10, 0, 5, 1), ExpiresAt: expires, CreatedAt: now,
+		Name:            "zzz",
+		InvitePublicKey: "z-key",
+		InviteIP:        net.IPv4(10, 1, 0, 1),
+		MainIP:          net.IPv4(10, 0, 5, 1),
+		ExpiresAt:       expires,
+		CreatedAt:       now,
 	}); err != nil {
 		t.Fatalf("insert zzz: %v", err)
 	}
 	if err := db.InsertRegistration("regnet", &service.Registration{
-		Name: "aaa", InvitePublicKey: "a-key", InviteIP: net.IPv4(10, 1, 0, 2),
-		MainIP: net.IPv4(10, 0, 5, 2), ExpiresAt: expires, CreatedAt: now.Add(time.Minute),
+		Name:            "aaa",
+		InvitePublicKey: "a-key",
+		InviteIP:        net.IPv4(10, 1, 0, 2),
+		MainIP:          net.IPv4(10, 0, 5, 2),
+		ExpiresAt:       expires,
+		CreatedAt:       now.Add(time.Minute),
 	}); err != nil {
 		t.Fatalf("insert aaa: %v", err)
 	}
@@ -169,14 +200,22 @@ func TestListActiveRegistrations(t *testing.T) {
 
 	now := time.Now()
 	if err := db.InsertRegistration("regnet", &service.Registration{
-		Name: "active", InvitePublicKey: "act-key", InviteIP: net.IPv4(10, 1, 0, 1),
-		MainIP: net.IPv4(10, 0, 5, 1), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
+		Name:            "active",
+		InvitePublicKey: "act-key",
+		InviteIP:        net.IPv4(10, 1, 0, 1),
+		MainIP:          net.IPv4(10, 0, 5, 1),
+		ExpiresAt:       now.Add(24 * time.Hour),
+		CreatedAt:       now,
 	}); err != nil {
 		t.Fatalf("insert active: %v", err)
 	}
 	if err := db.InsertRegistration("regnet", &service.Registration{
-		Name: "expired", InvitePublicKey: "exp-key", InviteIP: net.IPv4(10, 1, 0, 2),
-		MainIP: net.IPv4(10, 0, 5, 2), ExpiresAt: now.Add(-1 * time.Hour), CreatedAt: now,
+		Name:            "expired",
+		InvitePublicKey: "exp-key",
+		InviteIP:        net.IPv4(10, 1, 0, 2),
+		MainIP:          net.IPv4(10, 0, 5, 2),
+		ExpiresAt:       now.Add(-1 * time.Hour),
+		CreatedAt:       now,
 	}); err != nil {
 		t.Fatalf("insert expired: %v", err)
 	}
@@ -199,9 +238,14 @@ func TestListActiveRegistrations_IncludesRedeemed(t *testing.T) {
 
 	now := time.Now()
 	if err := db.InsertRegistration("regnet", &service.Registration{
-		Name: "redeemed-one", InvitePublicKey: "red-key", InviteIP: net.IPv4(10, 1, 0, 1),
-		MainIP: net.IPv4(10, 0, 5, 1), Redeemed: true, RedeemedKey: "perm-key",
-		ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
+		Name:            "redeemed-one",
+		InvitePublicKey: "red-key",
+		InviteIP:        net.IPv4(10, 1, 0, 1),
+		MainIP:          net.IPv4(10, 0, 5, 1),
+		Redeemed:        true,
+		RedeemedKey:     "perm-key",
+		ExpiresAt:       now.Add(24 * time.Hour),
+		CreatedAt:       now,
 	}); err != nil {
 		t.Fatalf("insert redeemed: %v", err)
 	}
@@ -224,8 +268,12 @@ func TestDeleteRegistration(t *testing.T) {
 
 	now := time.Now()
 	if err := db.InsertRegistration("regnet", &service.Registration{
-		Name: "delme", InvitePublicKey: "del-key", InviteIP: net.IPv4(10, 1, 0, 99),
-		MainIP: net.IPv4(10, 0, 5, 99), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
+		Name:            "delme",
+		InvitePublicKey: "del-key",
+		InviteIP:        net.IPv4(10, 1, 0, 99),
+		MainIP:          net.IPv4(10, 0, 5, 99),
+		ExpiresAt:       now.Add(24 * time.Hour),
+		CreatedAt:       now,
 	}); err != nil {
 		t.Fatalf("insert registration: %v", err)
 	}
@@ -256,14 +304,22 @@ func TestDeleteExpiredRegistrations(t *testing.T) {
 
 	now := time.Now()
 	if err := db.InsertRegistration("regnet", &service.Registration{
-		Name: "old", InvitePublicKey: "old-key", InviteIP: net.IPv4(10, 1, 0, 1),
-		MainIP: net.IPv4(10, 0, 5, 1), ExpiresAt: now.Add(-2 * time.Hour), CreatedAt: now,
+		Name:            "old",
+		InvitePublicKey: "old-key",
+		InviteIP:        net.IPv4(10, 1, 0, 1),
+		MainIP:          net.IPv4(10, 0, 5, 1),
+		ExpiresAt:       now.Add(-2 * time.Hour),
+		CreatedAt:       now,
 	}); err != nil {
 		t.Fatalf("insert old: %v", err)
 	}
 	if err := db.InsertRegistration("regnet", &service.Registration{
-		Name: "new", InvitePublicKey: "new-key", InviteIP: net.IPv4(10, 1, 0, 2),
-		MainIP: net.IPv4(10, 0, 5, 2), ExpiresAt: now.Add(2 * time.Hour), CreatedAt: now,
+		Name:            "new",
+		InvitePublicKey: "new-key",
+		InviteIP:        net.IPv4(10, 1, 0, 2),
+		MainIP:          net.IPv4(10, 0, 5, 2),
+		ExpiresAt:       now.Add(2 * time.Hour),
+		CreatedAt:       now,
 	}); err != nil {
 		t.Fatalf("insert new: %v", err)
 	}
@@ -290,8 +346,13 @@ func TestUpdateRegistrationRedemption(t *testing.T) {
 
 	now := time.Now()
 	if err := db.InsertRegistration("regnet", &service.Registration{
-		Name: "redeem-me", InvitePublicKey: "temp-reg-key", InviteIP: net.IPv4(10, 1, 0, 1),
-		MainIP: net.IPv4(10, 0, 5, 1), Admin: true, ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
+		Name:            "redeem-me",
+		InvitePublicKey: "temp-reg-key",
+		InviteIP:        net.IPv4(10, 1, 0, 1),
+		MainIP:          net.IPv4(10, 0, 5, 1),
+		Admin:           true,
+		ExpiresAt:       now.Add(24 * time.Hour),
+		CreatedAt:       now,
 	}); err != nil {
 		t.Fatalf("insert registration: %v", err)
 	}
@@ -346,8 +407,12 @@ func TestUpdateRegistrationRedemption_DoubleRedeem(t *testing.T) {
 
 	now := time.Now()
 	if err := db.InsertRegistration("regnet", &service.Registration{
-		Name: "redeem-twice", InvitePublicKey: "twice-key", InviteIP: net.IPv4(10, 1, 0, 1),
-		MainIP: net.IPv4(10, 0, 5, 1), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
+		Name:            "redeem-twice",
+		InvitePublicKey: "twice-key",
+		InviteIP:        net.IPv4(10, 1, 0, 1),
+		MainIP:          net.IPv4(10, 0, 5, 1),
+		ExpiresAt:       now.Add(24 * time.Hour),
+		CreatedAt:       now,
 	}); err != nil {
 		t.Fatalf("insert registration: %v", err)
 	}
@@ -368,8 +433,12 @@ func TestInsertRegistration_DuplicateName(t *testing.T) {
 
 	now := time.Now()
 	reg := &service.Registration{
-		Name: "dup", InvitePublicKey: "key-a", InviteIP: net.IPv4(10, 1, 0, 1),
-		MainIP: net.IPv4(10, 0, 5, 1), ExpiresAt: now.Add(24 * time.Hour), CreatedAt: now,
+		Name:            "dup",
+		InvitePublicKey: "key-a",
+		InviteIP:        net.IPv4(10, 1, 0, 1),
+		MainIP:          net.IPv4(10, 0, 5, 1),
+		ExpiresAt:       now.Add(24 * time.Hour),
+		CreatedAt:       now,
 	}
 	if err := db.InsertRegistration("regnet", reg); err != nil {
 		t.Fatalf("first insert: %v", err)

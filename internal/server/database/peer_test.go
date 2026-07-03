@@ -12,20 +12,33 @@ import (
 
 func seedNetwork(t *testing.T, db *database.DB) {
 	t.Helper()
-	now := time.Now()
-	if err := db.BootstrapNetwork(&service.Network{
-		Name:                "testnet",
-		PrivateKey:          "priv-test",
-		PublicKey:           "pub-test",
-		MainCidr:            "10.0.0.0/16",
-		InviteCidr:          "10.1.0.0/24",
-		ExternalIP:          "192.168.1.1",
-		MainWireguardPort:   51820,
-		InviteWireguardPort: 51821,
-		MainApiPort:         80,
-		InviteApiPort:       80,
-		CreatedAt:           now,
-	}, &service.Cidr{Name: "testnet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub-test", Admin: true, Enabled: true, Confirmed: true}); err != nil {
+
+	name := "testnet"
+	if err := db.BootstrapNetwork(
+		&service.NetworkConfig{
+			Name:       name,
+			PrivateKey: "priv-" + name,
+			PublicKey:  "pub-" + name,
+			ExternalIP: "1.1.1.1",
+			Main:       service.PlaneConfig{Name: name, Cidr: "10.0.0.0/16", WireguardPort: 51820, ApiPort: 80},
+			Invite:     service.PlaneConfig{Name: name + "-i", Cidr: "10.1.0.0/24", WireguardPort: 51821, ApiPort: 80},
+			CreatedAt:  time.Now(),
+		},
+		&service.Cidr{
+			Name:   "testnet",
+			Cidr:   "10.0.0.0/16",
+			Length: 16,
+			Prefix: 32,
+		},
+		&service.Peer{
+			Name:      "cord-server",
+			Cidr:      "10.0.0.1/32",
+			PublicKey: "pub-test",
+			Admin:     true,
+			Enabled:   true,
+			Confirmed: true,
+		},
+	); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
 }
@@ -266,19 +279,41 @@ func TestInsertPeer_SameNameDifferentNetwork(t *testing.T) {
 	seedNetwork(t, db)
 
 	now := time.Now()
-	if err := db.BootstrapNetwork(&service.Network{
-		Name:                "net2",
-		PrivateKey:          "priv2",
-		PublicKey:           "pub2",
-		MainCidr:            "172.16.0.0/16",
-		InviteCidr:          "172.17.0.0/24",
-		ExternalIP:          "1.1.1.2",
-		MainWireguardPort:   51822,
-		InviteWireguardPort: 51823,
-		MainApiPort:         8081,
-		InviteApiPort:       8082,
-		CreatedAt:           now,
-	}, &service.Cidr{Name: "net2", Cidr: "172.16.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "172.16.0.1/32", PublicKey: "pub2", Admin: true, Enabled: true, Confirmed: true}); err != nil {
+	if err := db.BootstrapNetwork(
+		&service.NetworkConfig{
+			Name:       "net2",
+			PrivateKey: "priv2",
+			PublicKey:  "pub2",
+			ExternalIP: "1.1.1.2",
+			Main: service.PlaneConfig{
+				Name:          "net2",
+				Cidr:          "172.16.0.0/16",
+				WireguardPort: 51822,
+				ApiPort:       8081,
+			},
+			Invite: service.PlaneConfig{
+				Name:          "net2-i",
+				Cidr:          "172.17.0.0/24",
+				WireguardPort: 51823,
+				ApiPort:       8082,
+			},
+			CreatedAt: now,
+		},
+		&service.Cidr{
+			Name:   "net2",
+			Cidr:   "172.16.0.0/16",
+			Length: 16,
+			Prefix: 32,
+		},
+		&service.Peer{
+			Name:      "cord-server",
+			Cidr:      "172.16.0.1/32",
+			PublicKey: "pub2",
+			Admin:     true,
+			Enabled:   true,
+			Confirmed: true,
+		},
+	); err != nil {
 		t.Fatalf("insert net2: %v", err)
 	}
 

@@ -11,20 +11,43 @@ import (
 
 func seedNetworkForAssoc(t *testing.T, db *database.DB) {
 	t.Helper()
-	now := time.Now()
-	if err := db.BootstrapNetwork(&service.Network{
-		Name:                "assocnet",
-		PrivateKey:          "priv",
-		PublicKey:           "pub",
-		MainCidr:            "10.0.0.0/16",
-		InviteCidr:          "10.1.0.0/24",
-		ExternalIP:          "1.1.1.1",
-		MainWireguardPort:   51820,
-		InviteWireguardPort: 51821,
-		MainApiPort:         80,
-		InviteApiPort:       80,
-		CreatedAt:           now,
-	}, &service.Cidr{Name: "assocnet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub", Admin: true, Enabled: true, Confirmed: true}); err != nil {
+
+	name := "assocnet"
+	if err := db.BootstrapNetwork(
+		&service.NetworkConfig{
+			Name:       name,
+			PrivateKey: "priv-" + name,
+			PublicKey:  "pub-" + name,
+			ExternalIP: "1.1.1.1",
+			Main: service.PlaneConfig{
+				Name:          name,
+				Cidr:          "10.0.0.0/16",
+				WireguardPort: 51820,
+				ApiPort:       80,
+			},
+			Invite: service.PlaneConfig{
+				Name:          name + "-i",
+				Cidr:          "10.1.0.0/24",
+				WireguardPort: 51821,
+				ApiPort:       80,
+			},
+			CreatedAt: time.Now(),
+		},
+		&service.Cidr{
+			Name:   "assocnet",
+			Cidr:   "10.0.0.0/16",
+			Length: 16,
+			Prefix: 32,
+		},
+		&service.Peer{
+			Name:      "cord-server",
+			Cidr:      "10.0.0.1/32",
+			PublicKey: "pub",
+			Admin:     true,
+			Enabled:   true,
+			Confirmed: true,
+		},
+	); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
 	for _, c := range []service.Cidr{
@@ -32,7 +55,6 @@ func seedNetworkForAssoc(t *testing.T, db *database.DB) {
 		{Name: "subnet-b", Cidr: "10.0.2.0/24", Length: 24, Prefix: 32},
 		{Name: "subnet-c", Cidr: "10.0.3.0/24", Length: 24, Prefix: 32},
 	} {
-		c := c
 		if err := db.InsertCidr("assocnet", &c); err != nil {
 			t.Fatalf("seed cidr %s: %v", c.Name, err)
 		}

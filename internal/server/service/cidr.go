@@ -71,15 +71,15 @@ func (s *Service) CreateCidr(
 		return fmt.Errorf("get network for cidr check: %w", mapStoreError(err))
 	}
 
-	_, rootNet, err := net.ParseCIDR(network.MainCidr)
+	_, rootNet, err := net.ParseCIDR(network.Main.Cidr)
 	if err != nil {
-		return fmt.Errorf("%w: parse main CIDR %q: %v", ErrInvalidInput, network.MainCidr, err)
+		return fmt.Errorf("%w: parse main CIDR %q: %v", ErrInvalidInput, network.Main.Cidr, err)
 	}
 
 	if !netaddr.Contains(rootNet, cidrNet) {
 		return fmt.Errorf(
 			"%w: CIDR %q is not contained within main CIDR %q",
-			ErrInvalidInput, cidr, network.MainCidr,
+			ErrInvalidInput, cidr, network.Main.Cidr,
 		)
 	}
 

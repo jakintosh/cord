@@ -11,7 +11,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
-func TestAPIAddPeer_Success(
+func TestAPIInviteCreate_Success(
 	t *testing.T,
 ) {
 	// setup env and seed network
@@ -19,7 +19,7 @@ func TestAPIAddPeer_Success(
 	env.SeedNetwork(t)
 
 	// add peer
-	url := "/networks/testnet/peers"
+	url := "/networks/testnet/registrations"
 	body := `{
 		"name": "alice",
 		"ip": "10.0.0.5",
@@ -61,7 +61,7 @@ func TestAPIAddPeer_Success(
 	}
 }
 
-func TestAPIAddPeer_AutoAssignIP(
+func TestAPIInviteCreate_AutoAssignIP(
 	t *testing.T,
 ) {
 	// setup env and seed network
@@ -69,7 +69,7 @@ func TestAPIAddPeer_AutoAssignIP(
 	env.SeedNetwork(t)
 
 	// add peer without explicit IP — should auto-assign
-	url := "/networks/testnet/peers"
+	url := "/networks/testnet/registrations"
 	body := `{
 		"name": "bob",
 		"admin": false
@@ -83,7 +83,7 @@ func TestAPIAddPeer_AutoAssignIP(
 	}
 }
 
-func TestAPIAddPeer_InvalidJSON(
+func TestAPIInviteCreate_InvalidJSON(
 	t *testing.T,
 ) {
 	// setup env and seed network
@@ -91,7 +91,7 @@ func TestAPIAddPeer_InvalidJSON(
 	env.SeedNetwork(t)
 
 	// post garbage
-	url := "/networks/testnet/peers"
+	url := "/networks/testnet/registrations"
 	body := `{`
 	result := wire.TestPost[any](env.Router, url, body)
 
@@ -99,14 +99,14 @@ func TestAPIAddPeer_InvalidJSON(
 	result.ExpectStatusError(t, http.StatusBadRequest)
 }
 
-func TestAPIAddPeer_NetworkNotFound(
+func TestAPIInviteCreate_NetworkNotFound(
 	t *testing.T,
 ) {
 	// setup env
 	env := testutil.Setup(t)
 
 	// add peer to nonexistent network
-	url := "/networks/ghost/peers"
+	url := "/networks/ghost/registrations"
 	body := `{
 		"name": "alice",
 		"ip": "10.0.0.5"
@@ -117,7 +117,7 @@ func TestAPIAddPeer_NetworkNotFound(
 	result.ExpectStatusError(t, http.StatusNotFound)
 }
 
-func TestAPIAddPeer_DuplicateName(
+func TestAPIInviteCreate_DuplicateName(
 	t *testing.T,
 ) {
 	// setup env and seed network
@@ -125,7 +125,7 @@ func TestAPIAddPeer_DuplicateName(
 	env.SeedNetwork(t)
 
 	// add first peer
-	url := "/networks/testnet/peers"
+	url := "/networks/testnet/registrations"
 	body := `{
 		"name": "alice",
 		"ip": "10.0.0.5"

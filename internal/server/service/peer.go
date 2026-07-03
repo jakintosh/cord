@@ -3,10 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
-	"net"
 	"time"
-
-	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 )
 
 // Peer is the canonical server-side record of a network participant.
@@ -124,77 +121,6 @@ func (s *Service) ListVisiblePeers(
 	return visible, nil
 }
 
-// AddPeer creates a registration for a new participant. If ip is nil
-// an address is auto-assigned from the root CIDR. Returns the
-// Invitation payload to deliver out-of-band to the invitee.
-func (s *Service) AddPeer(
-	network string,
-	name string,
-	ip *string,
-	admin bool,
-) (
-	*Invitation,
-	error,
-) {
-	if name == "" {
-		return nil, fmt.Errorf("%w: peer name required", ErrInvalidInput)
-	}
-
-	exists, err := s.store.PeerExists(network, name)
-	if err != nil {
-		return nil, fmt.Errorf("check peer exists: %w", err)
-	}
-	if exists {
-		return nil, fmt.Errorf("%w: peer %q already exists", ErrConflict, name)
-	}
-
-	nw, err := s.store.GetNetwork(network)
-	if err != nil {
-		return nil, fmt.Errorf("get network: %w", mapStoreError(err))
-	}
-
-	var peerIP *net.IP
-	if ip != nil && *ip != "" {
-		parsedIP := net.ParseIP(*ip)
-		if parsedIP == nil {
-			return nil, fmt.Errorf("%w: invalid IP %q", ErrInvalidInput, *ip)
-		}
-		_, rootNet, err := net.ParseCIDR(nw.MainCidr)
-		if err != nil {
-			return nil, fmt.Errorf("%w: parse main CIDR %q: %v", ErrInvalidInput, nw.MainCidr, err)
-		}
-		if !rootNet.Contains(parsedIP) {
-			return nil, fmt.Errorf(
-				"%w: IP %q is not within main CIDR %q",
-				ErrInvalidInput, *ip, nw.MainCidr,
-			)
-		}
-		peerIP = &parsedIP
-	} else {
-		freeIP, err := s.nextFreePeerIP(network, nw.MainCidr)
-		if err != nil {
-			return nil, fmt.Errorf("auto-assign IP: %w", err)
-		}
-		peerIP = &freeIP
-	}
-
-	return s.CreateRegistration(network, name, peerIP, admin, nil)
-}
-
-// RemovePeer deletes a peer and its associated invite (if any). The
-// peer's WireGuard configuration will be removed at the next
-// reconciliation.
-func (s *Service) RemovePeer(
-	network string,
-	name string,
-) error {
-	if err := s.store.DeletePeer(network, name); err != nil {
-		return fmt.Errorf("delete peer %q: %w", name, mapStoreError(err))
-	}
-	s.reconcileOnce(network)
-	return nil
-}
-
 // UpdatePeer applies a partial update to a peer and returns the
 // updated record. Nil pointer fields mean no change.
 func (s *Service) UpdatePeer(
@@ -217,7 +143,7 @@ func (s *Service) UpdatePeer(
 	if err != nil {
 		return nil, fmt.Errorf("update peer %q: %w", name, mapStoreError(err))
 	}
-	s.reconcileOnce(network)
+	s.reconcile(network)
 	return p, nil
 }
 
@@ -232,7 +158,7 @@ func (s *Service) EnablePeer(
 	if err != nil {
 		return fmt.Errorf("enable peer %q: %w", name, mapStoreError(err))
 	}
-	s.reconcileOnce(network)
+	s.reconcile(network)
 	return nil
 }
 
@@ -247,7 +173,7 @@ func (s *Service) DisablePeer(
 	if err != nil {
 		return fmt.Errorf("disable peer %q: %w", name, mapStoreError(err))
 	}
-	s.reconcileOnce(network)
+	s.reconcile(network)
 	return nil
 }
 
@@ -277,8 +203,22 @@ func (s *Service) ConfirmPeer(
 			return fmt.Errorf("confirm registration %q: %w", name, mapStoreError(err))
 		}
 	}
-	s.reconcileOnce(network)
+	s.reconcile(network)
 
+	return nil
+}
+
+// RemovePeer deletes a peer and its associated invite (if any). The
+// peer's WireGuard configuration will be removed at the next
+// reconciliation.
+func (s *Service) RemovePeer(
+	network string,
+	name string,
+) error {
+	if err := s.store.DeletePeer(network, name); err != nil {
+		return fmt.Errorf("delete peer %q: %w", name, mapStoreError(err))
+	}
+	s.reconcile(network)
 	return nil
 }
 
@@ -298,56 +238,4 @@ func (s *Service) ReportEndpoints(
 		return fmt.Errorf("insert endpoint sightings: %w", err)
 	}
 	return nil
-}
-
-// nextFreePeerIP finds the lowest free address in the root CIDR,
-// skipping the network address, the server address, and addresses
-// held by existing peers or active registrations.
-func (s *Service) nextFreePeerIP(
-	network string,
-	rootCidr string,
-) (
-	net.IP,
-	error,
-) {
-	_, ipNet, err := net.ParseCIDR(rootCidr)
-	if err != nil {
-		return nil, fmt.Errorf("parse root CIDR: %w", err)
-	}
-
-	peers, err := s.store.ListPeers(network)
-	if err != nil {
-		return nil, fmt.Errorf("list peers: %w", err)
-	}
-
-	regs, err := s.store.ListActiveRegistrations(network, s.clock())
-	if err != nil {
-		return nil, fmt.Errorf("list active registrations: %w", err)
-	}
-
-	used := map[string]bool{}
-	for _, p := range peers {
-		ip, _, _ := net.ParseCIDR(p.Cidr)
-		if ip != nil {
-			used[netaddr.Normalize(ip).String()] = true
-		}
-	}
-	for _, reg := range regs {
-		if reg.MainIP != nil {
-			used[netaddr.Normalize(reg.MainIP).String()] = true
-		}
-	}
-
-	first := netaddr.FirstAssignable(ipNet)
-	_, last := netaddr.Range(ipNet)
-
-	candidate := netaddr.Increment(first)
-	for ipNet.Contains(candidate) && !candidate.Equal(last) {
-		if !used[netaddr.Normalize(candidate).String()] {
-			return netaddr.Normalize(candidate), nil
-		}
-		candidate = netaddr.Increment(candidate)
-	}
-
-	return nil, fmt.Errorf("%w: no free addresses in %s", ErrInvalidInput, rootCidr)
 }

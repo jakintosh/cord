@@ -12,26 +12,22 @@ import (
 func SeedNetwork(
 	t *testing.T,
 	svc *service.Service,
-) *service.Network {
+) *service.NetworkConfig {
 	t.Helper()
-
-	mainWgPort := uint16(51820)
-	mainAPIPort := uint16(80)
-	inviteWgPort := uint16(51821)
-	inviteAPIPort := uint16(80)
-	inviteCidr := "10.1.0.0/24"
 
 	nw, err := svc.CreateNetwork(
 		"testnet",
 		"192.168.1.1",
-		"10.0.0.0/16",
-		nil,
-		&mainWgPort,
-		&mainAPIPort,
-		nil,
-		&inviteCidr,
-		&inviteWgPort,
-		&inviteAPIPort,
+		service.PlaneConfig{
+			Cidr:          "10.0.0.0/16",
+			WireguardPort: 51820,
+			ApiPort:       80,
+		},
+		service.PlaneConfig{
+			Cidr:          "10.1.0.0/24",
+			WireguardPort: 51821,
+			ApiPort:       80,
+		},
 	)
 	if err != nil {
 		t.Fatalf("seed network: %v", err)

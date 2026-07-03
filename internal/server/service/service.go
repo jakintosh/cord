@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -16,8 +15,7 @@ import (
 // defaultEndpointTTL is how long an endpoint sighting is considered current.
 const defaultEndpointTTL = 24 * time.Hour
 
-// Options configures the domain core for the cord server. All fields are
-// required for full operation but may be nil during early development.
+// Options configures the domain core for the cord server.
 type Options struct {
 	// Store is the persistence adapter for server-side network state.
 	Store Store
@@ -31,18 +29,13 @@ type Options struct {
 	// Logger receives internal diagnostics from the service.
 	Logger *log.Logger
 
-	// ReconcileInterval controls how often the reconciliation loop runs
-	// for each started network. Defaults to 10s when zero.
-	ReconcileInterval time.Duration
-
-	// APIFactory creates per-network HTTP handlers. Called by
-	// StartNetwork. Nil means no API listeners are started.
+	// APIFactory creates per-network HTTP handlers. Called when
+	// starting a network. Nil means no API listeners are started.
 	APIFactory func(network string) APIHandlers
 }
 
 // APIHandlers holds the HTTP handlers for a single network's main-facing
-// and invite-facing APIs. Created by APIFactory and used internally by
-// StartNetwork to start HTTP listeners.
+// and invite-facing APIs.
 type APIHandlers struct {
 	Main   http.Handler
 	Invite http.Handler
@@ -52,34 +45,18 @@ type APIHandlers struct {
 // are methods on Service, scoped by a network name parameter. It owns
 // durable state through the Store and live WireGuard state through WG.
 type Service struct {
-	store             Store
-	wireguard         *wireguard.Manager
-	clock             func() time.Time
-	log               *log.Logger
-	mu                sync.Mutex
-	reconcileInterval time.Duration
-	apiFactory        func(network string) APIHandlers
+	store      Store
+	wireguard  *wireguard.Manager
+	clock      func() time.Time
+	log        *log.Logger
+	mu         sync.Mutex
+	apiFactory func(network string) APIHandlers
 
-	// running tracks networks that have been started (WG devices up).
-	running map[string]*NetworkDevices
+	// running tracks networks that are up (WG devices + API servers).
+	running map[string]*Network
 }
 
-// NetworkDevices holds the live WireGuard state for a started server
-// network: both devices, their interface names, and a cancel function
-// that stops the reconciliation loop.
-type NetworkDevices struct {
-	MainName     string
-	MainDevice   *wireguard.Device
-	MainServer   *http.Server
-	InviteName   string
-	InviteDevice *wireguard.Device
-	InviteServer *http.Server
-	Cancel       context.CancelFunc
-}
-
-// New returns a ready-to-use Service. All Options fields are required
-// for full operation but may be nil during early development — methods
-// that depend on missing dependencies will return appropriate errors.
+// New returns a ready-to-use Service.
 func New(
 	opts Options,
 ) (
@@ -95,36 +72,95 @@ func New(
 		clock = time.Now
 	}
 
-	reconcileInterval := opts.ReconcileInterval
-	if reconcileInterval == 0 {
-		reconcileInterval = 10 * time.Second
-	}
-
 	return &Service{
-		store:             opts.Store,
-		wireguard:         opts.WireGuard,
-		clock:             clock,
-		log:               opts.Logger,
-		running:           make(map[string]*NetworkDevices),
-		reconcileInterval: reconcileInterval,
-		apiFactory:        opts.APIFactory,
+		store:      opts.Store,
+		wireguard:  opts.WireGuard,
+		clock:      clock,
+		log:        opts.Logger,
+		running:    make(map[string]*Network),
+		apiFactory: opts.APIFactory,
 	}, nil
 }
 
-// Close shuts down all running networks, stops their reconciliation
-// loops, and releases resources. It should be called during daemon
-// shutdown.
-func (s *Service) Close() error {
+// Start reads all persisted configs and starts every enabled network.
+// Non-fatal per network: failures are logged and the rest continue.
+func (s *Service) Start() error {
+	names, err := s.store.ListNetworkNames()
+	if err != nil {
+		return fmt.Errorf("list networks: %w", err)
+	}
+
+	var lastErr error
+	for _, name := range names {
+		nc, err := s.store.GetNetwork(name)
+		if err != nil {
+			s.logf("start networks: get %q: %v", name, err)
+			lastErr = err
+			continue
+		}
+		if !nc.Enabled {
+			continue
+		}
+		if err := s.startNetwork(name); err != nil {
+			s.logf("start networks: start %q: %v", name, err)
+			lastErr = err
+		}
+	}
+	return lastErr
+}
+
+// startNetwork constructs and starts a runtime Network from its
+// persisted config. Must not be called while holding s.mu.
+func (s *Service) startNetwork(
+	name string,
+) error {
 	s.mu.Lock()
-	names := make([]string, 0, len(s.running))
-	for name := range s.running {
-		names = append(names, name)
+	if _, exists := s.running[name]; exists {
+		s.mu.Unlock()
+		return nil
 	}
 	s.mu.Unlock()
 
+	nc, err := s.store.GetNetwork(name)
+	if err != nil {
+		return fmt.Errorf("start network: %w", mapStoreError(err))
+	}
+
+	n := &Network{
+		config:   nc,
+		store:    s.store,
+		wg:       s.wireguard,
+		api:      s.apiFactory,
+		clock:    s.clock,
+		logf:     s.logf,
+		registry: func() map[string]*Network { return s.running },
+	}
+
+	if err := n.start(); err != nil {
+		return fmt.Errorf("start network %q: %w", name, err)
+	}
+
+	s.mu.Lock()
+	s.running[name] = n
+	s.mu.Unlock()
+
+	return nil
+}
+
+// Close shuts down all running networks, stops their reconciliation
+// timers, and releases resources.
+func (s *Service) Close() error {
+	s.mu.Lock()
+	networks := make([]*Network, 0, len(s.running))
+	for _, n := range s.running {
+		networks = append(networks, n)
+	}
+	s.running = make(map[string]*Network)
+	s.mu.Unlock()
+
 	var errs []error
-	for _, name := range names {
-		if err := s.StopNetwork(name); err != nil {
+	for _, n := range networks {
+		if err := n.stop(); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -139,8 +175,7 @@ func (s *Service) logf(format string, args ...any) {
 }
 
 // ResolveRegistrationIdentity looks up an unredeemed, unexpired
-// registration by temporary IP within the invite network. Used by the
-// identity middleware to authenticate incoming invite-redemption requests.
+// registration by temporary IP within the invite network.
 func (s *Service) ResolveRegistrationIdentity(
 	networkName string,
 	ip net.IP,
@@ -156,8 +191,7 @@ func (s *Service) ResolveRegistrationIdentity(
 }
 
 // ResolvePeerIdentity looks up a confirmed, enabled peer by IP address
-// within the network. Used by the identity middleware to authenticate
-// ordinary peer API calls (/peers, /endpoints) by WireGuard source IP.
+// within the network.
 func (s *Service) ResolvePeerIdentity(
 	network string,
 	ip net.IP,
@@ -173,10 +207,7 @@ func (s *Service) ResolvePeerIdentity(
 }
 
 // ResolveProvisionalIdentity looks up an unconfirmed, enabled peer by
-// IP address within the network. Used by the identity middleware to
-// authenticate /confirm calls from peers that have redeemed but not
-// yet confirmed. Once a peer is confirmed, it authenticates via
-// ResolvePeerIdentity instead.
+// IP address within the network.
 func (s *Service) ResolveProvisionalIdentity(
 	network string,
 	ip net.IP,

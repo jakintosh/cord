@@ -1,8 +1,6 @@
 package service_test
 
 import (
-	"context"
-	"net/http"
 	"testing"
 	"time"
 
@@ -10,25 +8,24 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
-func TestStartNetwork_WithAPIFactory(t *testing.T) {
+func TestEnableNetwork_WithAPIFactory(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	var factoryCalls []string
 	env.Service = newServiceWithFactory(t, env, func(network string) service.APIHandlers {
 		factoryCalls = append(factoryCalls, network)
 		return service.APIHandlers{
-			Main:   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }),
-			Invite: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }),
+			Main:   nil,
+			Invite: nil,
 		}
 	})
 
 	testutil.SeedNetwork(t, env.Service)
 
-	ctx := context.Background()
-	if err := env.Service.StartNetwork(ctx, "testnet"); err != nil {
-		t.Fatalf("start network: %v", err)
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable network: %v", err)
 	}
-	defer env.Service.StopNetwork("testnet")
+	defer env.Service.DisableNetwork("testnet")
 
 	if len(factoryCalls) != 1 {
 		t.Fatalf("expected 1 factory call, got %d", len(factoryCalls))
@@ -46,65 +43,62 @@ func TestStartNetwork_WithAPIFactory(t *testing.T) {
 	}
 }
 
-func TestStartNetwork_NilAPIFactory(t *testing.T) {
+func TestEnableNetwork_NilAPIFactory(t *testing.T) {
 	env := testutil.SetupService(t)
-	// env.Svc has no APIFactory (nil by default)
 
 	testutil.SeedNetwork(t, env.Service)
 
-	ctx := context.Background()
-	if err := env.Service.StartNetwork(ctx, "testnet"); err != nil {
-		t.Fatalf("start network without factory: %v", err)
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable network without factory: %v", err)
 	}
-	defer env.Service.StopNetwork("testnet")
+	defer env.Service.DisableNetwork("testnet")
 }
 
-func TestStartNetwork_PopulatesHTTPServers(t *testing.T) {
+func TestEnableNetwork_Idempotent(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	env.Service = newServiceWithFactory(t, env, func(network string) service.APIHandlers {
-		return service.APIHandlers{
-			Main:   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }),
-			Invite: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }),
-		}
+		return service.APIHandlers{}
 	})
 
 	testutil.SeedNetwork(t, env.Service)
 
-	ctx := context.Background()
-	if err := env.Service.StartNetwork(ctx, "testnet"); err != nil {
-		t.Fatalf("start network: %v", err)
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable network: %v", err)
 	}
-	defer env.Service.StopNetwork("testnet")
 
-	if err := env.Service.StartNetwork(ctx, "testnet"); err != nil {
-		t.Fatalf("start network again: %v", err)
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable network again: %v", err)
 	}
+
+	env.Service.DisableNetwork("testnet")
 }
 
-func TestStopNetwork_ShutsDownHTTPServers(t *testing.T) {
+func TestDisableNetwork_Idempotent(t *testing.T) {
 	env := testutil.SetupService(t)
-
-	env.Service = newServiceWithFactory(t, env, func(network string) service.APIHandlers {
-		return service.APIHandlers{
-			Main:   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }),
-			Invite: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }),
-		}
-	})
 
 	testutil.SeedNetwork(t, env.Service)
 
-	ctx := context.Background()
-	if err := env.Service.StartNetwork(ctx, "testnet"); err != nil {
-		t.Fatalf("start network: %v", err)
+	if err := env.Service.DisableNetwork("testnet"); err != nil {
+		t.Fatalf("disable when not running: %v", err)
 	}
 
-	if err := env.Service.StopNetwork("testnet"); err != nil {
-		t.Fatalf("stop network: %v", err)
+	if err := env.Service.DisableNetwork("testnet"); err != nil {
+		t.Fatalf("disable again: %v", err)
+	}
+}
+
+func TestDisableNetwork_AfterEnable(t *testing.T) {
+	env := testutil.SetupService(t)
+
+	testutil.SeedNetwork(t, env.Service)
+
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable: %v", err)
 	}
 
-	if err := env.Service.StopNetwork("testnet"); err != nil {
-		t.Fatalf("stop network again: %v", err)
+	if err := env.Service.DisableNetwork("testnet"); err != nil {
+		t.Fatalf("disable: %v", err)
 	}
 }
 

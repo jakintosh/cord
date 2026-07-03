@@ -11,20 +11,43 @@ import (
 
 func seedNetworkForCidr(t *testing.T, db *database.DB) {
 	t.Helper()
-	now := time.Now()
-	if err := db.BootstrapNetwork(&service.Network{
-		Name:                "cidrnet",
-		PrivateKey:          "priv",
-		PublicKey:           "pub",
-		MainCidr:            "10.0.0.0/16",
-		InviteCidr:          "10.1.0.0/24",
-		ExternalIP:          "1.1.1.1",
-		MainWireguardPort:   51820,
-		InviteWireguardPort: 51821,
-		MainApiPort:         80,
-		InviteApiPort:       80,
-		CreatedAt:           now,
-	}, &service.Cidr{Name: "cidrnet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub", Admin: true, Enabled: true, Confirmed: true}); err != nil {
+
+	name := "cidrnet"
+	if err := db.BootstrapNetwork(
+		&service.NetworkConfig{
+			Name:       name,
+			PrivateKey: "priv-" + name,
+			PublicKey:  "pub-" + name,
+			ExternalIP: "1.1.1.1",
+			Main: service.PlaneConfig{
+				Name:          name,
+				Cidr:          "10.0.0.0/16",
+				WireguardPort: 51820,
+				ApiPort:       80,
+			},
+			Invite: service.PlaneConfig{
+				Name:          name + "-i",
+				Cidr:          "10.1.0.0/24",
+				WireguardPort: 51821,
+				ApiPort:       80,
+			},
+			CreatedAt: time.Now(),
+		},
+		&service.Cidr{
+			Name:   name,
+			Cidr:   "10.0.0.0/16",
+			Length: 16,
+			Prefix: 32,
+		},
+		&service.Peer{
+			Name:      "cord-server",
+			Cidr:      "10.0.0.1/32",
+			PublicKey: "pub",
+			Admin:     true,
+			Enabled:   true,
+			Confirmed: true,
+		},
+	); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
 }

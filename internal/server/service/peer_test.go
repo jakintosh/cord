@@ -2,95 +2,21 @@ package service_test
 
 import (
 	"errors"
+	"net"
 	"testing"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
-func TestAddPeer_AutoAssignsIP(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-
-	inv, err := env.Service.AddPeer("testnet", "alice", nil, false)
-	if err != nil {
-		t.Fatalf("add peer: %v", err)
-	}
-
-	if inv == nil {
-		t.Fatal("expected invitation, got nil")
-	}
-	if inv.Network.Name != "testnet" {
-		t.Errorf("network_name = %q, want testnet", inv.Network.Name)
-	}
-	if inv.Peer.PrivateKey == "" {
-		t.Error("private_key should not be empty")
-	}
-	// First auto-assigned IP should be 10.1.0.2 (10.1.0.0 = network, 10.1.0.1 = server)
-	if inv.Peer.CIDR != "10.1.0.2/24" {
-		t.Errorf("cidr = %q, want 10.1.0.2/24", inv.Peer.CIDR)
-	}
-}
-
-func TestAddPeer_SpecifiedIP(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-
-	ip := "10.0.5.10"
-	inv, err := env.Service.AddPeer("testnet", "bob", &ip, true)
-	if err != nil {
-		t.Fatalf("add peer: %v", err)
-	}
-
-	if inv == nil {
-		t.Fatal("expected invitation, got nil")
-	}
-	if inv.Network.PublicKey == "" {
-		t.Error("server public_key should not be empty")
-	}
-}
-
-func TestAddPeer_InvalidIP(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-
-	ip := "not-an-ip"
-	_, err := env.Service.AddPeer("testnet", "badip", &ip, false)
-	if !errors.Is(err, service.ErrInvalidInput) {
-		t.Errorf("err = %v, want ErrInvalidInput", err)
-	}
-}
-
-func TestAddPeer_IPOutsideRootCIDR(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-
-	ip := "192.168.1.1"
-	_, err := env.Service.AddPeer("testnet", "outside", &ip, false)
-	if !errors.Is(err, service.ErrInvalidInput) {
-		t.Errorf("err = %v, want ErrInvalidInput", err)
-	}
-}
-
-func TestAddPeer_EmptyName(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-
-	ip := "10.0.0.5"
-	_, err := env.Service.AddPeer("testnet", "", &ip, false)
-	if !errors.Is(err, service.ErrInvalidInput) {
-		t.Errorf("err = %v, want ErrInvalidInput", err)
-	}
-}
-
 func TestGetPeer_ViaRedeem(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	ip := "10.0.0.50"
-	_, err := env.Service.AddPeer("testnet", "carol", &ip, false)
+	ip := net.ParseIP("10.0.0.50")
+	_, err := env.Service.CreateRegistration("testnet", "carol", &ip, false, nil)
 	if err != nil {
-		t.Fatalf("add peer: %v", err)
+		t.Fatalf("create registration: %v", err)
 	}
 
 	tempKey := lastTempKey(t, env.Service, "testnet")
@@ -144,17 +70,17 @@ func TestListPeers_AfterRedeem(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	ip1 := "10.0.0.10"
-	_, err := env.Service.AddPeer("testnet", "peer1", &ip1, false)
+	ip1 := net.ParseIP("10.0.0.10")
+	_, err := env.Service.CreateRegistration("testnet", "peer1", &ip1, false, nil)
 	if err != nil {
-		t.Fatalf("add peer1: %v", err)
+		t.Fatalf("create peer1: %v", err)
 	}
 	tempKey1 := lastTempKey(t, env.Service, "testnet")
 
-	ip2 := "10.0.0.11"
-	_, err = env.Service.AddPeer("testnet", "peer2", &ip2, false)
+	ip2 := net.ParseIP("10.0.0.11")
+	_, err = env.Service.CreateRegistration("testnet", "peer2", &ip2, false, nil)
 	if err != nil {
-		t.Fatalf("add peer2: %v", err)
+		t.Fatalf("create peer2: %v", err)
 	}
 	tempKey2 := lastTempKey(t, env.Service, "testnet")
 
@@ -184,10 +110,10 @@ func TestRemovePeer_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	ip := "10.0.0.20"
-	_, err := env.Service.AddPeer("testnet", "removeme", &ip, false)
+	ip := net.ParseIP("10.0.0.20")
+	_, err := env.Service.CreateRegistration("testnet", "removeme", &ip, false, nil)
 	if err != nil {
-		t.Fatalf("add: %v", err)
+		t.Fatalf("create reg: %v", err)
 	}
 
 	tempKey := lastTempKey(t, env.Service, "testnet")
@@ -220,10 +146,10 @@ func TestUpdatePeer_Rename(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	ip := "10.0.0.30"
-	_, err := env.Service.AddPeer("testnet", "old-name", &ip, false)
+	ip := net.ParseIP("10.0.0.30")
+	_, err := env.Service.CreateRegistration("testnet", "old-name", &ip, false, nil)
 	if err != nil {
-		t.Fatalf("add: %v", err)
+		t.Fatalf("create reg: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 	_, err = env.Service.RedeemRegistration("testnet", tempKey, "rename-key")
@@ -245,10 +171,10 @@ func TestUpdatePeer_ToggleAdmin(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	ip := "10.0.0.31"
-	_, err := env.Service.AddPeer("testnet", "toggle", &ip, false)
+	ip := net.ParseIP("10.0.0.31")
+	_, err := env.Service.CreateRegistration("testnet", "toggle", &ip, false, nil)
 	if err != nil {
-		t.Fatalf("add: %v", err)
+		t.Fatalf("create reg: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 	_, err = env.Service.RedeemRegistration("testnet", tempKey, "toggle-key")
@@ -281,10 +207,10 @@ func TestEnablePeer_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	ip := "10.0.0.40"
-	_, err := env.Service.AddPeer("testnet", "enableme", &ip, false)
+	ip := net.ParseIP("10.0.0.40")
+	_, err := env.Service.CreateRegistration("testnet", "enableme", &ip, false, nil)
 	if err != nil {
-		t.Fatalf("add: %v", err)
+		t.Fatalf("create reg: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 	_, err = env.Service.RedeemRegistration("testnet", tempKey, "enable-key")
@@ -315,10 +241,10 @@ func TestDisablePeer_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	ip := "10.0.0.41"
-	_, err := env.Service.AddPeer("testnet", "disableme", &ip, false)
+	ip := net.ParseIP("10.0.0.41")
+	_, err := env.Service.CreateRegistration("testnet", "disableme", &ip, false, nil)
 	if err != nil {
-		t.Fatalf("add: %v", err)
+		t.Fatalf("create reg: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 	_, err = env.Service.RedeemRegistration("testnet", tempKey, "disable-key")
@@ -343,10 +269,10 @@ func TestConfirmPeer_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	ip := "10.0.0.50"
-	_, err := env.Service.AddPeer("testnet", "confirmme", &ip, false)
+	ip := net.ParseIP("10.0.0.50")
+	_, err := env.Service.CreateRegistration("testnet", "confirmme", &ip, false, nil)
 	if err != nil {
-		t.Fatalf("add: %v", err)
+		t.Fatalf("create reg: %v", err)
 	}
 
 	tempKey := lastTempKey(t, env.Service, "testnet")
@@ -391,10 +317,10 @@ func TestListVisiblePeers_ExcludesSelf(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	ip1 := "10.0.0.10"
-	_, err := env.Service.AddPeer("testnet", "self", &ip1, false)
+	ip1 := net.ParseIP("10.0.0.10")
+	_, err := env.Service.CreateRegistration("testnet", "self", &ip1, false, nil)
 	if err != nil {
-		t.Fatalf("add self: %v", err)
+		t.Fatalf("create self: %v", err)
 	}
 	tempKey1 := lastTempKey(t, env.Service, "testnet")
 	_, err = env.Service.RedeemRegistration("testnet", tempKey1, "self-key")
@@ -402,10 +328,10 @@ func TestListVisiblePeers_ExcludesSelf(t *testing.T) {
 		t.Fatalf("redeem self: %v", err)
 	}
 
-	ip2 := "10.0.0.11"
-	_, err = env.Service.AddPeer("testnet", "other", &ip2, false)
+	ip2 := net.ParseIP("10.0.0.11")
+	_, err = env.Service.CreateRegistration("testnet", "other", &ip2, false, nil)
 	if err != nil {
-		t.Fatalf("add other: %v", err)
+		t.Fatalf("create other: %v", err)
 	}
 	tempKey2 := lastTempKey(t, env.Service, "testnet")
 	_, err = env.Service.RedeemRegistration("testnet", tempKey2, "other-key")
