@@ -265,17 +265,12 @@ func (s *Service) Redeem(
 	defer cleanup()
 
 	// add the server peer
-	inviteServerPeer, err := wireguard.NewPeerConfig(
-		network.InviteServerPubkey,
-		[]string{network.InviteServerRoute},
-		network.InviteServerEndpoint,
-		0,
-		wireguard.EndpointFixed,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("new invite server peer: %w", err)
-	}
-	if err := inviteDev.SetPeers(inviteServerPeer); err != nil {
+	if err := inviteDev.SetPeers(wireguard.PeerConfig{
+		PublicKey:      network.InviteServerPubkey,
+		AllowedIPs:     []string{network.InviteServerRoute},
+		Endpoint:       network.InviteServerEndpoint,
+		EndpointPolicy: wireguard.EndpointFixed,
+	}); err != nil {
 		return nil, fmt.Errorf("apply invite peers: %w", err)
 	}
 
@@ -323,15 +318,14 @@ func (s *Service) Confirm(
 			ErrInvalidInput, name, network.State)
 	}
 
-	mainRoute, err := netaddr.ParseRoute(network.AssignedCidr)
+	mainDeviceRoute, err := netaddr.ParseRoute(network.AssignedCidr)
 	if err != nil {
 		return fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, network.AssignedCidr)
 	}
-
 	mainDev, err := s.wireguard.CreateDevice(wireguard.DeviceConfig{
 		Name:       network.MainInterfaceName,
 		PrivateKey: network.PrivateKey,
-		Route:      mainRoute,
+		Route:      mainDeviceRoute,
 	})
 	if err != nil {
 		return fmt.Errorf("create main device: %w", err)
@@ -344,19 +338,13 @@ func (s *Service) Confirm(
 	}
 	defer cleanup()
 
-	// AssignedCidr is the peer's own address (e.g. 10.42.0.5/32);
-	// the server peer's AllowedIPs is the explicit server route.
-	serverPeer, err := wireguard.NewPeerConfig(
-		network.ServerPubkey,
-		[]string{network.ServerRoute},
-		network.ServerEndpoint,
-		0,
-		wireguard.EndpointFixed,
-	)
-	if err != nil {
-		return fmt.Errorf("new server peer: %w", err)
-	}
-	if err := mainDev.SetPeers(serverPeer); err != nil {
+	// add the server peer
+	if err := mainDev.SetPeers(wireguard.PeerConfig{
+		PublicKey:      network.ServerPubkey,
+		AllowedIPs:     []string{network.ServerRoute},
+		Endpoint:       network.ServerEndpoint,
+		EndpointPolicy: wireguard.EndpointFixed,
+	}); err != nil {
 		return fmt.Errorf("apply main peers: %w", err)
 	}
 
@@ -972,34 +960,26 @@ func (s *Service) reconcilePeers(
 	}
 
 	wgPeers := make([]wireguard.PeerConfig, 0, len(peers)+1)
-	serverPeer, err := wireguard.NewPeerConfig(
-		network.ServerPubkey,
-		[]string{network.ServerRoute},
-		network.ServerEndpoint,
-		0,
-		wireguard.EndpointFixed,
-	)
-	if err != nil {
-		return fmt.Errorf("new server peer: %w", err)
-	}
-	wgPeers = append(wgPeers, serverPeer)
+
+	// add the server peer
+	wgPeers = append(wgPeers, wireguard.PeerConfig{
+		PublicKey:      network.ServerPubkey,
+		AllowedIPs:     []string{network.ServerRoute},
+		Endpoint:       network.ServerEndpoint,
+		EndpointPolicy: wireguard.EndpointFixed,
+	})
 
 	for _, peer := range peers {
 		peerRoute, err := netaddr.HostRouteFromCidr(peer.Cidr)
 		if err != nil {
 			return fmt.Errorf("parse peer cidr %q: %w", peer.Cidr, err)
 		}
-		p, err := wireguard.NewPeerConfig(
-			peer.PublicKey,
-			[]string{peerRoute.String()},
-			peer.Endpoint,
-			0,
-			wireguard.EndpointBootstrap,
-		)
-		if err != nil {
-			return fmt.Errorf("new peer %q: %w", peer.PublicKey, err)
-		}
-		wgPeers = append(wgPeers, p)
+		wgPeers = append(wgPeers, wireguard.PeerConfig{
+			PublicKey:      peer.PublicKey,
+			AllowedIPs:     []string{peerRoute.String()},
+			Endpoint:       peer.Endpoint,
+			EndpointPolicy: wireguard.EndpointBootstrap,
+		})
 	}
 
 	return device.SetPeers(wgPeers...)

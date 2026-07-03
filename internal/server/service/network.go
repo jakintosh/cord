@@ -369,11 +369,7 @@ func (n *Network) reconcile() {
 		n.logf("reconcile %s: list active registrations: %w", netName, err)
 		return
 	}
-	invitePeers, err := registrationsToWireGuardPeers(regs)
-	if err != nil {
-		n.logf("reconcile %s: build invite peers: %v", netName, err)
-		return
-	}
+	invitePeers := registrationsToWireGuardPeers(regs)
 	if err := n.invite.device.SetPeers(invitePeers...); err != nil {
 		n.logf("reconcile %s: apply invite peers: %v", netName, err)
 	}

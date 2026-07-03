@@ -145,15 +145,15 @@ func TestDevice_UpdateEndpoint_AppliesTargetedOperation(t *testing.T) {
 		t.Errorf("operation is remove, want update")
 	}
 	// Endpoint must be the new value.
-	if ops[0].Config.Endpoint == nil || ops[0].Config.Endpoint.String() != "1.2.3.4:51820" {
-		t.Errorf("endpoint = %v, want 1.2.3.4:51820", ops[0].Config.Endpoint)
+	if ops[0].Target.Endpoint == nil || ops[0].Target.Endpoint.String() != "1.2.3.4:51820" {
+		t.Errorf("endpoint = %v, want 1.2.3.4:51820", ops[0].Target.Endpoint)
 	}
 	// AllowedIPs and Keepalive must be preserved from the desired entry.
-	if len(ops[0].Config.AllowedIPs) != 2 {
-		t.Errorf("allowed IPs = %d, want 2", len(ops[0].Config.AllowedIPs))
+	if len(ops[0].Target.AllowedIPs) != 2 {
+		t.Errorf("allowed IPs = %d, want 2", len(ops[0].Target.AllowedIPs))
 	}
-	if ops[0].Config.PersistentKeepalive != 25*time.Second {
-		t.Errorf("keepalive = %v, want 25s", ops[0].Config.PersistentKeepalive)
+	if ops[0].Target.PersistentKeepalive != 25*time.Second {
+		t.Errorf("keepalive = %v, want 25s", ops[0].Target.PersistentKeepalive)
 	}
 }
 
@@ -209,14 +209,14 @@ func TestDevice_TwoDeviceIndependence(t *testing.T) {
 	if len(mdev1.AppliedOps()) != 1 {
 		t.Fatalf("dev1: expected 1 operation, got %d", len(mdev1.AppliedOps()))
 	}
-	if mdev1.AppliedOps()[0].Config.PublicKey != peer1 {
-		t.Errorf("dev1: expected peer %s, got %s", peer1, mdev1.AppliedOps()[0].Config.PublicKey)
+	if mdev1.AppliedOps()[0].Target.PublicKey != peer1 {
+		t.Errorf("dev1: expected peer %s, got %s", peer1, mdev1.AppliedOps()[0].Target.PublicKey)
 	}
 	if len(mdev2.AppliedOps()) != 1 {
 		t.Fatalf("dev2: expected 1 operation, got %d", len(mdev2.AppliedOps()))
 	}
-	if mdev2.AppliedOps()[0].Config.PublicKey != peer2 {
-		t.Errorf("dev2: expected peer %s, got %s", peer2, mdev2.AppliedOps()[0].Config.PublicKey)
+	if mdev2.AppliedOps()[0].Target.PublicKey != peer2 {
+		t.Errorf("dev2: expected peer %s, got %s", peer2, mdev2.AppliedOps()[0].Target.PublicKey)
 	}
 
 	if err := d1.Close(); err != nil {

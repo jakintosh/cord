@@ -163,7 +163,7 @@ func TestInstall_Success(t *testing.T) {
 	ops := env.Backend.AppliedOpsFor("install-me")
 	var addOps []string
 	for _, op := range ops {
-		addOps = append(addOps, op.Config.PublicKey.String())
+		addOps = append(addOps, op.Target.PublicKey.String())
 	}
 	if len(addOps) != 1 {
 		t.Fatalf("main peer ops = %d, want 1", len(addOps))

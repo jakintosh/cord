@@ -20,58 +20,62 @@ const (
 	EndpointFixed                           // always reconciled
 )
 
-// PeerConfig is a desired WireGuard peer. It carries only
-// configuration fields — runtime state like handshake time and byte
-// counters lives in PeerStatus.
+// PeerConfig is an external-facing peer configuration with string-based
+// fields. It is parsed and validated into a Peer when passed to
+// Device.SetPeers.
 type PeerConfig struct {
-	PublicKey           wgtypes.Key
-	AllowedIPs          []net.IPNet
-	Endpoint            *net.UDPAddr
+	PublicKey           string
+	AllowedIPs          []string
+	Endpoint            string
 	EndpointPolicy      EndpointPolicy
-	PersistentKeepalive time.Duration
+	PersistentKeepalive int // seconds; 0 means no keepalive
 }
 
-// NewPeerConfig parses string representations into a PeerConfig.
-// endpoint may be empty. keepaliveSec is seconds; 0 means no keepalive.
-func NewPeerConfig(
-	publicKey string,
-	allowedIPs []string,
-	endpoint string,
-	keepaliveSec int,
-	policy EndpointPolicy,
-) (
-	PeerConfig,
+// Parse validates the PeerConfig and returns a parsed Peer.
+func (cfg PeerConfig) Parse() (
+	Peer,
 	error,
 ) {
-	key, err := parseKey(publicKey)
+	key, err := parseKey(cfg.PublicKey)
 	if err != nil {
-		return PeerConfig{}, fmt.Errorf("public key %q: %w", publicKey, err)
+		return Peer{}, fmt.Errorf("public key %q: %w", cfg.PublicKey, err)
 	}
 
 	var ips []net.IPNet
-	for _, cidr := range allowedIPs {
+	for _, cidr := range cfg.AllowedIPs {
 		ipNet, err := netaddr.ParseRoute(cidr)
 		if err != nil {
-			return PeerConfig{}, fmt.Errorf("allowed-ip %q: %w", cidr, err)
+			return Peer{}, fmt.Errorf("allowed-ip %q: %w", cidr, err)
 		}
 		ips = append(ips, ipNet)
 	}
 
 	var ep *net.UDPAddr
-	if endpoint != "" {
-		ep, err = net.ResolveUDPAddr("udp", endpoint)
+	if cfg.Endpoint != "" {
+		ep, err = net.ResolveUDPAddr("udp", cfg.Endpoint)
 		if err != nil {
-			return PeerConfig{}, fmt.Errorf("endpoint %q: %w", endpoint, err)
+			return Peer{}, fmt.Errorf("endpoint %q: %w", cfg.Endpoint, err)
 		}
 	}
 
-	return PeerConfig{
+	return Peer{
 		PublicKey:           key,
 		AllowedIPs:          ips,
 		Endpoint:            ep,
-		EndpointPolicy:      policy,
-		PersistentKeepalive: time.Duration(keepaliveSec) * time.Second,
+		EndpointPolicy:      cfg.EndpointPolicy,
+		PersistentKeepalive: time.Duration(cfg.PersistentKeepalive) * time.Second,
 	}, nil
+}
+
+// Peer is a desired WireGuard peer. It carries only parsed
+// configuration fields — runtime state like handshake time and byte
+// counters lives in PeerStatus.
+type Peer struct {
+	PublicKey           wgtypes.Key
+	AllowedIPs          []net.IPNet
+	Endpoint            *net.UDPAddr
+	EndpointPolicy      EndpointPolicy
+	PersistentKeepalive time.Duration
 }
 
 // PeerStatus is the observed live state of a WireGuard peer returned
@@ -87,19 +91,19 @@ type PeerStatus struct {
 }
 
 // PeerOp is a single operation that makes a live peer match a desired
-// state. When Remove is true the peer identified by Config.PublicKey
-// is removed and the rest of Config is ignored. When Remove is false,
-// the backend makes the peer look like Config — AllowedIPs and
+// state. When Remove is true the peer identified by Target.PublicKey
+// is removed and the rest of Target is ignored. When Remove is false,
+// the backend makes the peer look like Target — AllowedIPs and
 // PersistentKeepalive are always applied, and Endpoint is set only
 // when non-nil.
 //
 // The planner (planPeerReconciliation) is the only place that
 // understands EndpointPolicy. By the time an op reaches the backend,
-// policy has been resolved: the Config.Endpoint field is either nil
+// policy has been resolved: the Target.Endpoint field is either nil
 // ("don't touch") or the concrete address to set.
 type PeerOp struct {
 	Remove bool
-	Config PeerConfig
+	Target Peer
 }
 
 // planPeerReconciliation compares desired peers with live peer state
@@ -114,10 +118,10 @@ type PeerOp struct {
 // Dynamic/Bootstrap endpoints are never rewritten on update so
 // WireGuard roaming can do its job.
 func planPeerReconciliation(
-	desired []PeerConfig,
+	desired []Peer,
 	observed []PeerStatus,
 ) []PeerOp {
-	desiredByKey := make(map[wgtypes.Key]PeerConfig, len(desired))
+	desiredByKey := make(map[wgtypes.Key]Peer, len(desired))
 	observedByKey := make(map[wgtypes.Key]PeerStatus, len(observed))
 	keySet := make(map[wgtypes.Key]struct{}, len(desired)+len(observed))
 
@@ -148,14 +152,14 @@ func planPeerReconciliation(
 		case !wanted && exists:
 			removes = append(removes, PeerOp{
 				Remove: true,
-				Config: PeerConfig{PublicKey: key},
+				Target: Peer{PublicKey: key},
 			})
 		case wanted && !exists:
-			op := PeerOp{Config: want}
+			op := PeerOp{Target: want}
 			// Strip endpoint for Dynamic peers — WireGuard will learn
 			// it from incoming handshakes.
 			if want.EndpointPolicy == EndpointDynamic {
-				op.Config.Endpoint = nil
+				op.Target.Endpoint = nil
 			}
 			adds = append(adds, op)
 		case wanted && exists:
@@ -173,7 +177,7 @@ func planPeerReconciliation(
 			if cfg.EndpointPolicy != EndpointFixed || endpointsEqual(cfg.Endpoint, have.Endpoint) {
 				cfg.Endpoint = nil
 			}
-			updates = append(updates, PeerOp{Config: cfg})
+			updates = append(updates, PeerOp{Target: cfg})
 		}
 	}
 

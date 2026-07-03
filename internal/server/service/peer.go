@@ -258,17 +258,11 @@ func peersToWireGuardPeers(
 		if err != nil {
 			return nil, fmt.Errorf("parse peer CIDR %q: %w", peer.Cidr, err)
 		}
-		p, err := wireguard.NewPeerConfig(
-			peer.PublicKey,
-			[]string{peerCidr.String()},
-			"",
-			0,
-			wireguard.EndpointDynamic,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("new peer %q: %w", peer.PublicKey, err)
-		}
-		wgpeers = append(wgpeers, p)
+		wgpeers = append(wgpeers, wireguard.PeerConfig{
+			PublicKey:      peer.PublicKey,
+			AllowedIPs:     []string{peerCidr.String()},
+			EndpointPolicy: wireguard.EndpointDynamic,
+		})
 	}
 	return wgpeers, nil
 }

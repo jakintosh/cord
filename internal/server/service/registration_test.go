@@ -104,11 +104,11 @@ func TestCreateRegistration_ReconcilesRunningInviteDeviceWithHostRoute(t *testin
 	if err != nil {
 		t.Fatalf("derive expected pub key: %v", err)
 	}
-	if peers[0].Config.PublicKey.String() != expectedPub {
+	if peers[0].Target.PublicKey.String() != expectedPub {
 		t.Fatalf("public key = %q, want temp registration public key %q",
-			peers[0].Config.PublicKey.String(), expectedPub)
+			peers[0].Target.PublicKey.String(), expectedPub)
 	}
-	if got := peers[0].Config.AllowedIPs; len(got) != 1 || got[0].String() != "10.1.0.2/32" {
+	if got := peers[0].Target.AllowedIPs; len(got) != 1 || got[0].String() != "10.1.0.2/32" {
 		t.Fatalf("allowed IPs = %v, want [10.1.0.2/32]", got)
 	}
 }
@@ -285,9 +285,9 @@ func TestRedeemRegistration_ReconcilesRunningDevices(t *testing.T) {
 	}
 	var found bool
 	for _, op := range env.Backend.LastAppliedOpsFor("testnet") {
-		if op.Config.PublicKey.String() == permKey {
+		if op.Target.PublicKey.String() == permKey {
 			found = true
-			if got := op.Config.AllowedIPs; len(got) != 1 || got[0].String() != "10.0.0.5/32" {
+			if got := op.Target.AllowedIPs; len(got) != 1 || got[0].String() != "10.0.0.5/32" {
 				t.Fatalf("redeemed peer allowed IPs = %v, want [10.0.0.5/32]", got)
 			}
 		}

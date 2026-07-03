@@ -389,24 +389,15 @@ func (s *Service) nextFreePeerIP(
 
 func registrationsToWireGuardPeers(
 	regs []*Registration,
-) (
-	[]wireguard.PeerConfig,
-	error,
-) {
+) []wireguard.PeerConfig {
 	var wgpeers []wireguard.PeerConfig
 	for _, reg := range regs {
 		route := netaddr.HostRoute(reg.InviteIP)
-		p, err := wireguard.NewPeerConfig(
-			reg.InvitePublicKey,
-			[]string{route.String()},
-			"",
-			0,
-			wireguard.EndpointDynamic,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("new peer %q: %w", reg.InvitePublicKey, err)
-		}
-		wgpeers = append(wgpeers, p)
+		wgpeers = append(wgpeers, wireguard.PeerConfig{
+			PublicKey:      reg.InvitePublicKey,
+			AllowedIPs:     []string{route.String()},
+			EndpointPolicy: wireguard.EndpointDynamic,
+		})
 	}
-	return wgpeers, nil
+	return wgpeers
 }

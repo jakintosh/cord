@@ -217,7 +217,7 @@ func TestParseUAPIPeers_FlushBetweenPeers(t *testing.T) {
 func TestPeerOperationsUAPI_Add(t *testing.T) {
 	k := mustGenerateKey(t)
 	op := PeerOp{
-		Config: PeerConfig{
+		Target: Peer{
 			PublicKey:           k,
 			AllowedIPs:          []net.IPNet{mustParseCIDR(t, "10.0.0.1/32")},
 			Endpoint:            mustResolveUDP(t, "1.2.3.4:51820"),
@@ -246,7 +246,7 @@ func TestPeerOperationsUAPI_Add(t *testing.T) {
 func TestPeerOperationsUAPI_AddNoEndpoint(t *testing.T) {
 	k := mustGenerateKey(t)
 	op := PeerOp{
-		Config: PeerConfig{
+		Target: Peer{
 			PublicKey:           k,
 			AllowedIPs:          []net.IPNet{mustParseCIDR(t, "10.0.0.1/32")},
 			PersistentKeepalive: 0,
@@ -263,7 +263,7 @@ func TestPeerOperationsUAPI_Remove(t *testing.T) {
 	k := mustGenerateKey(t)
 	op := PeerOp{
 		Remove: true,
-		Config: PeerConfig{PublicKey: k},
+		Target: Peer{PublicKey: k},
 	}
 
 	result := buildOpsUAPI([]PeerOp{op})
@@ -278,8 +278,8 @@ func TestPeerOperationsUAPI_Remove(t *testing.T) {
 func TestPeerOperationsUAPI_MultipleOps(t *testing.T) {
 	k := mustGenerateKey(t)
 	ops := []PeerOp{
-		{Config: PeerConfig{PublicKey: k, AllowedIPs: []net.IPNet{mustParseCIDR(t, "10.0.0.1/32")}}},
-		{Remove: true, Config: PeerConfig{PublicKey: k}},
+		{Target: Peer{PublicKey: k, AllowedIPs: []net.IPNet{mustParseCIDR(t, "10.0.0.1/32")}}},
+		{Remove: true, Target: Peer{PublicKey: k}},
 	}
 
 	result := buildOpsUAPI(ops)
