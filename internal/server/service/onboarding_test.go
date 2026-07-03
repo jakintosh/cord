@@ -24,6 +24,7 @@ func TestOnboardingLifecycle(t *testing.T) {
 		t.Fatalf("start network: %v", err)
 	}
 
+	alicePermKey := mustGenKey(t)
 	aliceIP := net.ParseIP("10.0.0.5")
 	expiresIn := time.Hour
 	_, err := env.Service.CreateRegistration("testnet", "alice", &aliceIP, false, &expiresIn)
@@ -32,7 +33,7 @@ func TestOnboardingLifecycle(t *testing.T) {
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 
-	result, err := env.Service.RedeemRegistration("testnet", tempKey, "alice-perm-key")
+	result, err := env.Service.RedeemRegistration("testnet", tempKey, alicePermKey)
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -64,19 +65,19 @@ func TestOnboardingLifecycle(t *testing.T) {
 		t.Errorf("resolve peer identity before confirm: err = %v, want ErrNotFound", err)
 	}
 
-	mainDev := env.WireGuard.Devices["testnet"]
-	if mainDev == nil {
+	if env.Backend.Device("testnet") == nil {
 		t.Fatal("expected main device")
 	}
-	if !hasWGPeer(mainDev.AppliedPeers(), "alice-perm-key") {
+	mainOps := env.Backend.AppliedOpsFor("testnet")
+	if !hasPeerOp(mainOps, alicePermKey) {
 		t.Error("main device missing provisional peer after redeem")
 	}
 
-	inviteDev := env.WireGuard.Devices["testnet-i"]
-	if inviteDev == nil {
+	if env.Backend.Device("testnet-i") == nil {
 		t.Fatal("expected invite device")
 	}
-	if !hasWGPeer(inviteDev.AppliedPeers(), tempKey) {
+	inviteOps := env.Backend.AppliedOpsFor("testnet-i")
+	if !hasPeerOp(inviteOps, tempKey) {
 		t.Error("invite device missing temp peer after redeem")
 	}
 
@@ -108,13 +109,13 @@ func TestOnboardingLifecycle(t *testing.T) {
 		t.Errorf("resolve provisional identity after confirm: err = %v, want ErrNotFound", err)
 	}
 
-	inviteDev = env.WireGuard.Devices["testnet-i"]
-	if hasWGPeer(inviteDev.AppliedPeers(), tempKey) {
+	inviteOps = env.Backend.LastAppliedOpsFor("testnet-i")
+	if hasPeerOp(inviteOps, tempKey) {
 		t.Error("invite device should not have temp peer after confirm")
 	}
 
-	mainDev = env.WireGuard.Devices["testnet"]
-	if !hasWGPeer(mainDev.AppliedPeers(), "alice-perm-key") {
+	mainOps = env.Backend.LastAppliedOpsFor("testnet")
+	if !hasPeerOp(mainOps, alicePermKey) {
 		t.Error("main device missing confirmed peer after confirm")
 	}
 }
@@ -133,7 +134,8 @@ func TestConfirmPeer_PreservesDisabledState(t *testing.T) {
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.Service.RedeemRegistration("testnet", tempKey, "bob-key")
+	bobKey := mustGenKey(t)
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, bobKey)
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -181,7 +183,8 @@ func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.Service.RedeemRegistration("testnet", tempKey, "short-lived-key")
+	shortKey := mustGenKey(t)
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, shortKey)
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -208,11 +211,11 @@ func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
 		t.Errorf("get registration after expiry+reconcile: err = %v, want ErrNotFound", err)
 	}
 
-	mainDev := env.WireGuard.Devices["testnet"]
-	if mainDev == nil {
+	if env.Backend.Device("testnet") == nil {
 		t.Fatal("expected main device")
 	}
-	if hasWGPeer(mainDev.AppliedPeers(), "short-lived-key") {
+	mainOps := env.Backend.LastAppliedOpsFor("testnet")
+	if hasPeerOp(mainOps, shortKey) {
 		t.Error("main device should not have expired provisional peer")
 	}
 }
@@ -236,7 +239,8 @@ func TestPruneExpiredRegistrations_RetainsActiveProvisionalPeer(t *testing.T) {
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.Service.RedeemRegistration("testnet", tempKey, "still-active-key")
+	stillKey := mustGenKey(t)
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, stillKey)
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -269,7 +273,8 @@ func TestPruneExpiredRegistrations_RetainsConfirmedPeerWithoutInvite(t *testing.
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.Service.RedeemRegistration("testnet", tempKey, "confirmed-key")
+	confKey := mustGenKey(t)
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, confKey)
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -310,7 +315,8 @@ func TestPruneExpiredRegistrations_RetainsConfirmedRegistrationAsAudit(t *testin
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
 
-	_, err = env.Service.RedeemRegistration("testnet", tempKey, "audited-key")
+	auditKey := mustGenKey(t)
+	_, err = env.Service.RedeemRegistration("testnet", tempKey, auditKey)
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
@@ -340,9 +346,22 @@ type mutableClock struct {
 
 func (m *mutableClock) now() time.Time { return m.t }
 
-func hasWGPeer(peers []wireguard.WGPeer, pubKey string) bool {
-	for _, p := range peers {
-		if p.PublicKey == pubKey {
+func mustGenKey(t *testing.T) string {
+	t.Helper()
+	k, err := wireguard.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	pub, err := wireguard.PublicKey(k)
+	if err != nil {
+		t.Fatalf("derive public key: %v", err)
+	}
+	return pub
+}
+
+func hasPeerOp(ops []wireguard.PeerOp, pubKey string) bool {
+	for _, op := range ops {
+		if !op.Remove && op.Config.PublicKey.String() == pubKey {
 			return true
 		}
 	}

@@ -181,11 +181,11 @@ func (s *Service) BeginInstall(
 		return nil, ErrNetworkExists
 	}
 
-	permPrivKey, err := s.wg.GenerateKey()
+	permPrivKey, err := wireguard.GenerateKey()
 	if err != nil {
 		return nil, err
 	}
-	permPubKey, err := s.wg.PublicKey(permPrivKey)
+	permPubKey, err := wireguard.PublicKey(permPrivKey)
 	if err != nil {
 		return nil, err
 	}
@@ -238,37 +238,41 @@ func (s *Service) Redeem(
 		return nil, fmt.Errorf("%w: invalid temp CIDR %q", ErrInvalidInput, network.TempPeerAssignedCidr)
 	}
 
-	inviteDev, err := s.wg.NewDevice(network.InviteInterfaceName, network.TempPeerPrivKey, inviteIfaceAddr, 0)
+	inviteDevCfg := wireguard.DeviceConfig{
+		Name:       network.InviteInterfaceName,
+		PrivateKey: network.TempPeerPrivKey,
+		Address:    inviteIfaceAddr,
+	}
+	inviteDev, err := s.wireguard.CreateDevice(inviteDevCfg)
 	if err != nil {
 		return nil, fmt.Errorf("create invite device: %w", err)
 	}
 	cleanup := func() {
 		if inviteDev != nil {
-			_ = inviteDev.Down()
-			_ = s.wg.RemoveDevice(network.InviteInterfaceName)
+			_ = inviteDev.Close()
 			inviteDev = nil
 		}
 	}
 	defer cleanup()
 
-	if err := inviteDev.Up(); err != nil {
-		return nil, fmt.Errorf("bring up invite device: %w", err)
-	}
-
-	// TempCidr carries the peer's invite address and the invite
-	// network prefix. Extract the network so the invite server
-	// peer routes the whole invite overlay.
+	// TempPeerAssignedCidr carries the peer's invite address and the invite
+	// network prefix. Extract the network so the invite server peer routes
+	// the whole invite overlay.
 	inviteServerRoute, err := networkRoute(network.TempPeerAssignedCidr)
 	if err != nil {
 		return nil, fmt.Errorf("invite server route: %w", err)
 	}
-	inviteServerPeer := wireguard.WGPeer{
-		PublicKey:      network.InviteServerPubkey,
-		AllowedIPs:     []string{inviteServerRoute},
-		Endpoint:       network.InviteServerEndpoint,
-		EndpointPolicy: wireguard.EndpointFixed,
+	inviteServerPeer, err := wireguard.NewPeerConfig(
+		network.InviteServerPubkey,
+		[]string{inviteServerRoute},
+		network.InviteServerEndpoint,
+		0,
+		wireguard.EndpointFixed,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("new invite server peer: %w", err)
 	}
-	if err := inviteDev.ApplyPeers([]wireguard.WGPeer{inviteServerPeer}); err != nil {
+	if err := inviteDev.SetPeers(inviteServerPeer); err != nil {
 		return nil, fmt.Errorf("apply invite peers: %w", err)
 	}
 
@@ -316,22 +320,21 @@ func (s *Service) Confirm(
 		return fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, network.AssignedCidr)
 	}
 
-	mainDev, err := s.wg.NewDevice(network.MainInterfaceName, network.PrivateKey, mainIfaceAddr, 0)
+	mainDev, err := s.wireguard.CreateDevice(wireguard.DeviceConfig{
+		Name:       network.MainInterfaceName,
+		PrivateKey: network.PrivateKey,
+		Address:    mainIfaceAddr,
+	})
 	if err != nil {
 		return fmt.Errorf("create main device: %w", err)
 	}
 	cleanup := func() {
 		if mainDev != nil {
-			_ = mainDev.Down()
-			_ = s.wg.RemoveDevice(network.MainInterfaceName)
+			_ = mainDev.Close()
 			mainDev = nil
 		}
 	}
 	defer cleanup()
-
-	if err := mainDev.Up(); err != nil {
-		return fmt.Errorf("bring up main device: %w", err)
-	}
 
 	// AssignedCidr is the peer's own address (e.g. 10.42.0.5/16);
 	// the prefix encodes the overlay network size. Extract the
@@ -340,13 +343,17 @@ func (s *Service) Confirm(
 	if err != nil {
 		return fmt.Errorf("main server route: %w", err)
 	}
-	serverPeer := wireguard.WGPeer{
-		PublicKey:      network.ServerPubkey,
-		AllowedIPs:     []string{serverRoute},
-		Endpoint:       network.ServerEndpoint,
-		EndpointPolicy: wireguard.EndpointFixed,
+	serverPeer, err := wireguard.NewPeerConfig(
+		network.ServerPubkey,
+		[]string{serverRoute},
+		network.ServerEndpoint,
+		0,
+		wireguard.EndpointFixed,
+	)
+	if err != nil {
+		return fmt.Errorf("new server peer: %w", err)
 	}
-	if err := mainDev.ApplyPeers([]wireguard.WGPeer{serverPeer}); err != nil {
+	if err := mainDev.SetPeers(serverPeer); err != nil {
 		return fmt.Errorf("apply main peers: %w", err)
 	}
 
@@ -460,7 +467,11 @@ func (s *Service) EnableNetwork(
 		return fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, network.AssignedCidr)
 	}
 
-	device, err := s.wg.NewDevice(network.MainInterfaceName, network.PrivateKey, ifaceAddr, 0)
+	device, err := s.wireguard.CreateDevice(wireguard.DeviceConfig{
+		Name:       network.MainInterfaceName,
+		PrivateKey: network.PrivateKey,
+		Address:    ifaceAddr,
+	})
 	if err != nil {
 		return err
 	}
@@ -478,10 +489,6 @@ func (s *Service) EnableNetwork(
 			_ = s.store.SetNetworkEnabled(networkName, false)
 		}
 	}()
-
-	if err := device.Up(); err != nil {
-		return err
-	}
 
 	if err := s.reconcilePeers(device, network); err != nil {
 		return err
@@ -629,8 +636,7 @@ func (s *Service) stopLive(
 	if ln.Cancel != nil {
 		ln.Cancel()
 	}
-	_ = ln.Device.Down()
-	_ = s.wg.RemoveDevice(networkName)
+	_ = ln.Device.Close()
 	s.mu.Lock()
 	delete(s.running, networkName)
 	s.mu.Unlock()
@@ -795,23 +801,24 @@ func (s *Service) reconcileDegraded(
 // report.
 func (s *Service) scanAndTickBlock(
 	networkName string,
-	ln *LiveNetwork,
+	liveNet *LiveNetwork,
 	now time.Time,
 ) []serverapi.EndpointSightingDTO {
-	livePeers, err := ln.Device.Status()
+	devicePeers, err := liveNet.Device.Peers()
 	if err != nil {
-		s.logf("scan %s: status: %v", networkName, err)
+		s.logf("scan %s: peers: %v", networkName, err)
 		return nil
 	}
 
 	nowUnix := now.Unix()
-	sightings := make([]serverapi.EndpointSightingDTO, 0, len(livePeers))
+	sightings := make([]serverapi.EndpointSightingDTO, 0, len(devicePeers))
 
 	// Track which degraded peers are still live and unhealthy.
 	activeDegraded := make(map[string]struct{})
 
-	for _, lp := range livePeers {
-		if lp.PublicKey == ln.ServerPubkey {
+	for _, lp := range devicePeers {
+		pubKey := lp.PublicKey.String()
+		if pubKey == liveNet.ServerPubkey {
 			continue
 		}
 
@@ -820,40 +827,41 @@ func (s *Service) scanAndTickBlock(
 
 		if healthy {
 			// Peer is healthy — remove any degraded state.
-			delete(ln.Degraded, lp.PublicKey)
+			delete(liveNet.Degraded, pubKey)
 
 			// Record local observation.
-			if lp.Endpoint != "" {
+			if lp.Endpoint != nil {
+				endpoint := lp.Endpoint.String()
 				if err := s.store.UpdatePeerEndpointLocal(
-					networkName, lp.PublicKey, lp.Endpoint, nowUnix,
+					networkName, pubKey, endpoint, nowUnix,
 				); err != nil {
 					s.logf("scan %s: update local endpoint for %q: %v",
-						networkName, lp.PublicKey, err)
+						networkName, pubKey, err)
 				}
 				sightings = append(sightings, serverapi.EndpointSightingDTO{
-					PeerKey:  lp.PublicKey,
-					Endpoint: lp.Endpoint,
+					PeerKey:  pubKey,
+					Endpoint: endpoint,
 				})
 			}
 			continue
 		}
 
 		// Peer is unhealthy.
-		activeDegraded[lp.PublicKey] = struct{}{}
+		activeDegraded[pubKey] = struct{}{}
 
 		// Create degraded state if not already tracked.
-		if _, ok := ln.Degraded[lp.PublicKey]; !ok {
-			endpoints, e := s.store.ListPeerEndpoints(networkName, lp.PublicKey)
+		if _, ok := liveNet.Degraded[pubKey]; !ok {
+			endpoints, e := s.store.ListPeerEndpoints(networkName, pubKey)
 			if e != nil {
 				s.logf("scan %s: list endpoints for %q: %v",
-					networkName, lp.PublicKey, e)
+					networkName, pubKey, e)
 				continue
 			}
 			candidates := make([]string, len(endpoints))
 			for i, ep := range endpoints {
 				candidates[i] = ep.Endpoint
 			}
-			ln.Degraded[lp.PublicKey] = &DegradedPeer{
+			liveNet.Degraded[pubKey] = &DegradedPeer{
 				Candidates:  candidates,
 				Idle:        len(candidates) == 0,
 				NextAttempt: now,
@@ -862,15 +870,15 @@ func (s *Service) scanAndTickBlock(
 	}
 
 	// Prune degraded entries for peers no longer live or now healthy.
-	for pubKey := range ln.Degraded {
+	for pubKey := range liveNet.Degraded {
 		if _, active := activeDegraded[pubKey]; !active {
-			delete(ln.Degraded, pubKey)
+			delete(liveNet.Degraded, pubKey)
 		}
 	}
 
 	// Tick all degraded peer state machines.
-	for pubKey, peer := range ln.Degraded {
-		s.tickDegraded(networkName, ln, pubKey, peer, now)
+	for pubKey, peer := range liveNet.Degraded {
+		s.tickDegraded(networkName, liveNet, pubKey, peer, now)
 	}
 
 	return sightings
@@ -915,7 +923,7 @@ func (s *Service) tickDegraded(
 
 	// Rotate to next candidate.
 	endpoint := peer.Candidates[peer.Index]
-	if err := ln.Device.UpdateEndpoint(pubKey, endpoint); err != nil {
+	if err := ln.Device.SetPeerEndpoint(pubKey, endpoint); err != nil {
 		s.logf("tick %s: update endpoint for %q to %q: %v",
 			networkName, pubKey, endpoint, err)
 	}
@@ -944,7 +952,7 @@ func degradedBackoff(loopCount int) time.Duration {
 
 // reconcilePeers applies the current peer cache to a WireGuard device.
 func (s *Service) reconcilePeers(
-	device wireguard.WGDevice,
+	device *wireguard.Device,
 	network *Network,
 ) error {
 	peers, err := s.store.ListPeers(network.Name)
@@ -957,13 +965,16 @@ func (s *Service) reconcilePeers(
 		return fmt.Errorf("server route: %w", err)
 	}
 
-	wgPeers := make([]wireguard.WGPeer, 0, len(peers)+1)
-
-	serverPeer := wireguard.WGPeer{
-		PublicKey:      network.ServerPubkey,
-		AllowedIPs:     []string{serverRoute},
-		Endpoint:       network.ServerEndpoint,
-		EndpointPolicy: wireguard.EndpointFixed,
+	wgPeers := make([]wireguard.PeerConfig, 0, len(peers)+1)
+	serverPeer, err := wireguard.NewPeerConfig(
+		network.ServerPubkey,
+		[]string{serverRoute},
+		network.ServerEndpoint,
+		0,
+		wireguard.EndpointFixed,
+	)
+	if err != nil {
+		return fmt.Errorf("new server peer: %w", err)
 	}
 	wgPeers = append(wgPeers, serverPeer)
 
@@ -972,15 +983,20 @@ func (s *Service) reconcilePeers(
 		if err != nil {
 			return fmt.Errorf("parse peer cidr %q: %w", peer.Cidr, err)
 		}
-		wgPeers = append(wgPeers, wireguard.WGPeer{
-			PublicKey:      peer.PublicKey,
-			AllowedIPs:     []string{peerRoute.String()},
-			Endpoint:       peer.Endpoint,
-			EndpointPolicy: wireguard.EndpointBootstrap,
-		})
+		p, err := wireguard.NewPeerConfig(
+			peer.PublicKey,
+			[]string{peerRoute.String()},
+			peer.Endpoint,
+			0,
+			wireguard.EndpointBootstrap,
+		)
+		if err != nil {
+			return fmt.Errorf("new peer %q: %w", peer.PublicKey, err)
+		}
+		wgPeers = append(wgPeers, p)
 	}
 
-	return device.ApplyPeers(wgPeers)
+	return device.SetPeers(wgPeers...)
 }
 
 func networkRoute(

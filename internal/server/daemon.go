@@ -71,7 +71,7 @@ func Serve(
 	wgOpts := wireguard.Options{
 		Backend: backend,
 	}
-	wg, err := wireguard.New(wgOpts)
+	wg, err := wireguard.NewManager(wgOpts)
 	if err != nil {
 		return fmt.Errorf("server: new wireguard: %w", err)
 	}
@@ -79,7 +79,7 @@ func Serve(
 	var svc *service.Service
 	svcOpts := service.Options{
 		Store:             db,
-		WG:                wg,
+		WireGuard:         wg,
 		Clock:             time.Now,
 		Logger:            log.Default(),
 		ReconcileInterval: opts.ReconcileInterval,

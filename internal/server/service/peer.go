@@ -91,7 +91,7 @@ func (s *Service) ListVisiblePeers(
 		return nil, fmt.Errorf("list peers for visibility: %w", err)
 	}
 
-	since := s.clock().Add(-defaultDndpointTTL)
+	since := s.clock().Add(-defaultEndpointTTL)
 	recentEndpoints, err := s.store.GetRecentEndpoints(network, since)
 	if err != nil {
 		return nil, fmt.Errorf("get recent endpoints: %w", err)

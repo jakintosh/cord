@@ -14,10 +14,11 @@ import (
 )
 
 type ServiceEnv struct {
-	Database  *database.DB
-	WireGuard *wireguardtest.MockWG
-	Service   *service.Service
-	Server    *httptest.Server
+	Database *database.DB
+	Manager  *wireguard.Manager
+	Backend  *wireguardtest.MockBackend
+	Service  *service.Service
+	Server   *httptest.Server
 }
 
 func SetupService(
@@ -34,7 +35,8 @@ func SetupServiceWithServer(
 	t.Helper()
 
 	db := SetupDB(t)
-	wg := wireguardtest.NewMockWG()
+	backend := wireguardtest.NewMockBackend()
+	mgr := wireguard.NewManagerWithBackend(backend)
 
 	var httpClient *http.Client
 	var server *httptest.Server
@@ -45,7 +47,7 @@ func SetupServiceWithServer(
 
 	svc, err := service.New(service.Options{
 		Store:        db,
-		WG:           wg,
+		WireGuard:    mgr,
 		Clock:        func() time.Time { return FixedTime },
 		Logger:       log.Default(),
 		HTTPClient:   httpClient,
@@ -56,16 +58,17 @@ func SetupServiceWithServer(
 	}
 
 	return &ServiceEnv{
-		Database:  db,
-		WireGuard: wg,
-		Service:   svc,
-		Server:    server,
+		Database: db,
+		Manager:  mgr,
+		Backend:  backend,
+		Service:  svc,
+		Server:   server,
 	}
 }
 
-func SetupServiceWithWG(
+func SetupServiceWithManager(
 	t *testing.T,
-	wg wireguard.WG,
+	mgr *wireguard.Manager,
 ) *ServiceEnv {
 	t.Helper()
 
@@ -73,7 +76,7 @@ func SetupServiceWithWG(
 
 	svc, err := service.New(service.Options{
 		Store:        db,
-		WG:           wg,
+		WireGuard:    mgr,
 		Clock:        func() time.Time { return FixedTime },
 		Logger:       log.Default(),
 		SyncInterval: 30 * time.Second,
@@ -82,14 +85,9 @@ func SetupServiceWithWG(
 		t.Fatalf("new service: %v", err)
 	}
 
-	var mockWG *wireguardtest.MockWG
-	if mw, ok := wg.(*wireguardtest.MockWG); ok {
-		mockWG = mw
-	}
-
 	return &ServiceEnv{
-		Database:  db,
-		WireGuard: mockWG,
-		Service:   svc,
+		Database: db,
+		Manager:  mgr,
+		Service:  svc,
 	}
 }

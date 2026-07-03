@@ -119,7 +119,7 @@ func newServiceWithFactory(
 
 	svc, err := service.New(service.Options{
 		Store:      env.Database,
-		WG:         env.WireGuard,
+		WireGuard:  env.Manager,
 		Clock:      func() time.Time { return testutil.FixedTime },
 		APIFactory: factory,
 	})

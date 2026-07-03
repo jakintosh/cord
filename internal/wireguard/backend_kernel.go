@@ -16,14 +16,19 @@ import (
 // WireGuard module.
 type KernelBackend struct{}
 
-func (b *KernelBackend) Up(cfg DeviceConfig) error {
-	link, err := ensureLink(cfg.Name)
+func (b *KernelBackend) CreateDevice(
+	cfg DeviceConfig,
+) (
+	WgDevice,
+	error,
+) {
+	link, err := kernelEnsureLink(cfg.Name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if err := syncAddress(link, cfg.Address); err != nil {
-		return err
+	if err := kernelSyncAddress(link, cfg.Address); err != nil {
+		return nil, err
 	}
 
 	mtu := cfg.MTU
@@ -31,101 +36,95 @@ func (b *KernelBackend) Up(cfg DeviceConfig) error {
 		mtu = defaultMTU
 	}
 	if err := netlink.LinkSetMTU(link, mtu); err != nil {
-		return fmt.Errorf("wireguard: set mtu %s: %w", cfg.Name, err)
+		return nil, fmt.Errorf("wireguard: set mtu %s: %w", cfg.Name, err)
 	}
 
-	if err := applyDeviceConfig(cfg.Name, cfg.PrivateKey, cfg.ListenPort); err != nil {
-		return err
+	privKey, err := parseKey(cfg.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("wireguard: parse key: %w", err)
+	}
+
+	if err := kernelApplyDeviceConfig(cfg.Name, privKey, int(cfg.ListenPort)); err != nil {
+		return nil, err
 	}
 
 	if err := netlink.LinkSetUp(link); err != nil {
-		return fmt.Errorf("wireguard: bring %s up: %w", cfg.Name, err)
+		return nil, fmt.Errorf("wireguard: bring %s up: %w", cfg.Name, err)
 	}
 
-	return nil
+	return &kernelDeviceHandle{name: cfg.Name}, nil
 }
 
-func (b *KernelBackend) Down(name string) error {
-	link, err := netlink.LinkByName(name)
-	if err != nil {
-		var notFound netlink.LinkNotFoundError
-		if errors.As(err, &notFound) {
-			return nil
-		}
-		return fmt.Errorf("wireguard: get link %s: %w", name, err)
-	}
-
-	if err := netlink.LinkSetDown(link); err != nil {
-		return fmt.Errorf("wireguard: bring %s down: %w", name, err)
-	}
-
-	return nil
+// kernelDeviceHandle is a WgDevice backed by the kernel WireGuard
+// module. It holds the interface link name.
+type kernelDeviceHandle struct {
+	name string
 }
 
-func (b *KernelBackend) Delete(name string) error {
-	link, err := netlink.LinkByName(name)
-	if err != nil {
-		var notFound netlink.LinkNotFoundError
-		if errors.As(err, &notFound) {
-			return nil
-		}
-		return fmt.Errorf("wireguard: get link %s: %w", name, err)
-	}
-
-	_ = netlink.LinkSetDown(link)
-
-	if err := netlink.LinkDel(link); err != nil {
-		return fmt.Errorf("wireguard: delete %s: %w", name, err)
-	}
-
-	return nil
-}
-
-func (b *KernelBackend) Status(name string) (*DeviceStatus, error) {
+func (h *kernelDeviceHandle) Peers() (
+	[]PeerStatus,
+	error,
+) {
 	client, err := wgctrl.New()
 	if err != nil {
 		return nil, fmt.Errorf("wireguard: wgctrl: %w", err)
 	}
 	defer client.Close()
 
-	dev, err := client.Device(name)
+	dev, err := client.Device(h.name)
 	if err != nil {
-		return nil, fmt.Errorf("wireguard: query %s: %w", name, err)
+		return nil, fmt.Errorf("wireguard: query %s: %w", h.name, err)
 	}
 
-	status := &DeviceStatus{
-		Name:       dev.Name,
-		ListenPort: dev.ListenPort,
+	peers := make([]PeerStatus, len(dev.Peers))
+	for i, p := range dev.Peers {
+		peers[i] = PeerStatus{
+			PublicKey:           p.PublicKey,
+			AllowedIPs:          p.AllowedIPs,
+			Endpoint:            p.Endpoint,
+			PersistentKeepalive: p.PersistentKeepaliveInterval,
+			LastHandshake:       p.LastHandshakeTime,
+			ReceiveBytes:        p.ReceiveBytes,
+			TransmitBytes:       p.TransmitBytes,
+		}
 	}
-	for _, peer := range dev.Peers {
-		status.Peers = append(status.Peers, ObservedPeer{
-			PublicKey:           peer.PublicKey,
-			AllowedIPs:          peer.AllowedIPs,
-			Endpoint:            peer.Endpoint,
-			PersistentKeepalive: peer.PersistentKeepaliveInterval,
-			LastHandshake:       peer.LastHandshakeTime,
-			ReceiveBytes:        peer.ReceiveBytes,
-			TransmitBytes:       peer.TransmitBytes,
-		})
-	}
-
-	return status, nil
+	return peers, nil
 }
 
-func (b *KernelBackend) ApplyPeerOperations(name string, operations []PeerOperation) error {
-	link, err := netlink.LinkByName(name)
+func (h *kernelDeviceHandle) ApplyPeers(
+	ops []PeerOp,
+) error {
+	link, err := netlink.LinkByName(h.name)
 	if err != nil {
-		return fmt.Errorf("wireguard: get link %s: %w", name, err)
+		return fmt.Errorf("wireguard: get link %s: %w", h.name, err)
 	}
 
 	if link.Attrs().Flags&net.FlagUp == 0 {
-		return fmt.Errorf("wireguard: %s is not up", name)
+		return fmt.Errorf("wireguard: %s is not up", h.name)
 	}
 
-	return kernelApplyPeerOperations(name, operations)
+	return kernelApplyPeerOperations(h.name, ops)
 }
 
-func kernelApplyPeerOperations(name string, operations []PeerOperation) error {
+func (h *kernelDeviceHandle) Close() error {
+	link, err := netlink.LinkByName(h.name)
+	if err != nil {
+		if _, ok := errors.AsType[netlink.LinkNotFoundError](err); ok {
+			return nil
+		}
+		return fmt.Errorf("wireguard: get link %s: %w", h.name, err)
+	}
+	_ = netlink.LinkSetDown(link)
+	if err := netlink.LinkDel(link); err != nil {
+		return fmt.Errorf("wireguard: delete %s: %w", h.name, err)
+	}
+	return nil
+}
+
+func kernelApplyPeerOperations(
+	name string,
+	operations []PeerOp,
+) error {
 	client, err := wgctrl.New()
 	if err != nil {
 		return fmt.Errorf("wireguard: wgctrl: %w", err)
@@ -134,22 +133,32 @@ func kernelApplyPeerOperations(name string, operations []PeerOperation) error {
 
 	peerConfigs := make([]wgtypes.PeerConfig, 0, len(operations))
 	for _, op := range operations {
-		peerConfigs = append(peerConfigs, wgPeerConfig(op))
+		peerConfigs = append(peerConfigs, op.toWgPeerConfig())
 	}
 
 	return client.ConfigureDevice(name, wgtypes.Config{Peers: peerConfigs})
 }
 
-func ensureLink(name string) (netlink.Link, error) {
+func kernelEnsureLink(
+	name string,
+) (
+	netlink.Link,
+	error,
+) {
 	link, err := netlink.LinkByName(name)
+
+	// if link found
 	if err == nil {
 		return link, nil
 	}
 
+	// if link errored, but not with notFound error
 	var notFound netlink.LinkNotFoundError
 	if !errors.As(err, &notFound) {
 		return nil, fmt.Errorf("wireguard: get link %s: %w", name, err)
 	}
+
+	// link not found, create it
 
 	attr := netlink.NewLinkAttrs()
 	attr.Name = name
@@ -162,7 +171,10 @@ func ensureLink(name string) (netlink.Link, error) {
 	return wg, nil
 }
 
-func syncAddress(link netlink.Link, addr net.IPNet) error {
+func kernelSyncAddress(
+	link netlink.Link,
+	addr net.IPNet,
+) error {
 	addrs, err := netlink.AddrList(link, netlink.FAMILY_ALL)
 	if err != nil {
 		return fmt.Errorf("wireguard: list addrs: %w", err)
@@ -189,7 +201,11 @@ func syncAddress(link netlink.Link, addr net.IPNet) error {
 	return nil
 }
 
-func applyDeviceConfig(name string, key wgtypes.Key, port int) error {
+func kernelApplyDeviceConfig(
+	name string,
+	key wgtypes.Key,
+	port int,
+) error {
 	client, err := wgctrl.New()
 	if err != nil {
 		return fmt.Errorf("wireguard: wgctrl: %w", err)
@@ -204,6 +220,25 @@ func applyDeviceConfig(name string, key wgtypes.Key, port int) error {
 	if err := client.ConfigureDevice(name, cfg); err != nil {
 		return fmt.Errorf("wireguard: configure %s: %w", name, err)
 	}
-
 	return nil
+}
+
+func (op PeerOp) toWgPeerConfig() wgtypes.PeerConfig {
+	if op.Remove {
+		return wgtypes.PeerConfig{
+			PublicKey: op.Config.PublicKey,
+			Remove:    true,
+		}
+	}
+	cfg := wgtypes.PeerConfig{
+		PublicKey:         op.Config.PublicKey,
+		ReplaceAllowedIPs: true,
+		AllowedIPs:        op.Config.AllowedIPs,
+	}
+	keepalive := op.Config.PersistentKeepalive
+	cfg.PersistentKeepaliveInterval = &keepalive
+	if op.Config.Endpoint != nil {
+		cfg.Endpoint = op.Config.Endpoint
+	}
+	return cfg
 }

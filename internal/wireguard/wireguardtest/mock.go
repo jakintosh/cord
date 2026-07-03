@@ -1,181 +1,243 @@
-// Package wireguardtest provides test doubles for the wireguard
-// package's WG and WGDevice interfaces.
+// Package wireguardtest provides test doubles for the wireguard package.
 package wireguardtest
 
 import (
-	"fmt"
 	"net"
+	"sort"
 	"sync"
-	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-// MockWG is a test double for wireguard.WG that generates
-// predictable keys and creates MockDevice instances.
-type MockWG struct {
-	mu      sync.Mutex
-	keySeq  int
-	Devices map[string]*MockDevice
-	NewErr  error
+// applyCall records one ApplyPeers call for batch tracking.
+type applyCall struct {
+	Ops []wireguard.PeerOp
 }
 
-// NewMockWG returns a ready-to-use MockWG.
-func NewMockWG() *MockWG {
-	return &MockWG{
-		Devices: make(map[string]*MockDevice),
-	}
-}
-
-func (m *MockWG) GenerateKey() (
-	string,
-	error,
-) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.keySeq++
-	return fmt.Sprintf("mock-priv-key-%d", m.keySeq), nil
-}
-
-func (m *MockWG) PublicKey(
-	privateKey string,
-) (
-	string,
-	error,
-) {
-	return privateKey + "-pub", nil
-}
-
-func (m *MockWG) NewDevice(
-	name string,
-	privateKey string,
-	address net.IPNet,
-	port uint16,
-) (
-	wireguard.WGDevice,
-	error,
-) {
-	if m.NewErr != nil {
-		return nil, m.NewErr
-	}
-	d := &MockDevice{
-		Name:       name,
-		PrivateKey: privateKey,
-		Address:    address.String(),
-		Port:       port,
-	}
-	m.mu.Lock()
-	m.Devices[name] = d
-	m.mu.Unlock()
-	return d, nil
-}
-
-func (m *MockWG) RemoveDevice(name string) error {
-	return nil
-}
-
-// MockDevice is a test double for wireguard.WGDevice that records
-// calls for assertions.
+// MockDevice is a WgDevice handle for testing. Each MockDevice
+// holds its own peer map, so tests can inspect per-device state
+// independently.
+//
+// ApplyPeers merges ops into peer state to match real backends:
+// AllowedIPs and PersistentKeepalive are always replaced, Endpoint is
+// set only when non-nil, and runtime fields (LastHandshake etc.) are
+// preserved.
 type MockDevice struct {
-	mu              sync.Mutex
-	Name            string
-	PrivateKey      string
-	Address         string
-	Port            uint16
-	Peers           []wireguard.WGPeer
-	UpCalls         int
-	DownCalls       int
-	ApplyCalls      int
-	IsUp            bool
-	UpErr           error
-	DownErr         error
-	ApplyErr        error
-	StatusErr       error
-	WaitCalls       int
-	EndpointUpdates []EndpointUpdate
-	UpdateErr       error
+	mu            sync.Mutex
+	peers         map[string]wireguard.PeerStatus
+	PeersCalls    int
+	ApplyCalls    []applyCall
+	CloseCalls    int
+	PeersErr      error
+	ApplyPeersErr error
+	CloseErr      error
 }
 
-// EndpointUpdate records a call to UpdateEndpoint.
-type EndpointUpdate struct {
-	PubKey   string
-	Endpoint string
-}
-
-func (d *MockDevice) ApplyPeers(
-	peers []wireguard.WGPeer,
-) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.ApplyCalls++
-	if !d.IsUp {
-		return wireguard.ErrDeviceNotUp
-	}
-	d.Peers = peers
-	return d.ApplyErr
-}
-
-func (d *MockDevice) UpdateEndpoint(
-	pubKey string,
-	endpoint string,
-) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.UpdateErr != nil {
-		return d.UpdateErr
-	}
-	d.EndpointUpdates = append(d.EndpointUpdates, EndpointUpdate{
-		PubKey:   pubKey,
-		Endpoint: endpoint,
-	})
-	return nil
-}
-
-func (d *MockDevice) Up() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.UpCalls++
-	if d.UpErr == nil {
-		d.IsUp = true
-	}
-	return d.UpErr
-}
-
-func (d *MockDevice) Down() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.DownCalls++
-	if d.DownErr == nil {
-		d.IsUp = false
-	}
-	return d.DownErr
-}
-
-func (d *MockDevice) DeviceName() string {
-	return d.Name
-}
-
-func (d *MockDevice) WaitForHandshake(
-	pubKey string,
-	timeout time.Duration,
-	onStatus func(wireguard.PeerStatus),
-) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.WaitCalls++
-	return nil
-}
-
-func (d *MockDevice) Status() (
+func (d *MockDevice) Peers() (
 	[]wireguard.PeerStatus,
 	error,
 ) {
-	return nil, d.StatusErr
-}
-
-// AppliedPeers returns the last set of peers applied to this device.
-func (d *MockDevice) AppliedPeers() []wireguard.WGPeer {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.Peers
+	d.PeersCalls++
+	if d.PeersErr != nil {
+		return nil, d.PeersErr
+	}
+	return d.peersListLocked(), nil
+}
+
+func (d *MockDevice) ApplyPeers(
+	ops []wireguard.PeerOp,
+) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.ApplyPeersErr != nil {
+		return d.ApplyPeersErr
+	}
+	call := applyCall{Ops: make([]wireguard.PeerOp, len(ops))}
+	copy(call.Ops, ops)
+	d.ApplyCalls = append(d.ApplyCalls, call)
+	for _, op := range ops {
+		key := op.Config.PublicKey.String()
+		if op.Remove {
+			delete(d.peers, key)
+			continue
+		}
+		existing := d.peers[key]
+		existing.PublicKey = op.Config.PublicKey
+		existing.AllowedIPs = copyIPNets(op.Config.AllowedIPs)
+		existing.PersistentKeepalive = op.Config.PersistentKeepalive
+		if op.Config.Endpoint != nil {
+			existing.Endpoint = copyUDPAddr(op.Config.Endpoint)
+		}
+		d.peers[key] = existing
+	}
+	return nil
+}
+
+// AppliedOps returns all peer operations applied to this device.
+func (d *MockDevice) AppliedOps() []wireguard.PeerOp {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []wireguard.PeerOp
+	for _, call := range d.ApplyCalls {
+		out = append(out, call.Ops...)
+	}
+	return out
+}
+
+// LastAppliedOps returns the most recent batch of peer operations.
+func (d *MockDevice) LastAppliedOps() []wireguard.PeerOp {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.ApplyCalls) == 0 {
+		return nil
+	}
+	last := d.ApplyCalls[len(d.ApplyCalls)-1]
+	out := make([]wireguard.PeerOp, len(last.Ops))
+	copy(out, last.Ops)
+	return out
+}
+
+func (d *MockDevice) Close() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.CloseCalls++
+	if d.CloseErr != nil {
+		return d.CloseErr
+	}
+	return nil
+}
+
+func (d *MockDevice) peersListLocked() []wireguard.PeerStatus {
+	out := make([]wireguard.PeerStatus, 0, len(d.peers))
+	for _, p := range d.peers {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].PublicKey.String() < out[j].PublicKey.String()
+	})
+	return out
+}
+
+// SetPeers replaces the mock's observed peer state for this device.
+// Unlike ApplyPeers (which merges), this is a wholesale replacement.
+func (d *MockDevice) SetPeers(
+	peers ...wireguard.PeerStatus,
+) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	devPeers := make(map[string]wireguard.PeerStatus, len(peers))
+	for _, p := range peers {
+		devPeers[p.PublicKey.String()] = p
+	}
+	d.peers = devPeers
+}
+
+// MockBackend implements wireguard.Backend for testing. It creates
+// MockDevice handles that record all calls.
+type MockBackend struct {
+	mu          sync.Mutex
+	devices     map[string]*MockDevice
+	CreateCalls []wireguard.DeviceConfig
+	CreateErr   error
+}
+
+// NewMockBackend returns a ready-to-use MockBackend.
+func NewMockBackend() *MockBackend {
+	return &MockBackend{
+		devices: make(map[string]*MockDevice),
+	}
+}
+
+func (b *MockBackend) CreateDevice(
+	cfg wireguard.DeviceConfig,
+) (
+	wireguard.WgDevice,
+	error,
+) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.CreateErr != nil {
+		return nil, b.CreateErr
+	}
+	b.CreateCalls = append(b.CreateCalls, cfg)
+	dev := &MockDevice{
+		peers: make(map[string]wireguard.PeerStatus),
+	}
+	b.devices[cfg.Name] = dev
+	return dev, nil
+}
+
+// Device returns the MockDevice for the given name, or nil.
+func (b *MockBackend) Device(
+	name string,
+) *MockDevice {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.devices[name]
+}
+
+// AppliedOpsFor returns all peer operations applied for a specific device.
+func (b *MockBackend) AppliedOpsFor(
+	name string,
+) []wireguard.PeerOp {
+	b.mu.Lock()
+	dev, ok := b.devices[name]
+	b.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	return dev.AppliedOps()
+}
+
+// LastAppliedOpsFor returns peer operations from the most recent ApplyPeers
+// call for a specific device.
+func (b *MockBackend) LastAppliedOpsFor(
+	name string,
+) []wireguard.PeerOp {
+	b.mu.Lock()
+	dev, ok := b.devices[name]
+	b.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	return dev.LastAppliedOps()
+}
+
+// Reset clears all recorded calls, peer state, and injected errors.
+func (b *MockBackend) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.CreateCalls = nil
+	b.CreateErr = nil
+	b.devices = make(map[string]*MockDevice)
+}
+
+func copyIPNets(
+	ips []net.IPNet,
+) []net.IPNet {
+	if ips == nil {
+		return nil
+	}
+	out := make([]net.IPNet, len(ips))
+	for i, ipNet := range ips {
+		out[i] = net.IPNet{
+			IP:   append(net.IP(nil), ipNet.IP...),
+			Mask: append(net.IPMask(nil), ipNet.Mask...),
+		}
+	}
+	return out
+}
+
+func copyUDPAddr(
+	addr *net.UDPAddr,
+) *net.UDPAddr {
+	if addr == nil {
+		return nil
+	}
+	out := *addr
+	out.IP = append(net.IP(nil), addr.IP...)
+	return &out
 }

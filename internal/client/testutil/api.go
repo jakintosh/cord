@@ -13,6 +13,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
 
@@ -39,7 +40,8 @@ func SetupWithServer(
 	t.Helper()
 
 	db := SetupDB(t)
-	wg := wireguardtest.NewMockWG()
+	backend := wireguardtest.NewMockBackend()
+	mgr := wireguard.NewManagerWithBackend(backend)
 
 	var httpClient *http.Client
 	var server *httptest.Server
@@ -53,7 +55,7 @@ func SetupWithServer(
 
 	svc, err := service.New(service.Options{
 		Store:        db,
-		WG:           wg,
+		WireGuard:    mgr,
 		Clock:        func() time.Time { return FixedTime },
 		Logger:       log.Default(),
 		HTTPClient:   httpClient,

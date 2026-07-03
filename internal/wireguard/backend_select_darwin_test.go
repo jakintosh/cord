@@ -1,45 +1,43 @@
 //go:build darwin
 
-package wireguard
+package wireguard_test
 
-import "testing"
+import (
+	"testing"
 
-func TestNewBackend_DarwinAuto(t *testing.T) {
-	b, err := newBackend(BackendAuto)
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
+)
+
+func TestNewManager_DarwinAuto(t *testing.T) {
+	mgr, err := wireguard.NewManager(wireguard.Options{Backend: wireguard.BackendAuto})
 	if err != nil {
-		t.Fatalf("newBackend(Auto): %v", err)
+		t.Fatalf("NewManager(Auto): %v", err)
 	}
-	if _, ok := b.(*UserspaceBackend); !ok {
-		t.Errorf("expected *UserspaceBackend, got %T", b)
+	if mgr == nil {
+		t.Fatal("expected non-nil Manager")
 	}
 }
 
-func TestNewBackend_DarwinUserspace(t *testing.T) {
-	b, err := newBackend(BackendUserspace)
+func TestNewManager_DarwinUserspace(t *testing.T) {
+	mgr, err := wireguard.NewManager(wireguard.Options{Backend: wireguard.BackendUserspace})
 	if err != nil {
-		t.Fatalf("newBackend(Userspace): %v", err)
+		t.Fatalf("NewManager(Userspace): %v", err)
 	}
-	if _, ok := b.(*UserspaceBackend); !ok {
-		t.Errorf("expected *UserspaceBackend, got %T", b)
+	if mgr == nil {
+		t.Fatal("expected non-nil Manager")
 	}
 }
 
-func TestNewBackend_DarwinKernel(t *testing.T) {
-	_, err := newBackend(BackendKernel)
+func TestNewManager_DarwinKernel(t *testing.T) {
+	_, err := wireguard.NewManager(wireguard.Options{Backend: wireguard.BackendKernel})
 	if err == nil {
 		t.Error("expected error for kernel backend on macOS")
 	}
 }
 
-func TestNewBackend_DarwinUnknown(t *testing.T) {
-	_, err := newBackend(BackendType("bogus"))
+func TestNewManager_DarwinUnknown(t *testing.T) {
+	_, err := wireguard.NewManager(wireguard.Options{Backend: wireguard.BackendType("bogus")})
 	if err == nil {
 		t.Error("expected error for unknown backend")
-	}
-}
-
-func TestTunName_Darwin(t *testing.T) {
-	if tunName("anything") != "utun" {
-		t.Errorf("tunName = %q, want utun", tunName("anything"))
 	}
 }

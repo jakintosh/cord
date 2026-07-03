@@ -6,7 +6,9 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
+	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 //
@@ -111,15 +113,27 @@ func TestAPIShowNetwork_NotFound(
 func TestAPIInstallNetwork_Success(
 	t *testing.T,
 ) {
-	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
+	tempKey, err := wireguard.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate temp key: %v", err)
+	}
+	srvPub, err := wireguard.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate server pub key: %v", err)
+	}
+
+	handler := func(apiAddr string) http.Handler {
+		return newInstallServer(apiAddr, srvPub)
+	}
+	env := testutil.SetupWithServer(t, handler)
 	apiAddr := env.Server.Listener.Addr().String()
 
 	url := "/networks"
 	body := `{
 		"network_name": "mynet",
-		"temp_private_key": "test-temp-key",
+		"temp_private_key": "` + tempKey + `",
 		"temp_cidr": "10.42.0.5/16",
-		"server_pubkey": "srv-pub",
+		"server_pubkey": "` + srvPub + `",
 		"server_endpoint": "1.2.3.4:51820",
 		"temp_api_addr": "` + apiAddr + `"
 	}`
@@ -146,8 +160,8 @@ func TestAPIInstallNetwork_Success(
 	if nw.Name != "mynet" {
 		t.Fatalf("name = %q, want mynet", nw.Name)
 	}
-	if nw.ServerPubkey != "server-pub-key" {
-		t.Fatalf("server_pubkey = %q, want server-pub-key (from redeem result)", nw.ServerPubkey)
+	if nw.ServerPubkey != srvPub {
+		t.Fatalf("server_pubkey = %q, want %q", nw.ServerPubkey, srvPub)
 	}
 	if nw.ServerEndpoint != "1.2.3.4:51820" {
 		t.Fatalf("server_endpoint = %q, want 1.2.3.4:51820", nw.ServerEndpoint)
@@ -400,6 +414,33 @@ func TestAPIDisableNetwork_AlreadyDisabled(
 	if data.Enabled {
 		t.Fatal("expected enabled=false")
 	}
+}
+
+//
+// helpers
+//
+
+func newInstallServer(
+	apiAddr string,
+	serverPubKey string,
+) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
+		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
+			Network: serverapi.NetworkInfoDTO{
+				PublicKey:   serverPubKey,
+				Endpoint:    "1.2.3.4:51820",
+				APIEndpoint: apiAddr,
+			},
+			Peer: serverapi.PeerIdentityDTO{
+				CIDR: "10.42.0.5/16",
+			},
+		})
+	})
+	mux.HandleFunc("POST /confirm", func(w http.ResponseWriter, r *http.Request) {
+		wire.WriteData(w, http.StatusOK, map[string]string{"status": "confirmed"})
+	})
+	return mux
 }
 
 //

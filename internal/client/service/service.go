@@ -17,8 +17,8 @@ type Options struct {
 	// Store is the persistence adapter for client-side network state.
 	Store Store
 
-	// WG is the WireGuard manager for creating network devices.
-	WG wireguard.WG
+	// WireGuard is the WireGuard manager for creating network devices.
+	WireGuard *wireguard.Manager
 
 	// Clock returns the current time. Defaults to time.Now when nil.
 	Clock func() time.Time
@@ -49,7 +49,7 @@ type Options struct {
 // state through the WG abstraction.
 type Service struct {
 	store        Store
-	wg           wireguard.WG
+	wireguard    *wireguard.Manager
 	clock        func() time.Time
 	log          *log.Logger
 	httpClient   *http.Client
@@ -65,7 +65,7 @@ type Service struct {
 // LiveNetwork holds the live resources for one enabled client network:
 // the WireGuard device, the server API client, and sync status.
 type LiveNetwork struct {
-	Device       wireguard.WGDevice
+	Device       *wireguard.Device
 	ApiClient    *serverapi.Client
 	ServerPubkey string
 	Cancel       context.CancelFunc
@@ -97,7 +97,7 @@ func New(
 	if opts.Store == nil {
 		return nil, errors.New("service: Store is required")
 	}
-	if opts.WG == nil {
+	if opts.WireGuard == nil {
 		return nil, errors.New("service: WG is required")
 	}
 	if opts.Clock == nil {
@@ -113,7 +113,7 @@ func New(
 	}
 	return &Service{
 		store:        opts.Store,
-		wg:           opts.WG,
+		wireguard:    opts.WireGuard,
 		clock:        opts.Clock,
 		log:          opts.Logger,
 		httpClient:   opts.HTTPClient,

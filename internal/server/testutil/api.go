@@ -9,16 +9,18 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
 
 var FixedTime = time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
 
 type APIEnv struct {
-	Database  *database.DB
-	Service   *service.Service
-	Router    http.Handler
-	WireGuard *wireguardtest.MockWG
+	Database *database.DB
+	Service  *service.Service
+	Router   http.Handler
+	Manager  *wireguard.Manager
+	Backend  *wireguardtest.MockBackend
 }
 
 func Setup(
@@ -28,13 +30,14 @@ func Setup(
 
 	db := SetupDB(t)
 
-	wg := wireguardtest.NewMockWG()
+	backend := wireguardtest.NewMockBackend()
+	mgr := wireguard.NewManagerWithBackend(backend)
 
 	svcOpts := service.Options{
-		Store:  db,
-		WG:     wg,
-		Clock:  func() time.Time { return FixedTime },
-		Logger: log.Default(),
+		Store:     db,
+		WireGuard: mgr,
+		Clock:     func() time.Time { return FixedTime },
+		Logger:    log.Default(),
 	}
 	svc, err := service.New(svcOpts)
 	if err != nil {
@@ -51,10 +54,11 @@ func Setup(
 	}
 
 	return &APIEnv{
-		Database:  db,
-		Service:   svc,
-		Router:    apiServer.Router(),
-		WireGuard: wg,
+		Database: db,
+		Service:  svc,
+		Router:   apiServer.Router(),
+		Manager:  mgr,
+		Backend:  backend,
 	}
 }
 

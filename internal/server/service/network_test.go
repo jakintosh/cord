@@ -7,6 +7,7 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 func TestCreateNetwork_Success(t *testing.T) {
@@ -439,19 +440,31 @@ func TestStartNetwork_UsesNetworkPrefixInterfaceAddresses(t *testing.T) {
 		t.Fatalf("start network: %v", err)
 	}
 
-	main := env.WireGuard.Devices["testnet"]
-	if main == nil {
+	var mainCfg *wireguard.DeviceConfig
+	for _, c := range env.Backend.CreateCalls {
+		if c.Name == "testnet" {
+			mainCfg = &c
+			break
+		}
+	}
+	if mainCfg == nil {
 		t.Fatal("expected main device")
 	}
-	if main.Address != "10.0.0.1/16" {
-		t.Fatalf("main address = %q, want 10.0.0.1/16", main.Address)
+	if mainCfg.Address.String() != "10.0.0.1/16" {
+		t.Fatalf("main address = %q, want 10.0.0.1/16", mainCfg.Address.String())
 	}
 
-	invite := env.WireGuard.Devices["testnet-i"]
-	if invite == nil {
+	var inviteCfg *wireguard.DeviceConfig
+	for _, c := range env.Backend.CreateCalls {
+		if c.Name == "testnet-i" {
+			inviteCfg = &c
+			break
+		}
+	}
+	if inviteCfg == nil {
 		t.Fatal("expected invite device")
 	}
-	if invite.Address != "10.1.0.1/24" {
-		t.Fatalf("invite address = %q, want 10.1.0.1/24", invite.Address)
+	if inviteCfg.Address.String() != "10.1.0.1/24" {
+		t.Fatalf("invite address = %q, want 10.1.0.1/24", inviteCfg.Address.String())
 	}
 }

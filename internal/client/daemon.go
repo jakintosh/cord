@@ -51,11 +51,6 @@ func Serve(
 	if opts.SocketPath == "" {
 		return fmt.Errorf("client: socket path required")
 	}
-	backend, err := wireguard.ParseBackendType(opts.Backend)
-	if err != nil {
-		return fmt.Errorf("client: %w", err)
-	}
-
 	dbOpts := database.Options{
 		Path: opts.DBPath,
 		WAL:  true,
@@ -66,17 +61,21 @@ func Serve(
 	}
 	defer db.Close()
 
+	backend, err := wireguard.ParseBackendType(opts.Backend)
+	if err != nil {
+		return fmt.Errorf("client: %w", err)
+	}
 	wgOpts := wireguard.Options{
 		Backend: backend,
 	}
-	wg, err := wireguard.New(wgOpts)
+	wg, err := wireguard.NewManager(wgOpts)
 	if err != nil {
 		return fmt.Errorf("client: new wireguard: %w", err)
 	}
 
 	svcOpts := service.Options{
 		Store:        db,
-		WG:           wg,
+		WireGuard:    wg,
 		Clock:        time.Now,
 		Logger:       log.Default(),
 		SyncInterval: opts.SyncInterval,
