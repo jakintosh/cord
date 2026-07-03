@@ -61,7 +61,7 @@ func (p *Plane) start(
 	handler http.Handler,
 ) error {
 	// determine interface address
-	ifaceAddr, err := netaddr.InterfaceAddressFromCidr(p.config.Cidr)
+	ifaceRoute, err := netaddr.InterfaceRouteFromCidr(p.config.Cidr)
 	if err != nil {
 		return fmt.Errorf("parse cidr: %v", err)
 	}
@@ -70,7 +70,7 @@ func (p *Plane) start(
 	p.device, err = wg.CreateDevice(wireguard.DeviceConfig{
 		Name:       p.config.Name,
 		PrivateKey: p.privateKey,
-		Address:    ifaceAddr,
+		Route:      ifaceRoute,
 		ListenPort: p.config.WireguardPort,
 	})
 	if err != nil {
@@ -79,7 +79,7 @@ func (p *Plane) start(
 
 	// start API server if handler is provided
 	if handler != nil {
-		apiEndpoint := netaddr.Endpoint(ifaceAddr.IP, p.config.ApiPort)
+		apiEndpoint := netaddr.Endpoint(ifaceRoute.IP, p.config.ApiPort)
 		p.server = &http.Server{
 			Addr:    apiEndpoint,
 			Handler: handler,

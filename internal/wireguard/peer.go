@@ -50,7 +50,7 @@ func NewPeerConfig(
 
 	var ips []net.IPNet
 	for _, cidr := range allowedIPs {
-		ipNet, err := netaddr.ParseInterface(cidr)
+		ipNet, err := netaddr.ParseRoute(cidr)
 		if err != nil {
 			return PeerConfig{}, fmt.Errorf("allowed-ip %q: %w", cidr, err)
 		}
@@ -191,7 +191,7 @@ func normalizeAllowedIPs(
 	for i, ip := range ips {
 		// Allowed IPs are routing prefixes, so the host bits are
 		// meaningless. Mask them off so that a desired entry carrying
-		// host bits (e.g. from netaddr.ParseInterface) compares equal
+		// host bits (e.g. from netaddr.ParseRoute) compares equal
 		// to the network-form value backends report. Without this,
 		// every reconcile cycle would emit a spurious update.
 		normalized[i] = net.IPNet{

@@ -174,7 +174,7 @@ func TestDevice_TwoDeviceIndependence(t *testing.T) {
 	cfg1 := wireguard.DeviceConfig{
 		Name:       "dev1",
 		PrivateKey: mustGeneratePrivateKey(t),
-		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+		Route:      mustParseCIDR(t, "10.0.0.1/32"),
 		ListenPort: 51820,
 	}
 	d1, err := mgr.CreateDevice(cfg1)
@@ -185,7 +185,7 @@ func TestDevice_TwoDeviceIndependence(t *testing.T) {
 	cfg2 := wireguard.DeviceConfig{
 		Name:       "dev2",
 		PrivateKey: mustGeneratePrivateKey(t),
-		Address:    mustParseCIDR(t, "10.0.1.1/32"),
+		Route:      mustParseCIDR(t, "10.0.1.1/32"),
 		ListenPort: 51821,
 	}
 	d2, err := mgr.CreateDevice(cfg2)

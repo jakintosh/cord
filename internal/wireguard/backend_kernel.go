@@ -27,7 +27,7 @@ func (b *KernelBackend) CreateDevice(
 		return nil, err
 	}
 
-	if err := kernelSyncAddress(link, cfg.Address); err != nil {
+	if err := kernelSyncRoute(link, cfg.Route); err != nil {
 		return nil, err
 	}
 
@@ -171,16 +171,16 @@ func kernelEnsureLink(
 	return wg, nil
 }
 
-func kernelSyncAddress(
+func kernelSyncRoute(
 	link netlink.Link,
-	addr net.IPNet,
+	route net.IPNet,
 ) error {
 	addrs, err := netlink.AddrList(link, netlink.FAMILY_ALL)
 	if err != nil {
 		return fmt.Errorf("wireguard: list addrs: %w", err)
 	}
 
-	desired := &netlink.Addr{IPNet: &addr}
+	desired := &netlink.Addr{IPNet: &route}
 	found := false
 	for _, existing := range addrs {
 		if existing.Equal(*desired) {
@@ -194,7 +194,7 @@ func kernelSyncAddress(
 
 	if !found {
 		if err := netlink.AddrAdd(link, desired); err != nil {
-			return fmt.Errorf("wireguard: add addr %s: %w", addr.String(), err)
+			return fmt.Errorf("wireguard: add addr %s: %w", route.String(), err)
 		}
 	}
 

@@ -115,7 +115,7 @@ func createTestDevice(t *testing.T, name string, backend *wireguardtest.MockBack
 	cfg := wireguard.DeviceConfig{
 		Name:       name,
 		PrivateKey: mustGeneratePrivateKey(t),
-		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+		Route:      mustParseCIDR(t, "10.0.0.1/32"),
 	}
 	dev, err := mgr.CreateDevice(cfg)
 	if err != nil {
@@ -184,7 +184,7 @@ func TestCreateDevice_ValidatesNameLength(t *testing.T) {
 	_, err := mgr.CreateDevice(wireguard.DeviceConfig{
 		Name:       "123456789012345",
 		PrivateKey: key,
-		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+		Route:      mustParseCIDR(t, "10.0.0.1/32"),
 	})
 	if err != nil {
 		t.Errorf("15-byte name should succeed: %v", err)
@@ -193,7 +193,7 @@ func TestCreateDevice_ValidatesNameLength(t *testing.T) {
 	_, err = mgr.CreateDevice(wireguard.DeviceConfig{
 		Name:       "1234567890123456",
 		PrivateKey: key,
-		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+		Route:      mustParseCIDR(t, "10.0.0.1/32"),
 	})
 	if err == nil {
 		t.Error("16-byte name should fail")
@@ -207,7 +207,7 @@ func TestCreateDevice_InvalidPrivateKey(t *testing.T) {
 	_, err := mgr.CreateDevice(wireguard.DeviceConfig{
 		Name:       "test",
 		PrivateKey: "not-a-key",
-		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+		Route:      mustParseCIDR(t, "10.0.0.1/32"),
 	})
 	if err == nil {
 		t.Error("expected error for invalid private key")
@@ -221,7 +221,7 @@ func TestCreateDevice_Valid(t *testing.T) {
 	dev, err := mgr.CreateDevice(wireguard.DeviceConfig{
 		Name:       "test",
 		PrivateKey: mustGeneratePrivateKey(t),
-		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+		Route:      mustParseCIDR(t, "10.0.0.1/32"),
 		ListenPort: 51820,
 	})
 	if err != nil {
@@ -243,7 +243,7 @@ func TestCreateDevice_BackendError(t *testing.T) {
 	_, err := mgr.CreateDevice(wireguard.DeviceConfig{
 		Name:       "test",
 		PrivateKey: mustGeneratePrivateKey(t),
-		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+		Route:      mustParseCIDR(t, "10.0.0.1/32"),
 	})
 	if err == nil {
 		t.Error("expected backend create error")

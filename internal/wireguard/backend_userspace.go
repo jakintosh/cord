@@ -36,7 +36,7 @@ func (b *UserspaceBackend) CreateDevice(
 		return nil, fmt.Errorf("wireguard: get tun name: %w", err)
 	}
 
-	if err := configureTunOS(realName, cfg.Address, mtu); err != nil {
+	if err := configureTunOS(realName, cfg.Route, mtu); err != nil {
 		tunDev.Close()
 		return nil, fmt.Errorf("wireguard: configure tun: %w", err)
 	}

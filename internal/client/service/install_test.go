@@ -271,8 +271,8 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 	if nw.TempPeerPrivKey != "" {
 		t.Errorf("temp_priv_key = %q, want empty after confirm", nw.TempPeerPrivKey)
 	}
-	if nw.TempPeerAssignedCidr != "" {
-		t.Errorf("temp_cidr = %q, want empty after confirm", nw.TempPeerAssignedCidr)
+	if nw.TempPeerAssignedRoute != "" {
+		t.Errorf("temp_cidr = %q, want empty after confirm", nw.TempPeerAssignedRoute)
 	}
 	if nw.InviteServerPubkey != "" {
 		t.Errorf("invite_server_pubkey = %q, want empty after confirm", nw.InviteServerPubkey)

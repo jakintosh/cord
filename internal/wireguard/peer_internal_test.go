@@ -405,7 +405,7 @@ func TestNormalizeAllowedIPs_MasksHostBits(t *testing.T) {
 	// A prefix with host bits set must be reduced to its network form so
 	// that it compares equal to the value backends report. This is the
 	// round-trip fix: NewPeerConfig preserves host bits via
-	// netaddr.ParseInterface, while parseUAPIPeers masks them via
+	// netaddr.ParseRoute, while parseUAPIPeers masks them via
 	// net.ParseCIDR.
 	in := []net.IPNet{mustParseCIDR(t, "10.0.0.1/24")}
 	got := normalizeAllowedIPs(in)
@@ -417,7 +417,7 @@ func TestNormalizeAllowedIPs_MasksHostBits(t *testing.T) {
 func TestPlanPeerReconciliation_HostBitAllowedIPsNoSpuriousUpdate(t *testing.T) {
 	k := mustGenKey(t)
 	// Desired carries host bits, as NewPeerConfig produces via
-	// netaddr.ParseInterface ("10.0.0.1/24" stays "10.0.0.1/24").
+	// netaddr.ParseRoute ("10.0.0.1/24" stays "10.0.0.1/24").
 	hostBit := net.IPNet{IP: net.ParseIP("10.0.0.1"), Mask: net.CIDRMask(24, 32)}
 	desired := []PeerConfig{{
 		PublicKey:      k,

@@ -109,11 +109,11 @@ type Network struct {
 	ServerEndpoint string
 	ServerApiAddr  string
 
-	TempPeerPrivKey      string
-	TempPeerAssignedCidr string
-	InviteServerPubkey   string
-	InviteServerEndpoint string
-	InviteServerAddr     string
+	TempPeerPrivKey       string
+	TempPeerAssignedRoute string
+	InviteServerPubkey    string
+	InviteServerEndpoint  string
+	InviteServerAddr      string
 }
 
 // NetworkStatus carries the runtime state of a single client network
@@ -191,19 +191,19 @@ func (s *Service) BeginInstall(
 	}
 
 	network := &Network{
-		Name:                 invite.NetworkName,
-		State:                StateInvited,
-		PrivateKey:           permPrivKey,
-		PublicKey:            permPubKey,
-		MainInterfaceName:    mainIfaceName,
-		InviteInterfaceName:  inviteIfaceName,
-		TempPeerPrivKey:      invite.TempPeerPrivKey,
-		TempPeerAssignedCidr: invite.TempPeerAssignedCidr,
-		InviteServerPubkey:   invite.InviteServerPubkey,
-		InviteServerEndpoint: invite.InviteServerEndpoint,
-		InviteServerAddr:     invite.InviteServerAddr,
-		Enabled:              false,
-		CreatedAt:            s.clock(),
+		Name:                  invite.NetworkName,
+		State:                 StateInvited,
+		PrivateKey:            permPrivKey,
+		PublicKey:             permPubKey,
+		MainInterfaceName:     mainIfaceName,
+		InviteInterfaceName:   inviteIfaceName,
+		TempPeerPrivKey:       invite.TempPeerPrivKey,
+		TempPeerAssignedRoute: invite.TempPeerAssignedCidr,
+		InviteServerPubkey:    invite.InviteServerPubkey,
+		InviteServerEndpoint:  invite.InviteServerEndpoint,
+		InviteServerAddr:      invite.InviteServerAddr,
+		Enabled:               false,
+		CreatedAt:             s.clock(),
 	}
 	if err := s.store.InsertNetwork(network); err != nil {
 		return nil, err
@@ -233,15 +233,18 @@ func (s *Service) Redeem(
 			ErrInvalidInput, name, network.State)
 	}
 
-	inviteIfaceAddr, err := netaddr.ParseInterface(network.TempPeerAssignedCidr)
+	// TempPeerAssignedRoute is the peer's invite-address plus the network
+	// prefix. For the peer wg device, we do not want the full network to be
+	// routed, only the peer's terminal "host" route.
+	inviteRoute, err := netaddr.HostRouteFromCidr(network.TempPeerAssignedRoute)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid temp CIDR %q", ErrInvalidInput, network.TempPeerAssignedCidr)
+		return nil, fmt.Errorf("%w: invalid temp CIDR %q", ErrInvalidInput, network.TempPeerAssignedRoute)
 	}
 
 	inviteDevCfg := wireguard.DeviceConfig{
 		Name:       network.InviteInterfaceName,
 		PrivateKey: network.TempPeerPrivKey,
-		Address:    inviteIfaceAddr,
+		Route:      inviteRoute,
 	}
 	inviteDev, err := s.wireguard.CreateDevice(inviteDevCfg)
 	if err != nil {
@@ -258,7 +261,7 @@ func (s *Service) Redeem(
 	// TempPeerAssignedCidr carries the peer's invite address and the invite
 	// network prefix. Extract the network so the invite server peer routes
 	// the whole invite overlay.
-	inviteServerRoute, err := networkRoute(network.TempPeerAssignedCidr)
+	inviteServerRoute, err := networkRoute(network.TempPeerAssignedRoute)
 	if err != nil {
 		return nil, fmt.Errorf("invite server route: %w", err)
 	}
@@ -315,7 +318,7 @@ func (s *Service) Confirm(
 			ErrInvalidInput, name, network.State)
 	}
 
-	mainIfaceAddr, err := netaddr.ParseInterface(network.AssignedCidr)
+	mainRoute, err := netaddr.ParseRoute(network.AssignedCidr)
 	if err != nil {
 		return fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, network.AssignedCidr)
 	}
@@ -323,7 +326,7 @@ func (s *Service) Confirm(
 	mainDev, err := s.wireguard.CreateDevice(wireguard.DeviceConfig{
 		Name:       network.MainInterfaceName,
 		PrivateKey: network.PrivateKey,
-		Address:    mainIfaceAddr,
+		Route:      mainRoute,
 	})
 	if err != nil {
 		return fmt.Errorf("create main device: %w", err)
@@ -462,7 +465,7 @@ func (s *Service) EnableNetwork(
 			ErrInvalidInput, networkName, network.State)
 	}
 
-	ifaceAddr, err := netaddr.ParseInterface(network.AssignedCidr)
+	networkRoute, err := netaddr.ParseRoute(network.AssignedCidr)
 	if err != nil {
 		return fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, network.AssignedCidr)
 	}
@@ -470,7 +473,7 @@ func (s *Service) EnableNetwork(
 	device, err := s.wireguard.CreateDevice(wireguard.DeviceConfig{
 		Name:       network.MainInterfaceName,
 		PrivateKey: network.PrivateKey,
-		Address:    ifaceAddr,
+		Route:      networkRoute,
 	})
 	if err != nil {
 		return err

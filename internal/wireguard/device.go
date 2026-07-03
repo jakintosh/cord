@@ -14,7 +14,7 @@ import (
 type DeviceConfig struct {
 	Name       string
 	PrivateKey string
-	Address    net.IPNet
+	Route      net.IPNet
 	ListenPort uint16
 	MTU        int // 0 uses the default
 }
