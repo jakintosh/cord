@@ -263,7 +263,8 @@ func parseInviteFile(
 		NetworkName:          payload.Network.Name,
 		InviteServerPubkey:   payload.Network.PublicKey,
 		InviteServerEndpoint: payload.Network.Endpoint,
-		InviteServerAddr:     payload.Network.APIEndpoint,
+		InviteServerRoute:    payload.Network.ServerRoute,
+		InviteServerPort:     payload.Network.APIPort,
 		TempPeerAssignedCidr: payload.Peer.CIDR,
 		TempPeerPrivKey:      payload.Peer.PrivateKey,
 	}, nil

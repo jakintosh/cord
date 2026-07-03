@@ -23,12 +23,14 @@ CREATE TABLE network (
     assigned_cidr           TEXT NOT NULL DEFAULT '',
     server_pubkey           TEXT NOT NULL DEFAULT '',
     server_endpoint         TEXT NOT NULL DEFAULT '',
-    server_api_addr         TEXT NOT NULL DEFAULT '',
+    server_route            TEXT NOT NULL DEFAULT '',
+    server_api_port         INTEGER NOT NULL DEFAULT 0,
     temp_priv_key           TEXT NOT NULL DEFAULT '',
     temp_cidr               TEXT NOT NULL DEFAULT '',
     invite_server_pubkey    TEXT NOT NULL DEFAULT '',
     invite_server_endpoint  TEXT NOT NULL DEFAULT '',
-    temp_api_addr           TEXT NOT NULL DEFAULT '',
+    invite_server_route     TEXT NOT NULL DEFAULT '',
+    invite_server_port      INTEGER NOT NULL DEFAULT 0,
     enabled                 INTEGER NOT NULL DEFAULT 0,
     created_at_unix         INTEGER NOT NULL
 );

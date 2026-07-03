@@ -24,12 +24,14 @@ func (db *DB) GetNetwork(
 			assigned_cidr,
 			server_pubkey,
 			server_endpoint,
-			server_api_addr,
+			server_route,
+			server_api_port,
 			temp_priv_key,
 			temp_cidr,
 			invite_server_pubkey,
 			invite_server_endpoint,
-			temp_api_addr,
+			invite_server_route,
+			invite_server_port,
 			enabled,
 			created_at_unix
 		FROM network
@@ -50,12 +52,14 @@ func (db *DB) GetNetwork(
 		&net.AssignedCidr,
 		&net.ServerPubkey,
 		&net.ServerEndpoint,
-		&net.ServerApiAddr,
+		&net.ServerRoute,
+		&net.ServerAPIPort,
 		&net.TempPeerPrivKey,
 		&net.TempPeerAssignedRoute,
 		&net.InviteServerPubkey,
 		&net.InviteServerEndpoint,
-		&net.InviteServerAddr,
+		&net.InviteServerRoute,
+		&net.InviteServerPort,
 		&enabledInt,
 		&createdUnix,
 	); err != nil {
@@ -110,16 +114,18 @@ func (db *DB) InsertNetwork(
 			assigned_cidr,
 			server_pubkey,
 			server_endpoint,
-			server_api_addr,
+			server_route,
+			server_api_port,
 			temp_priv_key,
 			temp_cidr,
 			invite_server_pubkey,
 			invite_server_endpoint,
-			temp_api_addr,
+			invite_server_route,
+			invite_server_port,
 			enabled,
 			created_at_unix
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)`,
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)`,
 		network.Name,
 		network.State,
 		network.PrivateKey,
@@ -129,12 +135,14 @@ func (db *DB) InsertNetwork(
 		network.AssignedCidr,
 		network.ServerPubkey,
 		network.ServerEndpoint,
-		network.ServerApiAddr,
+		network.ServerRoute,
+		network.ServerAPIPort,
 		network.TempPeerPrivKey,
 		network.TempPeerAssignedRoute,
 		network.InviteServerPubkey,
 		network.InviteServerEndpoint,
-		network.InviteServerAddr,
+		network.InviteServerRoute,
+		network.InviteServerPort,
 		boolToInt(network.Enabled),
 		network.CreatedAt.Unix(),
 	)
@@ -146,7 +154,8 @@ func (db *DB) SetNetworkRedeemed(
 	assignedCidr string,
 	serverPubkey string,
 	serverEndpoint string,
-	serverApiAddr string,
+	serverRoute string,
+	serverAPIPort uint16,
 ) error {
 	result, err := db.Conn.Exec(`
 		UPDATE network
@@ -155,13 +164,15 @@ func (db *DB) SetNetworkRedeemed(
 			assigned_cidr = ?2,
 			server_pubkey = ?3,
 			server_endpoint = ?4,
-			server_api_addr = ?5
+			server_route = ?5,
+			server_api_port = ?6
 		WHERE name = ?1`,
 		name,
 		assignedCidr,
 		serverPubkey,
 		serverEndpoint,
-		serverApiAddr,
+		serverRoute,
+		serverAPIPort,
 	)
 	if err != nil {
 		return CheckSqliteErr("set network redeemed", err)
@@ -187,7 +198,8 @@ func (db *DB) SetNetworkConfirmed(
 			temp_cidr = '',
 			invite_server_pubkey = '',
 			invite_server_endpoint = '',
-			temp_api_addr = ''
+			invite_server_route = '',
+			invite_server_port = 0
 		WHERE name = ?1`,
 		name,
 	)

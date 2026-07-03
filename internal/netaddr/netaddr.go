@@ -9,6 +9,7 @@
 package netaddr
 
 import (
+	"fmt"
 	"net"
 	"strconv"
 )
@@ -168,6 +169,23 @@ func Endpoint(
 ) string {
 	ip = Normalize(ip)
 	return net.JoinHostPort(ip.String(), strconv.FormatUint(uint64(port), 10))
+}
+
+// EndpointFromCIDR parses the IP from a CIDR string (e.g.
+// "10.42.0.1/32") and joins it with port to form a "host:port"
+// endpoint string.
+func EndpointFromCIDR(
+	cidr string,
+	port uint16,
+) (
+	string,
+	error,
+) {
+	ip, _, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return "", fmt.Errorf("parse %q: %w", cidr, err)
+	}
+	return Endpoint(ip, port), nil
 }
 
 // Overlaps reports whether a and b share any IP address.

@@ -74,8 +74,8 @@ func TestCreateRegistration_AutoAssignsIP(t *testing.T) {
 		t.Fatalf("create registration: %v", err)
 	}
 
-	if inv.Peer.CIDR != "10.1.0.2/24" {
-		t.Errorf("cidr = %q, want 10.1.0.2/24", inv.Peer.CIDR)
+	if inv.Peer.CIDR != "10.1.0.2/32" {
+		t.Errorf("cidr = %q, want 10.1.0.2/32", inv.Peer.CIDR)
 	}
 }
 
@@ -153,8 +153,8 @@ func TestRedeemRegistration_Success(t *testing.T) {
 	if result.Network.Name != "testnet" {
 		t.Errorf("network_name = %q, want testnet", result.Network.Name)
 	}
-	if result.Peer.CIDR != "10.0.0.5/16" {
-		t.Errorf("cidr = %q, want 10.0.0.5/16", result.Peer.CIDR)
+	if result.Peer.CIDR != "10.0.0.5/32" {
+		t.Errorf("cidr = %q, want 10.0.0.5/32", result.Peer.CIDR)
 	}
 	if result.Network.PublicKey == "" {
 		t.Error("server public_key should not be empty")
@@ -390,10 +390,11 @@ func TestParseInvitation_Success(t *testing.T) {
 			"name": "testnet",
 			"public_key": "server-key",
 			"endpoint": "1.2.3.4:51820",
-			"api_endpoint": "10.0.0.1:8080"
+			"server_route": "10.0.0.1/32",
+			"api_port": 8080
 		},
 		"peer": {
-			"cidr": "10.1.0.2/24",
+			"cidr": "10.1.0.2/32",
 			"private_key": "temp-key"
 		}
 	}`
@@ -409,8 +410,8 @@ func TestParseInvitation_Success(t *testing.T) {
 	if inv.Peer.PrivateKey != "temp-key" {
 		t.Errorf("private_key = %q, want temp-key", inv.Peer.PrivateKey)
 	}
-	if inv.Peer.CIDR != "10.1.0.2/24" {
-		t.Errorf("cidr = %q, want 10.1.0.2/24", inv.Peer.CIDR)
+	if inv.Peer.CIDR != "10.1.0.2/32" {
+		t.Errorf("cidr = %q, want 10.1.0.2/32", inv.Peer.CIDR)
 	}
 	if inv.Network.PublicKey != "server-key" {
 		t.Errorf("server public_key = %q, want server-key", inv.Network.PublicKey)
@@ -418,8 +419,11 @@ func TestParseInvitation_Success(t *testing.T) {
 	if inv.Network.Endpoint != "1.2.3.4:51820" {
 		t.Errorf("endpoint = %q, want 1.2.3.4:51820", inv.Network.Endpoint)
 	}
-	if inv.Network.APIEndpoint != "10.0.0.1:8080" {
-		t.Errorf("api_endpoint = %q, want 10.0.0.1:8080", inv.Network.APIEndpoint)
+	if inv.Network.ServerRoute != "10.0.0.1/32" {
+		t.Errorf("server_route = %q, want 10.0.0.1/32", inv.Network.ServerRoute)
+	}
+	if inv.Network.APIPort != 8080 {
+		t.Errorf("api_port = %d, want 8080", inv.Network.APIPort)
 	}
 }
 
@@ -438,10 +442,11 @@ func TestInvitation_Write(t *testing.T) {
 			Name:        "mynet",
 			PublicKey:   "pub",
 			Endpoint:    "1.2.3.4:51820",
-			APIEndpoint: "10.0.0.1:8080",
+			ServerRoute: "10.0.0.1/32",
+			APIPort:     8080,
 		},
 		Peer: service.PeerIdentity{
-			CIDR:       "10.0.0.5/24",
+			CIDR:       "10.0.0.5/32",
 			PrivateKey: "priv",
 		},
 	}

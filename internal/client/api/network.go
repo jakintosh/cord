@@ -25,7 +25,8 @@ type InstallNetworkRequest struct {
 	TempPeerAssignedCidr string `json:"temp_cidr"`
 	InviteServerPubkey   string `json:"server_pubkey"`
 	InviteServerEndpoint string `json:"server_endpoint"`
-	InviteServerAddr     string `json:"temp_api_addr"`
+	InviteServerRoute    string `json:"server_route"`
+	InviteServerPort     uint16 `json:"server_port"`
 }
 
 func installRequestToInvite(req InstallNetworkRequest) service.Invite {
@@ -35,7 +36,8 @@ func installRequestToInvite(req InstallNetworkRequest) service.Invite {
 		TempPeerAssignedCidr: req.TempPeerAssignedCidr,
 		InviteServerPubkey:   req.InviteServerPubkey,
 		InviteServerEndpoint: req.InviteServerEndpoint,
-		InviteServerAddr:     req.InviteServerAddr,
+		InviteServerRoute:    req.InviteServerRoute,
+		InviteServerPort:     req.InviteServerPort,
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
@@ -51,8 +50,9 @@ type Invite struct {
 	TempPeerPrivKey      string
 	TempPeerAssignedCidr string
 	InviteServerPubkey   string
-	InviteServerAddr     string
 	InviteServerEndpoint string
+	InviteServerRoute    string
+	InviteServerPort     uint16
 }
 
 func (inv Invite) Validate() error {
@@ -68,10 +68,13 @@ func (inv Invite) Validate() error {
 	if inv.InviteServerPubkey == "" {
 		return ErrInvalidInput
 	}
-	if inv.InviteServerAddr == "" {
+	if inv.InviteServerEndpoint == "" {
 		return ErrInvalidInput
 	}
-	if inv.InviteServerEndpoint == "" {
+	if inv.InviteServerRoute == "" {
+		return ErrInvalidInput
+	}
+	if inv.InviteServerPort == 0 {
 		return ErrInvalidInput
 	}
 	return nil
@@ -88,7 +91,7 @@ func (inv Invite) Validate() error {
 //   - Permanent identity (PrivateKey, PublicKey) — set at StateInvited,
 //     never changes.
 //   - Main network params (AssignedCidr, ServerPubkey, ServerEndpoint,
-//     ServerApiAddr) — set at StateRedeemed, never changes after.
+//     ServerRoute, ServerAPIPort) — set at StateRedeemed, never changes after.
 //   - Install scratch (TempPrivKey, TempCidr, InviteServerPubkey,
 //     InviteServerEndpoint, TempApiAddr) — set at StateInvited, cleared
 //     at StateConfirmed.
@@ -107,13 +110,15 @@ type Network struct {
 	AssignedCidr   string
 	ServerPubkey   string
 	ServerEndpoint string
-	ServerApiAddr  string
+	ServerRoute    string
+	ServerAPIPort  uint16
 
 	TempPeerPrivKey       string
 	TempPeerAssignedRoute string
 	InviteServerPubkey    string
 	InviteServerEndpoint  string
-	InviteServerAddr      string
+	InviteServerRoute     string
+	InviteServerPort      uint16
 }
 
 // NetworkStatus carries the runtime state of a single client network
@@ -201,7 +206,8 @@ func (s *Service) BeginInstall(
 		TempPeerAssignedRoute: invite.TempPeerAssignedCidr,
 		InviteServerPubkey:    invite.InviteServerPubkey,
 		InviteServerEndpoint:  invite.InviteServerEndpoint,
-		InviteServerAddr:      invite.InviteServerAddr,
+		InviteServerRoute:     invite.InviteServerRoute,
+		InviteServerPort:      invite.InviteServerPort,
 		Enabled:               false,
 		CreatedAt:             s.clock(),
 	}
@@ -236,7 +242,7 @@ func (s *Service) Redeem(
 	// TempPeerAssignedRoute is the peer's invite-address plus the network
 	// prefix. For the peer wg device, we do not want the full network to be
 	// routed, only the peer's terminal "host" route.
-	inviteRoute, err := netaddr.HostRouteFromCidr(network.TempPeerAssignedRoute)
+	tempPeerRoute, err := netaddr.HostRouteFromCidr(network.TempPeerAssignedRoute)
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid temp CIDR %q", ErrInvalidInput, network.TempPeerAssignedRoute)
 	}
@@ -244,7 +250,7 @@ func (s *Service) Redeem(
 	inviteDevCfg := wireguard.DeviceConfig{
 		Name:       network.InviteInterfaceName,
 		PrivateKey: network.TempPeerPrivKey,
-		Route:      inviteRoute,
+		Route:      tempPeerRoute,
 	}
 	inviteDev, err := s.wireguard.CreateDevice(inviteDevCfg)
 	if err != nil {
@@ -258,16 +264,10 @@ func (s *Service) Redeem(
 	}
 	defer cleanup()
 
-	// TempPeerAssignedCidr carries the peer's invite address and the invite
-	// network prefix. Extract the network so the invite server peer routes
-	// the whole invite overlay.
-	inviteServerRoute, err := networkRoute(network.TempPeerAssignedRoute)
-	if err != nil {
-		return nil, fmt.Errorf("invite server route: %w", err)
-	}
+	// add the server peer
 	inviteServerPeer, err := wireguard.NewPeerConfig(
 		network.InviteServerPubkey,
-		[]string{inviteServerRoute},
+		[]string{network.InviteServerRoute},
 		network.InviteServerEndpoint,
 		0,
 		wireguard.EndpointFixed,
@@ -279,7 +279,11 @@ func (s *Service) Redeem(
 		return nil, fmt.Errorf("apply invite peers: %w", err)
 	}
 
-	inviteAPI := serverapi.NewClient("", network.InviteServerAddr, s.httpClient)
+	inviteAPIAddr, err := netaddr.EndpointFromCIDR(network.InviteServerRoute, network.InviteServerPort)
+	if err != nil {
+		return nil, fmt.Errorf("invite server addr: %w", err)
+	}
+	inviteAPI := serverapi.NewClient("", inviteAPIAddr, s.httpClient)
 	result, err := inviteAPI.RedeemInvitation(serverapi.RedeemInvitationRequest{
 		PermPubKey: network.PublicKey,
 	})
@@ -294,7 +298,8 @@ func (s *Service) Redeem(
 		result.Peer.CIDR,
 		result.Network.PublicKey,
 		result.Network.Endpoint,
-		result.Network.APIEndpoint,
+		result.Network.ServerRoute,
+		result.Network.APIPort,
 	); err != nil {
 		return nil, err
 	}
@@ -339,16 +344,11 @@ func (s *Service) Confirm(
 	}
 	defer cleanup()
 
-	// AssignedCidr is the peer's own address (e.g. 10.42.0.5/16);
-	// the prefix encodes the overlay network size. Extract the
-	// network portion so the server peer routes the whole overlay.
-	serverRoute, err := networkRoute(network.AssignedCidr)
-	if err != nil {
-		return fmt.Errorf("main server route: %w", err)
-	}
+	// AssignedCidr is the peer's own address (e.g. 10.42.0.5/32);
+	// the server peer's AllowedIPs is the explicit server route.
 	serverPeer, err := wireguard.NewPeerConfig(
 		network.ServerPubkey,
-		[]string{serverRoute},
+		[]string{network.ServerRoute},
 		network.ServerEndpoint,
 		0,
 		wireguard.EndpointFixed,
@@ -360,7 +360,11 @@ func (s *Service) Confirm(
 		return fmt.Errorf("apply main peers: %w", err)
 	}
 
-	mainAPI := serverapi.NewClient(network.ServerApiAddr, "", s.httpClient)
+	mainAPIAddr, err := netaddr.EndpointFromCIDR(network.ServerRoute, network.ServerAPIPort)
+	if err != nil {
+		return fmt.Errorf("server api addr: %w", err)
+	}
+	mainAPI := serverapi.NewClient(mainAPIAddr, "", s.httpClient)
 	if err := mainAPI.ConfirmPeer(); err != nil {
 		return fmt.Errorf("confirm peer: %w", err)
 	}
@@ -497,7 +501,11 @@ func (s *Service) EnableNetwork(
 		return err
 	}
 
-	s.startLive(network.Name, liveNet, network.ServerApiAddr)
+	apiAddr, err := netaddr.EndpointFromCIDR(network.ServerRoute, network.ServerAPIPort)
+	if err != nil {
+		return fmt.Errorf("server api addr: %w", err)
+	}
+	s.startLive(network.Name, liveNet, apiAddr)
 
 	if err := s.store.SetNetworkEnabled(networkName, true); err != nil {
 		return err
@@ -963,15 +971,10 @@ func (s *Service) reconcilePeers(
 		return err
 	}
 
-	serverRoute, err := networkRoute(network.AssignedCidr)
-	if err != nil {
-		return fmt.Errorf("server route: %w", err)
-	}
-
 	wgPeers := make([]wireguard.PeerConfig, 0, len(peers)+1)
 	serverPeer, err := wireguard.NewPeerConfig(
 		network.ServerPubkey,
-		[]string{serverRoute},
+		[]string{network.ServerRoute},
 		network.ServerEndpoint,
 		0,
 		wireguard.EndpointFixed,
@@ -1000,17 +1003,4 @@ func (s *Service) reconcilePeers(
 	}
 
 	return device.SetPeers(wgPeers...)
-}
-
-func networkRoute(
-	cidr string,
-) (
-	string,
-	error,
-) {
-	_, network, err := net.ParseCIDR(cidr)
-	if err != nil {
-		return "", fmt.Errorf("parse %q: %w", cidr, err)
-	}
-	return network.String(), nil
 }

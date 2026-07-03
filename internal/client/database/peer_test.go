@@ -19,7 +19,8 @@ func seedNetwork(t *testing.T, db *database.DB) {
 		AssignedCidr:   "10.42.0.5/16",
 		ServerPubkey:   "server-pub-key",
 		ServerEndpoint: "1.2.3.4:51820",
-		ServerApiAddr:  "10.42.0.1:8443",
+		ServerRoute:    "10.42.0.1/32",
+		ServerAPIPort:  8443,
 		CreatedAt:      now,
 	}); err != nil {
 		t.Fatalf("seed network: %v", err)
@@ -159,7 +160,8 @@ func TestSetPeers_NetworkIsolation(t *testing.T) {
 		AssignedCidr:   "10.43.0.5/16",
 		ServerPubkey:   "srv-key-2",
 		ServerEndpoint: "5.6.7.8:51820",
-		ServerApiAddr:  "10.43.0.1:8443",
+		ServerRoute:    "10.43.0.1/32",
+		ServerAPIPort:  8443,
 		CreatedAt:      now,
 	}); err != nil {
 		t.Fatalf("insert other network: %v", err)

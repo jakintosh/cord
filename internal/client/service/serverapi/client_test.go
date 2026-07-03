@@ -144,10 +144,11 @@ func TestRedeemInvite_Success(t *testing.T) {
 			Network: NetworkInfoDTO{
 				PublicKey:   "server-key",
 				Endpoint:    "1.2.3.4:51820",
-				APIEndpoint: "10.42.0.1:8443",
+				ServerRoute: "10.42.0.1/32",
+				APIPort:     8443,
 			},
 			Peer: PeerIdentityDTO{
-				CIDR: "10.42.0.5/16",
+				CIDR: "10.42.0.5/32",
 			},
 		})
 	})
@@ -162,14 +163,14 @@ func TestRedeemInvite_Success(t *testing.T) {
 	if result.Network.PublicKey != "server-key" {
 		t.Errorf("Network.PublicKey = %q, want server-key", result.Network.PublicKey)
 	}
-	if result.Network.APIEndpoint != "10.42.0.1:8443" {
-		t.Errorf("Network.APIEndpoint = %q, want 10.42.0.1:8443", result.Network.APIEndpoint)
+	if result.Network.APIPort != 8443 {
+		t.Errorf("Network.APIPort = %d, want 8443", result.Network.APIPort)
 	}
 	if result.Network.Endpoint != "1.2.3.4:51820" {
 		t.Errorf("Network.Endpoint = %q, want 1.2.3.4:51820", result.Network.Endpoint)
 	}
-	if result.Peer.CIDR != "10.42.0.5/16" {
-		t.Errorf("Peer.CIDR = %q, want 10.42.0.5/16", result.Peer.CIDR)
+	if result.Peer.CIDR != "10.42.0.5/32" {
+		t.Errorf("Peer.CIDR = %q, want 10.42.0.5/32", result.Peer.CIDR)
 	}
 }
 

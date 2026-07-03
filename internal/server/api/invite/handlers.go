@@ -35,7 +35,8 @@ func (a *API) handleRedeemInvite(
 			Name:        result.Network.Name,
 			PublicKey:   result.Network.PublicKey,
 			Endpoint:    result.Network.Endpoint,
-			APIEndpoint: result.Network.APIEndpoint,
+			ServerRoute: result.Network.ServerRoute,
+			APIPort:     result.Network.APIPort,
 		},
 		Peer: PeerIdentityDTO{
 			CIDR: result.Peer.CIDR,

@@ -3,7 +3,9 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
@@ -33,7 +35,8 @@ func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
 		TempPeerAssignedCidr: "10.43.0.2/24",
 		InviteServerPubkey:   "srv-pub",
 		InviteServerEndpoint: "1.2.3.4:51821",
-		InviteServerAddr:     "10.43.0.1:8443",
+		InviteServerRoute:    "10.43.0.1/32",
+		InviteServerPort:     8443,
 	})
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
@@ -64,7 +67,8 @@ func TestBeginInstall_Idempotent(t *testing.T) {
 		TempPeerAssignedCidr: "10.43.0.2/24",
 		InviteServerPubkey:   "srv-pub",
 		InviteServerEndpoint: "1.2.3.4:51821",
-		InviteServerAddr:     "10.43.0.1:8443",
+		InviteServerRoute:    "10.43.0.1/32",
+		InviteServerPort:     8443,
 	}
 
 	nw1, err := env.Service.BeginInstall(invite)
@@ -97,7 +101,8 @@ func TestBeginInstall_ExistingConfirmedNetwork(t *testing.T) {
 		TempPeerAssignedCidr: "10.43.0.2/24",
 		InviteServerPubkey:   "srv-pub",
 		InviteServerEndpoint: "1.2.3.4:51821",
-		InviteServerAddr:     "10.43.0.1:8443",
+		InviteServerRoute:    "10.43.0.1/32",
+		InviteServerPort:     8443,
 	})
 	if err == nil {
 		t.Fatal("expected error for existing network")
@@ -118,14 +123,17 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 			return
 		}
 		redeemPubKey = req.PermPubKey
+		srvHost, srvPortStr, _ := net.SplitHostPort(r.Host)
+		srvPort, _ := strconv.Atoi(srvPortStr)
 		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
 			Network: serverapi.NetworkInfoDTO{
 				PublicKey:   srvPubKey,
 				Endpoint:    "1.2.3.4:51820",
-				APIEndpoint: r.Host,
+				ServerRoute: srvHost + "/32",
+				APIPort:     uint16(srvPort),
 			},
 			Peer: serverapi.PeerIdentityDTO{
-				CIDR: "10.42.0.5/16",
+				CIDR: "10.42.0.5/32",
 			},
 		})
 	})
@@ -135,13 +143,17 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 
 	env := testutil.SetupServiceWithServer(t, mux)
 
+	srvHost, srvPortStr, _ := net.SplitHostPort(env.Server.Listener.Addr().String())
+	srvPort, _ := strconv.Atoi(srvPortStr)
+
 	invite := service.Invite{
 		NetworkName:          "resume-test",
 		TempPeerPrivKey:      mustGenKey(t),
 		TempPeerAssignedCidr: "10.43.0.2/24",
 		InviteServerPubkey:   srvPubKey,
 		InviteServerEndpoint: "5.6.7.8:51821",
-		InviteServerAddr:     env.Server.Listener.Addr().String(),
+		InviteServerRoute:    srvHost + "/32",
+		InviteServerPort:     uint16(srvPort),
 	}
 
 	nw1, err := env.Service.BeginInstall(invite)
@@ -176,14 +188,17 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 	confirmCalled := false
 	srvPubKey := mustGenKey(t)
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
+		srvHost, srvPortStr, _ := net.SplitHostPort(r.Host)
+		srvPort, _ := strconv.Atoi(srvPortStr)
 		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
 			Network: serverapi.NetworkInfoDTO{
 				PublicKey:   srvPubKey,
 				Endpoint:    "1.2.3.4:51820",
-				APIEndpoint: r.Host,
+				ServerRoute: srvHost + "/32",
+				APIPort:     uint16(srvPort),
 			},
 			Peer: serverapi.PeerIdentityDTO{
-				CIDR: "10.42.0.5/16",
+				CIDR: "10.42.0.5/32",
 			},
 		})
 	})
@@ -194,13 +209,17 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 
 	env := testutil.SetupServiceWithServer(t, mux)
 
+	srvHost, srvPortStr, _ := net.SplitHostPort(env.Server.Listener.Addr().String())
+	srvPort, _ := strconv.Atoi(srvPortStr)
+
 	invite := service.Invite{
 		NetworkName:          "res-redeemed",
 		TempPeerPrivKey:      mustGenKey(t),
 		TempPeerAssignedCidr: "10.43.0.2/24",
 		InviteServerPubkey:   srvPubKey,
 		InviteServerEndpoint: "5.6.7.8:51821",
-		InviteServerAddr:     env.Server.Listener.Addr().String(),
+		InviteServerRoute:    srvHost + "/32",
+		InviteServerPort:     uint16(srvPort),
 	}
 
 	nw1, err := env.Service.BeginInstall(invite)
@@ -234,14 +253,17 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 	mux := http.NewServeMux()
 	srvPubKey := mustGenKey(t)
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
+		srvHost, srvPortStr, _ := net.SplitHostPort(r.Host)
+		srvPort, _ := strconv.Atoi(srvPortStr)
 		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
 			Network: serverapi.NetworkInfoDTO{
 				PublicKey:   srvPubKey,
 				Endpoint:    "1.2.3.4:51820",
-				APIEndpoint: r.Host,
+				ServerRoute: srvHost + "/32",
+				APIPort:     uint16(srvPort),
 			},
 			Peer: serverapi.PeerIdentityDTO{
-				CIDR: "10.42.0.5/16",
+				CIDR: "10.42.0.5/32",
 			},
 		})
 	})
@@ -251,13 +273,17 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 
 	env := testutil.SetupServiceWithServer(t, mux)
 
+	srvHost, srvPortStr, _ := net.SplitHostPort(env.Server.Listener.Addr().String())
+	srvPort, _ := strconv.Atoi(srvPortStr)
+
 	invite := service.Invite{
 		NetworkName:          "clear-test",
 		TempPeerPrivKey:      mustGenKey(t),
 		TempPeerAssignedCidr: "10.43.0.2/24",
 		InviteServerPubkey:   srvPubKey,
 		InviteServerEndpoint: "5.6.7.8:51821",
-		InviteServerAddr:     env.Server.Listener.Addr().String(),
+		InviteServerRoute:    srvHost + "/32",
+		InviteServerPort:     uint16(srvPort),
 	}
 
 	nw, err := env.Service.Install(invite)
@@ -280,8 +306,8 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 	if nw.InviteServerEndpoint != "" {
 		t.Errorf("invite_server_endpoint = %q, want empty after confirm", nw.InviteServerEndpoint)
 	}
-	if nw.InviteServerAddr != "" {
-		t.Errorf("temp_api_addr = %q, want empty after confirm", nw.InviteServerAddr)
+	if nw.InviteServerRoute != "" {
+		t.Errorf("invite_server_route = %q, want empty after confirm", nw.InviteServerRoute)
 	}
 	if nw.AssignedCidr == "" {
 		t.Error("assigned_cidr should not be empty after confirm")
@@ -302,7 +328,8 @@ func TestEnableNetwork_RefusesUnconfirmed(t *testing.T) {
 		TempPeerAssignedCidr: "10.43.0.2/24",
 		InviteServerPubkey:   "srv-pub",
 		InviteServerEndpoint: "1.2.3.4:51821",
-		InviteServerAddr:     "10.43.0.1:8443",
+		InviteServerRoute:    "10.43.0.1/32",
+		InviteServerPort:     8443,
 	})
 	if err != nil {
 		t.Fatalf("begin install: %v", err)

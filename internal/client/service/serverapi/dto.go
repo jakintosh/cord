@@ -49,7 +49,8 @@ type InvitationDTO struct {
 type NetworkInfoDTO struct {
 	PublicKey   string `json:"public_key"`
 	Endpoint    string `json:"endpoint"`
-	APIEndpoint string `json:"api_endpoint"`
+	ServerRoute string `json:"server_route"`
+	APIPort     uint16 `json:"api_port"`
 }
 
 // PeerIdentityDTO describes the peer's assigned identity on the network.

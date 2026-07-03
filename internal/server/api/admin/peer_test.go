@@ -44,8 +44,11 @@ func TestAPIInviteCreate_Success(
 	if result.Data.Network.Endpoint == "" {
 		t.Fatal("endpoint should not be empty")
 	}
-	if result.Data.Network.APIEndpoint == "" {
-		t.Fatal("api_endpoint should not be empty")
+	if result.Data.Network.ServerRoute == "" {
+		t.Fatal("server_route should not be empty")
+	}
+	if result.Data.Network.APIPort == 0 {
+		t.Fatal("api_port should not be zero")
 	}
 
 	// verify registration was created

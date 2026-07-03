@@ -13,7 +13,8 @@ type NetworkInfoDTO struct {
 	Name        string `json:"name"`
 	PublicKey   string `json:"public_key"`
 	Endpoint    string `json:"endpoint"`
-	APIEndpoint string `json:"api_endpoint"`
+	ServerRoute string `json:"server_route"`
+	APIPort     uint16 `json:"api_port"`
 }
 
 type PeerIdentityDTO struct {

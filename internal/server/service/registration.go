@@ -17,7 +17,8 @@ type NetworkInfo struct {
 	Name        string `json:"name"`
 	PublicKey   string `json:"public_key"`
 	Endpoint    string `json:"endpoint"`     // external WG endpoint
-	APIEndpoint string `json:"api_endpoint"` // internal API endpoint
+	ServerRoute string `json:"server_route"` // server's host route on the overlay (e.g. "10.42.0.1/32")
+	APIPort     uint16 `json:"api_port"`     // server API port on the overlay
 }
 
 // PeerIdentity describes a peer's assigned identity on the network.
@@ -178,32 +179,29 @@ func (s *Service) CreateRegistration(
 	}
 	s.reconcile(networkName)
 
-	// TODO: at this point, we can generate an invitation from just the ext ip,
-	// invite plane config, private key, and peer invite IP
-
 	_, inviteNet, err := net.ParseCIDR(network.Invite.Cidr)
 	if err != nil {
 		return nil, fmt.Errorf("parse invite CIDR %q: %w", network.Invite.Cidr, err)
 	}
-	inviteNetPrefix, _ := inviteNet.Mask.Size()
-
-	peerInviteNet := fmt.Sprintf("%s/%d", peerTempAssignedIP.String(), inviteNetPrefix)
 
 	serverExternalIP := net.ParseIP(network.ExternalIP)
 	serverInviteExternalAddr := netaddr.Endpoint(serverExternalIP, network.Invite.WireguardPort)
 
 	serverInternalIP := netaddr.FirstAssignable(inviteNet)
-	serverInviteInternalAddr := netaddr.Endpoint(serverInternalIP, network.Invite.ApiPort)
+
+	serverRoute := netaddr.HostRoute(serverInternalIP)
+	peerCIDR := netaddr.HostRoute(peerTempAssignedIP)
 
 	payload := &Invitation{
 		Network: NetworkInfo{
 			Name:        network.Name,
 			PublicKey:   network.PublicKey,
 			Endpoint:    serverInviteExternalAddr,
-			APIEndpoint: serverInviteInternalAddr,
+			ServerRoute: serverRoute.String(),
+			APIPort:     network.Invite.ApiPort,
 		},
 		Peer: PeerIdentity{
-			CIDR:       peerInviteNet,
+			CIDR:       peerCIDR.String(),
 			PrivateKey: peerTempPrivKey,
 		},
 	}
@@ -273,22 +271,26 @@ func (s *Service) buildInvitation(
 	if err != nil {
 		return nil, fmt.Errorf("parse main CIDR %q: %w", network.Main.Cidr, err)
 	}
-	networkPrefix, _ := rootNet.Mask.Size()
+
+	serverIP := netaddr.FirstAssignable(rootNet)
+	serverRoute := netaddr.HostRoute(serverIP)
 
 	peerIP, _, err := net.ParseCIDR(peer.Cidr)
 	if err != nil {
 		return nil, fmt.Errorf("parse peer CIDR %q: %w", peer.Cidr, err)
 	}
+	peerCIDR := netaddr.HostRoute(peerIP)
 
 	return &Invitation{
 		Network: NetworkInfo{
 			Name:        network.Name,
 			PublicKey:   network.PublicKey,
 			Endpoint:    netaddr.Endpoint(net.ParseIP(network.ExternalIP), network.Main.WireguardPort),
-			APIEndpoint: netaddr.Endpoint(netaddr.FirstAssignable(rootNet), network.Main.ApiPort),
+			ServerRoute: serverRoute.String(),
+			APIPort:     network.Main.ApiPort,
 		},
 		Peer: PeerIdentity{
-			CIDR: fmt.Sprintf("%s/%d", peerIP.String(), networkPrefix),
+			CIDR: peerCIDR.String(),
 		},
 	}, nil
 }

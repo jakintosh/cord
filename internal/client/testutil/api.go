@@ -111,10 +111,11 @@ func NewInstallServer(apiAddr string) http.Handler {
 			Network: serverapi.NetworkInfoDTO{
 				PublicKey:   "server-pub-key",
 				Endpoint:    "1.2.3.4:51820",
-				APIEndpoint: apiAddr,
+				ServerRoute: "10.42.0.1/32",
+				APIPort:     8443,
 			},
 			Peer: serverapi.PeerIdentityDTO{
-				CIDR: "10.42.0.5/16",
+				CIDR: "10.42.0.5/32",
 			},
 		})
 	})
