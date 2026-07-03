@@ -27,8 +27,8 @@ func seedNetwork(t *testing.T, db *database.DB) {
 		&service.Cidr{
 			Name:   "testnet",
 			Cidr:   "10.0.0.0/16",
-			Length: 16,
-			Prefix: 32,
+			Prefix: 16,
+			Bits:   32,
 		},
 		&service.Peer{
 			Name:      "cord-server",
@@ -302,8 +302,8 @@ func TestInsertPeer_SameNameDifferentNetwork(t *testing.T) {
 		&service.Cidr{
 			Name:   "net2",
 			Cidr:   "172.16.0.0/16",
-			Length: 16,
-			Prefix: 32,
+			Prefix: 16,
+			Bits:   32,
 		},
 		&service.Peer{
 			Name:      "cord-server",

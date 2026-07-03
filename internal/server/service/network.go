@@ -193,8 +193,8 @@ func (s *Service) CreateNetwork(
 	rootCidr := &Cidr{
 		Name:   name,
 		Cidr:   nc.Main.Cidr,
-		Length: ones,
-		Prefix: bits,
+		Prefix: ones,
+		Bits:   bits,
 	}
 
 	serverIP := netaddr.FirstAssignable(mainNet)

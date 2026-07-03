@@ -47,8 +47,8 @@ func TestInsertAndGetNetwork(t *testing.T) {
 		&service.Cidr{
 			Name:   "homenet",
 			Cidr:   "10.0.0.0/16",
-			Length: 16,
-			Prefix: 32,
+			Prefix: 16,
+			Bits:   32,
 		},
 		&service.Peer{
 			Name:      "cord-server",
@@ -130,8 +130,8 @@ func TestInsertNetwork_Duplicate(t *testing.T) {
 		&service.Cidr{
 			Name:   "homenet",
 			Cidr:   "10.0.0.0/16",
-			Length: 16,
-			Prefix: 32,
+			Prefix: 16,
+			Bits:   32,
 		},
 		&service.Peer{
 			Name:      "cord-server",
@@ -150,8 +150,8 @@ func TestInsertNetwork_Duplicate(t *testing.T) {
 		&service.Cidr{
 			Name:   "homenet",
 			Cidr:   "10.0.0.0/16",
-			Length: 16,
-			Prefix: 32,
+			Prefix: 16,
+			Bits:   32,
 		},
 		&service.Peer{
 			Name:      "cord-server",
@@ -204,8 +204,8 @@ func TestListNetworkNames(t *testing.T) {
 			&service.Cidr{
 				Name:   name,
 				Cidr:   "10.0.0.0/16",
-				Length: 16,
-				Prefix: 32,
+				Prefix: 16,
+				Bits:   32,
 			},
 			&service.Peer{
 				Name:      "cord-server",
@@ -264,8 +264,8 @@ func TestDeleteNetwork(t *testing.T) {
 		&service.Cidr{
 			Name:   "deleteme",
 			Cidr:   "10.0.0.0/16",
-			Length: 16,
-			Prefix: 32,
+			Prefix: 16,
+			Bits:   32,
 		},
 		&service.Peer{
 			Name:      "cord-server",
@@ -325,8 +325,8 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 		&service.Cidr{
 			Name:   "cascadenet",
 			Cidr:   "10.0.0.0/16",
-			Length: 16,
-			Prefix: 32,
+			Prefix: 16,
+			Bits:   32,
 		},
 		&service.Peer{
 			Name:      "cord-server",
@@ -343,8 +343,8 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 	if err := db.InsertCidr("cascadenet", &service.Cidr{
 		Name:   "subnet-1",
 		Cidr:   "10.0.1.0/24",
-		Length: 32,
 		Prefix: 24,
+		Bits:   32,
 	}); err != nil {
 		t.Fatalf("insert cidr: %v", err)
 	}

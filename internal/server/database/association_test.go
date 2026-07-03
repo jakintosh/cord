@@ -36,8 +36,8 @@ func seedNetworkForAssoc(t *testing.T, db *database.DB) {
 		&service.Cidr{
 			Name:   "assocnet",
 			Cidr:   "10.0.0.0/16",
-			Length: 16,
-			Prefix: 32,
+			Prefix: 16,
+			Bits:   32,
 		},
 		&service.Peer{
 			Name:      "cord-server",
@@ -51,9 +51,9 @@ func seedNetworkForAssoc(t *testing.T, db *database.DB) {
 		t.Fatalf("seed network: %v", err)
 	}
 	for _, c := range []service.Cidr{
-		{Name: "subnet-a", Cidr: "10.0.1.0/24", Length: 24, Prefix: 32},
-		{Name: "subnet-b", Cidr: "10.0.2.0/24", Length: 24, Prefix: 32},
-		{Name: "subnet-c", Cidr: "10.0.3.0/24", Length: 24, Prefix: 32},
+		{Name: "subnet-a", Cidr: "10.0.1.0/24", Prefix: 24, Bits: 32},
+		{Name: "subnet-b", Cidr: "10.0.2.0/24", Prefix: 24, Bits: 32},
+		{Name: "subnet-c", Cidr: "10.0.3.0/24", Prefix: 24, Bits: 32},
 	} {
 		if err := db.InsertCidr("assocnet", &c); err != nil {
 			t.Fatalf("seed cidr %s: %v", c.Name, err)

@@ -12,8 +12,8 @@ import (
 type Cidr struct {
 	Name   string
 	Cidr   string // e.g. "10.42.1.0/24"
-	Length int    // prefix length (e.g. 24)
-	Prefix int    // total bits (32 for IPv4, 128 for IPv6)
+	Prefix int    // prefix length (e.g. 24)
+	Bits   int    // total address bits (32 for IPv4, 128 for IPv6)
 }
 
 // GetCidr returns a CIDR by name within the given network.
@@ -87,8 +87,8 @@ func (s *Service) CreateCidr(
 	c := &Cidr{
 		Name:   name,
 		Cidr:   cidr,
-		Length: ones,
-		Prefix: bits,
+		Prefix: ones,
+		Bits:   bits,
 	}
 
 	if err := s.store.InsertCidr(networkName, c); err != nil {
