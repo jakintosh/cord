@@ -11,21 +11,6 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-// Registration is the server-side stored representation of a pending peer
-// registration. It tracks the temporary key, assigned IPs, and redemption state.
-type Registration struct {
-	Name            string
-	InvitePublicKey string    // the temporary public key the peer uses to redeem
-	InviteIP        net.IP    // the temporary IP on the invite network
-	MainIP          net.IP    // the permanent IP on the main network
-	Admin           bool      // whether the registration grants admin privileges
-	Redeemed        bool      // whether the registration has been redeemed
-	RedeemedKey     string    // the permanent public key after redemption
-	Confirmed       bool      // whether the peer has confirmed via /confirm
-	CreatedAt       time.Time // when the registration was created
-	ExpiresAt       time.Time // when the registration expires
-}
-
 // NetworkInfo describes a cord network and how to reach it. It travels
 // in invitation payloads and is stored in client-side network config.
 type NetworkInfo struct {
@@ -73,6 +58,21 @@ func (inv *Invitation) Write(
 		return fmt.Errorf("write invitation: %w", err)
 	}
 	return nil
+}
+
+// Registration is the server-side stored representation of a pending peer
+// registration. It tracks the temporary key, assigned IPs, and redemption state.
+type Registration struct {
+	Name            string
+	InvitePublicKey string    // the temporary public key the peer uses to redeem
+	InviteIP        net.IP    // the temporary IP on the invite network
+	MainIP          net.IP    // the permanent IP on the main network
+	Admin           bool      // whether the registration grants admin privileges
+	Redeemed        bool      // whether the registration has been redeemed
+	RedeemedKey     string    // the permanent public key after redemption
+	Confirmed       bool      // whether the peer has confirmed via /confirm
+	CreatedAt       time.Time // when the registration was created
+	ExpiresAt       time.Time // when the registration expires
 }
 
 // ListRegistrations returns all registrations for the given network
@@ -177,6 +177,9 @@ func (s *Service) CreateRegistration(
 		return nil, fmt.Errorf("insert registration: %w", mapStoreError(err))
 	}
 	s.reconcile(networkName)
+
+	// TODO: at this point, we can generate an invitation from just the ext ip,
+	// invite plane config, private key, and peer invite IP
 
 	_, inviteNet, err := net.ParseCIDR(network.Invite.Cidr)
 	if err != nil {
@@ -380,4 +383,28 @@ func (s *Service) nextFreePeerIP(
 	}
 
 	return nil, fmt.Errorf("%w: no free addresses in %s", ErrInvalidInput, rootCidr)
+}
+
+func registrationsToWireGuardPeers(
+	regs []*Registration,
+) (
+	[]wireguard.PeerConfig,
+	error,
+) {
+	var wgpeers []wireguard.PeerConfig
+	for _, reg := range regs {
+		route := netaddr.HostRoute(reg.InviteIP)
+		p, err := wireguard.NewPeerConfig(
+			reg.InvitePublicKey,
+			[]string{route.String()},
+			"",
+			0,
+			wireguard.EndpointDynamic,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("new peer %q: %w", reg.InvitePublicKey, err)
+		}
+		wgpeers = append(wgpeers, p)
+	}
+	return wgpeers, nil
 }

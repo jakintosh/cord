@@ -188,7 +188,6 @@ func (s *Service) CreateNetwork(
 	if err != nil {
 		return nil, fmt.Errorf("parse main CIDR: %w", err)
 	}
-
 	ones, bits := mainNet.Mask.Size()
 	rootCidr := &Cidr{
 		Name:   name,
@@ -341,40 +340,49 @@ func (n *Network) stop() error {
 // It prunes expired registrations, builds peer sets for both planes,
 // applies them, and rearms the timer.
 func (n *Network) reconcile() {
-	name := n.config.Name
+	netName := n.config.Name
 	now := n.clock()
 
-	if err := n.store.PruneExpiredRegistrations(name, now); err != nil {
-		n.logf("reconcile %s: prune: %v", name, err)
+	if err := n.store.PruneExpiredRegistrations(netName, now); err != nil {
+		n.logf("reconcile %s: prune: %v", netName, err)
 		return
 	}
 
-	mainPeers, err := n.buildMainPeers(name)
+	// reconcile main peers
+	peers, err := n.store.ListPeers(netName)
 	if err != nil {
-		n.logf("reconcile %s: build main peers: %v", name, err)
+		n.logf("reconcile %s: list peers: %w", netName, err)
+		return
+	}
+	mainPeers, err := peersToWireGuardPeers(peers)
+	if err != nil {
+		n.logf("reconcile %s: build main peers: %v", netName, err)
 		return
 	}
 	if err := n.main.device.SetPeers(mainPeers...); err != nil {
-		n.logf("reconcile %s: apply main peers: %v", name, err)
+		n.logf("reconcile %s: apply main peers: %v", netName, err)
 	}
 
-	invitePeers, err := n.buildInvitePeers(name)
+	// reconcile invite peers
+	regs, err := n.store.ListActiveRegistrations(netName, now)
 	if err != nil {
-		n.logf("reconcile %s: build invite peers: %v", name, err)
+		n.logf("reconcile %s: list active registrations: %w", netName, err)
+		return
+	}
+	invitePeers, err := registrationsToWireGuardPeers(regs)
+	if err != nil {
+		n.logf("reconcile %s: build invite peers: %v", netName, err)
 		return
 	}
 	if err := n.invite.device.SetPeers(invitePeers...); err != nil {
-		n.logf("reconcile %s: apply invite peers: %v", name, err)
+		n.logf("reconcile %s: apply invite peers: %v", netName, err)
 	}
 
 	// Rearm timer
 	next := now.Add(defaultReconcileCap)
-	regs, err := n.store.ListActiveRegistrations(name, now)
-	if err == nil {
-		for _, reg := range regs {
-			if reg.ExpiresAt.Before(next) {
-				next = reg.ExpiresAt
-			}
+	for _, reg := range regs {
+		if reg.ExpiresAt.Before(next) {
+			next = reg.ExpiresAt
 		}
 	}
 	delay := next.Sub(now)
@@ -386,72 +394,4 @@ func (n *Network) reconcile() {
 	} else {
 		n.timer.Reset(delay)
 	}
-}
-
-// buildMainPeers converts enabled peers into WireGuard peer config
-// for the main device.
-func (n *Network) buildMainPeers(
-	network string,
-) (
-	[]wireguard.PeerConfig,
-	error,
-) {
-	peers, err := n.store.ListPeers(network)
-	if err != nil {
-		return nil, fmt.Errorf("list peers: %w", err)
-	}
-
-	var wgpeers []wireguard.PeerConfig
-	for _, peer := range peers {
-		if !peer.Enabled {
-			continue
-		}
-		peerCidr, err := netaddr.HostRouteFromCidr(peer.Cidr)
-		if err != nil {
-			return nil, fmt.Errorf("parse peer CIDR %q: %w", peer.Cidr, err)
-		}
-		p, err := wireguard.NewPeerConfig(
-			peer.PublicKey,
-			[]string{peerCidr.String()},
-			"",
-			0,
-			wireguard.EndpointDynamic,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("new peer %q: %w", peer.PublicKey, err)
-		}
-		wgpeers = append(wgpeers, p)
-	}
-	return wgpeers, nil
-}
-
-// buildInvitePeers converts active registrations into WireGuard peer
-// config for the invite device.
-func (n *Network) buildInvitePeers(
-	network string,
-) (
-	[]wireguard.PeerConfig,
-	error,
-) {
-	regs, err := n.store.ListActiveRegistrations(network, n.clock())
-	if err != nil {
-		return nil, fmt.Errorf("list active registrations: %w", err)
-	}
-
-	var wgpeers []wireguard.PeerConfig
-	for _, reg := range regs {
-		route := netaddr.HostRoute(reg.InviteIP)
-		p, err := wireguard.NewPeerConfig(
-			reg.InvitePublicKey,
-			[]string{route.String()},
-			"",
-			0,
-			wireguard.EndpointDynamic,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("new peer %q: %w", reg.InvitePublicKey, err)
-		}
-		wgpeers = append(wgpeers, p)
-	}
-	return wgpeers, nil
 }

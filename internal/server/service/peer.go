@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 // Peer is the canonical server-side record of a network participant.
@@ -238,4 +241,34 @@ func (s *Service) ReportEndpoints(
 		return fmt.Errorf("insert endpoint sightings: %w", err)
 	}
 	return nil
+}
+
+func peersToWireGuardPeers(
+	peers []*Peer,
+) (
+	[]wireguard.PeerConfig,
+	error,
+) {
+	var wgpeers []wireguard.PeerConfig
+	for _, peer := range peers {
+		if !peer.Enabled {
+			continue
+		}
+		peerCidr, err := netaddr.HostRouteFromCidr(peer.Cidr)
+		if err != nil {
+			return nil, fmt.Errorf("parse peer CIDR %q: %w", peer.Cidr, err)
+		}
+		p, err := wireguard.NewPeerConfig(
+			peer.PublicKey,
+			[]string{peerCidr.String()},
+			"",
+			0,
+			wireguard.EndpointDynamic,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("new peer %q: %w", peer.PublicKey, err)
+		}
+		wgpeers = append(wgpeers, p)
+	}
+	return wgpeers, nil
 }

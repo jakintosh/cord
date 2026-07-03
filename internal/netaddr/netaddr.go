@@ -96,6 +96,23 @@ func InterfaceAddress(
 	}
 }
 
+// InterfaceAddressFromCidr parses s as a CIDR (e.g. "10.0.0.0/16") and
+// returns the first assignable host address carrying the network's
+// prefix length (e.g. 10.0.0.1/16). Returns an error if s is not valid
+// CIDR.
+func InterfaceAddressFromCidr(
+	s string,
+) (
+	net.IPNet,
+	error,
+) {
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		return net.IPNet{}, err
+	}
+	return InterfaceAddress(n), nil
+}
+
 // HostRoute returns a single-host route for ip (e.g. 10.0.0.5/32 or
 // fd00::1/128).
 func HostRoute(

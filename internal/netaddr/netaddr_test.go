@@ -173,6 +173,35 @@ func TestInterfaceAddress_DoesNotAliasInputMask(t *testing.T) {
 	}
 }
 
+func TestInterfaceAddressFromCidr(t *testing.T) {
+	tests := []struct {
+		cidr string
+		want string
+	}{
+		{"10.0.0.0/16", "10.0.0.1/16"},
+		{"172.16.10.0/24", "172.16.10.1/24"},
+		{"10.27.0.0/16", "10.27.0.1/16"},
+		{"fd00::/64", "fd00::1/64"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.cidr, func(t *testing.T) {
+			got, err := InterfaceAddressFromCidr(tt.cidr)
+			if err != nil {
+				t.Fatalf("InterfaceAddressFromCidr(%q): %v", tt.cidr, err)
+			}
+			if got.String() != tt.want {
+				t.Fatalf("InterfaceAddressFromCidr(%q) = %s, want %s", tt.cidr, got.String(), tt.want)
+			}
+		})
+	}
+}
+
+func TestInterfaceAddressFromCidr_Invalid(t *testing.T) {
+	if _, err := InterfaceAddressFromCidr("not-a-cidr"); err == nil {
+		t.Fatal("expected error for invalid CIDR")
+	}
+}
+
 func TestHostRoute(t *testing.T) {
 	tests := []struct {
 		ip   string

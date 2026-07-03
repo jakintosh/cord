@@ -34,23 +34,6 @@ func (pc *PlaneConfig) validate() error {
 	return nil
 }
 
-func (cfg PlaneConfig) toWireguardConfig(
-	privateKey string,
-) wireguard.DeviceConfig {
-	_, net, err := net.ParseCIDR(cfg.Cidr)
-	if err != nil {
-		return wireguard.DeviceConfig{}
-	}
-	addr := netaddr.InterfaceAddress(net)
-
-	return wireguard.DeviceConfig{
-		Name:       cfg.Name,
-		PrivateKey: privateKey,
-		Address:    addr,
-		ListenPort: cfg.WireguardPort,
-	}
-}
-
 // Plane is a running WireGuard plane: one WG device plus an optional
 // HTTP API server served over the tunnel.
 type Plane struct {
@@ -77,24 +60,34 @@ func (p *Plane) start(
 	wg *wireguard.Manager,
 	handler http.Handler,
 ) error {
-	cfg := p.config.toWireguardConfig(p.privateKey)
-	dev, err := wg.CreateDevice(cfg)
+	// determine interface address
+	ifaceAddr, err := netaddr.InterfaceAddressFromCidr(p.config.Cidr)
+	if err != nil {
+		return fmt.Errorf("parse cidr: %v", err)
+	}
+
+	// create we device
+	p.device, err = wg.CreateDevice(wireguard.DeviceConfig{
+		Name:       p.config.Name,
+		PrivateKey: p.privateKey,
+		Address:    ifaceAddr,
+		ListenPort: p.config.WireguardPort,
+	})
 	if err != nil {
 		return fmt.Errorf("create device %q: %w", p.config.Name, err)
 	}
-	p.device = dev
 
+	// start API server if handler is provided
 	if handler != nil {
-		ifaceIP := netaddr.FirstAssignable(&cfg.Address)
-		addr := netaddr.Endpoint(ifaceIP, p.config.ApiPort)
+		apiEndpoint := netaddr.Endpoint(ifaceAddr.IP, p.config.ApiPort)
 		p.server = &http.Server{
-			Addr:    addr,
+			Addr:    apiEndpoint,
 			Handler: handler,
 		}
-		ln, err := net.Listen("tcp", addr)
+		ln, err := net.Listen("tcp", apiEndpoint)
 		if err != nil {
 			_ = p.device.Close()
-			return fmt.Errorf("listen %q on %s: %w", p.config.Name, addr, err)
+			return fmt.Errorf("listen %q on %s: %w", p.config.Name, apiEndpoint, err)
 		}
 		go func() {
 			if err := p.server.Serve(ln); err != nil && err != http.ErrServerClosed {
