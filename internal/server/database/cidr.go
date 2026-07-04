@@ -177,8 +177,8 @@ func scanCidr(
 	return &service.Cidr{
 		Name:   name,
 		Cidr:   cidrStr,
-		Length: prefix,
-		Prefix: length,
+		Prefix: prefix,
+		Bits:   length,
 	}, nil
 }
 func cidrFirstAndLast(

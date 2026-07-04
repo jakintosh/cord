@@ -14,7 +14,7 @@ import (
 type DeviceConfig struct {
 	Name       string
 	PrivateKey string
-	Address    net.IPNet
+	Route      net.IPNet
 	ListenPort uint16
 	MTU        int // 0 uses the default
 }
@@ -26,7 +26,7 @@ type Device struct {
 	name    string
 	mu      sync.Mutex
 	backend WgDevice
-	desired map[wgtypes.Key]PeerConfig
+	desired map[wgtypes.Key]Peer
 }
 
 func newDevice(
@@ -36,7 +36,7 @@ func newDevice(
 	return &Device{
 		name:    name,
 		backend: backend,
-		desired: make(map[wgtypes.Key]PeerConfig),
+		desired: make(map[wgtypes.Key]Peer),
 	}
 }
 
@@ -45,26 +45,34 @@ func (d *Device) Name() string {
 }
 
 // SetPeers replaces the desired peer set and reconciles it against
-// the live WireGuard state. The mutex is held across the entire
+// the live WireGuard state. Each PeerConfig is parsed and validated
+// before any changes are applied. The mutex is held across the entire
 // observe→plan→apply cycle so that concurrent calls are serialized.
 func (d *Device) SetPeers(
-	peers ...PeerConfig,
+	configs ...PeerConfig,
 ) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	d.desired = make(map[wgtypes.Key]PeerConfig, len(peers))
-	desiredSlice := make([]PeerConfig, len(peers))
-	for i, p := range peers {
+	peers := make([]Peer, len(configs))
+	for i, cfg := range configs {
+		var err error
+		peers[i], err = cfg.Parse()
+		if err != nil {
+			return fmt.Errorf("wireguard: peer config %d: %w", i, err)
+		}
+	}
+
+	d.desired = make(map[wgtypes.Key]Peer, len(peers))
+	for _, p := range peers {
 		d.desired[p.PublicKey] = p
-		desiredSlice[i] = p
 	}
 
 	observed, err := d.backend.Peers()
 	if err != nil {
 		return fmt.Errorf("wireguard: reconcile observe: %w", err)
 	}
-	ops := planPeerReconciliation(desiredSlice, observed)
+	ops := planPeerReconciliation(peers, observed)
 	if len(ops) == 0 {
 		return nil
 	}
@@ -110,7 +118,7 @@ func (d *Device) SetPeerEndpoint(
 	peer.Endpoint = addr
 	d.desired[key] = peer
 
-	return d.backend.ApplyPeers([]PeerOp{{Config: peer}})
+	return d.backend.ApplyPeers([]PeerOp{{Target: peer}})
 }
 
 // Close brings the device down and removes it.

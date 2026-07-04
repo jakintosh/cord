@@ -50,30 +50,12 @@ func peerConfig(
 	policy wireguard.EndpointPolicy,
 	keepalive time.Duration,
 ) wireguard.PeerConfig {
-	var ep *net.UDPAddr
-	if endpoint != "" {
-		addr, err := net.ResolveUDPAddr("udp", endpoint)
-		if err != nil {
-			panic(err)
-		}
-		ep = addr
-	}
-
-	ips := make([]net.IPNet, 0, len(allowedIPs))
-	for _, cidr := range allowedIPs {
-		_, n, err := net.ParseCIDR(cidr)
-		if err != nil {
-			panic(err)
-		}
-		ips = append(ips, *n)
-	}
-
 	return wireguard.PeerConfig{
-		PublicKey:           key,
-		AllowedIPs:          ips,
-		Endpoint:            ep,
+		PublicKey:           key.String(),
+		AllowedIPs:          allowedIPs,
+		Endpoint:            endpoint,
 		EndpointPolicy:      policy,
-		PersistentKeepalive: keepalive,
+		PersistentKeepalive: int(keepalive.Seconds()),
 	}
 }
 
@@ -115,7 +97,7 @@ func createTestDevice(t *testing.T, name string, backend *wireguardtest.MockBack
 	cfg := wireguard.DeviceConfig{
 		Name:       name,
 		PrivateKey: mustGeneratePrivateKey(t),
-		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+		Route:      mustParseCIDR(t, "10.0.0.1/32"),
 	}
 	dev, err := mgr.CreateDevice(cfg)
 	if err != nil {
@@ -184,7 +166,7 @@ func TestCreateDevice_ValidatesNameLength(t *testing.T) {
 	_, err := mgr.CreateDevice(wireguard.DeviceConfig{
 		Name:       "123456789012345",
 		PrivateKey: key,
-		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+		Route:      mustParseCIDR(t, "10.0.0.1/32"),
 	})
 	if err != nil {
 		t.Errorf("15-byte name should succeed: %v", err)
@@ -193,7 +175,7 @@ func TestCreateDevice_ValidatesNameLength(t *testing.T) {
 	_, err = mgr.CreateDevice(wireguard.DeviceConfig{
 		Name:       "1234567890123456",
 		PrivateKey: key,
-		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+		Route:      mustParseCIDR(t, "10.0.0.1/32"),
 	})
 	if err == nil {
 		t.Error("16-byte name should fail")
@@ -207,7 +189,7 @@ func TestCreateDevice_InvalidPrivateKey(t *testing.T) {
 	_, err := mgr.CreateDevice(wireguard.DeviceConfig{
 		Name:       "test",
 		PrivateKey: "not-a-key",
-		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+		Route:      mustParseCIDR(t, "10.0.0.1/32"),
 	})
 	if err == nil {
 		t.Error("expected error for invalid private key")
@@ -221,7 +203,7 @@ func TestCreateDevice_Valid(t *testing.T) {
 	dev, err := mgr.CreateDevice(wireguard.DeviceConfig{
 		Name:       "test",
 		PrivateKey: mustGeneratePrivateKey(t),
-		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+		Route:      mustParseCIDR(t, "10.0.0.1/32"),
 		ListenPort: 51820,
 	})
 	if err != nil {
@@ -243,24 +225,25 @@ func TestCreateDevice_BackendError(t *testing.T) {
 	_, err := mgr.CreateDevice(wireguard.DeviceConfig{
 		Name:       "test",
 		PrivateKey: mustGeneratePrivateKey(t),
-		Address:    mustParseCIDR(t, "10.0.0.1/32"),
+		Route:      mustParseCIDR(t, "10.0.0.1/32"),
 	})
 	if err == nil {
 		t.Error("expected backend create error")
 	}
 }
 
-func TestNewPeerConfig(t *testing.T) {
+func TestPeerConfigParse(t *testing.T) {
 	key := mustGenerateKey(t)
-	p, err := wireguard.NewPeerConfig(
-		key.String(),
-		[]string{"10.0.0.5/32", "10.0.1.0/24"},
-		"1.2.3.4:51820",
-		25,
-		wireguard.EndpointFixed,
-	)
+	cfg := wireguard.PeerConfig{
+		PublicKey:           key.String(),
+		AllowedIPs:          []string{"10.0.0.5/32", "10.0.1.0/24"},
+		Endpoint:            "1.2.3.4:51820",
+		EndpointPolicy:      wireguard.EndpointFixed,
+		PersistentKeepalive: 25,
+	}
+	p, err := cfg.Parse()
 	if err != nil {
-		t.Fatalf("NewPeerConfig: %v", err)
+		t.Fatalf("Parse: %v", err)
 	}
 	if p.PublicKey != key {
 		t.Error("public key mismatch")
@@ -279,7 +262,7 @@ func TestNewPeerConfig(t *testing.T) {
 	}
 }
 
-func TestNewPeerConfig_InvalidInputs(t *testing.T) {
+func TestPeerConfigParse_InvalidInputs(t *testing.T) {
 	key := mustGenerateKey(t).String()
 
 	tests := []struct {
@@ -295,13 +278,14 @@ func TestNewPeerConfig_InvalidInputs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := wireguard.NewPeerConfig(
-				tt.publicKey,
-				tt.allowedIPs,
-				tt.endpoint,
-				0,
-				wireguard.EndpointDynamic,
-			)
+			cfg := wireguard.PeerConfig{
+				PublicKey:           tt.publicKey,
+				AllowedIPs:          tt.allowedIPs,
+				Endpoint:            tt.endpoint,
+				EndpointPolicy:      wireguard.EndpointDynamic,
+				PersistentKeepalive: 0,
+			}
+			_, err := cfg.Parse()
 			if err == nil {
 				t.Fatal("expected error")
 			}

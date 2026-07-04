@@ -58,8 +58,8 @@ func TestAPICreateNetwork_Success(
 	if err != nil {
 		t.Fatalf("get network from service: %v", err)
 	}
-	if net.MainCidr != "10.0.0.0/16" {
-		t.Fatalf("main_cidr = %q, want 10.0.0.0/16", net.MainCidr)
+	if net.Main.Cidr != "10.0.0.0/16" {
+		t.Fatalf("main_cidr = %q, want 10.0.0.0/16", net.Main.Cidr)
 	}
 }
 

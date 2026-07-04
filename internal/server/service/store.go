@@ -11,9 +11,9 @@ import (
 type Store interface {
 	// Network records.
 
-	// GetNetwork returns the persisted network record by name.
+	// GetNetwork returns the persisted network config by name.
 	// Returns ErrNotFound when no matching row exists.
-	GetNetwork(name string) (*Network, error)
+	GetNetwork(name string) (*NetworkConfig, error)
 
 	// ListNetworkNames returns the names of all server networks,
 	// ordered by name ascending.
@@ -23,7 +23,7 @@ type Store interface {
 	// with its root CIDR record and initial server peer. All three
 	// are persisted in a single transaction. Returns ErrConflict
 	// when a network with this name already exists.
-	BootstrapNetwork(network *Network, rootCidr *Cidr, serverPeer *Peer) error
+	BootstrapNetwork(network *NetworkConfig, rootCidr *Cidr, serverPeer *Peer) error
 
 	// SetNetworkEnabled updates the enabled flag for a network.
 	// When enabled, the daemon starts the network's WireGuard devices
@@ -145,9 +145,9 @@ type Store interface {
 	// PruneExpiredRegistrations removes expired unconfirmed
 	// registrations and any provisional peer rows whose registration
 	// is gone or expired. Confirmed peers are retained; their
-	// registrations are retained as audit state. Called from
-	// buildMainPeers and buildInvitePeers so that both WireGuard
-	// peer sets are derived from clean state.
+	// registrations are retained as audit state. Called once at the
+	// top of reconcile so that both WireGuard peer sets are derived
+	// from clean state.
 	PruneExpiredRegistrations(network string, now time.Time) error
 
 	// Endpoint records within a network.

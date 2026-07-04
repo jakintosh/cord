@@ -28,11 +28,11 @@ func TestAddCidr_Success(t *testing.T) {
 	if cidr.Cidr != "10.0.1.0/24" {
 		t.Errorf("cidr = %q, want 10.0.1.0/24", cidr.Cidr)
 	}
-	if cidr.Length != 24 {
-		t.Errorf("length = %d, want 24", cidr.Length)
+	if cidr.Prefix != 24 {
+		t.Errorf("prefix = %d, want 24", cidr.Prefix)
 	}
-	if cidr.Prefix != 32 {
-		t.Errorf("prefix = %d, want 32", cidr.Prefix)
+	if cidr.Bits != 32 {
+		t.Errorf("bits = %d, want 32", cidr.Bits)
 	}
 }
 

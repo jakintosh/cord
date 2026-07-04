@@ -1,7 +1,9 @@
 package api_test
 
 import (
+	"net"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
@@ -127,15 +129,18 @@ func TestAPIInstallNetwork_Success(
 	}
 	env := testutil.SetupWithServer(t, handler)
 	apiAddr := env.Server.Listener.Addr().String()
+	apiHost, apiPortStr, _ := net.SplitHostPort(apiAddr)
+	apiPort, _ := strconv.Atoi(apiPortStr)
 
 	url := "/networks"
 	body := `{
 		"network_name": "mynet",
 		"temp_private_key": "` + tempKey + `",
-		"temp_cidr": "10.42.0.5/16",
+		"temp_route": "10.42.0.5/16",
 		"server_pubkey": "` + srvPub + `",
 		"server_endpoint": "1.2.3.4:51820",
-		"temp_api_addr": "` + apiAddr + `"
+		"server_route": "` + apiHost + `/32",
+		"server_port": ` + strconv.Itoa(apiPort) + `
 	}`
 	result := wire.TestPost[api.NetworkDTO](env.Router, url, body)
 
@@ -166,8 +171,11 @@ func TestAPIInstallNetwork_Success(
 	if nw.ServerEndpoint != "1.2.3.4:51820" {
 		t.Fatalf("server_endpoint = %q, want 1.2.3.4:51820", nw.ServerEndpoint)
 	}
-	if nw.ServerApiAddr != apiAddr {
-		t.Fatalf("server_api_addr = %q, want %q", nw.ServerApiAddr, apiAddr)
+	if nw.ServerRoute != apiHost+"/32" {
+		t.Fatalf("server_route = %q, want %q", nw.ServerRoute, apiHost+"/32")
+	}
+	if nw.ServerAPIPort != uint16(apiPort) {
+		t.Fatalf("server_api_port = %d, want %d", nw.ServerAPIPort, apiPort)
 	}
 	if nw.PrivateKey == "" {
 		t.Fatal("private_key should not be empty")
@@ -200,10 +208,11 @@ func TestAPIInstallNetwork_MissingName(
 	url := "/networks"
 	body := `{
 		"temp_private_key": "test-temp-key",
-		"temp_cidr": "10.42.0.5/16",
+		"temp_route": "10.42.0.5/16",
 		"server_pubkey": "srv-pub",
 		"server_endpoint": "1.2.3.4:51820",
-		"temp_api_addr": "10.42.0.1:8443"
+		"server_route": "10.42.0.1/32",
+		"server_port": 8443
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 
@@ -220,10 +229,11 @@ func TestAPIInstallNetwork_Duplicate(
 	body := `{
 		"network_name": "dupnet",
 		"temp_private_key": "test-temp-key",
-		"temp_cidr": "10.42.0.5/16",
+		"temp_route": "10.42.0.5/16",
 		"server_pubkey": "srv-pub",
 		"server_endpoint": "1.2.3.4:51820",
-		"temp_api_addr": "10.42.0.1:8443"
+		"server_route": "10.42.0.1/32",
+		"server_port": 8443
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 
@@ -426,14 +436,17 @@ func newInstallServer(
 ) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
+		srvHost, srvPortStr, _ := net.SplitHostPort(apiAddr)
+		srvPort, _ := strconv.Atoi(srvPortStr)
 		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
 			Network: serverapi.NetworkInfoDTO{
 				PublicKey:   serverPubKey,
 				Endpoint:    "1.2.3.4:51820",
-				APIEndpoint: apiAddr,
+				ServerRoute: srvHost + "/32",
+				APIPort:     uint16(srvPort),
 			},
 			Peer: serverapi.PeerIdentityDTO{
-				CIDR: "10.42.0.5/16",
+				Route: "10.42.0.5/32",
 			},
 		})
 	})

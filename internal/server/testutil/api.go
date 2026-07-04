@@ -64,7 +64,7 @@ func Setup(
 
 func (e *APIEnv) SeedNetwork(
 	t *testing.T,
-) *service.Network {
+) *service.NetworkConfig {
 	return SeedNetwork(t, e.Service)
 }
 

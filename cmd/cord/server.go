@@ -26,11 +26,6 @@ var serverCmd = &args.Command{
 			Type: args.OptionTypeParameter,
 			Help: "wireguard backend: auto, kernel, or userspace",
 		},
-		{
-			Long: "reconcile-interval",
-			Type: args.OptionTypeParameter,
-			Help: "server reconciliation interval (e.g. 10s, 30s, 5m)",
-		},
 	},
 	Subcommands: []*args.Command{
 		serverDaemonCmd,
@@ -49,12 +44,6 @@ var serverDaemonCmd = &args.Command{
 	Handler: func(i *args.Input) error {
 		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
 		backend := i.GetParameterOr("backend", "auto")
-		reconcileIntervalOpt := i.GetParameter("reconcile-interval")
-
-		reconcileInterval, err := parseDurationOpt(reconcileIntervalOpt)
-		if err != nil {
-			return fmt.Errorf("invalid 'reconcile-interval': %w", err)
-		}
 
 		ctx, cancel := signal.NotifyContext(
 			context.Background(), os.Interrupt, syscall.SIGTERM,
@@ -62,9 +51,8 @@ var serverDaemonCmd = &args.Command{
 		defer cancel()
 
 		opts := server.Options{
-			SocketPath:        socketPath,
-			Backend:           backend,
-			ReconcileInterval: reconcileInterval,
+			SocketPath: socketPath,
+			Backend:    backend,
 		}
 		return server.Serve(ctx, opts)
 	},

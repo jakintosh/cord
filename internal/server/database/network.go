@@ -5,14 +5,13 @@ import (
 	"net"
 	"time"
 
-	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
 func (db *DB) GetNetwork(
 	name string,
 ) (
-	*service.Network,
+	*service.NetworkConfig,
 	error,
 ) {
 	row := db.Conn.QueryRow(`
@@ -36,29 +35,29 @@ func (db *DB) GetNetwork(
 		name,
 	)
 
-	var net service.Network
+	var nc service.NetworkConfig
 	var createdUnix int64
 	if err := row.Scan(
-		&net.Name,
-		&net.PrivateKey,
-		&net.PublicKey,
-		&net.ExternalIP,
-		&net.MainName,
-		&net.MainCidr,
-		&net.MainWireguardPort,
-		&net.MainApiPort,
-		&net.InviteName,
-		&net.InviteCidr,
-		&net.InviteWireguardPort,
-		&net.InviteApiPort,
-		&net.Enabled,
+		&nc.Name,
+		&nc.PrivateKey,
+		&nc.PublicKey,
+		&nc.ExternalIP,
+		&nc.Main.Name,
+		&nc.Main.Cidr,
+		&nc.Main.WireguardPort,
+		&nc.Main.ApiPort,
+		&nc.Invite.Name,
+		&nc.Invite.Cidr,
+		&nc.Invite.WireguardPort,
+		&nc.Invite.ApiPort,
+		&nc.Enabled,
 		&createdUnix,
 	); err != nil {
 		return nil, CheckSqliteErr("get network", err)
 	}
 
-	net.CreatedAt = time.Unix(createdUnix, 0)
-	return &net, nil
+	nc.CreatedAt = time.Unix(createdUnix, 0)
+	return &nc, nil
 }
 
 func (db *DB) ListNetworkNames() (
@@ -92,7 +91,7 @@ func (db *DB) ListNetworkNames() (
 }
 
 func (db *DB) BootstrapNetwork(
-	network *service.Network,
+	network *service.NetworkConfig,
 	rootCidr *service.Cidr,
 	serverPeer *service.Peer,
 ) error {
@@ -102,12 +101,6 @@ func (db *DB) BootstrapNetwork(
 	}
 	rootOnes, rootBits := rootIPNet.Mask.Size()
 	rootFirst, rootLast := cidrFirstAndLast(rootIPNet)
-
-	_, peerIPNet, err := net.ParseCIDR(serverPeer.Cidr)
-	if err != nil {
-		return fmt.Errorf("parse server peer cidr: %w", err)
-	}
-	peerIP := netaddr.Normalize(peerIPNet.IP)
 
 	tx, err := db.Conn.Begin()
 	if err != nil {
@@ -137,14 +130,14 @@ func (db *DB) BootstrapNetwork(
 		network.PrivateKey,
 		network.PublicKey,
 		network.ExternalIP,
-		network.MainName,
-		network.MainCidr,
-		network.MainWireguardPort,
-		network.MainApiPort,
-		network.InviteName,
-		network.InviteCidr,
-		network.InviteWireguardPort,
-		network.InviteApiPort,
+		network.Main.Name,
+		network.Main.Cidr,
+		network.Main.WireguardPort,
+		network.Main.ApiPort,
+		network.Invite.Name,
+		network.Invite.Cidr,
+		network.Invite.WireguardPort,
+		network.Invite.ApiPort,
 		boolToInt(network.Enabled),
 		network.CreatedAt.Unix(),
 	)
@@ -172,7 +165,7 @@ func (db *DB) BootstrapNetwork(
 			network_name,
 			name,
 			public_key,
-			ip,
+			route,
 			admin,
 			enabled,
 			confirmed
@@ -181,7 +174,7 @@ func (db *DB) BootstrapNetwork(
 		network.Name,
 		serverPeer.Name,
 		serverPeer.PublicKey,
-		peerIP,
+		serverPeer.Route,
 		boolToInt(serverPeer.Admin),
 		boolToInt(serverPeer.Enabled),
 		boolToInt(serverPeer.Confirmed),

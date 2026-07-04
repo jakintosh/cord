@@ -1,35 +1,30 @@
 package service_test
 
 import (
-	"context"
 	"errors"
+	"net"
 	"testing"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
-	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 func TestCreateNetwork_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	mainWgPort := uint16(51820)
-	mainAPIPort := uint16(80)
-	inviteCidr := "10.1.0.0/24"
-	inviteWgPort := uint16(51821)
-	inviteAPIPort := uint16(80)
-
 	net, err := env.Service.CreateNetwork(
 		"mynet",
 		"1.2.3.4",
-		"10.0.0.0/16",
-		nil,
-		&mainWgPort,
-		&mainAPIPort,
-		nil,
-		&inviteCidr,
-		&inviteWgPort,
-		&inviteAPIPort,
+		service.PlaneConfig{
+			Cidr:          "10.0.0.0/16",
+			WireguardPort: 51820,
+			ApiPort:       80,
+		},
+		service.PlaneConfig{
+			Cidr:          "10.1.0.0/24",
+			WireguardPort: 51821,
+			ApiPort:       80,
+		},
 	)
 	if err != nil {
 		t.Fatalf("create network: %v", err)
@@ -44,26 +39,26 @@ func TestCreateNetwork_Success(t *testing.T) {
 	if net.PublicKey == "" {
 		t.Error("public_key should not be empty")
 	}
-	if net.MainCidr != "10.0.0.0/16" {
-		t.Errorf("main_cidr = %q, want 10.0.0.0/16", net.MainCidr)
+	if net.Main.Cidr != "10.0.0.0/16" {
+		t.Errorf("main.cidr = %q, want 10.0.0.0/16", net.Main.Cidr)
 	}
-	if net.InviteCidr != "10.1.0.0/24" {
-		t.Errorf("invite_cidr = %q, want 10.1.0.0/24", net.InviteCidr)
+	if net.Invite.Cidr != "10.1.0.0/24" {
+		t.Errorf("invite.cidr = %q, want 10.1.0.0/24", net.Invite.Cidr)
 	}
 	if net.ExternalIP != "1.2.3.4" {
 		t.Errorf("external_ip = %q, want 1.2.3.4", net.ExternalIP)
 	}
-	if net.MainWireguardPort != 51820 {
-		t.Errorf("listen_port = %d, want 51820", net.MainWireguardPort)
+	if net.Main.WireguardPort != 51820 {
+		t.Errorf("main.wg_port = %d, want 51820", net.Main.WireguardPort)
 	}
-	if net.InviteWireguardPort != 51821 {
-		t.Errorf("invite_listen_port = %d, want 51821", net.InviteWireguardPort)
+	if net.Invite.WireguardPort != 51821 {
+		t.Errorf("invite.wg_port = %d, want 51821", net.Invite.WireguardPort)
 	}
-	if net.MainApiPort != 80 {
-		t.Errorf("api_port = %d, want 80", net.MainApiPort)
+	if net.Main.ApiPort != 80 {
+		t.Errorf("main.api_port = %d, want 80", net.Main.ApiPort)
 	}
-	if net.InviteApiPort != 80 {
-		t.Errorf("invite_api_port = %d, want 80", net.InviteApiPort)
+	if net.Invite.ApiPort != 80 {
+		t.Errorf("invite.api_port = %d, want 80", net.Invite.ApiPort)
 	}
 	if net.CreatedAt.IsZero() {
 		t.Error("created_at should not be zero")
@@ -73,23 +68,11 @@ func TestCreateNetwork_Success(t *testing.T) {
 func TestCreateNetwork_StoresKeyPair(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	mainWgPort := uint16(51820)
-	mainAPIPort := uint16(80)
-	inviteCidr := "10.1.0.0/24"
-	inviteWgPort := uint16(51821)
-	inviteAPIPort := uint16(80)
-
 	net, err := env.Service.CreateNetwork(
 		"keytest",
 		"1.2.3.4",
-		"10.0.0.0/16",
-		nil,
-		&mainWgPort,
-		&mainAPIPort,
-		nil,
-		&inviteCidr,
-		&inviteWgPort,
-		&inviteAPIPort,
+		service.PlaneConfig{Cidr: "10.0.0.0/16", WireguardPort: 51820, ApiPort: 80},
+		service.PlaneConfig{Cidr: "10.1.0.0/24", WireguardPort: 51821, ApiPort: 80},
 	)
 	if err != nil {
 		t.Fatalf("create network: %v", err)
@@ -111,40 +94,21 @@ func TestCreateNetwork_StoresKeyPair(t *testing.T) {
 func TestCreateNetwork_DuplicateName(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	mainWgPort := uint16(51820)
-	mainAPIPort := uint16(80)
-	inviteCidr := "10.1.0.0/24"
-	inviteWgPort := uint16(51821)
-	inviteAPIPort := uint16(80)
-
-	first, err := env.Service.CreateNetwork(
+	_, err := env.Service.CreateNetwork(
 		"dup",
 		"1.2.3.4",
-		"10.0.0.0/16",
-		nil,
-		&mainWgPort,
-		&mainAPIPort,
-		nil,
-		&inviteCidr,
-		&inviteWgPort,
-		&inviteAPIPort,
+		service.PlaneConfig{Cidr: "10.0.0.0/16", WireguardPort: 51820, ApiPort: 80},
+		service.PlaneConfig{Cidr: "10.1.0.0/24", WireguardPort: 51821, ApiPort: 80},
 	)
 	if err != nil {
 		t.Fatalf("first create: %v", err)
 	}
-	_ = first
 
 	_, err = env.Service.CreateNetwork(
 		"dup",
 		"1.2.3.4",
-		"10.0.0.0/16",
-		nil,
-		&mainWgPort,
-		&mainAPIPort,
-		nil,
-		&inviteCidr,
-		&inviteWgPort,
-		&inviteAPIPort,
+		service.PlaneConfig{Cidr: "10.0.0.0/16", WireguardPort: 51820, ApiPort: 80},
+		service.PlaneConfig{Cidr: "10.1.0.0/24", WireguardPort: 51821, ApiPort: 80},
 	)
 	if !errors.Is(err, service.ErrNetworkExists) {
 		t.Errorf("err = %v, want ErrNetworkExists", err)
@@ -154,23 +118,11 @@ func TestCreateNetwork_DuplicateName(t *testing.T) {
 func TestCreateNetwork_EmptyName(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	mainWgPort := uint16(51820)
-	mainAPIPort := uint16(80)
-	inviteCidr := "10.1.0.0/24"
-	inviteWgPort := uint16(51821)
-	inviteAPIPort := uint16(80)
-
 	_, err := env.Service.CreateNetwork(
 		"",
 		"1.2.3.4",
-		"10.0.0.0/16",
-		nil,
-		&mainWgPort,
-		&mainAPIPort,
-		nil,
-		&inviteCidr,
-		&inviteWgPort,
-		&inviteAPIPort,
+		service.PlaneConfig{Cidr: "10.0.0.0/16", WireguardPort: 51820, ApiPort: 80},
+		service.PlaneConfig{Cidr: "10.1.0.0/24", WireguardPort: 51821, ApiPort: 80},
 	)
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -180,23 +132,11 @@ func TestCreateNetwork_EmptyName(t *testing.T) {
 func TestCreateNetwork_InvalidMainCIDR(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	mainWgPort := uint16(51820)
-	mainAPIPort := uint16(80)
-	inviteCidr := "10.1.0.0/24"
-	inviteWgPort := uint16(51821)
-	inviteAPIPort := uint16(80)
-
 	_, err := env.Service.CreateNetwork(
 		"badcidr",
 		"1.2.3.4",
-		"not-a-cidr",
-		nil,
-		&mainWgPort,
-		&mainAPIPort,
-		nil,
-		&inviteCidr,
-		&inviteWgPort,
-		&inviteAPIPort,
+		service.PlaneConfig{Cidr: "not-a-cidr", WireguardPort: 51820, ApiPort: 80},
+		service.PlaneConfig{Cidr: "10.1.0.0/24", WireguardPort: 51821, ApiPort: 80},
 	)
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -206,23 +146,11 @@ func TestCreateNetwork_InvalidMainCIDR(t *testing.T) {
 func TestCreateNetwork_InvalidInviteCIDR(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	mainWgPort := uint16(51820)
-	mainAPIPort := uint16(80)
-	inviteCidr := "not-a-cidr"
-	inviteWgPort := uint16(51821)
-	inviteAPIPort := uint16(80)
-
 	_, err := env.Service.CreateNetwork(
 		"badinvite",
 		"1.2.3.4",
-		"10.0.0.0/16",
-		nil,
-		&mainWgPort,
-		&mainAPIPort,
-		nil,
-		&inviteCidr,
-		&inviteWgPort,
-		&inviteAPIPort,
+		service.PlaneConfig{Cidr: "10.0.0.0/16", WireguardPort: 51820, ApiPort: 80},
+		service.PlaneConfig{Cidr: "not-a-cidr", WireguardPort: 51821, ApiPort: 80},
 	)
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -232,23 +160,11 @@ func TestCreateNetwork_InvalidInviteCIDR(t *testing.T) {
 func TestCreateNetwork_MissingExternalIP(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	mainWgPort := uint16(51820)
-	mainAPIPort := uint16(80)
-	inviteCidr := "10.1.0.0/24"
-	inviteWgPort := uint16(51821)
-	inviteAPIPort := uint16(80)
-
 	_, err := env.Service.CreateNetwork(
 		"noip",
 		"",
-		"10.0.0.0/16",
-		nil,
-		&mainWgPort,
-		&mainAPIPort,
-		nil,
-		&inviteCidr,
-		&inviteWgPort,
-		&inviteAPIPort,
+		service.PlaneConfig{Cidr: "10.0.0.0/16", WireguardPort: 51820, ApiPort: 80},
+		service.PlaneConfig{Cidr: "10.1.0.0/24", WireguardPort: 51821, ApiPort: 80},
 	)
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -258,80 +174,54 @@ func TestCreateNetwork_MissingExternalIP(t *testing.T) {
 func TestCreateNetwork_DefaultPorts(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	mainWgPort := uint16(51820)
-	inviteCidr := "10.1.0.0/24"
-
 	nw, err := env.Service.CreateNetwork(
 		"defaults",
 		"1.2.3.4",
-		"10.0.0.0/16",
-		nil,
-		&mainWgPort,
-		nil,
-		nil,
-		&inviteCidr,
-		nil,
-		nil,
+		service.PlaneConfig{Cidr: "10.0.0.0/16"},
+		service.PlaneConfig{Cidr: "10.1.0.0/24"},
 	)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if nw.InviteWireguardPort != 51821 {
-		t.Errorf("invite_listen_port = %d, want 51821", nw.InviteWireguardPort)
+	if nw.Main.WireguardPort != 51820 {
+		t.Errorf("main.wg_port = %d, want 51820", nw.Main.WireguardPort)
 	}
-	if nw.MainApiPort != 80 {
-		t.Errorf("api_port = %d, want 80", nw.MainApiPort)
+	if nw.Invite.WireguardPort != 51821 {
+		t.Errorf("invite.wg_port = %d, want 51821", nw.Invite.WireguardPort)
 	}
-	if nw.InviteApiPort != 80 {
-		t.Errorf("invite_api_port = %d, want 80", nw.InviteApiPort)
+	if nw.Main.ApiPort != 80 {
+		t.Errorf("main.api_port = %d, want 80", nw.Main.ApiPort)
+	}
+	if nw.Invite.ApiPort != 80 {
+		t.Errorf("invite.api_port = %d, want 80", nw.Invite.ApiPort)
 	}
 }
 
 func TestCreateNetwork_DefaultInviteCidr(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	mainWgPort := uint16(51820)
-
 	nw, err := env.Service.CreateNetwork(
 		"auto-invite",
 		"1.2.3.4",
-		"10.27.0.0/16",
-		nil,
-		&mainWgPort,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
+		service.PlaneConfig{Cidr: "10.27.0.0/16", WireguardPort: 51820},
+		service.PlaneConfig{},
 	)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if nw.InviteCidr != "172.16.10.0/24" {
-		t.Errorf("invite_cidr = %q, want 172.16.10.0/24", nw.InviteCidr)
+	if nw.Invite.Cidr != "172.16.10.0/24" {
+		t.Errorf("invite.cidr = %q, want 172.16.10.0/24", nw.Invite.Cidr)
 	}
 }
 
 func TestCreateNetwork_OverlappingCIDRs(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	mainWgPort := uint16(51820)
-	mainAPIPort := uint16(80)
-	inviteCidr := "10.0.1.0/24"
-	inviteWgPort := uint16(51821)
-	inviteAPIPort := uint16(80)
-
 	_, err := env.Service.CreateNetwork(
 		"overlap",
 		"1.2.3.4",
-		"10.0.0.0/16",
-		nil,
-		&mainWgPort,
-		&mainAPIPort,
-		nil,
-		&inviteCidr,
-		&inviteWgPort,
-		&inviteAPIPort,
+		service.PlaneConfig{Cidr: "10.0.0.0/16", WireguardPort: 51820, ApiPort: 80},
+		service.PlaneConfig{Cidr: "10.0.1.0/24", WireguardPort: 51821, ApiPort: 80},
 	)
 	if !errors.Is(err, service.ErrCIDROverlap) {
 		t.Errorf("err = %v, want ErrCIDROverlap", err)
@@ -349,8 +239,8 @@ func TestGetNetwork_Success(t *testing.T) {
 	if net.Name != "testnet" {
 		t.Errorf("name = %q, want testnet", net.Name)
 	}
-	if net.MainCidr != "10.0.0.0/16" {
-		t.Errorf("main_cidr = %q, want 10.0.0.0/16", net.MainCidr)
+	if net.Main.Cidr != "10.0.0.0/16" {
+		t.Errorf("main.cidr = %q, want 10.0.0.0/16", net.Main.Cidr)
 	}
 }
 
@@ -413,10 +303,10 @@ func TestDeleteNetwork_CascadesResources(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := "10.0.0.5"
-	admin := false
-	_, err := env.Service.AddPeer("testnet", "alice", &ip, admin)
+	parsedIP := net.ParseIP(ip)
+	_, err := env.Service.CreateRegistration("testnet", "alice", &parsedIP, false, nil)
 	if err != nil {
-		t.Fatalf("add peer: %v", err)
+		t.Fatalf("create registration: %v", err)
 	}
 
 	if err := env.Service.DeleteNetwork("testnet"); err != nil {
@@ -429,42 +319,5 @@ func TestDeleteNetwork_CascadesResources(t *testing.T) {
 	}
 	if len(peers) != 0 {
 		t.Errorf("expected 0 peers after cascade, got %d", len(peers))
-	}
-}
-
-func TestStartNetwork_UsesNetworkPrefixInterfaceAddresses(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-
-	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
-		t.Fatalf("start network: %v", err)
-	}
-
-	var mainCfg *wireguard.DeviceConfig
-	for _, c := range env.Backend.CreateCalls {
-		if c.Name == "testnet" {
-			mainCfg = &c
-			break
-		}
-	}
-	if mainCfg == nil {
-		t.Fatal("expected main device")
-	}
-	if mainCfg.Address.String() != "10.0.0.1/16" {
-		t.Fatalf("main address = %q, want 10.0.0.1/16", mainCfg.Address.String())
-	}
-
-	var inviteCfg *wireguard.DeviceConfig
-	for _, c := range env.Backend.CreateCalls {
-		if c.Name == "testnet-i" {
-			inviteCfg = &c
-			break
-		}
-	}
-	if inviteCfg == nil {
-		t.Fatal("expected invite device")
-	}
-	if inviteCfg.Address.String() != "10.1.0.1/24" {
-		t.Fatalf("invite address = %q, want 10.1.0.1/24", inviteCfg.Address.String())
 	}
 }

@@ -11,25 +11,48 @@ import (
 
 func seedNetworkForEndpoint(t *testing.T, db *database.DB) {
 	t.Helper()
-	now := time.Now()
-	if err := db.BootstrapNetwork(&service.Network{
-		Name:                "epnet",
-		PrivateKey:          "priv",
-		PublicKey:           "pub",
-		MainCidr:            "10.0.0.0/16",
-		InviteCidr:          "10.1.0.0/24",
-		ExternalIP:          "1.1.1.1",
-		MainWireguardPort:   51820,
-		InviteWireguardPort: 51821,
-		MainApiPort:         80,
-		InviteApiPort:       80,
-		CreatedAt:           now,
-	}, &service.Cidr{Name: "epnet", Cidr: "10.0.0.0/16", Length: 16, Prefix: 32}, &service.Peer{Name: "cord-server", Cidr: "10.0.0.1/32", PublicKey: "pub", Admin: true, Enabled: true, Confirmed: true}); err != nil {
+
+	var name string = "epnet"
+	if err := db.BootstrapNetwork(
+		&service.NetworkConfig{
+			Name:       name,
+			PrivateKey: "priv-" + name,
+			PublicKey:  "pub-" + name,
+			ExternalIP: "1.1.1.1",
+			Main: service.PlaneConfig{
+				Name:          name,
+				Cidr:          "10.0.0.0/16",
+				WireguardPort: 51820,
+				ApiPort:       80,
+			},
+			Invite: service.PlaneConfig{
+				Name:          name + "-i",
+				Cidr:          "10.1.0.0/24",
+				WireguardPort: 51821,
+				ApiPort:       80,
+			},
+			CreatedAt: time.Now(),
+		},
+		&service.Cidr{
+			Name:   "epnet",
+			Cidr:   "10.0.0.0/16",
+			Prefix: 16,
+			Bits:   32,
+		},
+		&service.Peer{
+			Name:      "cord-server",
+			Route:     "10.0.0.1/32",
+			PublicKey: "pub",
+			Admin:     true,
+			Enabled:   true,
+			Confirmed: true,
+		},
+	); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
 	for _, p := range []service.Peer{
-		{Name: "peer-a", PublicKey: "pub-a", Cidr: "10.0.1.1/32", Confirmed: true, Enabled: true},
-		{Name: "peer-b", PublicKey: "pub-b", Cidr: "10.0.1.2/32", Confirmed: true, Enabled: true},
+		{Name: "peer-a", PublicKey: "pub-a", Route: "10.0.1.1/32", Confirmed: true, Enabled: true},
+		{Name: "peer-b", PublicKey: "pub-b", Route: "10.0.1.2/32", Confirmed: true, Enabled: true},
 	} {
 		if err := db.InsertPeer("epnet", &p); err != nil {
 			t.Fatalf("seed peer %s: %v", p.Name, err)

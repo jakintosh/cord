@@ -22,15 +22,15 @@ func (db *DB) SetPeers(
 		names = append(names, peer.Name)
 
 		if _, err := tx.Exec(`
-			INSERT INTO peer (network_name, name, public_key, cidr)
+			INSERT INTO peer (network_name, name, public_key, route)
 			VALUES (?1, ?2, ?3, ?4)
 			ON CONFLICT (network_name, public_key) DO UPDATE SET
 				name = ?2,
-				cidr = ?4;`,
+				route = ?4;`,
 			network,
 			peer.Name,
 			peer.PublicKey,
-			peer.Cidr,
+			peer.Route,
 		); err != nil {
 			return fmt.Errorf("failed to upsert peer '%s': %w", peer.Name, err)
 		}
@@ -62,7 +62,7 @@ func (db *DB) ListPeers(
 		SELECT
 			p.name,
 			p.public_key,
-			p.cidr,
+			p.route,
 			COALESCE(
 				(SELECT e.endpoint FROM endpoint e
 				 WHERE e.peer_id = p.id
@@ -86,7 +86,7 @@ func (db *DB) ListPeers(
 		if err := rows.Scan(
 			&peer.Name,
 			&peer.PublicKey,
-			&peer.Cidr,
+			&peer.Route,
 			&peer.Endpoint,
 		); err != nil {
 			return nil, fmt.Errorf("scan peer: %w", err)

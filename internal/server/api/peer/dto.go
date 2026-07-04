@@ -8,7 +8,7 @@ import (
 
 type VisiblePeerDTO struct {
 	Name      string               `json:"name"`
-	Cidr      string               `json:"cidr"`
+	Route     string               `json:"route"`
 	PublicKey string               `json:"public_key"`
 	Endpoints []EndpointWitnessDTO `json:"endpoints"`
 }
@@ -42,7 +42,7 @@ func toVisiblePeerDTO(p *service.VisiblePeer) VisiblePeerDTO {
 
 	return VisiblePeerDTO{
 		Name:      p.Name,
-		Cidr:      p.Cidr,
+		Route:     p.Route,
 		PublicKey: p.PublicKey,
 		Endpoints: endpoints,
 	}

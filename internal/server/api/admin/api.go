@@ -42,7 +42,7 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("POST /networks/{name}/disable", a.handleNetworkDisable)
 
 	mux.HandleFunc("GET /networks/{name}/peers", a.handlePeerList)
-	mux.HandleFunc("POST /networks/{name}/peers", a.handlePeerAdd)
+	mux.HandleFunc("POST /networks/{name}/registrations", a.handleInviteCreate)
 	mux.HandleFunc("PATCH /networks/{name}/peers/{peer}", a.handlePeerRename)
 	mux.HandleFunc("DELETE /networks/{name}/peers/{peer}", a.handlePeerDelete)
 	mux.HandleFunc("POST /networks/{name}/peers/{peer}/enable", a.handlePeerEnable)

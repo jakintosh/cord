@@ -36,7 +36,7 @@ func (b *UserspaceBackend) CreateDevice(
 		return nil, fmt.Errorf("wireguard: get tun name: %w", err)
 	}
 
-	if err := configureTunOS(realName, cfg.Address, mtu); err != nil {
+	if err := configureTunOS(realName, cfg.Route, mtu); err != nil {
 		tunDev.Close()
 		return nil, fmt.Errorf("wireguard: configure tun: %w", err)
 	}
@@ -119,19 +119,19 @@ func buildOpsUAPI(
 ) string {
 	var w uapiWriter
 	for _, op := range operations {
-		w.SetHex("public_key", op.Config.PublicKey[:])
+		w.SetHex("public_key", op.Target.PublicKey[:])
 		if op.Remove {
 			w.Set("remove", "true")
 			continue
 		}
 		w.Set("replace_allowed_ips", "true")
-		for _, ip := range op.Config.AllowedIPs {
+		for _, ip := range op.Target.AllowedIPs {
 			w.Set("allowed_ip", ip.String())
 		}
-		if op.Config.Endpoint != nil {
-			w.Set("endpoint", op.Config.Endpoint.String())
+		if op.Target.Endpoint != nil {
+			w.Set("endpoint", op.Target.Endpoint.String())
 		}
-		w.SetInt("persistent_keepalive_interval", int(op.Config.PersistentKeepalive.Seconds()))
+		w.SetInt("persistent_keepalive_interval", int(op.Target.PersistentKeepalive.Seconds()))
 	}
 	return w.String()
 }

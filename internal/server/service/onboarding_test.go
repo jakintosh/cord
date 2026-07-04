@@ -1,7 +1,6 @@
 package service_test
 
 import (
-	"context"
 	"errors"
 	"net"
 	"testing"
@@ -13,15 +12,13 @@ import (
 )
 
 // TestOnboardingLifecycle exercises the full server-side onboarding
-// flow: create invite → redeem → confirm. It verifies the auth model
-// at each step: a provisional peer can authenticate to /confirm but
-// not to /peers, and a confirmed peer can authenticate to /peers.
+// flow: create invite → redeem → confirm.
 func TestOnboardingLifecycle(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
-		t.Fatalf("start network: %v", err)
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable network: %v", err)
 	}
 
 	alicePermKey := mustGenKey(t)
@@ -37,8 +34,8 @@ func TestOnboardingLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
-	if result.Peer.CIDR != "10.0.0.5/16" {
-		t.Errorf("cidr = %q, want 10.0.0.5/16", result.Peer.CIDR)
+	if result.Peer.Route != "10.0.0.5/32" {
+		t.Errorf("cidr = %q, want 10.0.0.5/32", result.Peer.Route)
 	}
 
 	peer, err := env.Service.GetPeer("testnet", "alice")
@@ -171,8 +168,8 @@ func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
 	env := testutil.SetupServiceWithClock(t, clock.now)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
-		t.Fatalf("start network: %v", err)
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable network: %v", err)
 	}
 
 	shortIP := net.ParseIP("10.0.0.7")
@@ -199,7 +196,10 @@ func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
 
 	clock.t = clock.t.Add(2 * time.Hour)
 
-	env.Service.Reconcile("testnet")
+	_, err = env.Service.CreateRegistration("testnet", "reconcile-trigger", nil, false, nil)
+	if err != nil {
+		t.Fatalf("trigger reconcile: %v", err)
+	}
 
 	_, err = env.Service.GetPeer("testnet", "short-lived")
 	if !errors.Is(err, service.ErrNotFound) {
@@ -227,8 +227,8 @@ func TestPruneExpiredRegistrations_RetainsActiveProvisionalPeer(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
-		t.Fatalf("start network: %v", err)
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable network: %v", err)
 	}
 
 	stillIP := net.ParseIP("10.0.0.8")
@@ -245,7 +245,10 @@ func TestPruneExpiredRegistrations_RetainsActiveProvisionalPeer(t *testing.T) {
 		t.Fatalf("redeem: %v", err)
 	}
 
-	env.Service.Reconcile("testnet")
+	_, err = env.Service.CreateRegistration("testnet", "reconcile-trigger", nil, false, nil)
+	if err != nil {
+		t.Fatalf("trigger reconcile: %v", err)
+	}
 
 	peer, err := env.Service.GetPeer("testnet", "still-active")
 	if err != nil {
@@ -262,8 +265,8 @@ func TestPruneExpiredRegistrations_RetainsConfirmedPeerWithoutInvite(t *testing.
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
-		t.Fatalf("start network: %v", err)
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable network: %v", err)
 	}
 
 	confirmedIP := net.ParseIP("10.0.0.9")
@@ -287,7 +290,10 @@ func TestPruneExpiredRegistrations_RetainsConfirmedPeerWithoutInvite(t *testing.
 		t.Fatalf("revoke registration: %v", err)
 	}
 
-	env.Service.Reconcile("testnet")
+	_, err = env.Service.CreateRegistration("testnet", "reconcile-trigger", nil, false, nil)
+	if err != nil {
+		t.Fatalf("trigger reconcile: %v", err)
+	}
 
 	peer, err := env.Service.GetPeer("testnet", "confirmed")
 	if err != nil {
@@ -327,7 +333,10 @@ func TestPruneExpiredRegistrations_RetainsConfirmedRegistrationAsAudit(t *testin
 
 	clock.t = clock.t.Add(2 * time.Hour)
 
-	env.Service.Reconcile("testnet")
+	_, err = env.Service.CreateRegistration("testnet", "reconcile-trigger", nil, false, nil)
+	if err != nil {
+		t.Fatalf("trigger reconcile: %v", err)
+	}
 
 	reg, err := env.Database.GetRegistration("testnet", "audited")
 	if err != nil {
@@ -361,7 +370,7 @@ func mustGenKey(t *testing.T) string {
 
 func hasPeerOp(ops []wireguard.PeerOp, pubKey string) bool {
 	for _, op := range ops {
-		if !op.Remove && op.Config.PublicKey.String() == pubKey {
+		if !op.Remove && op.Target.PublicKey.String() == pubKey {
 			return true
 		}
 	}

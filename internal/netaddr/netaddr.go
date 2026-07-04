@@ -9,6 +9,7 @@
 package netaddr
 
 import (
+	"fmt"
 	"net"
 	"strconv"
 )
@@ -81,11 +82,11 @@ func TerminalPrefix(
 	return 128
 }
 
-// InterfaceAddress returns the address to assign to a device on network
+// InterfaceRoute returns the route to assign to a device on network
 // n: the first assignable host IP carrying n's prefix length (e.g.
 // 10.0.0.1/16). This is deliberately not a masked network address — the
 // host bits identify the device itself.
-func InterfaceAddress(
+func InterfaceRoute(
 	n *net.IPNet,
 ) net.IPNet {
 	mask := make(net.IPMask, len(n.Mask))
@@ -94,6 +95,23 @@ func InterfaceAddress(
 		IP:   FirstAssignable(n),
 		Mask: mask,
 	}
+}
+
+// InterfaceRouteFromCidr parses s as a CIDR (e.g. "10.0.0.0/16") and
+// returns the first assignable host route carrying the network's
+// prefix length (e.g. 10.0.0.1/16). Returns an error if s is not valid
+// CIDR.
+func InterfaceRouteFromCidr(
+	s string,
+) (
+	net.IPNet,
+	error,
+) {
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		return net.IPNet{}, err
+	}
+	return InterfaceRoute(n), nil
 }
 
 // HostRoute returns a single-host route for ip (e.g. 10.0.0.5/32 or
@@ -108,12 +126,27 @@ func HostRoute(
 	}
 }
 
-// ParseInterface parses an interface address in CIDR notation (e.g.
-// "10.0.0.1/16") while preserving the host bits. Unlike net.ParseCIDR —
-// whose returned *net.IPNet is masked to the network address — the
-// result retains the host portion, so it is suitable for assigning to a
+// HostRouteFromCidr parses s as a CIDR and returns a single-host route
+// for the IP it contains (e.g. "10.42.0.5/16" returns 10.42.0.5/32).
+func HostRouteFromCidr(
+	s string,
+) (
+	net.IPNet,
+	error,
+) {
+	ip, _, err := net.ParseCIDR(s)
+	if err != nil {
+		return net.IPNet{}, err
+	}
+	return HostRoute(ip), nil
+}
+
+// ParseRoute parses a route in CIDR notation (e.g. "10.0.0.1/16")
+// while preserving the host bits. Unlike net.ParseCIDR — whose
+// returned *net.IPNet is masked to the network address — the result
+// retains the host portion, so it is suitable for assigning to a
 // device. Returns an error if s is not valid CIDR.
-func ParseInterface(
+func ParseRoute(
 	s string,
 ) (
 	net.IPNet,
@@ -138,6 +171,23 @@ func Endpoint(
 	return net.JoinHostPort(ip.String(), strconv.FormatUint(uint64(port), 10))
 }
 
+// EndpointFromCIDR parses the IP from a CIDR string (e.g.
+// "10.42.0.1/32") and joins it with port to form a "host:port"
+// endpoint string.
+func EndpointFromCIDR(
+	cidr string,
+	port uint16,
+) (
+	string,
+	error,
+) {
+	ip, _, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return "", fmt.Errorf("parse %q: %w", cidr, err)
+	}
+	return Endpoint(ip, port), nil
+}
+
 // Overlaps reports whether a and b share any IP address.
 func Overlaps(
 	a *net.IPNet,
@@ -153,19 +203,4 @@ func Contains(
 ) bool {
 	_, innerLast := Range(inner)
 	return outer.Contains(inner.IP) && outer.Contains(innerLast)
-}
-
-// HostRouteFromCidr parses s as a CIDR and returns a single-host route
-// for the IP it contains (e.g. "10.42.0.5/16" returns 10.42.0.5/32).
-func HostRouteFromCidr(
-	s string,
-) (
-	net.IPNet,
-	error,
-) {
-	ip, _, err := net.ParseCIDR(s)
-	if err != nil {
-		return net.IPNet{}, err
-	}
-	return HostRoute(ip), nil
 }

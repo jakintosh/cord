@@ -39,19 +39,19 @@ type AddNetworkRequest struct {
 }
 
 func NetworkDTOFromService(
-	n service.Network,
+	n service.NetworkConfig,
 ) NetworkDTO {
 	return NetworkDTO{
 		Name:          n.Name,
 		ExternalIP:    n.ExternalIP,
-		MainName:      n.MainName,
-		MainCidr:      n.MainCidr,
-		MainWgPort:    n.MainWireguardPort,
-		MainApiPort:   n.MainApiPort,
-		InviteName:    n.InviteName,
-		InviteCidr:    n.InviteCidr,
-		InviteWgPort:  n.InviteWireguardPort,
-		InviteApiPort: n.InviteApiPort,
+		MainName:      n.Main.Name,
+		MainCidr:      n.Main.Cidr,
+		MainWgPort:    n.Main.WireguardPort,
+		MainApiPort:   n.Main.ApiPort,
+		InviteName:    n.Invite.Name,
+		InviteCidr:    n.Invite.Cidr,
+		InviteWgPort:  n.Invite.WireguardPort,
+		InviteApiPort: n.Invite.ApiPort,
 		Enabled:       n.Enabled,
 	}
 }
@@ -97,17 +97,31 @@ func (a *API) handleNetworkAdd(
 		return
 	}
 
+	main := service.PlaneConfig{
+		Cidr:          req.MainCidr,
+		WireguardPort: ptrVal(req.MainWgPort, 0),
+		ApiPort:       ptrVal(req.MainApiPort, 0),
+	}
+	if req.MainName != nil {
+		main.Name = *req.MainName
+	}
+
+	invite := service.PlaneConfig{
+		WireguardPort: ptrVal(req.InviteWgPort, 0),
+		ApiPort:       ptrVal(req.InviteApiPort, 0),
+	}
+	if req.InviteName != nil {
+		invite.Name = *req.InviteName
+	}
+	if req.InviteCidr != nil {
+		invite.Cidr = *req.InviteCidr
+	}
+
 	network, err := a.service.CreateNetwork(
 		req.Name,
 		req.ExternalIP,
-		req.MainCidr,
-		req.MainName,
-		req.MainWgPort,
-		req.MainApiPort,
-		req.InviteName,
-		req.InviteCidr,
-		req.InviteWgPort,
-		req.InviteApiPort,
+		main,
+		invite,
 	)
 	if err != nil {
 		writeServiceError(w, err)
@@ -115,6 +129,13 @@ func (a *API) handleNetworkAdd(
 	}
 
 	wire.WriteData(w, http.StatusCreated, NetworkDTOFromService(*network))
+}
+
+func ptrVal(p *uint16, def uint16) uint16 {
+	if p == nil {
+		return def
+	}
+	return *p
 }
 
 func (a *API) handleNetworkDelete(
@@ -140,7 +161,7 @@ func (a *API) handleNetworkEnable(
 ) {
 	name := r.PathValue("name")
 
-	if err := a.service.EnableNetwork(r.Context(), name); err != nil {
+	if err := a.service.EnableNetwork(name); err != nil {
 		writeServiceError(w, err)
 		return
 	}

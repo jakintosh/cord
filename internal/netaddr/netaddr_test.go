@@ -141,7 +141,7 @@ func TestTerminalPrefix(t *testing.T) {
 	}
 }
 
-func TestInterfaceAddress(t *testing.T) {
+func TestInterfaceRoute(t *testing.T) {
 	tests := []struct {
 		cidr string
 		want string
@@ -153,23 +153,52 @@ func TestInterfaceAddress(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.cidr, func(t *testing.T) {
-			got := InterfaceAddress(mustCIDR(t, tt.cidr))
+			got := InterfaceRoute(mustCIDR(t, tt.cidr))
 			if got.String() != tt.want {
-				t.Fatalf("InterfaceAddress(%s) = %s, want %s", tt.cidr, got.String(), tt.want)
+				t.Fatalf("InterfaceRoute(%s) = %s, want %s", tt.cidr, got.String(), tt.want)
 			}
 		})
 	}
 }
 
-func TestInterfaceAddress_DoesNotAliasInputMask(t *testing.T) {
+func TestInterfaceRoute_DoesNotAliasInputMask(t *testing.T) {
 	n := mustCIDR(t, "10.0.0.0/16")
-	addr := InterfaceAddress(n)
+	addr := InterfaceRoute(n)
 	// Mutating the returned mask must not corrupt the source network.
 	for i := range addr.Mask {
 		addr.Mask[i] = 0
 	}
 	if n.Mask.String() != net.CIDRMask(16, 32).String() {
-		t.Fatalf("InterfaceAddress aliased input mask: source mask now %v", n.Mask)
+		t.Fatalf("InterfaceRoute aliased input mask: source mask now %v", n.Mask)
+	}
+}
+
+func TestInterfaceRouteFromCidr(t *testing.T) {
+	tests := []struct {
+		cidr string
+		want string
+	}{
+		{"10.0.0.0/16", "10.0.0.1/16"},
+		{"172.16.10.0/24", "172.16.10.1/24"},
+		{"10.27.0.0/16", "10.27.0.1/16"},
+		{"fd00::/64", "fd00::1/64"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.cidr, func(t *testing.T) {
+			got, err := InterfaceRouteFromCidr(tt.cidr)
+			if err != nil {
+				t.Fatalf("InterfaceRouteFromCidr(%q): %v", tt.cidr, err)
+			}
+			if got.String() != tt.want {
+				t.Fatalf("InterfaceRouteFromCidr(%q) = %s, want %s", tt.cidr, got.String(), tt.want)
+			}
+		})
+	}
+}
+
+func TestInterfaceRouteFromCidr_Invalid(t *testing.T) {
+	if _, err := InterfaceRouteFromCidr("not-a-cidr"); err == nil {
+		t.Fatal("expected error for invalid CIDR")
 	}
 }
 
@@ -192,7 +221,7 @@ func TestHostRoute(t *testing.T) {
 	}
 }
 
-func TestParseInterface_PreservesHostBits(t *testing.T) {
+func TestParseRoute_PreservesHostBits(t *testing.T) {
 	tests := []struct {
 		in   string
 		want string
@@ -205,20 +234,20 @@ func TestParseInterface_PreservesHostBits(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
-			got, err := ParseInterface(tt.in)
+			got, err := ParseRoute(tt.in)
 			if err != nil {
-				t.Fatalf("ParseInterface(%q): %v", tt.in, err)
+				t.Fatalf("ParseRoute(%q): %v", tt.in, err)
 			}
 			if got.String() != tt.want {
-				t.Fatalf("ParseInterface(%q) = %q, want %q", tt.in, got.String(), tt.want)
+				t.Fatalf("ParseRoute(%q) = %q, want %q", tt.in, got.String(), tt.want)
 			}
 		})
 	}
 }
 
-// TestParseInterface_DiffersFromParseCIDR documents the exact footgun
+// TestParseRoute_DiffersFromParseCIDR documents the exact footgun
 // this helper exists to avoid: net.ParseCIDR masks the host bits.
-func TestParseInterface_DiffersFromParseCIDR(t *testing.T) {
+func TestParseRoute_DiffersFromParseCIDR(t *testing.T) {
 	_, masked, err := net.ParseCIDR("10.27.0.1/16")
 	if err != nil {
 		t.Fatal(err)
@@ -226,17 +255,17 @@ func TestParseInterface_DiffersFromParseCIDR(t *testing.T) {
 	if masked.String() != "10.27.0.0/16" {
 		t.Fatalf("precondition: net.ParseCIDR returned %q, expected masked network", masked.String())
 	}
-	got, err := ParseInterface("10.27.0.1/16")
+	got, err := ParseRoute("10.27.0.1/16")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.String() != "10.27.0.1/16" {
-		t.Fatalf("ParseInterface dropped host bits: %q", got.String())
+		t.Fatalf("ParseRoute dropped host bits: %q", got.String())
 	}
 }
 
-func TestParseInterface_ConsistentByteLengths(t *testing.T) {
-	got, err := ParseInterface("10.0.0.1/16")
+func TestParseRoute_ConsistentByteLengths(t *testing.T) {
+	got, err := ParseRoute("10.0.0.1/16")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,8 +277,8 @@ func TestParseInterface_ConsistentByteLengths(t *testing.T) {
 	}
 }
 
-func TestParseInterface_Invalid(t *testing.T) {
-	if _, err := ParseInterface("not-a-cidr"); err == nil {
+func TestParseRoute_Invalid(t *testing.T) {
+	if _, err := ParseRoute("not-a-cidr"); err == nil {
 		t.Fatal("expected error for invalid CIDR")
 	}
 }

@@ -13,65 +13,11 @@ var serverPeerCmd = &args.Command{
 	Name: "peer",
 	Help: "manage peers",
 	Subcommands: []*args.Command{
-		serverPeerAdd,
 		serverPeerRename,
 		serverPeerEnable,
 		serverPeerDisable,
 		serverPeerDelete,
 		serverPeerList,
-	},
-}
-
-var serverPeerAdd = &args.Command{
-	Name: "add",
-	Help: "add a peer to a network",
-	Operands: []args.Operand{
-		{
-			Name: "network",
-			Help: "network name",
-		},
-		{
-			Name: "name",
-			Help: "peer name",
-		},
-	},
-	Options: []args.Option{
-		{
-			Long: "ip",
-			Type: args.OptionTypeParameter,
-			Help: "peer IP address",
-		},
-		{
-			Short: 'a',
-			Long:  "admin",
-			Type:  args.OptionTypeFlag,
-			Help:  "make the new peer an admin",
-		},
-	},
-	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
-
-		network := i.GetOperand("network")
-		name := i.GetOperand("name")
-
-		ip := i.GetParameter("ip")
-		adminFlag := i.GetFlag("admin")
-
-		client := admin.NewClient(socketPath)
-		peer, err := client.AddPeer(
-			context.Background(),
-			network,
-			admin.AddPeerRequest{
-				Name:  name,
-				Ip:    ip,
-				Admin: adminFlag,
-			},
-		)
-		if err != nil {
-			return err
-		}
-
-		return printJSON(peer)
 	},
 }
 

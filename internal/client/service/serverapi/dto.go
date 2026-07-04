@@ -9,7 +9,7 @@ import "time"
 // server's peer.VisiblePeerDTO JSON wire format.
 type VisiblePeerDTO struct {
 	Name      string               `json:"name"`
-	Cidr      string               `json:"cidr"`
+	Route     string               `json:"route"`
 	PublicKey string               `json:"public_key"`
 	Endpoints []EndpointWitnessDTO `json:"endpoints"`
 }
@@ -49,10 +49,11 @@ type InvitationDTO struct {
 type NetworkInfoDTO struct {
 	PublicKey   string `json:"public_key"`
 	Endpoint    string `json:"endpoint"`
-	APIEndpoint string `json:"api_endpoint"`
+	ServerRoute string `json:"server_route"`
+	APIPort     uint16 `json:"api_port"`
 }
 
 // PeerIdentityDTO describes the peer's assigned identity on the network.
 type PeerIdentityDTO struct {
-	CIDR string `json:"cidr"`
+	Route string `json:"route"`
 }

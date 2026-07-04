@@ -95,7 +95,7 @@ func TestHandleConfirmPeer_Success(t *testing.T) {
 	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
-		Cidr:      "10.0.0.5/32",
+		Route:     "10.0.0.5/32",
 		Admin:     false,
 		Enabled:   true,
 		Confirmed: false,
@@ -143,7 +143,7 @@ func setupPeerTest(t *testing.T) (*testutil.ServiceEnv, *API) {
 	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
-		Cidr:      "10.0.0.5/32",
+		Route:     "10.0.0.5/32",
 		Admin:     false,
 		Enabled:   true,
 		Confirmed: true,

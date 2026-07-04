@@ -35,7 +35,7 @@ func TestAPIListRegistrations_WithData(
 	env.SeedNetwork(t)
 
 	// add a peer which creates a registration
-	url := "/networks/testnet/peers"
+	url := "/networks/testnet/registrations"
 	body := `{
 		"name": "alice",
 		"ip": "10.0.0.5"

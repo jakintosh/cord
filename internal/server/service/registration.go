@@ -11,35 +11,21 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-// Registration is the server-side stored representation of a pending peer
-// registration. It tracks the temporary key, assigned IPs, and redemption state.
-type Registration struct {
-	Name            string
-	InvitePublicKey string    // the temporary public key the peer uses to redeem
-	InviteIP        net.IP    // the temporary IP on the invite network
-	MainIP          net.IP    // the permanent IP on the main network
-	Admin           bool      // whether the registration grants admin privileges
-	Redeemed        bool      // whether the registration has been redeemed
-	RedeemedKey     string    // the permanent public key after redemption
-	Confirmed       bool      // whether the peer has confirmed via /confirm
-	CreatedAt       time.Time // when the registration was created
-	ExpiresAt       time.Time // when the registration expires
-}
-
 // NetworkInfo describes a cord network and how to reach it. It travels
 // in invitation payloads and is stored in client-side network config.
 type NetworkInfo struct {
 	Name        string `json:"name"`
 	PublicKey   string `json:"public_key"`
 	Endpoint    string `json:"endpoint"`     // external WG endpoint
-	APIEndpoint string `json:"api_endpoint"` // internal API endpoint
+	ServerRoute string `json:"server_route"` // server's host route on the overlay (e.g. "10.42.0.1/32")
+	APIPort     uint16 `json:"api_port"`     // server API port on the overlay
 }
 
 // PeerIdentity describes a peer's assigned identity on the network.
 // The PrivateKey is only present in the initial invitation; it is
 // omitted from redemption responses.
 type PeerIdentity struct {
-	CIDR       string `json:"cidr"`
+	Route      string `json:"route"`
 	PrivateKey string `json:"private_key,omitempty"`
 }
 
@@ -73,6 +59,21 @@ func (inv *Invitation) Write(
 		return fmt.Errorf("write invitation: %w", err)
 	}
 	return nil
+}
+
+// Registration is the server-side stored representation of a pending peer
+// registration. It tracks the temporary key, assigned routes, and redemption state.
+type Registration struct {
+	Name            string
+	InvitePublicKey string    // the temporary public key the peer uses to redeem
+	InviteRoute     string    // the temporary host route on the invite overlay
+	MainRoute       string    // the permanent host route on the main overlay
+	Admin           bool      // whether the registration grants admin privileges
+	Redeemed        bool      // whether the registration has been redeemed
+	RedeemedKey     string    // the permanent public key after redemption
+	Confirmed       bool      // whether the peer has confirmed via /confirm
+	CreatedAt       time.Time // when the registration was created
+	ExpiresAt       time.Time // when the registration expires
 }
 
 // ListRegistrations returns all registrations for the given network
@@ -113,11 +114,29 @@ func (s *Service) CreateRegistration(
 		return nil, fmt.Errorf("%w: registration name required", ErrInvalidInput)
 	}
 
+	exists, err := s.store.PeerExists(networkName, name)
+	if err != nil {
+		return nil, fmt.Errorf("check peer exists: %w", err)
+	}
+	if exists {
+		return nil, fmt.Errorf("%w: peer %q already exists", ErrConflict, name)
+	}
+
 	var peerMainAssignedIP net.IP
 	if ip != nil {
 		peerMainAssignedIP = netaddr.Normalize(*ip)
+		_, mainNet, err := net.ParseCIDR(network.Main.Cidr)
+		if err != nil {
+			return nil, fmt.Errorf("parse main CIDR: %w", err)
+		}
+		if !mainNet.Contains(peerMainAssignedIP) {
+			return nil, fmt.Errorf(
+				"%w: requested IP %s is not within main CIDR %s",
+				ErrInvalidInput, peerMainAssignedIP, network.Main.Cidr,
+			)
+		}
 	} else {
-		freeIP, err := s.nextFreePeerIP(networkName, network.MainCidr)
+		freeIP, err := s.nextFreePeerIP(networkName, network.Main.Cidr)
 		if err != nil {
 			return nil, fmt.Errorf("auto-assign permanent IP: %w", err)
 		}
@@ -134,7 +153,7 @@ func (s *Service) CreateRegistration(
 		return nil, fmt.Errorf("derive temp public key: %w", err)
 	}
 
-	peerTempAssignedIP, err := s.nextFreeRegistrationIP(networkName, network.InviteCidr)
+	peerTempAssignedIP, err := s.nextFreeRegistrationIP(networkName, network.Invite.Cidr)
 	if err != nil {
 		return nil, fmt.Errorf("allocate invite IP: %w", err)
 	}
@@ -145,11 +164,13 @@ func (s *Service) CreateRegistration(
 	}
 
 	now := s.clock()
+	tempRoute := netaddr.HostRoute(peerTempAssignedIP)
+	mainRoute := netaddr.HostRoute(peerMainAssignedIP)
 	reg := &Registration{
 		Name:            name,
 		InvitePublicKey: peerTempPubKey,
-		InviteIP:        peerTempAssignedIP,
-		MainIP:          peerMainAssignedIP,
+		InviteRoute:     tempRoute.String(),
+		MainRoute:       mainRoute.String(),
 		Admin:           admin,
 		ExpiresAt:       now.Add(expiry),
 		CreatedAt:       now,
@@ -158,31 +179,31 @@ func (s *Service) CreateRegistration(
 	if err := s.store.InsertRegistration(networkName, reg); err != nil {
 		return nil, fmt.Errorf("insert registration: %w", mapStoreError(err))
 	}
-	s.reconcileOnce(networkName)
+	s.reconcile(networkName)
 
-	_, inviteNet, err := net.ParseCIDR(network.InviteCidr)
+	_, inviteNet, err := net.ParseCIDR(network.Invite.Cidr)
 	if err != nil {
-		return nil, fmt.Errorf("parse invite CIDR %q: %w", network.InviteCidr, err)
+		return nil, fmt.Errorf("parse invite CIDR %q: %w", network.Invite.Cidr, err)
 	}
-	inviteNetPrefix, _ := inviteNet.Mask.Size()
-
-	peerInviteNet := fmt.Sprintf("%s/%d", peerTempAssignedIP.String(), inviteNetPrefix)
 
 	serverExternalIP := net.ParseIP(network.ExternalIP)
-	serverInviteExternalAddr := netaddr.Endpoint(serverExternalIP, network.InviteWireguardPort)
+	serverInviteExternalAddr := netaddr.Endpoint(serverExternalIP, network.Invite.WireguardPort)
 
 	serverInternalIP := netaddr.FirstAssignable(inviteNet)
-	serverInviteInternalAddr := netaddr.Endpoint(serverInternalIP, network.InviteApiPort)
+
+	serverRoute := netaddr.HostRoute(serverInternalIP)
+	peerRoute := netaddr.HostRoute(peerTempAssignedIP)
 
 	payload := &Invitation{
 		Network: NetworkInfo{
 			Name:        network.Name,
 			PublicKey:   network.PublicKey,
 			Endpoint:    serverInviteExternalAddr,
-			APIEndpoint: serverInviteInternalAddr,
+			ServerRoute: serverRoute.String(),
+			APIPort:     network.Invite.ApiPort,
 		},
 		Peer: PeerIdentity{
-			CIDR:       peerInviteNet,
+			Route:      peerRoute.String(),
 			PrivateKey: peerTempPrivKey,
 		},
 	}
@@ -210,12 +231,12 @@ func (s *Service) RedeemRegistration(
 	if err != nil {
 		peer, lookupErr := s.store.GetPeerByKey(networkName, permPubKey)
 		if lookupErr == nil && !peer.Confirmed {
-			s.reconcileOnce(networkName)
+			s.reconcile(networkName)
 			return s.buildInvitation(network, peer)
 		}
 		return nil, fmt.Errorf("redeem registration: %w", mapStoreError(err))
 	}
-	s.reconcileOnce(networkName)
+	s.reconcile(networkName)
 
 	peer, err := s.store.GetPeerByKey(networkName, permPubKey)
 	if err != nil {
@@ -235,38 +256,42 @@ func (s *Service) RevokeRegistration(
 	if err := s.store.DeleteRegistration(network, name); err != nil {
 		return fmt.Errorf("delete registration %q: %w", name, mapStoreError(err))
 	}
-	s.reconcileOnce(network)
+	s.reconcile(network)
 	return nil
 }
 
-// buildInvitation constructs an Invitation from a network and a redeemed peer.
+// buildInvitation constructs an Invitation from a network config and a
+// redeemed peer.
 func (s *Service) buildInvitation(
-	network *Network,
+	network *NetworkConfig,
 	peer *Peer,
 ) (
 	*Invitation,
 	error,
 ) {
-	_, rootNet, err := net.ParseCIDR(network.MainCidr)
+	_, rootNet, err := net.ParseCIDR(network.Main.Cidr)
 	if err != nil {
-		return nil, fmt.Errorf("parse main CIDR %q: %w", network.MainCidr, err)
+		return nil, fmt.Errorf("parse main CIDR %q: %w", network.Main.Cidr, err)
 	}
-	networkPrefix, _ := rootNet.Mask.Size()
 
-	peerIP, _, err := net.ParseCIDR(peer.Cidr)
+	serverIP := netaddr.FirstAssignable(rootNet)
+	serverRoute := netaddr.HostRoute(serverIP)
+
+	peerRoute, err := netaddr.ParseRoute(peer.Route)
 	if err != nil {
-		return nil, fmt.Errorf("parse peer CIDR %q: %w", peer.Cidr, err)
+		return nil, fmt.Errorf("parse peer route %q: %w", peer.Route, err)
 	}
 
 	return &Invitation{
 		Network: NetworkInfo{
 			Name:        network.Name,
 			PublicKey:   network.PublicKey,
-			Endpoint:    netaddr.Endpoint(net.ParseIP(network.ExternalIP), network.MainWireguardPort),
-			APIEndpoint: netaddr.Endpoint(netaddr.FirstAssignable(rootNet), network.MainApiPort),
+			Endpoint:    netaddr.Endpoint(net.ParseIP(network.ExternalIP), network.Main.WireguardPort),
+			ServerRoute: serverRoute.String(),
+			APIPort:     network.Main.ApiPort,
 		},
 		Peer: PeerIdentity{
-			CIDR: fmt.Sprintf("%s/%d", peerIP.String(), networkPrefix),
+			Route: peerRoute.String(),
 		},
 	}, nil
 }
@@ -292,8 +317,11 @@ func (s *Service) nextFreeRegistrationIP(
 
 	used := map[string]bool{}
 	for _, reg := range regs {
-		if reg.InviteIP != nil {
-			used[netaddr.Normalize(reg.InviteIP).String()] = true
+		if reg.InviteRoute != "" {
+			ip, _, _ := net.ParseCIDR(reg.InviteRoute)
+			if ip != nil {
+				used[netaddr.Normalize(ip).String()] = true
+			}
 		}
 	}
 
@@ -309,4 +337,73 @@ func (s *Service) nextFreeRegistrationIP(
 	}
 
 	return nil, fmt.Errorf("%w: no free addresses in invite CIDR %s", ErrInvalidInput, inviteCidr)
+}
+
+// nextFreePeerIP finds the lowest free address in the root CIDR,
+// skipping the network address, the server address, and addresses
+// held by existing peers or active registrations.
+func (s *Service) nextFreePeerIP(
+	network string,
+	rootCidr string,
+) (
+	net.IP,
+	error,
+) {
+	_, ipNet, err := net.ParseCIDR(rootCidr)
+	if err != nil {
+		return nil, fmt.Errorf("parse root CIDR: %w", err)
+	}
+
+	peers, err := s.store.ListPeers(network)
+	if err != nil {
+		return nil, fmt.Errorf("list peers: %w", err)
+	}
+
+	regs, err := s.store.ListActiveRegistrations(network, s.clock())
+	if err != nil {
+		return nil, fmt.Errorf("list active registrations: %w", err)
+	}
+
+	used := map[string]bool{}
+	for _, p := range peers {
+		ip, _, _ := net.ParseCIDR(p.Route)
+		if ip != nil {
+			used[netaddr.Normalize(ip).String()] = true
+		}
+	}
+	for _, reg := range regs {
+		if reg.MainRoute != "" {
+			ip, _, _ := net.ParseCIDR(reg.MainRoute)
+			if ip != nil {
+				used[netaddr.Normalize(ip).String()] = true
+			}
+		}
+	}
+
+	first := netaddr.FirstAssignable(ipNet)
+	_, last := netaddr.Range(ipNet)
+
+	candidate := netaddr.Increment(first)
+	for ipNet.Contains(candidate) && !candidate.Equal(last) {
+		if !used[netaddr.Normalize(candidate).String()] {
+			return netaddr.Normalize(candidate), nil
+		}
+		candidate = netaddr.Increment(candidate)
+	}
+
+	return nil, fmt.Errorf("%w: no free addresses in %s", ErrInvalidInput, rootCidr)
+}
+
+func registrationsToWireGuardPeers(
+	regs []*Registration,
+) []wireguard.PeerConfig {
+	var wgpeers []wireguard.PeerConfig
+	for _, reg := range regs {
+		wgpeers = append(wgpeers, wireguard.PeerConfig{
+			PublicKey:      reg.InvitePublicKey,
+			AllowedIPs:     []string{reg.InviteRoute},
+			EndpointPolicy: wireguard.EndpointDynamic,
+		})
+	}
+	return wgpeers
 }

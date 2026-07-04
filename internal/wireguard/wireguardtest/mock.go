@@ -58,17 +58,17 @@ func (d *MockDevice) ApplyPeers(
 	copy(call.Ops, ops)
 	d.ApplyCalls = append(d.ApplyCalls, call)
 	for _, op := range ops {
-		key := op.Config.PublicKey.String()
+		key := op.Target.PublicKey.String()
 		if op.Remove {
 			delete(d.peers, key)
 			continue
 		}
 		existing := d.peers[key]
-		existing.PublicKey = op.Config.PublicKey
-		existing.AllowedIPs = copyIPNets(op.Config.AllowedIPs)
-		existing.PersistentKeepalive = op.Config.PersistentKeepalive
-		if op.Config.Endpoint != nil {
-			existing.Endpoint = copyUDPAddr(op.Config.Endpoint)
+		existing.PublicKey = op.Target.PublicKey
+		existing.AllowedIPs = copyIPNets(op.Target.AllowedIPs)
+		existing.PersistentKeepalive = op.Target.PersistentKeepalive
+		if op.Target.Endpoint != nil {
+			existing.Endpoint = copyUDPAddr(op.Target.Endpoint)
 		}
 		d.peers[key] = existing
 	}

@@ -20,15 +20,17 @@ CREATE TABLE network (
     public_key              TEXT NOT NULL,
     main_interface_name     TEXT NOT NULL DEFAULT '',
     invite_interface_name   TEXT NOT NULL DEFAULT '',
-    assigned_cidr           TEXT NOT NULL DEFAULT '',
+    assigned_route          TEXT NOT NULL DEFAULT '',
     server_pubkey           TEXT NOT NULL DEFAULT '',
     server_endpoint         TEXT NOT NULL DEFAULT '',
-    server_api_addr         TEXT NOT NULL DEFAULT '',
+    server_route            TEXT NOT NULL DEFAULT '',
+    server_api_port         INTEGER NOT NULL DEFAULT 0,
     temp_priv_key           TEXT NOT NULL DEFAULT '',
-    temp_cidr               TEXT NOT NULL DEFAULT '',
+    temp_route              TEXT NOT NULL DEFAULT '',
     invite_server_pubkey    TEXT NOT NULL DEFAULT '',
     invite_server_endpoint  TEXT NOT NULL DEFAULT '',
-    temp_api_addr           TEXT NOT NULL DEFAULT '',
+    invite_server_route     TEXT NOT NULL DEFAULT '',
+    invite_server_port      INTEGER NOT NULL DEFAULT 0,
     enabled                 INTEGER NOT NULL DEFAULT 0,
     created_at_unix         INTEGER NOT NULL
 );
@@ -38,7 +40,7 @@ CREATE TABLE peer (
     network_name    TEXT NOT NULL,
     name            TEXT NOT NULL,
     public_key      TEXT NOT NULL,
-    cidr            TEXT NOT NULL,
+    route           TEXT NOT NULL,
     FOREIGN KEY (network_name)
         REFERENCES network (name)
         ON DELETE CASCADE,

@@ -2,7 +2,6 @@ package service_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -31,8 +30,8 @@ func TestCreateRegistration_Success(t *testing.T) {
 	if inv.Peer.PrivateKey == "" {
 		t.Error("private_key should not be empty")
 	}
-	if inv.Peer.CIDR == "" {
-		t.Error("cidr should not be empty")
+	if inv.Peer.Route == "" {
+		t.Error("route should not be empty")
 	}
 	if inv.Network.PublicKey == "" {
 		t.Error("server public_key should not be empty")
@@ -75,9 +74,8 @@ func TestCreateRegistration_AutoAssignsIP(t *testing.T) {
 		t.Fatalf("create registration: %v", err)
 	}
 
-	// First auto-assigned IP should be 10.0.0.2 (10.0.0.0 = network, 10.0.0.1 = server)
-	if inv.Peer.CIDR != "10.1.0.2/24" {
-		t.Errorf("cidr = %q, want 10.1.0.2/24", inv.Peer.CIDR)
+	if inv.Peer.Route != "10.1.0.2/32" {
+		t.Errorf("route = %q, want 10.1.0.2/32", inv.Peer.Route)
 	}
 }
 
@@ -85,8 +83,8 @@ func TestCreateRegistration_ReconcilesRunningInviteDeviceWithHostRoute(t *testin
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
-		t.Fatalf("start network: %v", err)
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable network: %v", err)
 	}
 
 	ip := net.ParseIP("10.0.0.5")
@@ -106,11 +104,11 @@ func TestCreateRegistration_ReconcilesRunningInviteDeviceWithHostRoute(t *testin
 	if err != nil {
 		t.Fatalf("derive expected pub key: %v", err)
 	}
-	if peers[0].Config.PublicKey.String() != expectedPub {
+	if peers[0].Target.PublicKey.String() != expectedPub {
 		t.Fatalf("public key = %q, want temp registration public key %q",
-			peers[0].Config.PublicKey.String(), expectedPub)
+			peers[0].Target.PublicKey.String(), expectedPub)
 	}
-	if got := peers[0].Config.AllowedIPs; len(got) != 1 || got[0].String() != "10.1.0.2/32" {
+	if got := peers[0].Target.AllowedIPs; len(got) != 1 || got[0].String() != "10.1.0.2/32" {
 		t.Fatalf("allowed IPs = %v, want [10.1.0.2/32]", got)
 	}
 }
@@ -155,8 +153,8 @@ func TestRedeemRegistration_Success(t *testing.T) {
 	if result.Network.Name != "testnet" {
 		t.Errorf("network_name = %q, want testnet", result.Network.Name)
 	}
-	if result.Peer.CIDR != "10.0.0.5/16" {
-		t.Errorf("cidr = %q, want 10.0.0.5/16", result.Peer.CIDR)
+	if result.Peer.Route != "10.0.0.5/32" {
+		t.Errorf("route = %q, want 10.0.0.5/32", result.Peer.Route)
 	}
 	if result.Network.PublicKey == "" {
 		t.Error("server public_key should not be empty")
@@ -169,8 +167,8 @@ func TestRedeemRegistration_Success(t *testing.T) {
 	if peer.PublicKey != "perm-key-1" {
 		t.Errorf("public_key = %q, want perm-key-1", peer.PublicKey)
 	}
-	if peer.Cidr != "10.0.0.5/32" {
-		t.Errorf("cidr = %q, want 10.0.0.5/32", peer.Cidr)
+	if peer.Route != "10.0.0.5/32" {
+		t.Errorf("route = %q, want 10.0.0.5/32", peer.Route)
 	}
 }
 
@@ -195,8 +193,8 @@ func TestRedeemRegistration_Idempotent_SameKey(t *testing.T) {
 		t.Fatalf("second redeem: %v", err)
 	}
 
-	if result1.Peer.CIDR != result2.Peer.CIDR {
-		t.Errorf("results differ: %q vs %q", result1.Peer.CIDR, result2.Peer.CIDR)
+	if result1.Peer.Route != result2.Peer.Route {
+		t.Errorf("results differ: %q vs %q", result1.Peer.Route, result2.Peer.Route)
 	}
 }
 
@@ -259,8 +257,8 @@ func TestRedeemRegistration_ReconcilesRunningDevices(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Service.StartNetwork(context.Background(), "testnet"); err != nil {
-		t.Fatalf("start network: %v", err)
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable network: %v", err)
 	}
 	ip := net.ParseIP("10.0.0.5")
 	_, err := env.Service.CreateRegistration("testnet", "live-redeem", &ip, false, nil)
@@ -275,9 +273,6 @@ func TestRedeemRegistration_ReconcilesRunningDevices(t *testing.T) {
 		t.Fatalf("redeem: %v", err)
 	}
 
-	// After redeem, the peer is added to the main device but the temp
-	// peer stays on the invite device so the client can retry if the
-	// response was lost.
 	if env.Backend.Device("testnet-i") == nil {
 		t.Fatal("expected invite device")
 	}
@@ -290,9 +285,9 @@ func TestRedeemRegistration_ReconcilesRunningDevices(t *testing.T) {
 	}
 	var found bool
 	for _, op := range env.Backend.LastAppliedOpsFor("testnet") {
-		if op.Config.PublicKey.String() == permKey {
+		if op.Target.PublicKey.String() == permKey {
 			found = true
-			if got := op.Config.AllowedIPs; len(got) != 1 || got[0].String() != "10.0.0.5/32" {
+			if got := op.Target.AllowedIPs; len(got) != 1 || got[0].String() != "10.0.0.5/32" {
 				t.Fatalf("redeemed peer allowed IPs = %v, want [10.0.0.5/32]", got)
 			}
 		}
@@ -346,10 +341,6 @@ func TestListRegistrations_Mixed(t *testing.T) {
 	if active != 1 {
 		t.Errorf("expected 1 active, got %d", active)
 	}
-	// After redeem, the registration is marked as redeemed but the mere
-	// existence of the record keeps the temp peer on the invite device
-	// so the client can retry if the response was lost. ConfirmPeer
-	// marks it confirmed, removing it from the invite device.
 	for _, reg := range regs {
 		if reg.RedeemedKey != "" && !reg.Redeemed {
 			t.Errorf("registration %q: should be redeemed after RedeemRegistration", reg.Name)
@@ -399,10 +390,11 @@ func TestParseInvitation_Success(t *testing.T) {
 			"name": "testnet",
 			"public_key": "server-key",
 			"endpoint": "1.2.3.4:51820",
-			"api_endpoint": "10.0.0.1:8080"
+			"server_route": "10.0.0.1/32",
+			"api_port": 8080
 		},
 		"peer": {
-			"cidr": "10.1.0.2/24",
+			"route": "10.1.0.2/32",
 			"private_key": "temp-key"
 		}
 	}`
@@ -418,8 +410,8 @@ func TestParseInvitation_Success(t *testing.T) {
 	if inv.Peer.PrivateKey != "temp-key" {
 		t.Errorf("private_key = %q, want temp-key", inv.Peer.PrivateKey)
 	}
-	if inv.Peer.CIDR != "10.1.0.2/24" {
-		t.Errorf("cidr = %q, want 10.1.0.2/24", inv.Peer.CIDR)
+	if inv.Peer.Route != "10.1.0.2/32" {
+		t.Errorf("route = %q, want 10.1.0.2/32", inv.Peer.Route)
 	}
 	if inv.Network.PublicKey != "server-key" {
 		t.Errorf("server public_key = %q, want server-key", inv.Network.PublicKey)
@@ -427,8 +419,11 @@ func TestParseInvitation_Success(t *testing.T) {
 	if inv.Network.Endpoint != "1.2.3.4:51820" {
 		t.Errorf("endpoint = %q, want 1.2.3.4:51820", inv.Network.Endpoint)
 	}
-	if inv.Network.APIEndpoint != "10.0.0.1:8080" {
-		t.Errorf("api_endpoint = %q, want 10.0.0.1:8080", inv.Network.APIEndpoint)
+	if inv.Network.ServerRoute != "10.0.0.1/32" {
+		t.Errorf("server_route = %q, want 10.0.0.1/32", inv.Network.ServerRoute)
+	}
+	if inv.Network.APIPort != 8080 {
+		t.Errorf("api_port = %d, want 8080", inv.Network.APIPort)
 	}
 }
 
@@ -447,10 +442,11 @@ func TestInvitation_Write(t *testing.T) {
 			Name:        "mynet",
 			PublicKey:   "pub",
 			Endpoint:    "1.2.3.4:51820",
-			APIEndpoint: "10.0.0.1:8080",
+			ServerRoute: "10.0.0.1/32",
+			APIPort:     8080,
 		},
 		Peer: service.PeerIdentity{
-			CIDR:       "10.0.0.5/24",
+			Route:      "10.0.0.5/32",
 			PrivateKey: "priv",
 		},
 	}
@@ -508,10 +504,10 @@ func TestRegistration_Persistence(t *testing.T) {
 	if reg.RedeemedKey != "" {
 		t.Errorf("redeemed_key = %q, want empty", reg.RedeemedKey)
 	}
-	if reg.MainIP == nil || reg.MainIP.String() != "10.0.0.5" {
-		t.Errorf("final_ip = %v, want 10.0.0.5", reg.MainIP)
+	if reg.MainRoute == "" || reg.MainRoute != "10.0.0.5/32" {
+		t.Errorf("final_route = %q, want 10.0.0.5/32", reg.MainRoute)
 	}
-	if reg.InviteIP == nil {
+	if reg.InviteRoute == "" {
 		t.Error("temp_ip should not be nil")
 	}
 	if reg.CreatedAt.IsZero() {

@@ -260,11 +260,12 @@ func parseInviteFile(
 	}
 
 	return api.InstallNetworkRequest{
-		NetworkName:          payload.Network.Name,
-		InviteServerPubkey:   payload.Network.PublicKey,
-		InviteServerEndpoint: payload.Network.Endpoint,
-		InviteServerAddr:     payload.Network.APIEndpoint,
-		TempPeerAssignedCidr: payload.Peer.CIDR,
-		TempPeerPrivKey:      payload.Peer.PrivateKey,
+		NetworkName:           payload.Network.Name,
+		InviteServerPubkey:    payload.Network.PublicKey,
+		InviteServerEndpoint:  payload.Network.Endpoint,
+		InviteServerRoute:     payload.Network.ServerRoute,
+		InviteServerPort:      payload.Network.APIPort,
+		TempPeerAssignedRoute: payload.Peer.Route,
+		TempPeerPrivKey:       payload.Peer.PrivateKey,
 	}, nil
 }

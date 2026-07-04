@@ -53,7 +53,7 @@ CREATE TABLE peer (
     id              INTEGER PRIMARY KEY,
     network_name    TEXT NOT NULL,
     name            TEXT NOT NULL,
-    ip              BLOB NOT NULL,
+    route           TEXT NOT NULL,
     public_key      TEXT NOT NULL,
     admin           INTEGER DEFAULT 0 NOT NULL,
     enabled         INTEGER DEFAULT 0 NOT NULL,
@@ -62,7 +62,7 @@ CREATE TABLE peer (
         REFERENCES network (name)
         ON DELETE CASCADE,
     UNIQUE (network_name, name),
-    UNIQUE (network_name, ip),
+    UNIQUE (network_name, route),
     UNIQUE (network_name, public_key)
 );
 
@@ -87,8 +87,8 @@ CREATE TABLE registration (
     network_name    TEXT NOT NULL,
     name            TEXT NOT NULL,
     temp_public_key TEXT NOT NULL,
-    temp_ip         BLOB NOT NULL,
-    final_ip        BLOB NOT NULL,
+    temp_route      TEXT NOT NULL,
+    final_route     TEXT NOT NULL,
     admin           INTEGER DEFAULT 0 NOT NULL,
     redeemed        INTEGER DEFAULT 0 NOT NULL,
     redeemed_key    TEXT DEFAULT '' NOT NULL,
@@ -100,8 +100,8 @@ CREATE TABLE registration (
         ON DELETE CASCADE,
     UNIQUE (network_name, name),
     UNIQUE (network_name, temp_public_key),
-    UNIQUE (network_name, temp_ip),
-    UNIQUE (network_name, final_ip)
+    UNIQUE (network_name, temp_route),
+    UNIQUE (network_name, final_route)
 );
 
 CREATE TABLE endpoint (

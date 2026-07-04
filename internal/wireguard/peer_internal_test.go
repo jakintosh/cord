@@ -17,7 +17,7 @@ func TestPlanPeerReconciliation_EmptyBoth(t *testing.T) {
 
 func TestPlanPeerReconciliation_AllNew(t *testing.T) {
 	k1, k2, k3 := mustGenKey(t), mustGenKey(t), mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(k1, []string{"10.0.0.1/32"}, "", EndpointDynamic, 0),
 		pcfg(k2, []string{"10.0.0.2/32"}, "", EndpointDynamic, 0),
 		pcfg(k3, []string{"10.0.0.3/32"}, "", EndpointDynamic, 0),
@@ -55,7 +55,7 @@ func TestPlanPeerReconciliation_AllRemoved(t *testing.T) {
 
 func TestPlanPeerReconciliation_ExactMatch(t *testing.T) {
 	k1, k2 := mustGenKey(t), mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(k1, []string{"10.0.0.1/32"}, "", EndpointDynamic, 0),
 		pcfg(k2, []string{"10.0.0.2/32"}, "", EndpointDynamic, 0),
 	}
@@ -72,7 +72,7 @@ func TestPlanPeerReconciliation_ExactMatch(t *testing.T) {
 
 func TestPlanPeerReconciliation_Mixed(t *testing.T) {
 	kA, kB, kC, kD := mustGenKey(t), mustGenKey(t), mustGenKey(t), mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(kA, []string{"10.0.0.1/32"}, "", EndpointDynamic, 0),
 		pcfg(kB, []string{"10.0.0.2/32"}, "", EndpointDynamic, 0),
 		pcfg(kC, []string{"10.0.0.3/32"}, "", EndpointDynamic, 0),
@@ -90,7 +90,7 @@ func TestPlanPeerReconciliation_Mixed(t *testing.T) {
 	for _, op := range ops {
 		if op.Remove {
 			removes++
-		} else if op.Config.PublicKey == kA || op.Config.PublicKey == kC {
+		} else if op.Target.PublicKey == kA || op.Target.PublicKey == kC {
 			adds++
 		}
 	}
@@ -103,7 +103,7 @@ func TestPlanPeerReconciliation_Mixed(t *testing.T) {
 	// kB is present in both desired and observed with matching state, so it
 	// must not produce any op. Verify by ensuring no op targets kB.
 	for _, op := range ops {
-		if op.Config.PublicKey == kB {
+		if op.Target.PublicKey == kB {
 			t.Errorf("expected no op for unchanged peer kB, got %v", op)
 		}
 	}
@@ -111,7 +111,7 @@ func TestPlanPeerReconciliation_Mixed(t *testing.T) {
 
 func TestPlanPeerReconciliation_AllowedIPsChanged(t *testing.T) {
 	k := mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(k, []string{"10.0.1.0/24"}, "", EndpointDynamic, 0),
 	}
 	observed := []PeerStatus{
@@ -127,14 +127,14 @@ func TestPlanPeerReconciliation_AllowedIPsChanged(t *testing.T) {
 	}
 	// Dynamic policy: an update must never carry an endpoint, otherwise
 	// a roamed endpoint learned by WireGuard would be clobbered.
-	if ops[0].Config.Endpoint != nil {
-		t.Errorf("expected nil endpoint on Dynamic update, got %v", ops[0].Config.Endpoint)
+	if ops[0].Target.Endpoint != nil {
+		t.Errorf("expected nil endpoint on Dynamic update, got %v", ops[0].Target.Endpoint)
 	}
 }
 
 func TestPlanPeerReconciliation_DynamicUpdateStripsEndpoint(t *testing.T) {
 	k := mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(k, []string{"10.0.1.0/24"}, "1.2.3.4:51820", EndpointDynamic, 0),
 	}
 	observed := []PeerStatus{
@@ -147,14 +147,14 @@ func TestPlanPeerReconciliation_DynamicUpdateStripsEndpoint(t *testing.T) {
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 update op, got %d", len(ops))
 	}
-	if ops[0].Config.Endpoint != nil {
-		t.Errorf("expected nil endpoint on Dynamic update to preserve roaming, got %v", ops[0].Config.Endpoint)
+	if ops[0].Target.Endpoint != nil {
+		t.Errorf("expected nil endpoint on Dynamic update to preserve roaming, got %v", ops[0].Target.Endpoint)
 	}
 }
 
 func TestPlanPeerReconciliation_AllowedIPOrderIgnored(t *testing.T) {
 	k := mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(k, []string{"10.0.1.0/24", "10.0.0.0/24"}, "", EndpointDynamic, 0),
 	}
 	observed := []PeerStatus{
@@ -169,7 +169,7 @@ func TestPlanPeerReconciliation_AllowedIPOrderIgnored(t *testing.T) {
 
 func TestPlanPeerReconciliation_KeepaliveChanged(t *testing.T) {
 	k := mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(k, []string{"10.0.0.1/32"}, "", EndpointDynamic, 25*time.Second),
 	}
 	observed := []PeerStatus{
@@ -180,14 +180,14 @@ func TestPlanPeerReconciliation_KeepaliveChanged(t *testing.T) {
 	if len(ops) != 1 {
 		t.Errorf("expected 1 update op, got %d", len(ops))
 	}
-	if ops[0].Config.Endpoint != nil {
-		t.Errorf("expected nil endpoint on Dynamic update, got %v", ops[0].Config.Endpoint)
+	if ops[0].Target.Endpoint != nil {
+		t.Errorf("expected nil endpoint on Dynamic update, got %v", ops[0].Target.Endpoint)
 	}
 }
 
 func TestPlanPeerReconciliation_EndpointFixedChanged(t *testing.T) {
 	k := mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(k, []string{"10.0.0.1/32"}, "1.2.3.4:51820", EndpointFixed, 0),
 	}
 	observed := []PeerStatus{
@@ -198,14 +198,14 @@ func TestPlanPeerReconciliation_EndpointFixedChanged(t *testing.T) {
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 update op, got %d", len(ops))
 	}
-	if ops[0].Config.Endpoint == nil {
+	if ops[0].Target.Endpoint == nil {
 		t.Error("expected endpoint to be set for Fixed peer with drifted endpoint")
 	}
 }
 
 func TestPlanPeerReconciliation_EndpointFixedMatchingNotRewritten(t *testing.T) {
 	k := mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(k, []string{"10.0.1.0/24"}, "1.2.3.4:51820", EndpointFixed, 0),
 	}
 	observed := []PeerStatus{
@@ -220,19 +220,19 @@ func TestPlanPeerReconciliation_EndpointFixedMatchingNotRewritten(t *testing.T) 
 	// A Fixed peer whose endpoint already matches must NOT carry an
 	// endpoint on the update — rewriting it is wasted work and could
 	// race with concurrent endpoint learning.
-	if ops[0].Config.Endpoint != nil {
-		t.Errorf("expected nil endpoint when Fixed endpoint matches, got %v", ops[0].Config.Endpoint)
+	if ops[0].Target.Endpoint != nil {
+		t.Errorf("expected nil endpoint when Fixed endpoint matches, got %v", ops[0].Target.Endpoint)
 	}
 	// The changed allowed-IPs must still be applied.
-	if len(ops[0].Config.AllowedIPs) != 1 ||
-		ops[0].Config.AllowedIPs[0].String() != "10.0.1.0/24" {
-		t.Errorf("allowed IPs = %v, want [10.0.1.0/24]", ops[0].Config.AllowedIPs)
+	if len(ops[0].Target.AllowedIPs) != 1 ||
+		ops[0].Target.AllowedIPs[0].String() != "10.0.1.0/24" {
+		t.Errorf("allowed IPs = %v, want [10.0.1.0/24]", ops[0].Target.AllowedIPs)
 	}
 }
 
 func TestPlanPeerReconciliation_EndpointDynamicIgnoresChange(t *testing.T) {
 	k := mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(k, []string{"10.0.0.1/32"}, "1.2.3.4:51820", EndpointDynamic, 0),
 	}
 	observed := []PeerStatus{
@@ -247,7 +247,7 @@ func TestPlanPeerReconciliation_EndpointDynamicIgnoresChange(t *testing.T) {
 
 func TestPlanPeerReconciliation_EndpointBootstrapIgnoresChange(t *testing.T) {
 	k := mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(k, []string{"10.0.0.1/32"}, "1.2.3.4:51820", EndpointBootstrap, 0),
 	}
 	observed := []PeerStatus{
@@ -262,7 +262,7 @@ func TestPlanPeerReconciliation_EndpointBootstrapIgnoresChange(t *testing.T) {
 
 func TestPlanPeerReconciliation_MultipleChanges(t *testing.T) {
 	k := mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(k, []string{"10.0.1.0/24"}, "1.2.3.4:51820", EndpointFixed, 25*time.Second),
 	}
 	observed := []PeerStatus{
@@ -277,14 +277,14 @@ func TestPlanPeerReconciliation_MultipleChanges(t *testing.T) {
 	if op.Remove {
 		t.Fatal("expected non-remove op")
 	}
-	if op.Config.Endpoint == nil {
+	if op.Target.Endpoint == nil {
 		t.Error("expected endpoint to be set for Fixed peer with drifted endpoint")
 	}
 }
 
 func TestPlanPeerReconciliation_OperationOrdering(t *testing.T) {
 	kA, kB, kC := mustGenKey(t), mustGenKey(t), mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(kB, []string{"10.0.0.2/32"}, "", EndpointDynamic, 0),
 		pcfg(kC, []string{"10.0.1.0/24"}, "", EndpointDynamic, 0),
 	}
@@ -310,7 +310,7 @@ func TestPlanPeerReconciliation_OperationOrdering(t *testing.T) {
 
 func TestPlanPeerReconciliation_NoEndpointOnAddForDynamic(t *testing.T) {
 	k := mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(k, []string{"10.0.0.1/32"}, "1.2.3.4:51820", EndpointDynamic, 0),
 	}
 
@@ -318,14 +318,14 @@ func TestPlanPeerReconciliation_NoEndpointOnAddForDynamic(t *testing.T) {
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 op, got %d", len(ops))
 	}
-	if ops[0].Config.Endpoint != nil {
+	if ops[0].Target.Endpoint != nil {
 		t.Error("expected nil endpoint for Dynamic peer on add")
 	}
 }
 
 func TestPlanPeerReconciliation_EndpointOnAddForFixed(t *testing.T) {
 	k := mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(k, []string{"10.0.0.1/32"}, "1.2.3.4:51820", EndpointFixed, 0),
 	}
 
@@ -333,14 +333,14 @@ func TestPlanPeerReconciliation_EndpointOnAddForFixed(t *testing.T) {
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 op, got %d", len(ops))
 	}
-	if ops[0].Config.Endpoint == nil {
+	if ops[0].Target.Endpoint == nil {
 		t.Error("expected endpoint for Fixed peer on add")
 	}
 }
 
 func TestPlanPeerReconciliation_EndpointOnAddForBootstrap(t *testing.T) {
 	k := mustGenKey(t)
-	desired := []PeerConfig{
+	desired := []Peer{
 		pcfg(k, []string{"10.0.0.1/32"}, "1.2.3.4:51820", EndpointBootstrap, 0),
 	}
 
@@ -348,7 +348,7 @@ func TestPlanPeerReconciliation_EndpointOnAddForBootstrap(t *testing.T) {
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 op, got %d", len(ops))
 	}
-	if ops[0].Config.Endpoint == nil {
+	if ops[0].Target.Endpoint == nil {
 		t.Error("expected endpoint for Bootstrap peer on add")
 	}
 }
@@ -404,8 +404,8 @@ func TestAllowedIPsEqual(t *testing.T) {
 func TestNormalizeAllowedIPs_MasksHostBits(t *testing.T) {
 	// A prefix with host bits set must be reduced to its network form so
 	// that it compares equal to the value backends report. This is the
-	// round-trip fix: NewPeerConfig preserves host bits via
-	// netaddr.ParseInterface, while parseUAPIPeers masks them via
+	// round-trip fix: PeerConfig.Parse preserves host bits via
+	// netaddr.ParseRoute, while parseUAPIPeers masks them via
 	// net.ParseCIDR.
 	in := []net.IPNet{mustParseCIDR(t, "10.0.0.1/24")}
 	got := normalizeAllowedIPs(in)
@@ -416,10 +416,10 @@ func TestNormalizeAllowedIPs_MasksHostBits(t *testing.T) {
 
 func TestPlanPeerReconciliation_HostBitAllowedIPsNoSpuriousUpdate(t *testing.T) {
 	k := mustGenKey(t)
-	// Desired carries host bits, as NewPeerConfig produces via
-	// netaddr.ParseInterface ("10.0.0.1/24" stays "10.0.0.1/24").
+	// Desired carries host bits, as PeerConfig.Parse produces via
+	// netaddr.ParseRoute ("10.0.0.1/24" stays "10.0.0.1/24").
 	hostBit := net.IPNet{IP: net.ParseIP("10.0.0.1"), Mask: net.CIDRMask(24, 32)}
-	desired := []PeerConfig{{
+	desired := []Peer{{
 		PublicKey:      k,
 		AllowedIPs:     []net.IPNet{hostBit},
 		EndpointPolicy: EndpointDynamic,
@@ -448,7 +448,7 @@ func mustGenKey(t *testing.T) wgtypes.Key {
 	return key
 }
 
-func pcfg(key wgtypes.Key, allowedIPs []string, endpoint string, policy EndpointPolicy, keepalive time.Duration) PeerConfig {
+func pcfg(key wgtypes.Key, allowedIPs []string, endpoint string, policy EndpointPolicy, keepalive time.Duration) Peer {
 	var ep *net.UDPAddr
 	if endpoint != "" {
 		addr, err := net.ResolveUDPAddr("udp", endpoint)
@@ -465,7 +465,7 @@ func pcfg(key wgtypes.Key, allowedIPs []string, endpoint string, policy Endpoint
 		}
 		ips = append(ips, *n)
 	}
-	return PeerConfig{
+	return Peer{
 		PublicKey:           key,
 		AllowedIPs:          ips,
 		Endpoint:            ep,

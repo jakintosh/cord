@@ -11,7 +11,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
-func TestAPIAddPeer_Success(
+func TestAPIInviteCreate_Success(
 	t *testing.T,
 ) {
 	// setup env and seed network
@@ -19,7 +19,7 @@ func TestAPIAddPeer_Success(
 	env.SeedNetwork(t)
 
 	// add peer
-	url := "/networks/testnet/peers"
+	url := "/networks/testnet/registrations"
 	body := `{
 		"name": "alice",
 		"ip": "10.0.0.5",
@@ -35,8 +35,8 @@ func TestAPIAddPeer_Success(
 	if result.Data.Peer.PrivateKey == "" {
 		t.Fatal("private_key should not be empty")
 	}
-	if result.Data.Peer.CIDR == "" {
-		t.Fatal("cidr should not be empty")
+	if result.Data.Peer.Route == "" {
+		t.Fatal("route should not be empty")
 	}
 	if result.Data.Network.PublicKey == "" {
 		t.Fatal("server public_key should not be empty")
@@ -44,8 +44,11 @@ func TestAPIAddPeer_Success(
 	if result.Data.Network.Endpoint == "" {
 		t.Fatal("endpoint should not be empty")
 	}
-	if result.Data.Network.APIEndpoint == "" {
-		t.Fatal("api_endpoint should not be empty")
+	if result.Data.Network.ServerRoute == "" {
+		t.Fatal("server_route should not be empty")
+	}
+	if result.Data.Network.APIPort == 0 {
+		t.Fatal("api_port should not be zero")
 	}
 
 	// verify registration was created
@@ -61,7 +64,7 @@ func TestAPIAddPeer_Success(
 	}
 }
 
-func TestAPIAddPeer_AutoAssignIP(
+func TestAPIInviteCreate_AutoAssignIP(
 	t *testing.T,
 ) {
 	// setup env and seed network
@@ -69,7 +72,7 @@ func TestAPIAddPeer_AutoAssignIP(
 	env.SeedNetwork(t)
 
 	// add peer without explicit IP — should auto-assign
-	url := "/networks/testnet/peers"
+	url := "/networks/testnet/registrations"
 	body := `{
 		"name": "bob",
 		"admin": false
@@ -78,12 +81,12 @@ func TestAPIAddPeer_AutoAssignIP(
 
 	// verify result
 	result.ExpectStatusOK(t, http.StatusCreated)
-	if result.Data.Peer.CIDR == "" {
-		t.Fatal("cidr should not be empty for auto-assigned IP")
+	if result.Data.Peer.Route == "" {
+		t.Fatal("route should not be empty for auto-assigned IP")
 	}
 }
 
-func TestAPIAddPeer_InvalidJSON(
+func TestAPIInviteCreate_InvalidJSON(
 	t *testing.T,
 ) {
 	// setup env and seed network
@@ -91,7 +94,7 @@ func TestAPIAddPeer_InvalidJSON(
 	env.SeedNetwork(t)
 
 	// post garbage
-	url := "/networks/testnet/peers"
+	url := "/networks/testnet/registrations"
 	body := `{`
 	result := wire.TestPost[any](env.Router, url, body)
 
@@ -99,14 +102,14 @@ func TestAPIAddPeer_InvalidJSON(
 	result.ExpectStatusError(t, http.StatusBadRequest)
 }
 
-func TestAPIAddPeer_NetworkNotFound(
+func TestAPIInviteCreate_NetworkNotFound(
 	t *testing.T,
 ) {
 	// setup env
 	env := testutil.Setup(t)
 
 	// add peer to nonexistent network
-	url := "/networks/ghost/peers"
+	url := "/networks/ghost/registrations"
 	body := `{
 		"name": "alice",
 		"ip": "10.0.0.5"
@@ -117,7 +120,7 @@ func TestAPIAddPeer_NetworkNotFound(
 	result.ExpectStatusError(t, http.StatusNotFound)
 }
 
-func TestAPIAddPeer_DuplicateName(
+func TestAPIInviteCreate_DuplicateName(
 	t *testing.T,
 ) {
 	// setup env and seed network
@@ -125,7 +128,7 @@ func TestAPIAddPeer_DuplicateName(
 	env.SeedNetwork(t)
 
 	// add first peer
-	url := "/networks/testnet/peers"
+	url := "/networks/testnet/registrations"
 	body := `{
 		"name": "alice",
 		"ip": "10.0.0.5"
@@ -172,7 +175,7 @@ func TestAPIListPeers_WithData(
 	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
-		Cidr:      "10.0.0.5/32",
+		Route:     "10.0.0.5/32",
 		Admin:     false,
 		Enabled:   true,
 		Confirmed: true,
@@ -196,8 +199,8 @@ func TestAPIListPeers_WithData(
 			if p.PublicKey != "alice-pub-key" {
 				t.Fatalf("public_key = %q, want alice-pub-key", p.PublicKey)
 			}
-			if p.Ip == "" {
-				t.Fatal("ip should not be empty")
+			if p.Route == "" {
+				t.Fatal("route should not be empty")
 			}
 			break
 		}
@@ -218,7 +221,7 @@ func TestAPIRenamePeer_Success(
 	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
-		Cidr:      "10.0.0.5/32",
+		Route:     "10.0.0.5/32",
 		Admin:     false,
 		Enabled:   true,
 		Confirmed: true,
@@ -271,7 +274,7 @@ func TestAPIDeletePeer_Success(
 	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
-		Cidr:      "10.0.0.5/32",
+		Route:     "10.0.0.5/32",
 		Admin:     false,
 		Enabled:   true,
 		Confirmed: true,
@@ -325,7 +328,7 @@ func TestAPIEnablePeer_Success(
 	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
-		Cidr:      "10.0.0.5/32",
+		Route:     "10.0.0.5/32",
 		Admin:     false,
 		Enabled:   false,
 		Confirmed: false,
@@ -367,7 +370,7 @@ func TestAPIDisablePeer_Success(
 	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
-		Cidr:      "10.0.0.5/32",
+		Route:     "10.0.0.5/32",
 		Admin:     false,
 		Enabled:   true,
 		Confirmed: true,

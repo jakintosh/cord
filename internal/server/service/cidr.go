@@ -12,8 +12,8 @@ import (
 type Cidr struct {
 	Name   string
 	Cidr   string // e.g. "10.42.1.0/24"
-	Length int    // prefix length (e.g. 24)
-	Prefix int    // total bits (32 for IPv4, 128 for IPv6)
+	Prefix int    // prefix length (e.g. 24)
+	Bits   int    // total address bits (32 for IPv4, 128 for IPv6)
 }
 
 // GetCidr returns a CIDR by name within the given network.
@@ -71,15 +71,15 @@ func (s *Service) CreateCidr(
 		return fmt.Errorf("get network for cidr check: %w", mapStoreError(err))
 	}
 
-	_, rootNet, err := net.ParseCIDR(network.MainCidr)
+	_, rootNet, err := net.ParseCIDR(network.Main.Cidr)
 	if err != nil {
-		return fmt.Errorf("%w: parse main CIDR %q: %v", ErrInvalidInput, network.MainCidr, err)
+		return fmt.Errorf("%w: parse main CIDR %q: %v", ErrInvalidInput, network.Main.Cidr, err)
 	}
 
 	if !netaddr.Contains(rootNet, cidrNet) {
 		return fmt.Errorf(
 			"%w: CIDR %q is not contained within main CIDR %q",
-			ErrInvalidInput, cidr, network.MainCidr,
+			ErrInvalidInput, cidr, network.Main.Cidr,
 		)
 	}
 
@@ -87,8 +87,8 @@ func (s *Service) CreateCidr(
 	c := &Cidr{
 		Name:   name,
 		Cidr:   cidr,
-		Length: ones,
-		Prefix: bits,
+		Prefix: ones,
+		Bits:   bits,
 	}
 
 	if err := s.store.InsertCidr(networkName, c); err != nil {
