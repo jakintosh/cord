@@ -9,7 +9,7 @@ import "git.studiopollinator.com/pollinator/cord/internal/client/service/servera
 type Peer struct {
 	Name      string
 	PublicKey string
-	Cidr      string // e.g. "10.42.0.5/16"
+	Route     string // explicit route for AllowedIPs, e.g. "10.42.0.5/32"
 	Endpoint  string // best known endpoint, populated by ListPeers
 }
 
@@ -32,7 +32,7 @@ func peersFromDTOs(
 		peers[i] = Peer{
 			Name:      dto.Name,
 			PublicKey: dto.PublicKey,
-			Cidr:      dto.Cidr,
+			Route:     dto.Route,
 		}
 	}
 	return peers

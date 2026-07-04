@@ -13,7 +13,7 @@ import (
 // It includes the identity, assigned address, and management flags.
 type Peer struct {
 	Name      string
-	Cidr      string // terminal host route, e.g. "10.42.0.5/32" or "fd00::5/128"
+	Route     string // terminal host route, e.g. "10.42.0.5/32" or "fd00::5/128"
 	PublicKey string
 	Admin     bool // whether the peer has administrative privileges
 	Enabled   bool // whether the peer's WireGuard config is applied
@@ -25,7 +25,7 @@ type Peer struct {
 // management flags (Admin, Enabled, Confirmed).
 type VisiblePeer struct {
 	Name      string
-	Cidr      string
+	Route     string
 	PublicKey string
 	Endpoints []EndpointWitness
 }
@@ -115,7 +115,7 @@ func (s *Service) ListVisiblePeers(
 
 		visible = append(visible, &VisiblePeer{
 			Name:      p.Name,
-			Cidr:      p.Cidr,
+			Route:     p.Route,
 			PublicKey: p.PublicKey,
 			Endpoints: endpoints,
 		})
@@ -254,13 +254,13 @@ func peersToWireGuardPeers(
 		if !peer.Enabled {
 			continue
 		}
-		peerCidr, err := netaddr.HostRouteFromCidr(peer.Cidr)
+		peerRoute, err := netaddr.ParseRoute(peer.Route)
 		if err != nil {
-			return nil, fmt.Errorf("parse peer CIDR %q: %w", peer.Cidr, err)
+			return nil, fmt.Errorf("parse peer route %q: %w", peer.Route, err)
 		}
 		wgpeers = append(wgpeers, wireguard.PeerConfig{
 			PublicKey:      peer.PublicKey,
-			AllowedIPs:     []string{peerCidr.String()},
+			AllowedIPs:     []string{peerRoute.String()},
 			EndpointPolicy: wireguard.EndpointDynamic,
 		})
 	}

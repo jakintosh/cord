@@ -42,7 +42,7 @@ func seedNetworkForRegistration(t *testing.T, db *database.DB) {
 		},
 		&service.Peer{
 			Name:      "cord-server",
-			Cidr:      "10.0.0.1/32",
+			Route:     "10.0.0.1/32",
 			PublicKey: "pub",
 			Admin:     true,
 			Enabled:   true,
@@ -62,8 +62,8 @@ func TestInsertAndGetRegistration(t *testing.T) {
 	reg := &service.Registration{
 		Name:            "reg-1",
 		InvitePublicKey: "temp-key-1",
-		InviteIP:        net.IPv4(10, 1, 0, 1),
-		MainIP:          net.IPv4(10, 0, 5, 1),
+		InviteRoute:     "10.1.0.1/32",
+		MainRoute:       "10.0.5.1/32",
 		Admin:           true,
 		Redeemed:        false,
 		RedeemedKey:     "",
@@ -86,11 +86,11 @@ func TestInsertAndGetRegistration(t *testing.T) {
 	if got.InvitePublicKey != reg.InvitePublicKey {
 		t.Errorf("temp_pub_key = %q, want %q", got.InvitePublicKey, reg.InvitePublicKey)
 	}
-	if !got.InviteIP.Equal(reg.InviteIP) {
-		t.Errorf("temp_ip = %v, want %v", got.InviteIP, reg.InviteIP)
+	if got.InviteRoute != reg.InviteRoute {
+		t.Errorf("temp_ip = %v, want %v", got.InviteRoute, reg.InviteRoute)
 	}
-	if !got.MainIP.Equal(reg.MainIP) {
-		t.Errorf("final_ip = %v, want %v", got.MainIP, reg.MainIP)
+	if got.MainRoute != reg.MainRoute {
+		t.Errorf("final_ip = %v, want %v", got.MainRoute, reg.MainRoute)
 	}
 	if got.Admin != reg.Admin {
 		t.Errorf("admin = %v, want %v", got.Admin, reg.Admin)
@@ -125,8 +125,8 @@ func TestGetRegistrationByIP(t *testing.T) {
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "ip-reg",
 		InvitePublicKey: "ip-key",
-		InviteIP:        net.IPv4(10, 1, 0, 10),
-		MainIP:          net.IPv4(10, 0, 5, 10),
+		InviteRoute:     "10.1.0.10/32",
+		MainRoute:       "10.0.5.10/32",
 		Admin:           false,
 		ExpiresAt:       expires,
 		CreatedAt:       now,
@@ -134,7 +134,7 @@ func TestGetRegistrationByIP(t *testing.T) {
 		t.Fatalf("insert registration: %v", err)
 	}
 
-	got, err := db.GetRegistrationByIP("regnet", net.IPv4(10, 1, 0, 10), now)
+	got, err := db.GetRegistrationByIP("regnet", net.ParseIP("10.1.0.10"), now)
 	if err != nil {
 		t.Fatalf("get registration by IP: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestGetRegistrationByIP_NotFound(t *testing.T) {
 	seedNetworkForRegistration(t, db)
 	now := time.Now()
 
-	_, err := db.GetRegistrationByIP("regnet", net.IPv4(10, 1, 0, 99), now)
+	_, err := db.GetRegistrationByIP("regnet", net.ParseIP("10.1.0.99"), now)
 	if err == nil {
 		t.Fatal("expected error for unknown IP")
 	}
@@ -163,8 +163,8 @@ func TestListRegistrations(t *testing.T) {
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "zzz",
 		InvitePublicKey: "z-key",
-		InviteIP:        net.IPv4(10, 1, 0, 1),
-		MainIP:          net.IPv4(10, 0, 5, 1),
+		InviteRoute:     "10.1.0.1/32",
+		MainRoute:       "10.0.5.1/32",
 		ExpiresAt:       expires,
 		CreatedAt:       now,
 	}); err != nil {
@@ -173,8 +173,8 @@ func TestListRegistrations(t *testing.T) {
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "aaa",
 		InvitePublicKey: "a-key",
-		InviteIP:        net.IPv4(10, 1, 0, 2),
-		MainIP:          net.IPv4(10, 0, 5, 2),
+		InviteRoute:     "10.1.0.2/32",
+		MainRoute:       "10.0.5.2/32",
 		ExpiresAt:       expires,
 		CreatedAt:       now.Add(time.Minute),
 	}); err != nil {
@@ -202,8 +202,8 @@ func TestListActiveRegistrations(t *testing.T) {
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "active",
 		InvitePublicKey: "act-key",
-		InviteIP:        net.IPv4(10, 1, 0, 1),
-		MainIP:          net.IPv4(10, 0, 5, 1),
+		InviteRoute:     "10.1.0.1/32",
+		MainRoute:       "10.0.5.1/32",
 		ExpiresAt:       now.Add(24 * time.Hour),
 		CreatedAt:       now,
 	}); err != nil {
@@ -212,8 +212,8 @@ func TestListActiveRegistrations(t *testing.T) {
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "expired",
 		InvitePublicKey: "exp-key",
-		InviteIP:        net.IPv4(10, 1, 0, 2),
-		MainIP:          net.IPv4(10, 0, 5, 2),
+		InviteRoute:     "10.1.0.2/32",
+		MainRoute:       "10.0.5.2/32",
 		ExpiresAt:       now.Add(-1 * time.Hour),
 		CreatedAt:       now,
 	}); err != nil {
@@ -240,8 +240,8 @@ func TestListActiveRegistrations_IncludesRedeemed(t *testing.T) {
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "redeemed-one",
 		InvitePublicKey: "red-key",
-		InviteIP:        net.IPv4(10, 1, 0, 1),
-		MainIP:          net.IPv4(10, 0, 5, 1),
+		InviteRoute:     "10.1.0.1/32",
+		MainRoute:       "10.0.5.1/32",
 		Redeemed:        true,
 		RedeemedKey:     "perm-key",
 		ExpiresAt:       now.Add(24 * time.Hour),
@@ -270,8 +270,8 @@ func TestDeleteRegistration(t *testing.T) {
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "delme",
 		InvitePublicKey: "del-key",
-		InviteIP:        net.IPv4(10, 1, 0, 99),
-		MainIP:          net.IPv4(10, 0, 5, 99),
+		InviteRoute:     "10.1.0.99/32",
+		MainRoute:       "10.0.5.99/32",
 		ExpiresAt:       now.Add(24 * time.Hour),
 		CreatedAt:       now,
 	}); err != nil {
@@ -306,8 +306,8 @@ func TestDeleteExpiredRegistrations(t *testing.T) {
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "old",
 		InvitePublicKey: "old-key",
-		InviteIP:        net.IPv4(10, 1, 0, 1),
-		MainIP:          net.IPv4(10, 0, 5, 1),
+		InviteRoute:     "10.1.0.1/32",
+		MainRoute:       "10.0.5.1/32",
 		ExpiresAt:       now.Add(-2 * time.Hour),
 		CreatedAt:       now,
 	}); err != nil {
@@ -316,8 +316,8 @@ func TestDeleteExpiredRegistrations(t *testing.T) {
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "new",
 		InvitePublicKey: "new-key",
-		InviteIP:        net.IPv4(10, 1, 0, 2),
-		MainIP:          net.IPv4(10, 0, 5, 2),
+		InviteRoute:     "10.1.0.2/32",
+		MainRoute:       "10.0.5.2/32",
 		ExpiresAt:       now.Add(2 * time.Hour),
 		CreatedAt:       now,
 	}); err != nil {
@@ -348,8 +348,8 @@ func TestUpdateRegistrationRedemption(t *testing.T) {
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "redeem-me",
 		InvitePublicKey: "temp-reg-key",
-		InviteIP:        net.IPv4(10, 1, 0, 1),
-		MainIP:          net.IPv4(10, 0, 5, 1),
+		InviteRoute:     "10.1.0.1/32",
+		MainRoute:       "10.0.5.1/32",
 		Admin:           true,
 		ExpiresAt:       now.Add(24 * time.Hour),
 		CreatedAt:       now,
@@ -409,8 +409,8 @@ func TestUpdateRegistrationRedemption_DoubleRedeem(t *testing.T) {
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "redeem-twice",
 		InvitePublicKey: "twice-key",
-		InviteIP:        net.IPv4(10, 1, 0, 1),
-		MainIP:          net.IPv4(10, 0, 5, 1),
+		InviteRoute:     "10.1.0.1/32",
+		MainRoute:       "10.0.5.1/32",
 		ExpiresAt:       now.Add(24 * time.Hour),
 		CreatedAt:       now,
 	}); err != nil {
@@ -435,8 +435,8 @@ func TestInsertRegistration_DuplicateName(t *testing.T) {
 	reg := &service.Registration{
 		Name:            "dup",
 		InvitePublicKey: "key-a",
-		InviteIP:        net.IPv4(10, 1, 0, 1),
-		MainIP:          net.IPv4(10, 0, 5, 1),
+		InviteRoute:     "10.1.0.1/32",
+		MainRoute:       "10.0.5.1/32",
 		ExpiresAt:       now.Add(24 * time.Hour),
 		CreatedAt:       now,
 	}
@@ -445,8 +445,8 @@ func TestInsertRegistration_DuplicateName(t *testing.T) {
 	}
 
 	reg.InvitePublicKey = "key-b"
-	reg.InviteIP = net.IPv4(10, 1, 0, 2)
-	reg.MainIP = net.IPv4(10, 0, 5, 2)
+	reg.InviteRoute = "10.1.0.2/32"
+	reg.MainRoute = "10.0.5.2/32"
 	err := db.InsertRegistration("regnet", reg)
 	if err == nil {
 		t.Fatal("expected error for duplicate registration name")

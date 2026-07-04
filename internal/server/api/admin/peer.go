@@ -15,7 +15,7 @@ import (
 type PeerDTO struct {
 	Name      string `json:"name"`
 	PublicKey string `json:"public_key"`
-	Ip        string `json:"ip"`
+	Route     string `json:"route"`
 	Admin     bool   `json:"admin"`
 	Enabled   bool   `json:"enabled"`
 }
@@ -36,7 +36,7 @@ func PeerDTOFromService(
 	return PeerDTO{
 		Name:      p.Name,
 		PublicKey: p.PublicKey,
-		Ip:        p.Cidr,
+		Route:     p.Route,
 		Admin:     p.Admin,
 		Enabled:   p.Enabled,
 	}

@@ -34,8 +34,8 @@ func TestOnboardingLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
-	if result.Peer.CIDR != "10.0.0.5/32" {
-		t.Errorf("cidr = %q, want 10.0.0.5/32", result.Peer.CIDR)
+	if result.Peer.Route != "10.0.0.5/32" {
+		t.Errorf("cidr = %q, want 10.0.0.5/32", result.Peer.Route)
 	}
 
 	peer, err := env.Service.GetPeer("testnet", "alice")

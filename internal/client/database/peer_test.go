@@ -16,7 +16,7 @@ func seedNetwork(t *testing.T, db *database.DB) {
 		Name:           "testnet",
 		PrivateKey:     "priv-test",
 		PublicKey:      "pub-test",
-		AssignedCidr:   "10.42.0.5/16",
+		AssignedRoute:  "10.42.0.5/16",
 		ServerPubkey:   "server-pub-key",
 		ServerEndpoint: "1.2.3.4:51820",
 		ServerRoute:    "10.42.0.1/32",
@@ -32,9 +32,9 @@ func TestSetPeers_Insert(t *testing.T) {
 	seedNetwork(t, db)
 
 	peers := []service.Peer{
-		{Name: "alice", PublicKey: "alice-key", Cidr: "10.42.1.5/32"},
-		{Name: "bob", PublicKey: "bob-key", Cidr: "10.42.1.6/32"},
-		{Name: "charlie", PublicKey: "charlie-key", Cidr: "10.42.1.7/32"},
+		{Name: "alice", PublicKey: "alice-key", Route: "10.42.1.5/32"},
+		{Name: "bob", PublicKey: "bob-key", Route: "10.42.1.6/32"},
+		{Name: "charlie", PublicKey: "charlie-key", Route: "10.42.1.7/32"},
 	}
 
 	if err := db.SetPeers("testnet", peers); err != nil {
@@ -55,8 +55,8 @@ func TestSetPeers_Insert(t *testing.T) {
 		if p.PublicKey != peers[i].PublicKey {
 			t.Errorf("peer[%d] public_key = %q, want %q", i, p.PublicKey, peers[i].PublicKey)
 		}
-		if p.Cidr != peers[i].Cidr {
-			t.Errorf("peer[%d] cidr = %q, want %q", i, p.Cidr, peers[i].Cidr)
+		if p.Route != peers[i].Route {
+			t.Errorf("peer[%d] cidr = %q, want %q", i, p.Route, peers[i].Route)
 		}
 	}
 }
@@ -66,13 +66,13 @@ func TestSetPeers_Upsert(t *testing.T) {
 	seedNetwork(t, db)
 
 	if err := db.SetPeers("testnet", []service.Peer{
-		{Name: "original", PublicKey: "peer-key", Cidr: "10.42.1.10/32"},
+		{Name: "original", PublicKey: "peer-key", Route: "10.42.1.10/32"},
 	}); err != nil {
 		t.Fatalf("first reconcile: %v", err)
 	}
 
 	if err := db.SetPeers("testnet", []service.Peer{
-		{Name: "renamed", PublicKey: "peer-key", Cidr: "10.42.1.20/32"},
+		{Name: "renamed", PublicKey: "peer-key", Route: "10.42.1.20/32"},
 	}); err != nil {
 		t.Fatalf("second reconcile: %v", err)
 	}
@@ -87,8 +87,8 @@ func TestSetPeers_Upsert(t *testing.T) {
 	if got[0].Name != "renamed" {
 		t.Errorf("name = %q, want renamed", got[0].Name)
 	}
-	if got[0].Cidr != "10.42.1.20/32" {
-		t.Errorf("cidr = %q, want 10.42.1.20/32", got[0].Cidr)
+	if got[0].Route != "10.42.1.20/32" {
+		t.Errorf("cidr = %q, want 10.42.1.20/32", got[0].Route)
 	}
 	if got[0].PublicKey != "peer-key" {
 		t.Errorf("public_key = %q, want peer-key", got[0].PublicKey)
@@ -100,14 +100,14 @@ func TestSetPeers_Prune(t *testing.T) {
 	seedNetwork(t, db)
 
 	if err := db.SetPeers("testnet", []service.Peer{
-		{Name: "keep", PublicKey: "keep-key", Cidr: "10.42.1.1/32"},
-		{Name: "remove", PublicKey: "remove-key", Cidr: "10.42.1.2/32"},
+		{Name: "keep", PublicKey: "keep-key", Route: "10.42.1.1/32"},
+		{Name: "remove", PublicKey: "remove-key", Route: "10.42.1.2/32"},
 	}); err != nil {
 		t.Fatalf("first reconcile: %v", err)
 	}
 
 	if err := db.SetPeers("testnet", []service.Peer{
-		{Name: "keep", PublicKey: "keep-key", Cidr: "10.42.1.1/32"},
+		{Name: "keep", PublicKey: "keep-key", Route: "10.42.1.1/32"},
 	}); err != nil {
 		t.Fatalf("second reconcile: %v", err)
 	}
@@ -129,8 +129,8 @@ func TestSetPeers_ClearAll(t *testing.T) {
 	seedNetwork(t, db)
 
 	if err := db.SetPeers("testnet", []service.Peer{
-		{Name: "alice", PublicKey: "alice-key", Cidr: "10.42.1.1/32"},
-		{Name: "bob", PublicKey: "bob-key", Cidr: "10.42.1.2/32"},
+		{Name: "alice", PublicKey: "alice-key", Route: "10.42.1.1/32"},
+		{Name: "bob", PublicKey: "bob-key", Route: "10.42.1.2/32"},
 	}); err != nil {
 		t.Fatalf("initial reconcile: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestSetPeers_NetworkIsolation(t *testing.T) {
 		Name:           "othernet",
 		PrivateKey:     "priv-other",
 		PublicKey:      "pub-other",
-		AssignedCidr:   "10.43.0.5/16",
+		AssignedRoute:  "10.43.0.5/16",
 		ServerPubkey:   "srv-key-2",
 		ServerEndpoint: "5.6.7.8:51820",
 		ServerRoute:    "10.43.0.1/32",
@@ -168,7 +168,7 @@ func TestSetPeers_NetworkIsolation(t *testing.T) {
 	}
 
 	if err := db.SetPeers("testnet", []service.Peer{
-		{Name: "alice", PublicKey: "alice-key", Cidr: "10.42.1.5/32"},
+		{Name: "alice", PublicKey: "alice-key", Route: "10.42.1.5/32"},
 	}); err != nil {
 		t.Fatalf("reconcile testnet: %v", err)
 	}
@@ -195,9 +195,9 @@ func TestListPeers_Ordered(t *testing.T) {
 	seedNetwork(t, db)
 
 	if err := db.SetPeers("testnet", []service.Peer{
-		{Name: "ccc", PublicKey: "ccc-key", Cidr: "10.42.1.3/32"},
-		{Name: "aaa", PublicKey: "aaa-key", Cidr: "10.42.1.1/32"},
-		{Name: "bbb", PublicKey: "bbb-key", Cidr: "10.42.1.2/32"},
+		{Name: "ccc", PublicKey: "ccc-key", Route: "10.42.1.3/32"},
+		{Name: "aaa", PublicKey: "aaa-key", Route: "10.42.1.1/32"},
+		{Name: "bbb", PublicKey: "bbb-key", Route: "10.42.1.2/32"},
 	}); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestListPeers_WithEndpoint(t *testing.T) {
 	seedNetwork(t, db)
 
 	if err := db.SetPeers("testnet", []service.Peer{
-		{Name: "alice", PublicKey: "alice-key", Cidr: "10.42.1.5/32"},
+		{Name: "alice", PublicKey: "alice-key", Route: "10.42.1.5/32"},
 	}); err != nil {
 		t.Fatalf("set peers: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestSetPeerEndpoints_Upsert(t *testing.T) {
 	seedNetwork(t, db)
 
 	if err := db.SetPeers("testnet", []service.Peer{
-		{Name: "alice", PublicKey: "alice-key", Cidr: "10.42.1.5/32"},
+		{Name: "alice", PublicKey: "alice-key", Route: "10.42.1.5/32"},
 	}); err != nil {
 		t.Fatalf("set peers: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestUpdatePeerEndpointLocal(t *testing.T) {
 	seedNetwork(t, db)
 
 	if err := db.SetPeers("testnet", []service.Peer{
-		{Name: "alice", PublicKey: "alice-key", Cidr: "10.42.1.5/32"},
+		{Name: "alice", PublicKey: "alice-key", Route: "10.42.1.5/32"},
 	}); err != nil {
 		t.Fatalf("set peers: %v", err)
 	}
@@ -357,7 +357,7 @@ func TestListPeerEndpoints_Empty(t *testing.T) {
 	seedNetwork(t, db)
 
 	if err := db.SetPeers("testnet", []service.Peer{
-		{Name: "alice", PublicKey: "alice-key", Cidr: "10.42.1.5/32"},
+		{Name: "alice", PublicKey: "alice-key", Route: "10.42.1.5/32"},
 	}); err != nil {
 		t.Fatalf("set peers: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestSetPeerEndpoints_ClearAll(t *testing.T) {
 	seedNetwork(t, db)
 
 	if err := db.SetPeers("testnet", []service.Peer{
-		{Name: "alice", PublicKey: "alice-key", Cidr: "10.42.1.5/32"},
+		{Name: "alice", PublicKey: "alice-key", Route: "10.42.1.5/32"},
 	}); err != nil {
 		t.Fatalf("set peers: %v", err)
 	}
@@ -406,7 +406,7 @@ func TestSetPeerEndpoints_CascadeDelete(t *testing.T) {
 	seedNetwork(t, db)
 
 	if err := db.SetPeers("testnet", []service.Peer{
-		{Name: "alice", PublicKey: "alice-key", Cidr: "10.42.1.5/32"},
+		{Name: "alice", PublicKey: "alice-key", Route: "10.42.1.5/32"},
 	}); err != nil {
 		t.Fatalf("set peers: %v", err)
 	}

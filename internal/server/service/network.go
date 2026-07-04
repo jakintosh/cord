@@ -197,10 +197,10 @@ func (s *Service) CreateNetwork(
 	}
 
 	serverIP := netaddr.FirstAssignable(mainNet)
-	serverCIDR := netaddr.HostRoute(serverIP)
+	serverRoute := netaddr.HostRoute(serverIP)
 	serverPeer := &Peer{
 		Name:      "cord-server",
-		Cidr:      serverCIDR.String(),
+		Route:     serverRoute.String(),
 		PublicKey: pubKey,
 		Admin:     true,
 		Enabled:   true,

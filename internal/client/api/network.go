@@ -20,24 +20,24 @@ type NetworkDTO struct {
 }
 
 type InstallNetworkRequest struct {
-	NetworkName          string `json:"network_name"`
-	TempPeerPrivKey      string `json:"temp_private_key"`
-	TempPeerAssignedCidr string `json:"temp_cidr"`
-	InviteServerPubkey   string `json:"server_pubkey"`
-	InviteServerEndpoint string `json:"server_endpoint"`
-	InviteServerRoute    string `json:"server_route"`
-	InviteServerPort     uint16 `json:"server_port"`
+	NetworkName           string `json:"network_name"`
+	TempPeerPrivKey       string `json:"temp_private_key"`
+	TempPeerAssignedRoute string `json:"temp_route"`
+	InviteServerPubkey    string `json:"server_pubkey"`
+	InviteServerEndpoint  string `json:"server_endpoint"`
+	InviteServerRoute     string `json:"server_route"`
+	InviteServerPort      uint16 `json:"server_port"`
 }
 
 func installRequestToInvite(req InstallNetworkRequest) service.Invite {
 	return service.Invite{
-		NetworkName:          req.NetworkName,
-		TempPeerPrivKey:      req.TempPeerPrivKey,
-		TempPeerAssignedCidr: req.TempPeerAssignedCidr,
-		InviteServerPubkey:   req.InviteServerPubkey,
-		InviteServerEndpoint: req.InviteServerEndpoint,
-		InviteServerRoute:    req.InviteServerRoute,
-		InviteServerPort:     req.InviteServerPort,
+		NetworkName:           req.NetworkName,
+		TempPeerPrivKey:       req.TempPeerPrivKey,
+		TempPeerAssignedRoute: req.TempPeerAssignedRoute,
+		InviteServerPubkey:    req.InviteServerPubkey,
+		InviteServerEndpoint:  req.InviteServerEndpoint,
+		InviteServerRoute:     req.InviteServerRoute,
+		InviteServerPort:      req.InviteServerPort,
 	}
 }
 

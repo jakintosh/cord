@@ -38,8 +38,8 @@ func TestGetPeer_ViaRedeem(t *testing.T) {
 	if peer.PublicKey != "carol-perm-key" {
 		t.Errorf("public_key = %q, want carol-perm-key", peer.PublicKey)
 	}
-	if peer.Cidr != "10.0.0.50/32" {
-		t.Errorf("cidr = %q, want 10.0.0.50/32", peer.Cidr)
+	if peer.Route != "10.0.0.50/32" {
+		t.Errorf("route = %q, want 10.0.0.50/32", peer.Route)
 	}
 }
 

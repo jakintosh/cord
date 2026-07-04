@@ -25,7 +25,7 @@ type NetworkInfo struct {
 // The PrivateKey is only present in the initial invitation; it is
 // omitted from redemption responses.
 type PeerIdentity struct {
-	CIDR       string `json:"cidr"`
+	Route      string `json:"route"`
 	PrivateKey string `json:"private_key,omitempty"`
 }
 
@@ -62,12 +62,12 @@ func (inv *Invitation) Write(
 }
 
 // Registration is the server-side stored representation of a pending peer
-// registration. It tracks the temporary key, assigned IPs, and redemption state.
+// registration. It tracks the temporary key, assigned routes, and redemption state.
 type Registration struct {
 	Name            string
 	InvitePublicKey string    // the temporary public key the peer uses to redeem
-	InviteIP        net.IP    // the temporary IP on the invite network
-	MainIP          net.IP    // the permanent IP on the main network
+	InviteRoute     string    // the temporary host route on the invite overlay
+	MainRoute       string    // the permanent host route on the main overlay
 	Admin           bool      // whether the registration grants admin privileges
 	Redeemed        bool      // whether the registration has been redeemed
 	RedeemedKey     string    // the permanent public key after redemption
@@ -164,11 +164,13 @@ func (s *Service) CreateRegistration(
 	}
 
 	now := s.clock()
+	tempRoute := netaddr.HostRoute(peerTempAssignedIP)
+	mainRoute := netaddr.HostRoute(peerMainAssignedIP)
 	reg := &Registration{
 		Name:            name,
 		InvitePublicKey: peerTempPubKey,
-		InviteIP:        peerTempAssignedIP,
-		MainIP:          peerMainAssignedIP,
+		InviteRoute:     tempRoute.String(),
+		MainRoute:       mainRoute.String(),
 		Admin:           admin,
 		ExpiresAt:       now.Add(expiry),
 		CreatedAt:       now,
@@ -190,7 +192,7 @@ func (s *Service) CreateRegistration(
 	serverInternalIP := netaddr.FirstAssignable(inviteNet)
 
 	serverRoute := netaddr.HostRoute(serverInternalIP)
-	peerCIDR := netaddr.HostRoute(peerTempAssignedIP)
+	peerRoute := netaddr.HostRoute(peerTempAssignedIP)
 
 	payload := &Invitation{
 		Network: NetworkInfo{
@@ -201,7 +203,7 @@ func (s *Service) CreateRegistration(
 			APIPort:     network.Invite.ApiPort,
 		},
 		Peer: PeerIdentity{
-			CIDR:       peerCIDR.String(),
+			Route:      peerRoute.String(),
 			PrivateKey: peerTempPrivKey,
 		},
 	}
@@ -275,11 +277,10 @@ func (s *Service) buildInvitation(
 	serverIP := netaddr.FirstAssignable(rootNet)
 	serverRoute := netaddr.HostRoute(serverIP)
 
-	peerIP, _, err := net.ParseCIDR(peer.Cidr)
+	peerRoute, err := netaddr.ParseRoute(peer.Route)
 	if err != nil {
-		return nil, fmt.Errorf("parse peer CIDR %q: %w", peer.Cidr, err)
+		return nil, fmt.Errorf("parse peer route %q: %w", peer.Route, err)
 	}
-	peerCIDR := netaddr.HostRoute(peerIP)
 
 	return &Invitation{
 		Network: NetworkInfo{
@@ -290,7 +291,7 @@ func (s *Service) buildInvitation(
 			APIPort:     network.Main.ApiPort,
 		},
 		Peer: PeerIdentity{
-			CIDR: peerCIDR.String(),
+			Route: peerRoute.String(),
 		},
 	}, nil
 }
@@ -316,8 +317,11 @@ func (s *Service) nextFreeRegistrationIP(
 
 	used := map[string]bool{}
 	for _, reg := range regs {
-		if reg.InviteIP != nil {
-			used[netaddr.Normalize(reg.InviteIP).String()] = true
+		if reg.InviteRoute != "" {
+			ip, _, _ := net.ParseCIDR(reg.InviteRoute)
+			if ip != nil {
+				used[netaddr.Normalize(ip).String()] = true
+			}
 		}
 	}
 
@@ -362,14 +366,17 @@ func (s *Service) nextFreePeerIP(
 
 	used := map[string]bool{}
 	for _, p := range peers {
-		ip, _, _ := net.ParseCIDR(p.Cidr)
+		ip, _, _ := net.ParseCIDR(p.Route)
 		if ip != nil {
 			used[netaddr.Normalize(ip).String()] = true
 		}
 	}
 	for _, reg := range regs {
-		if reg.MainIP != nil {
-			used[netaddr.Normalize(reg.MainIP).String()] = true
+		if reg.MainRoute != "" {
+			ip, _, _ := net.ParseCIDR(reg.MainRoute)
+			if ip != nil {
+				used[netaddr.Normalize(ip).String()] = true
+			}
 		}
 	}
 
@@ -392,10 +399,9 @@ func registrationsToWireGuardPeers(
 ) []wireguard.PeerConfig {
 	var wgpeers []wireguard.PeerConfig
 	for _, reg := range regs {
-		route := netaddr.HostRoute(reg.InviteIP)
 		wgpeers = append(wgpeers, wireguard.PeerConfig{
 			PublicKey:      reg.InvitePublicKey,
-			AllowedIPs:     []string{route.String()},
+			AllowedIPs:     []string{reg.InviteRoute},
 			EndpointPolicy: wireguard.EndpointDynamic,
 		})
 	}

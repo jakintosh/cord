@@ -106,7 +106,7 @@ func TestInstall_Success(t *testing.T) {
 				APIPort:     uint16(srvPort),
 			},
 			Peer: serverapi.PeerIdentityDTO{
-				CIDR: "10.42.0.5/32",
+				Route: "10.42.0.5/32",
 			},
 		})
 	})
@@ -124,13 +124,13 @@ func TestInstall_Success(t *testing.T) {
 		t.Fatalf("generate invite key: %v", err)
 	}
 	invite := service.Invite{
-		NetworkName:          "install-me",
-		TempPeerPrivKey:      inviteKey,
-		TempPeerAssignedCidr: "10.43.0.2/24",
-		InviteServerPubkey:   serverPubKeyStr,
-		InviteServerEndpoint: "5.6.7.8:51821",
-		InviteServerRoute:    srvHost + "/32",
-		InviteServerPort:     uint16(srvPort),
+		NetworkName:           "install-me",
+		TempPeerPrivKey:       inviteKey,
+		TempPeerAssignedRoute: "10.43.0.2/24",
+		InviteServerPubkey:    serverPubKeyStr,
+		InviteServerEndpoint:  "5.6.7.8:51821",
+		InviteServerRoute:     srvHost + "/32",
+		InviteServerPort:      uint16(srvPort),
 	}
 
 	nw, err := env.Service.Install(invite)
@@ -140,8 +140,8 @@ func TestInstall_Success(t *testing.T) {
 	if nw.Name != "install-me" {
 		t.Fatalf("name = %q, want install-me", nw.Name)
 	}
-	if nw.AssignedCidr != "10.42.0.5/32" {
-		t.Fatalf("assigned cidr = %q, want 10.42.0.5/32", nw.AssignedCidr)
+	if nw.AssignedRoute != "10.42.0.5/32" {
+		t.Fatalf("assigned cidr = %q, want 10.42.0.5/32", nw.AssignedRoute)
 	}
 
 	d := env.Backend.Device("install-me-i")
@@ -181,12 +181,12 @@ func TestBeginInstall_MissingNetworkName(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.BeginInstall(service.Invite{
-		TempPeerPrivKey:      "temp-key",
-		TempPeerAssignedCidr: "10.42.0.5/16",
-		InviteServerPubkey:   "srv",
-		InviteServerEndpoint: "1.2.3.4:51820",
-		InviteServerRoute:    "10.42.0.1/32",
-		InviteServerPort:     8443,
+		TempPeerPrivKey:       "temp-key",
+		TempPeerAssignedRoute: "10.42.0.5/16",
+		InviteServerPubkey:    "srv",
+		InviteServerEndpoint:  "1.2.3.4:51820",
+		InviteServerRoute:     "10.42.0.1/32",
+		InviteServerPort:      8443,
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -197,12 +197,12 @@ func TestBeginInstall_MissingTempPrivKey(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.BeginInstall(service.Invite{
-		NetworkName:          "noname",
-		TempPeerAssignedCidr: "10.42.0.5/16",
-		InviteServerPubkey:   "srv",
-		InviteServerEndpoint: "1.2.3.4:51820",
-		InviteServerRoute:    "10.42.0.1/32",
-		InviteServerPort:     8443,
+		NetworkName:           "noname",
+		TempPeerAssignedRoute: "10.42.0.5/16",
+		InviteServerPubkey:    "srv",
+		InviteServerEndpoint:  "1.2.3.4:51820",
+		InviteServerRoute:     "10.42.0.1/32",
+		InviteServerPort:      8443,
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -229,12 +229,12 @@ func TestBeginInstall_MissingServerPubkey(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.BeginInstall(service.Invite{
-		NetworkName:          "noname",
-		TempPeerPrivKey:      "temp-key",
-		TempPeerAssignedCidr: "10.42.0.5/16",
-		InviteServerEndpoint: "1.2.3.4:51820",
-		InviteServerRoute:    "10.42.0.1/32",
-		InviteServerPort:     8443,
+		NetworkName:           "noname",
+		TempPeerPrivKey:       "temp-key",
+		TempPeerAssignedRoute: "10.42.0.5/16",
+		InviteServerEndpoint:  "1.2.3.4:51820",
+		InviteServerRoute:     "10.42.0.1/32",
+		InviteServerPort:      8443,
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -245,12 +245,12 @@ func TestBeginInstall_MissingServerEndpoint(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.BeginInstall(service.Invite{
-		NetworkName:          "noname",
-		TempPeerPrivKey:      "temp-key",
-		TempPeerAssignedCidr: "10.42.0.5/16",
-		InviteServerPubkey:   "srv",
-		InviteServerRoute:    "10.42.0.1/32",
-		InviteServerPort:     8443,
+		NetworkName:           "noname",
+		TempPeerPrivKey:       "temp-key",
+		TempPeerAssignedRoute: "10.42.0.5/16",
+		InviteServerPubkey:    "srv",
+		InviteServerRoute:     "10.42.0.1/32",
+		InviteServerPort:      8443,
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -261,11 +261,11 @@ func TestBeginInstall_MissingTempApiAddr(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.BeginInstall(service.Invite{
-		NetworkName:          "noname",
-		TempPeerPrivKey:      "temp-key",
-		TempPeerAssignedCidr: "10.42.0.5/16",
-		InviteServerPubkey:   "srv",
-		InviteServerEndpoint: "1.2.3.4:51820",
+		NetworkName:           "noname",
+		TempPeerPrivKey:       "temp-key",
+		TempPeerAssignedRoute: "10.42.0.5/16",
+		InviteServerPubkey:    "srv",
+		InviteServerEndpoint:  "1.2.3.4:51820",
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)

@@ -136,7 +136,7 @@ func TestAPIInstallNetwork_Success(
 	body := `{
 		"network_name": "mynet",
 		"temp_private_key": "` + tempKey + `",
-		"temp_cidr": "10.42.0.5/16",
+		"temp_route": "10.42.0.5/16",
 		"server_pubkey": "` + srvPub + `",
 		"server_endpoint": "1.2.3.4:51820",
 		"server_route": "` + apiHost + `/32",
@@ -208,7 +208,7 @@ func TestAPIInstallNetwork_MissingName(
 	url := "/networks"
 	body := `{
 		"temp_private_key": "test-temp-key",
-		"temp_cidr": "10.42.0.5/16",
+		"temp_route": "10.42.0.5/16",
 		"server_pubkey": "srv-pub",
 		"server_endpoint": "1.2.3.4:51820",
 		"server_route": "10.42.0.1/32",
@@ -229,7 +229,7 @@ func TestAPIInstallNetwork_Duplicate(
 	body := `{
 		"network_name": "dupnet",
 		"temp_private_key": "test-temp-key",
-		"temp_cidr": "10.42.0.5/16",
+		"temp_route": "10.42.0.5/16",
 		"server_pubkey": "srv-pub",
 		"server_endpoint": "1.2.3.4:51820",
 		"server_route": "10.42.0.1/32",
@@ -446,7 +446,7 @@ func newInstallServer(
 				APIPort:     uint16(srvPort),
 			},
 			Peer: serverapi.PeerIdentityDTO{
-				CIDR: "10.42.0.5/32",
+				Route: "10.42.0.5/32",
 			},
 		})
 	})

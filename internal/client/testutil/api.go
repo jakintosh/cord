@@ -115,7 +115,7 @@ func NewInstallServer(apiAddr string) http.Handler {
 				APIPort:     8443,
 			},
 			Peer: serverapi.PeerIdentityDTO{
-				CIDR: "10.42.0.5/32",
+				Route: "10.42.0.5/32",
 			},
 		})
 	})

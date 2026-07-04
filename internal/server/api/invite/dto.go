@@ -18,6 +18,6 @@ type NetworkInfoDTO struct {
 }
 
 type PeerIdentityDTO struct {
-	CIDR       string `json:"cidr"`
+	Route      string `json:"route"`
 	PrivateKey string `json:"private_key,omitempty"`
 }

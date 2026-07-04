@@ -35,8 +35,8 @@ func TestAPIInviteCreate_Success(
 	if result.Data.Peer.PrivateKey == "" {
 		t.Fatal("private_key should not be empty")
 	}
-	if result.Data.Peer.CIDR == "" {
-		t.Fatal("cidr should not be empty")
+	if result.Data.Peer.Route == "" {
+		t.Fatal("route should not be empty")
 	}
 	if result.Data.Network.PublicKey == "" {
 		t.Fatal("server public_key should not be empty")
@@ -81,8 +81,8 @@ func TestAPIInviteCreate_AutoAssignIP(
 
 	// verify result
 	result.ExpectStatusOK(t, http.StatusCreated)
-	if result.Data.Peer.CIDR == "" {
-		t.Fatal("cidr should not be empty for auto-assigned IP")
+	if result.Data.Peer.Route == "" {
+		t.Fatal("route should not be empty for auto-assigned IP")
 	}
 }
 
@@ -175,7 +175,7 @@ func TestAPIListPeers_WithData(
 	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
-		Cidr:      "10.0.0.5/32",
+		Route:     "10.0.0.5/32",
 		Admin:     false,
 		Enabled:   true,
 		Confirmed: true,
@@ -199,8 +199,8 @@ func TestAPIListPeers_WithData(
 			if p.PublicKey != "alice-pub-key" {
 				t.Fatalf("public_key = %q, want alice-pub-key", p.PublicKey)
 			}
-			if p.Ip == "" {
-				t.Fatal("ip should not be empty")
+			if p.Route == "" {
+				t.Fatal("route should not be empty")
 			}
 			break
 		}
@@ -221,7 +221,7 @@ func TestAPIRenamePeer_Success(
 	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
-		Cidr:      "10.0.0.5/32",
+		Route:     "10.0.0.5/32",
 		Admin:     false,
 		Enabled:   true,
 		Confirmed: true,
@@ -274,7 +274,7 @@ func TestAPIDeletePeer_Success(
 	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
-		Cidr:      "10.0.0.5/32",
+		Route:     "10.0.0.5/32",
 		Admin:     false,
 		Enabled:   true,
 		Confirmed: true,
@@ -328,7 +328,7 @@ func TestAPIEnablePeer_Success(
 	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
-		Cidr:      "10.0.0.5/32",
+		Route:     "10.0.0.5/32",
 		Admin:     false,
 		Enabled:   false,
 		Confirmed: false,
@@ -370,7 +370,7 @@ func TestAPIDisablePeer_Success(
 	if err := env.Database.InsertPeer("testnet", &service.Peer{
 		Name:      "alice",
 		PublicKey: "alice-pub-key",
-		Cidr:      "10.0.0.5/32",
+		Route:     "10.0.0.5/32",
 		Admin:     false,
 		Enabled:   true,
 		Confirmed: true,

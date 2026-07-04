@@ -46,13 +46,13 @@ const (
 // payload from whatever format it arrives in (JSON file, clipboard,
 // etc.).
 type Invite struct {
-	NetworkName          string
-	TempPeerPrivKey      string
-	TempPeerAssignedCidr string
-	InviteServerPubkey   string
-	InviteServerEndpoint string
-	InviteServerRoute    string
-	InviteServerPort     uint16
+	NetworkName           string
+	TempPeerPrivKey       string
+	TempPeerAssignedRoute string
+	InviteServerPubkey    string
+	InviteServerEndpoint  string
+	InviteServerRoute     string
+	InviteServerPort      uint16
 }
 
 func (inv Invite) Validate() error {
@@ -62,7 +62,7 @@ func (inv Invite) Validate() error {
 	if inv.TempPeerPrivKey == "" {
 		return ErrInvalidInput
 	}
-	if inv.TempPeerAssignedCidr == "" {
+	if inv.TempPeerAssignedRoute == "" {
 		return ErrInvalidInput
 	}
 	if inv.InviteServerPubkey == "" {
@@ -90,9 +90,9 @@ func (inv Invite) Validate() error {
 //     validated at StateInvited, never changes.
 //   - Permanent identity (PrivateKey, PublicKey) — set at StateInvited,
 //     never changes.
-//   - Main network params (AssignedCidr, ServerPubkey, ServerEndpoint,
+//   - Main network params (AssignedRoute, ServerPubkey, ServerEndpoint,
 //     ServerRoute, ServerAPIPort) — set at StateRedeemed, never changes after.
-//   - Install scratch (TempPrivKey, TempCidr, InviteServerPubkey,
+//   - Install scratch (TempPrivKey, TempPeerAssignedRoute, InviteServerPubkey,
 //     InviteServerEndpoint, TempApiAddr) — set at StateInvited, cleared
 //     at StateConfirmed.
 type Network struct {
@@ -107,7 +107,7 @@ type Network struct {
 	MainInterfaceName   string
 	InviteInterfaceName string
 
-	AssignedCidr   string
+	AssignedRoute  string
 	ServerPubkey   string
 	ServerEndpoint string
 	ServerRoute    string
@@ -203,7 +203,7 @@ func (s *Service) BeginInstall(
 		MainInterfaceName:     mainIfaceName,
 		InviteInterfaceName:   inviteIfaceName,
 		TempPeerPrivKey:       invite.TempPeerPrivKey,
-		TempPeerAssignedRoute: invite.TempPeerAssignedCidr,
+		TempPeerAssignedRoute: invite.TempPeerAssignedRoute,
 		InviteServerPubkey:    invite.InviteServerPubkey,
 		InviteServerEndpoint:  invite.InviteServerEndpoint,
 		InviteServerRoute:     invite.InviteServerRoute,
@@ -290,7 +290,7 @@ func (s *Service) Redeem(
 
 	if err := s.store.SetNetworkRedeemed(
 		name,
-		result.Peer.CIDR,
+		result.Peer.Route,
 		result.Network.PublicKey,
 		result.Network.Endpoint,
 		result.Network.ServerRoute,
@@ -318,9 +318,9 @@ func (s *Service) Confirm(
 			ErrInvalidInput, name, network.State)
 	}
 
-	mainDeviceRoute, err := netaddr.ParseRoute(network.AssignedCidr)
+	mainDeviceRoute, err := netaddr.ParseRoute(network.AssignedRoute)
 	if err != nil {
-		return fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, network.AssignedCidr)
+		return fmt.Errorf("%w: invalid assigned route %q", ErrInvalidInput, network.AssignedRoute)
 	}
 	mainDev, err := s.wireguard.CreateDevice(wireguard.DeviceConfig{
 		Name:       network.MainInterfaceName,
@@ -457,9 +457,9 @@ func (s *Service) EnableNetwork(
 			ErrInvalidInput, networkName, network.State)
 	}
 
-	networkRoute, err := netaddr.ParseRoute(network.AssignedCidr)
+	networkRoute, err := netaddr.ParseRoute(network.AssignedRoute)
 	if err != nil {
-		return fmt.Errorf("%w: invalid assigned CIDR %q", ErrInvalidInput, network.AssignedCidr)
+		return fmt.Errorf("%w: invalid assigned route %q", ErrInvalidInput, network.AssignedRoute)
 	}
 
 	device, err := s.wireguard.CreateDevice(wireguard.DeviceConfig{
@@ -970,9 +970,9 @@ func (s *Service) reconcilePeers(
 	})
 
 	for _, peer := range peers {
-		peerRoute, err := netaddr.HostRouteFromCidr(peer.Cidr)
+		peerRoute, err := netaddr.ParseRoute(peer.Route)
 		if err != nil {
-			return fmt.Errorf("parse peer cidr %q: %w", peer.Cidr, err)
+			return fmt.Errorf("parse peer route %q: %w", peer.Route, err)
 		}
 		wgPeers = append(wgPeers, wireguard.PeerConfig{
 			PublicKey:      peer.PublicKey,

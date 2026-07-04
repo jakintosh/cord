@@ -41,7 +41,7 @@ func seedNetworkForAssoc(t *testing.T, db *database.DB) {
 		},
 		&service.Peer{
 			Name:      "cord-server",
-			Cidr:      "10.0.0.1/32",
+			Route:     "10.0.0.1/32",
 			PublicKey: "pub",
 			Admin:     true,
 			Enabled:   true,

@@ -20,7 +20,7 @@ func (db *DB) GetPeer(
 		SELECT
 			name,
 			public_key,
-			ip,
+			route,
 			admin,
 			enabled,
 			confirmed
@@ -45,22 +45,22 @@ func (db *DB) GetPeerByIP(
 	*service.Peer,
 	error,
 ) {
-	ip = netaddr.Normalize(ip)
+	route := netaddr.HostRoute(netaddr.Normalize(ip))
 	row := db.Conn.QueryRow(`
 		SELECT
 			name,
 			public_key,
-			ip,
+			route,
 			admin,
 			enabled,
 			confirmed
 		FROM peer
 		WHERE network_name = ?1
-			AND ip = ?2
+			AND route = ?2
 			AND confirmed = 1
 			AND enabled = 1`,
 		network,
-		ip,
+		route.String(),
 	)
 
 	peer, err := scanPeer(row)
@@ -77,22 +77,22 @@ func (db *DB) GetProvisionalPeerByIP(
 	*service.Peer,
 	error,
 ) {
-	ip = netaddr.Normalize(ip)
+	route := netaddr.HostRoute(netaddr.Normalize(ip))
 	row := db.Conn.QueryRow(`
 		SELECT
 			name,
 			public_key,
-			ip,
+			route,
 			admin,
 			enabled,
 			confirmed
 		FROM peer
 		WHERE network_name = ?1
-			AND ip = ?2
+			AND route = ?2
 			AND confirmed = 0
 			AND enabled = 1`,
 		network,
-		ip,
+		route.String(),
 	)
 
 	peer, err := scanPeer(row)
@@ -113,7 +113,7 @@ func (db *DB) GetPeerByKey(
 		SELECT
 			name,
 			public_key,
-			ip,
+			route,
 			admin,
 			enabled,
 			confirmed
@@ -141,7 +141,7 @@ func (db *DB) ListPeers(
 		SELECT
 			name,
 			public_key,
-			ip,
+			route,
 			admin,
 			enabled,
 			confirmed
@@ -175,27 +175,25 @@ func (db *DB) InsertPeer(
 	network string,
 	peer *service.Peer,
 ) error {
-	_, cidr, err := net.ParseCIDR(peer.Cidr)
+	_, cidr, err := net.ParseCIDR(peer.Route)
 	if err != nil {
-		return fmt.Errorf("insert peer %q: parse cidr: %w", peer.Name, err)
+		return fmt.Errorf("insert peer %q: parse route: %w", peer.Name, err)
 	}
 
 	ones, bits := cidr.Mask.Size()
 	if ones != bits {
 		return fmt.Errorf(
-			"%w: peer CIDR %q must be a terminal prefix (/%d)",
-			service.ErrInvalidInput, peer.Cidr, bits,
+			"%w: peer route %q must be a terminal prefix (/%d)",
+			service.ErrInvalidInput, peer.Route, bits,
 		)
 	}
-
-	ip := netaddr.Normalize(cidr.IP)
 
 	_, err = db.Conn.Exec(`
 		INSERT INTO peer (
 			network_name,
 			name,
 			public_key,
-			ip,
+			route,
 			admin,
 			enabled,
 			confirmed
@@ -204,7 +202,7 @@ func (db *DB) InsertPeer(
 		network,
 		peer.Name,
 		peer.PublicKey,
-		ip,
+		peer.Route,
 		boolToInt(peer.Admin),
 		boolToInt(peer.Enabled),
 		boolToInt(peer.Confirmed),
@@ -247,7 +245,7 @@ func (db *DB) UpdatePeer(
 		RETURNING
 			name,
 			public_key,
-			ip,
+			route,
 			admin,
 			enabled,
 			confirmed`,
@@ -278,8 +276,8 @@ func (db *DB) DeletePeer(
 
 	if _, err := tx.Exec(`
 		DELETE FROM registration
-		WHERE final_ip IN (
-			SELECT ip FROM peer
+		WHERE final_route IN (
+			SELECT route FROM peer
 			WHERE network_name = ?1 AND name = ?2
 		)`,
 		network,
@@ -345,7 +343,7 @@ func scanPeer(
 ) {
 	var name string
 	var publicKey string
-	var ip []byte
+	var route string
 	var admin int64
 	var enabled int64
 	var confirmed int64
@@ -353,7 +351,7 @@ func scanPeer(
 	if err := s.Scan(
 		&name,
 		&publicKey,
-		&ip,
+		&route,
 		&admin,
 		&enabled,
 		&confirmed,
@@ -364,25 +362,12 @@ func scanPeer(
 		return nil, CheckSqliteErr("scan peer", err)
 	}
 
-	cidr := ipToPeerCidr(net.IP(ip))
-
 	return &service.Peer{
 		Name:      name,
 		PublicKey: publicKey,
-		Cidr:      cidr.String(),
+		Route:     route,
 		Admin:     admin != 0,
 		Enabled:   enabled != 0,
 		Confirmed: confirmed != 0,
 	}, nil
-}
-
-func ipToPeerCidr(
-	ip net.IP,
-) *net.IPNet {
-	ip = netaddr.Normalize(ip)
-	prefix := len(ip) * 8
-	return &net.IPNet{
-		IP:   ip,
-		Mask: net.CIDRMask(prefix, prefix),
-	}
 }

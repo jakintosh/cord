@@ -20,7 +20,7 @@ type Store interface {
 	// SetNetworkRedeemed transitions a network to the redeemed
 	// state, recording the main network parameters returned by
 	// the server's /redeem endpoint.
-	SetNetworkRedeemed(name string, assignedCidr string, serverPubkey string, serverEndpoint string, serverRoute string, serverAPIPort uint16) error
+	SetNetworkRedeemed(name string, assignedRoute string, serverPubkey string, serverEndpoint string, serverRoute string, serverAPIPort uint16) error
 
 	// SetNetworkConfirmed transitions a network to the confirmed
 	// state and clears the temporary install scratch fields.

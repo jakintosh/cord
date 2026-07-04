@@ -41,7 +41,7 @@ func seedNetworkForEndpoint(t *testing.T, db *database.DB) {
 		},
 		&service.Peer{
 			Name:      "cord-server",
-			Cidr:      "10.0.0.1/32",
+			Route:     "10.0.0.1/32",
 			PublicKey: "pub",
 			Admin:     true,
 			Enabled:   true,
@@ -51,8 +51,8 @@ func seedNetworkForEndpoint(t *testing.T, db *database.DB) {
 		t.Fatalf("seed network: %v", err)
 	}
 	for _, p := range []service.Peer{
-		{Name: "peer-a", PublicKey: "pub-a", Cidr: "10.0.1.1/32", Confirmed: true, Enabled: true},
-		{Name: "peer-b", PublicKey: "pub-b", Cidr: "10.0.1.2/32", Confirmed: true, Enabled: true},
+		{Name: "peer-a", PublicKey: "pub-a", Route: "10.0.1.1/32", Confirmed: true, Enabled: true},
+		{Name: "peer-b", PublicKey: "pub-b", Route: "10.0.1.2/32", Confirmed: true, Enabled: true},
 	} {
 		if err := db.InsertPeer("epnet", &p); err != nil {
 			t.Fatalf("seed peer %s: %v", p.Name, err)

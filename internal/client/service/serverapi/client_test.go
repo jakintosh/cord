@@ -18,7 +18,7 @@ func TestListPeers_Success(t *testing.T) {
 		wire.WriteData(w, http.StatusOK, []VisiblePeerDTO{
 			{
 				Name:      "alice",
-				Cidr:      "10.42.0.5/16",
+				Route:     "10.42.0.5/32",
 				PublicKey: "alice-key",
 				Endpoints: []EndpointWitnessDTO{
 					{
@@ -42,8 +42,8 @@ func TestListPeers_Success(t *testing.T) {
 	if p.Name != "alice" {
 		t.Errorf("Name = %q, want alice", p.Name)
 	}
-	if p.Cidr != "10.42.0.5/16" {
-		t.Errorf("Cidr = %q, want 10.42.0.5/16", p.Cidr)
+	if p.Route != "10.42.0.5/32" {
+		t.Errorf("Route = %q, want 10.42.0.5/32", p.Route)
 	}
 	if p.PublicKey != "alice-key" {
 		t.Errorf("PublicKey = %q, want alice-key", p.PublicKey)
@@ -148,7 +148,7 @@ func TestRedeemInvite_Success(t *testing.T) {
 				APIPort:     8443,
 			},
 			Peer: PeerIdentityDTO{
-				CIDR: "10.42.0.5/32",
+				Route: "10.42.0.5/32",
 			},
 		})
 	})
@@ -169,8 +169,8 @@ func TestRedeemInvite_Success(t *testing.T) {
 	if result.Network.Endpoint != "1.2.3.4:51820" {
 		t.Errorf("Network.Endpoint = %q, want 1.2.3.4:51820", result.Network.Endpoint)
 	}
-	if result.Peer.CIDR != "10.42.0.5/32" {
-		t.Errorf("Peer.CIDR = %q, want 10.42.0.5/32", result.Peer.CIDR)
+	if result.Peer.Route != "10.42.0.5/32" {
+		t.Errorf("Peer.Route = %q, want 10.42.0.5/32", result.Peer.Route)
 	}
 }
 

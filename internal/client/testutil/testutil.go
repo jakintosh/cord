@@ -11,12 +11,12 @@ import (
 const DefaultNetworkName = "testnet"
 
 var defaultInvite = service.Invite{
-	TempPeerPrivKey:      mustGenerateKey(),
-	TempPeerAssignedCidr: "10.42.0.5/16",
-	InviteServerPubkey:   "server-pub-key",
-	InviteServerEndpoint: "1.2.3.4:51820",
-	InviteServerRoute:    "10.42.0.1/32",
-	InviteServerPort:     8443,
+	TempPeerPrivKey:       mustGenerateKey(),
+	TempPeerAssignedRoute: "10.42.0.5/32",
+	InviteServerPubkey:    "server-pub-key",
+	InviteServerEndpoint:  "1.2.3.4:51820",
+	InviteServerRoute:     "10.42.0.1/32",
+	InviteServerPort:      8443,
 }
 
 func mustGenerateKey() string {
@@ -73,7 +73,7 @@ func SeedNetworkDirect(
 		PublicKey:           pubKey,
 		MainInterfaceName:   name,
 		InviteInterfaceName: name + "-i",
-		AssignedCidr:        "10.42.0.5/32",
+		AssignedRoute:       "10.42.0.5/32",
 		ServerPubkey:        mustGenerateKey(),
 		ServerEndpoint:      "1.2.3.4:51820",
 		ServerRoute:         "10.42.0.1/32",

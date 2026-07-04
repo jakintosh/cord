@@ -5,7 +5,6 @@ import (
 	"net"
 	"time"
 
-	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -103,12 +102,6 @@ func (db *DB) BootstrapNetwork(
 	rootOnes, rootBits := rootIPNet.Mask.Size()
 	rootFirst, rootLast := cidrFirstAndLast(rootIPNet)
 
-	_, peerIPNet, err := net.ParseCIDR(serverPeer.Cidr)
-	if err != nil {
-		return fmt.Errorf("parse server peer cidr: %w", err)
-	}
-	peerIP := netaddr.Normalize(peerIPNet.IP)
-
 	tx, err := db.Conn.Begin()
 	if err != nil {
 		return fmt.Errorf("begin bootstrap tx: %w", err)
@@ -172,7 +165,7 @@ func (db *DB) BootstrapNetwork(
 			network_name,
 			name,
 			public_key,
-			ip,
+			route,
 			admin,
 			enabled,
 			confirmed
@@ -181,7 +174,7 @@ func (db *DB) BootstrapNetwork(
 		network.Name,
 		serverPeer.Name,
 		serverPeer.PublicKey,
-		peerIP,
+		serverPeer.Route,
 		boolToInt(serverPeer.Admin),
 		boolToInt(serverPeer.Enabled),
 		boolToInt(serverPeer.Confirmed),

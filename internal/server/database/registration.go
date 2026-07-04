@@ -20,8 +20,8 @@ func (db *DB) GetRegistration(
 		SELECT
 			name,
 			temp_public_key,
-			temp_ip,
-			final_ip,
+			temp_route,
+			final_route,
 			admin,
 			redeemed,
 			redeemed_key,
@@ -46,13 +46,13 @@ func (db *DB) GetRegistrationByIP(
 	*service.Registration,
 	error,
 ) {
-	ip = netaddr.Normalize(ip)
+	route := netaddr.HostRoute(netaddr.Normalize(ip))
 	row := db.Conn.QueryRow(`
 		SELECT
 			name,
 			temp_public_key,
-			temp_ip,
-			final_ip,
+			temp_route,
+			final_route,
 			admin,
 			redeemed,
 			redeemed_key,
@@ -61,11 +61,11 @@ func (db *DB) GetRegistrationByIP(
 			created_at_unix
 		FROM registration
 		WHERE network_name = ?1
-			AND temp_ip = ?2
+			AND temp_route = ?2
 			AND confirmed = 0
 			AND expires_at_unix > ?3`,
 		network,
-		ip,
+		route.String(),
 		now.Unix(),
 	)
 
@@ -82,8 +82,8 @@ func (db *DB) ListRegistrations(
 		SELECT
 			name,
 			temp_public_key,
-			temp_ip,
-			final_ip,
+			temp_route,
+			final_route,
 			admin,
 			redeemed,
 			redeemed_key,
@@ -127,8 +127,8 @@ func (db *DB) ListActiveRegistrations(
 		SELECT
 			name,
 			temp_public_key,
-			temp_ip,
-			final_ip,
+			temp_route,
+			final_route,
 			admin,
 			redeemed,
 			redeemed_key,
@@ -168,16 +168,13 @@ func (db *DB) InsertRegistration(
 	network string,
 	reg *service.Registration,
 ) error {
-	tempIP := netaddr.Normalize(reg.InviteIP)
-	finalIP := netaddr.Normalize(reg.MainIP)
-
 	_, err := db.Conn.Exec(`
 		INSERT INTO registration (
 			network_name,
 			name,
 			temp_public_key,
-			temp_ip,
-			final_ip,
+			temp_route,
+			final_route,
 			admin,
 			redeemed,
 			redeemed_key,
@@ -189,8 +186,8 @@ func (db *DB) InsertRegistration(
 		network,
 		reg.Name,
 		reg.InvitePublicKey,
-		tempIP,
-		finalIP,
+		reg.InviteRoute,
+		reg.MainRoute,
 		boolToInt(reg.Admin),
 		boolToInt(reg.Redeemed),
 		reg.RedeemedKey,
@@ -217,7 +214,7 @@ func (db *DB) RedeemRegistration(
 		INSERT INTO peer (
 			network_name,
 			name,
-			ip,
+			route,
 			public_key,
 			admin,
 			enabled,
@@ -226,7 +223,7 @@ func (db *DB) RedeemRegistration(
 		SELECT
 			r.network_name,
 			r.name,
-			r.final_ip,
+			r.final_route,
 			?3,
 			r.admin,
 			1,
@@ -398,8 +395,8 @@ func scanRegistration(
 ) {
 	var name string
 	var tempPubKey string
-	var tempIPBytes []byte
-	var finalIPBytes []byte
+	var tempRoute string
+	var finalRoute string
 	var admin int64
 	var redeemed int64
 	var redeemedKey string
@@ -410,8 +407,8 @@ func scanRegistration(
 	if err := s.Scan(
 		&name,
 		&tempPubKey,
-		&tempIPBytes,
-		&finalIPBytes,
+		&tempRoute,
+		&finalRoute,
 		&admin,
 		&redeemed,
 		&redeemedKey,
@@ -425,8 +422,8 @@ func scanRegistration(
 	return &service.Registration{
 		Name:            name,
 		InvitePublicKey: tempPubKey,
-		InviteIP:        net.IP(tempIPBytes),
-		MainIP:          net.IP(finalIPBytes),
+		InviteRoute:     tempRoute,
+		MainRoute:       finalRoute,
 		Admin:           admin != 0,
 		Redeemed:        redeemed != 0,
 		RedeemedKey:     redeemedKey,

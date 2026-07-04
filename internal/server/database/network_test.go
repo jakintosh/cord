@@ -52,7 +52,7 @@ func TestInsertAndGetNetwork(t *testing.T) {
 		},
 		&service.Peer{
 			Name:      "cord-server",
-			Cidr:      "10.0.0.1/32",
+			Route:     "10.0.0.1/32",
 			PublicKey: "pub-key-123",
 			Admin:     true,
 			Enabled:   true,
@@ -135,7 +135,7 @@ func TestInsertNetwork_Duplicate(t *testing.T) {
 		},
 		&service.Peer{
 			Name:      "cord-server",
-			Cidr:      "10.0.0.1/32",
+			Route:     "10.0.0.1/32",
 			PublicKey: "pub-a",
 			Admin:     true,
 			Enabled:   true,
@@ -155,7 +155,7 @@ func TestInsertNetwork_Duplicate(t *testing.T) {
 		},
 		&service.Peer{
 			Name:      "cord-server",
-			Cidr:      "10.0.0.1/32",
+			Route:     "10.0.0.1/32",
 			PublicKey: "pub-a",
 			Admin:     true,
 			Enabled:   true,
@@ -209,7 +209,7 @@ func TestListNetworkNames(t *testing.T) {
 			},
 			&service.Peer{
 				Name:      "cord-server",
-				Cidr:      "10.0.0.1/32",
+				Route:     "10.0.0.1/32",
 				PublicKey: "pub-" + name,
 				Admin:     true,
 				Enabled:   true,
@@ -269,7 +269,7 @@ func TestDeleteNetwork(t *testing.T) {
 		},
 		&service.Peer{
 			Name:      "cord-server",
-			Cidr:      "10.0.0.1/32",
+			Route:     "10.0.0.1/32",
 			PublicKey: "pub",
 			Admin:     true,
 			Enabled:   true,
@@ -330,7 +330,7 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 		},
 		&service.Peer{
 			Name:      "cord-server",
-			Cidr:      "10.0.0.1/32",
+			Route:     "10.0.0.1/32",
 			PublicKey: "pub",
 			Admin:     true,
 			Enabled:   true,
@@ -352,7 +352,7 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 	if err := db.InsertPeer("cascadenet", &service.Peer{
 		Name:      "peer-1",
 		PublicKey: "peer-key-1",
-		Cidr:      "10.0.1.5/32",
+		Route:     "10.0.1.5/32",
 		Admin:     false,
 		Enabled:   true,
 		Confirmed: true,

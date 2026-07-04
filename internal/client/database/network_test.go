@@ -25,7 +25,7 @@ func TestInsertAndGetNetwork(t *testing.T) {
 		Name:           "homenet",
 		PrivateKey:     "priv-key-123",
 		PublicKey:      "pub-key-123",
-		AssignedCidr:   "10.42.0.5/32",
+		AssignedRoute:  "10.42.0.5/32",
 		ServerPubkey:   "server-pub-key",
 		ServerEndpoint: "1.2.3.4:51820",
 		ServerRoute:    "10.42.0.1/32",
@@ -52,8 +52,8 @@ func TestInsertAndGetNetwork(t *testing.T) {
 	if got.PublicKey != net.PublicKey {
 		t.Errorf("public_key = %q, want %q", got.PublicKey, net.PublicKey)
 	}
-	if got.AssignedCidr != net.AssignedCidr {
-		t.Errorf("assigned_cidr = %q, want %q", got.AssignedCidr, net.AssignedCidr)
+	if got.AssignedRoute != net.AssignedRoute {
+		t.Errorf("assigned_cidr = %q, want %q", got.AssignedRoute, net.AssignedRoute)
 	}
 	if got.ServerPubkey != net.ServerPubkey {
 		t.Errorf("server_pubkey = %q, want %q", got.ServerPubkey, net.ServerPubkey)
@@ -82,7 +82,7 @@ func TestInsertAndGetNetwork_Disabled(t *testing.T) {
 		Name:           "offnet",
 		PrivateKey:     "priv-off",
 		PublicKey:      "pub-off",
-		AssignedCidr:   "10.42.0.6/16",
+		AssignedRoute:  "10.42.0.6/16",
 		ServerPubkey:   "server-pub-key",
 		ServerEndpoint: "1.2.3.4:51820",
 		ServerRoute:    "10.42.0.1/32",
@@ -111,7 +111,7 @@ func TestInsertNetwork_Duplicate(t *testing.T) {
 		Name:           "homenet",
 		PrivateKey:     "priv-a",
 		PublicKey:      "pub-a",
-		AssignedCidr:   "10.0.0.5/16",
+		AssignedRoute:  "10.0.0.5/16",
 		ServerPubkey:   "srv-key",
 		ServerEndpoint: "1.1.1.1:51820",
 		ServerRoute:    "10.0.0.1/32",
@@ -151,7 +151,7 @@ func TestListNetworkNames_Ordered(t *testing.T) {
 			Name:           name,
 			PrivateKey:     "priv-" + name,
 			PublicKey:      "pub-" + name,
-			AssignedCidr:   "10.42.0.0/16",
+			AssignedRoute:  "10.42.0.0/16",
 			ServerPubkey:   "srv-key",
 			ServerEndpoint: "1.1.1.1:51820",
 			ServerRoute:    "10.42.0.1/32",
@@ -187,7 +187,7 @@ func TestDeleteNetwork(t *testing.T) {
 		Name:           "deleteme",
 		PrivateKey:     "priv",
 		PublicKey:      "pub",
-		AssignedCidr:   "10.42.0.5/16",
+		AssignedRoute:  "10.42.0.5/16",
 		ServerPubkey:   "srv-key",
 		ServerEndpoint: "1.1.1.1:51820",
 		ServerRoute:    "10.42.0.1/32",
@@ -224,7 +224,7 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 		Name:           "cascadenet",
 		PrivateKey:     "priv",
 		PublicKey:      "pub",
-		AssignedCidr:   "10.42.0.5/16",
+		AssignedRoute:  "10.42.0.5/16",
 		ServerPubkey:   "srv-key",
 		ServerEndpoint: "1.1.1.1:51820",
 		ServerRoute:    "10.42.0.1/32",
@@ -235,8 +235,8 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 	}
 
 	if err := db.SetPeers("cascadenet", []service.Peer{
-		{Name: "peer-1", PublicKey: "peer-key-1", Cidr: "10.42.1.5/32"},
-		{Name: "peer-2", PublicKey: "peer-key-2", Cidr: "10.42.1.6/32"},
+		{Name: "peer-1", PublicKey: "peer-key-1", Route: "10.42.1.5/32"},
+		{Name: "peer-2", PublicKey: "peer-key-2", Route: "10.42.1.6/32"},
 	}); err != nil {
 		t.Fatalf("reconcile peers: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestSetNetworkEnabled(t *testing.T) {
 		Name:           "toggle",
 		PrivateKey:     "priv",
 		PublicKey:      "pub",
-		AssignedCidr:   "10.42.0.5/16",
+		AssignedRoute:  "10.42.0.5/16",
 		ServerPubkey:   "srv-key",
 		ServerEndpoint: "1.1.1.1:51820",
 		ServerRoute:    "10.42.0.1/32",
