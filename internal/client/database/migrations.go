@@ -13,26 +13,37 @@ var migrations = []Migration{
 		Version: 1,
 		Name:    "create client schema",
 		SQL: `
-CREATE TABLE network (
+CREATE TABLE install (
     name                    TEXT PRIMARY KEY,
-    state                   TEXT NOT NULL,
-    private_key             TEXT NOT NULL,
-    public_key              TEXT NOT NULL,
-    main_interface_name     TEXT NOT NULL DEFAULT '',
-    invite_interface_name   TEXT NOT NULL DEFAULT '',
-    assigned_route          TEXT NOT NULL DEFAULT '',
-    server_pubkey           TEXT NOT NULL DEFAULT '',
-    server_endpoint         TEXT NOT NULL DEFAULT '',
-    server_route            TEXT NOT NULL DEFAULT '',
-    server_api_port         INTEGER NOT NULL DEFAULT 0,
-    temp_priv_key           TEXT NOT NULL DEFAULT '',
-    temp_route              TEXT NOT NULL DEFAULT '',
-    invite_server_pubkey    TEXT NOT NULL DEFAULT '',
-    invite_server_endpoint  TEXT NOT NULL DEFAULT '',
-    invite_server_route     TEXT NOT NULL DEFAULT '',
-    invite_server_port      INTEGER NOT NULL DEFAULT 0,
-    enabled                 INTEGER NOT NULL DEFAULT 0,
+    phase                   TEXT NOT NULL,
+    invite_iface_name       TEXT NOT NULL,
+    invite_peer_private_key TEXT NOT NULL,
+    invite_peer_route       TEXT NOT NULL,
+    invite_server_pubkey    TEXT NOT NULL,
+    invite_server_endpoint  TEXT NOT NULL,
+    invite_server_route     TEXT NOT NULL,
+    invite_server_api_port  INTEGER NOT NULL,
+    main_iface_name         TEXT NOT NULL,
+    main_peer_private_key   TEXT NOT NULL,
+    main_peer_route         TEXT NOT NULL DEFAULT '',
+    main_server_pubkey      TEXT NOT NULL DEFAULT '',
+    main_server_endpoint    TEXT NOT NULL DEFAULT '',
+    main_server_route       TEXT NOT NULL DEFAULT '',
+    main_server_api_port    INTEGER NOT NULL DEFAULT 0,
     created_at_unix         INTEGER NOT NULL
+);
+
+CREATE TABLE network (
+    name            TEXT PRIMARY KEY,
+    peer_private_key     TEXT NOT NULL,
+    peer_route      TEXT NOT NULL,
+    interface_name  TEXT NOT NULL,
+    server_pubkey   TEXT NOT NULL,
+    server_endpoint TEXT NOT NULL,
+    server_route    TEXT NOT NULL,
+    server_api_port INTEGER NOT NULL,
+    enabled         INTEGER NOT NULL DEFAULT 0,
+    created_at_unix INTEGER NOT NULL
 );
 
 CREATE TABLE peer (

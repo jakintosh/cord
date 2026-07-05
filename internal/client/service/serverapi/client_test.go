@@ -10,7 +10,7 @@ import (
 )
 
 func TestListPeers_Success(t *testing.T) {
-	c, teardown := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c, teardown := newTestPeerClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/peers" {
 			wire.WriteError(w, http.StatusNotFound, "not found")
 			return
@@ -57,7 +57,7 @@ func TestListPeers_Success(t *testing.T) {
 }
 
 func TestListPeers_Forbidden(t *testing.T) {
-	c, teardown := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c, teardown := newTestPeerClient(t, func(w http.ResponseWriter, r *http.Request) {
 		wire.WriteError(w, http.StatusForbidden, "identity unknown")
 	})
 	defer teardown()
@@ -72,7 +72,7 @@ func TestListPeers_Forbidden(t *testing.T) {
 }
 
 func TestConfirmPeer_Success(t *testing.T) {
-	c, teardown := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c, teardown := newTestPeerClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/confirm" {
 			wire.WriteError(w, http.StatusNotFound, "not found")
 			return
@@ -87,7 +87,7 @@ func TestConfirmPeer_Success(t *testing.T) {
 }
 
 func TestConfirmPeer_Forbidden(t *testing.T) {
-	c, teardown := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c, teardown := newTestPeerClient(t, func(w http.ResponseWriter, r *http.Request) {
 		wire.WriteError(w, http.StatusForbidden, "identity unknown")
 	})
 	defer teardown()
@@ -102,7 +102,7 @@ func TestConfirmPeer_Forbidden(t *testing.T) {
 }
 
 func TestReportEndpoints_Success(t *testing.T) {
-	c, teardown := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c, teardown := newTestPeerClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/endpoints" {
 			wire.WriteError(w, http.StatusNotFound, "not found")
 			return
@@ -120,7 +120,7 @@ func TestReportEndpoints_Success(t *testing.T) {
 }
 
 func TestReportEndpoints_Forbidden(t *testing.T) {
-	c, teardown := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c, teardown := newTestPeerClient(t, func(w http.ResponseWriter, r *http.Request) {
 		wire.WriteError(w, http.StatusForbidden, "identity unknown")
 	})
 	defer teardown()
@@ -135,7 +135,7 @@ func TestReportEndpoints_Forbidden(t *testing.T) {
 }
 
 func TestRedeemInvite_Success(t *testing.T) {
-	c, teardown := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c, teardown := newTestInviteClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/redeem" {
 			wire.WriteError(w, http.StatusNotFound, "not found")
 			return
@@ -154,9 +154,7 @@ func TestRedeemInvite_Success(t *testing.T) {
 	})
 	defer teardown()
 
-	result, err := c.RedeemInvitation(RedeemInvitationRequest{
-		PermPubKey: "perm-key",
-	})
+	result, err := c.RedeemInvitation("perm-key")
 	if err != nil {
 		t.Fatalf("RedeemInvite: %v", err)
 	}
@@ -175,14 +173,12 @@ func TestRedeemInvite_Success(t *testing.T) {
 }
 
 func TestRedeemInvite_Forbidden(t *testing.T) {
-	c, teardown := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+	c, teardown := newTestInviteClient(t, func(w http.ResponseWriter, r *http.Request) {
 		wire.WriteError(w, http.StatusForbidden, "identity unknown")
 	})
 	defer teardown()
 
-	_, err := c.RedeemInvitation(RedeemInvitationRequest{
-		PermPubKey: "perm-key",
-	})
+	_, err := c.RedeemInvitation("perm-key")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -193,17 +189,30 @@ func TestRedeemInvite_Forbidden(t *testing.T) {
 
 // --- test helpers ---
 
-// newTestClient creates a Client pointed at an httptest server whose
-// handler is used for both the main and invite API listeners.
-func newTestClient(
+// newTestPeerClient creates a PeerClient pointed at an httptest server.
+func newTestPeerClient(
 	t *testing.T,
 	handler func(w http.ResponseWriter, r *http.Request),
-) (*Client, func()) {
+) (*PeerClient, func()) {
 	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(handler))
 	addr := server.Listener.Addr().String()
 
-	c := NewClient(addr, addr, nil)
+	c := NewPeerClient(addr, nil)
+	return c, server.Close
+}
+
+// newTestInviteClient creates an InviteClient pointed at an httptest server.
+func newTestInviteClient(
+	t *testing.T,
+	handler func(w http.ResponseWriter, r *http.Request),
+) (*InviteClient, func()) {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(handler))
+	addr := server.Listener.Addr().String()
+
+	c := NewInviteClient(addr, nil)
 	return c, server.Close
 }

@@ -1,7 +1,6 @@
 package service_test
 
 import (
-	"context"
 	"testing"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
@@ -11,8 +10,7 @@ func TestClose_StopsRunningNetworks(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "close-me")
 
-	ctx := context.Background()
-	if err := env.Service.EnableNetwork(ctx, "close-me"); err != nil {
+	if err := env.Service.EnableNetwork("close-me"); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
@@ -28,7 +26,7 @@ func TestClose_StopsRunningNetworks(t *testing.T) {
 		t.Errorf("close calls = %d, want 1", dev.CloseCalls)
 	}
 
-	statuses, err := env.Service.Status()
+	statuses, err := env.Service.ListNetworkStatuses()
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}

@@ -12,16 +12,18 @@ import (
 func seedNetwork(t *testing.T, db *database.DB) {
 	t.Helper()
 	now := time.Now()
-	if err := db.InsertNetwork(&service.Network{
-		Name:           "testnet",
-		PrivateKey:     "priv-test",
-		PublicKey:      "pub-test",
-		AssignedRoute:  "10.42.0.5/16",
-		ServerPubkey:   "server-pub-key",
-		ServerEndpoint: "1.2.3.4:51820",
-		ServerRoute:    "10.42.0.1/32",
-		ServerAPIPort:  8443,
-		CreatedAt:      now,
+	if err := db.InsertNetwork(&service.NetworkConfig{
+		Name:          "testnet",
+		PrivateKey:    "priv-test",
+		InterfaceName: "wg-testnet",
+		AssignedRoute: "10.42.0.5/16",
+		Server: service.ServerInfo{
+			PublicKey: "server-pub-key",
+			Endpoint:  "1.2.3.4:51820",
+			Route:     "10.42.0.1/32",
+			APIPort:   8443,
+		},
+		CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
@@ -153,16 +155,18 @@ func TestSetPeers_NetworkIsolation(t *testing.T) {
 	seedNetwork(t, db)
 
 	now := time.Now()
-	if err := db.InsertNetwork(&service.Network{
-		Name:           "othernet",
-		PrivateKey:     "priv-other",
-		PublicKey:      "pub-other",
-		AssignedRoute:  "10.43.0.5/16",
-		ServerPubkey:   "srv-key-2",
-		ServerEndpoint: "5.6.7.8:51820",
-		ServerRoute:    "10.43.0.1/32",
-		ServerAPIPort:  8443,
-		CreatedAt:      now,
+	if err := db.InsertNetwork(&service.NetworkConfig{
+		Name:          "othernet",
+		PrivateKey:    "priv-other",
+		InterfaceName: "wg-othernet",
+		AssignedRoute: "10.43.0.5/16",
+		Server: service.ServerInfo{
+			PublicKey: "srv-key-2",
+			Endpoint:  "5.6.7.8:51820",
+			Route:     "10.43.0.1/32",
+			APIPort:   8443,
+		},
+		CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("insert other network: %v", err)
 	}

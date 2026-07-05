@@ -21,17 +21,19 @@ func TestInsertAndGetNetwork(t *testing.T) {
 	db := testutil.SetupDB(t)
 
 	createdAt := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
-	net := &service.Network{
-		Name:           "homenet",
-		PrivateKey:     "priv-key-123",
-		PublicKey:      "pub-key-123",
-		AssignedRoute:  "10.42.0.5/32",
-		ServerPubkey:   "server-pub-key",
-		ServerEndpoint: "1.2.3.4:51820",
-		ServerRoute:    "10.42.0.1/32",
-		ServerAPIPort:  8443,
-		Enabled:        true,
-		CreatedAt:      createdAt,
+	net := &service.NetworkConfig{
+		Name:          "homenet",
+		PrivateKey:    "priv-key-123",
+		InterfaceName: "wg-homenet",
+		AssignedRoute: "10.42.0.5/32",
+		Server: service.ServerInfo{
+			PublicKey: "server-pub-key",
+			Endpoint:  "1.2.3.4:51820",
+			Route:     "10.42.0.1/32",
+			APIPort:   8443,
+		},
+		Enabled:   true,
+		CreatedAt: createdAt,
 	}
 
 	if err := db.InsertNetwork(net); err != nil {
@@ -49,23 +51,20 @@ func TestInsertAndGetNetwork(t *testing.T) {
 	if got.PrivateKey != net.PrivateKey {
 		t.Errorf("private_key = %q, want %q", got.PrivateKey, net.PrivateKey)
 	}
-	if got.PublicKey != net.PublicKey {
-		t.Errorf("public_key = %q, want %q", got.PublicKey, net.PublicKey)
-	}
 	if got.AssignedRoute != net.AssignedRoute {
 		t.Errorf("assigned_cidr = %q, want %q", got.AssignedRoute, net.AssignedRoute)
 	}
-	if got.ServerPubkey != net.ServerPubkey {
-		t.Errorf("server_pubkey = %q, want %q", got.ServerPubkey, net.ServerPubkey)
+	if got.Server.PublicKey != net.Server.PublicKey {
+		t.Errorf("server_pubkey = %q, want %q", got.Server.PublicKey, net.Server.PublicKey)
 	}
-	if got.ServerEndpoint != net.ServerEndpoint {
-		t.Errorf("server_endpoint = %q, want %q", got.ServerEndpoint, net.ServerEndpoint)
+	if got.Server.Endpoint != net.Server.Endpoint {
+		t.Errorf("server_endpoint = %q, want %q", got.Server.Endpoint, net.Server.Endpoint)
 	}
-	if got.ServerRoute != net.ServerRoute {
-		t.Errorf("server_route = %q, want %q", got.ServerRoute, net.ServerRoute)
+	if got.Server.Route != net.Server.Route {
+		t.Errorf("server_route = %q, want %q", got.Server.Route, net.Server.Route)
 	}
-	if got.ServerAPIPort != net.ServerAPIPort {
-		t.Errorf("server_api_port = %d, want %d", got.ServerAPIPort, net.ServerAPIPort)
+	if got.Server.APIPort != net.Server.APIPort {
+		t.Errorf("server_api_port = %d, want %d", got.Server.APIPort, net.Server.APIPort)
 	}
 	if got.Enabled != net.Enabled {
 		t.Errorf("enabled = %v, want %v", got.Enabled, net.Enabled)
@@ -78,17 +77,19 @@ func TestInsertAndGetNetwork(t *testing.T) {
 func TestInsertAndGetNetwork_Disabled(t *testing.T) {
 	db := testutil.SetupDB(t)
 
-	net := &service.Network{
-		Name:           "offnet",
-		PrivateKey:     "priv-off",
-		PublicKey:      "pub-off",
-		AssignedRoute:  "10.42.0.6/16",
-		ServerPubkey:   "server-pub-key",
-		ServerEndpoint: "1.2.3.4:51820",
-		ServerRoute:    "10.42.0.1/32",
-		ServerAPIPort:  8443,
-		Enabled:        false,
-		CreatedAt:      time.Now(),
+	net := &service.NetworkConfig{
+		Name:          "offnet",
+		PrivateKey:    "priv-off",
+		InterfaceName: "wg-offnet",
+		AssignedRoute: "10.42.0.6/16",
+		Server: service.ServerInfo{
+			PublicKey: "server-pub-key",
+			Endpoint:  "1.2.3.4:51820",
+			Route:     "10.42.0.1/32",
+			APIPort:   8443,
+		},
+		Enabled:   false,
+		CreatedAt: time.Now(),
 	}
 
 	if err := db.InsertNetwork(net); err != nil {
@@ -107,16 +108,18 @@ func TestInsertAndGetNetwork_Disabled(t *testing.T) {
 func TestInsertNetwork_Duplicate(t *testing.T) {
 	db := testutil.SetupDB(t)
 
-	net := &service.Network{
-		Name:           "homenet",
-		PrivateKey:     "priv-a",
-		PublicKey:      "pub-a",
-		AssignedRoute:  "10.0.0.5/16",
-		ServerPubkey:   "srv-key",
-		ServerEndpoint: "1.1.1.1:51820",
-		ServerRoute:    "10.0.0.1/32",
-		ServerAPIPort:  8443,
-		CreatedAt:      time.Now(),
+	net := &service.NetworkConfig{
+		Name:          "homenet",
+		PrivateKey:    "priv-a",
+		InterfaceName: "wg-homenet",
+		AssignedRoute: "10.0.0.5/16",
+		Server: service.ServerInfo{
+			PublicKey: "srv-key",
+			Endpoint:  "1.1.1.1:51820",
+			Route:     "10.0.0.1/32",
+			APIPort:   8443,
+		},
+		CreatedAt: time.Now(),
 	}
 
 	if err := db.InsertNetwork(net); err != nil {
@@ -147,16 +150,18 @@ func TestListNetworkNames_Ordered(t *testing.T) {
 	now := time.Now()
 	mustInsert := func(name string) {
 		t.Helper()
-		err := db.InsertNetwork(&service.Network{
-			Name:           name,
-			PrivateKey:     "priv-" + name,
-			PublicKey:      "pub-" + name,
-			AssignedRoute:  "10.42.0.0/16",
-			ServerPubkey:   "srv-key",
-			ServerEndpoint: "1.1.1.1:51820",
-			ServerRoute:    "10.42.0.1/32",
-			ServerAPIPort:  8443,
-			CreatedAt:      now,
+		err := db.InsertNetwork(&service.NetworkConfig{
+			Name:          name,
+			PrivateKey:    "priv-" + name,
+			InterfaceName: "wg-" + name,
+			AssignedRoute: "10.42.0.0/16",
+			Server: service.ServerInfo{
+				PublicKey: "srv-key",
+				Endpoint:  "1.1.1.1:51820",
+				Route:     "10.42.0.1/32",
+				APIPort:   8443,
+			},
+			CreatedAt: now,
 		})
 		if err != nil {
 			t.Fatalf("insert %s: %v", name, err)
@@ -183,16 +188,18 @@ func TestDeleteNetwork(t *testing.T) {
 	db := testutil.SetupDB(t)
 
 	now := time.Now()
-	if err := db.InsertNetwork(&service.Network{
-		Name:           "deleteme",
-		PrivateKey:     "priv",
-		PublicKey:      "pub",
-		AssignedRoute:  "10.42.0.5/16",
-		ServerPubkey:   "srv-key",
-		ServerEndpoint: "1.1.1.1:51820",
-		ServerRoute:    "10.42.0.1/32",
-		ServerAPIPort:  8443,
-		CreatedAt:      now,
+	if err := db.InsertNetwork(&service.NetworkConfig{
+		Name:          "deleteme",
+		PrivateKey:    "priv",
+		InterfaceName: "wg-deleteme",
+		AssignedRoute: "10.42.0.5/16",
+		Server: service.ServerInfo{
+			PublicKey: "srv-key",
+			Endpoint:  "1.1.1.1:51820",
+			Route:     "10.42.0.1/32",
+			APIPort:   8443,
+		},
+		CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
@@ -220,16 +227,18 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 	db := testutil.SetupDB(t)
 
 	now := time.Now()
-	if err := db.InsertNetwork(&service.Network{
-		Name:           "cascadenet",
-		PrivateKey:     "priv",
-		PublicKey:      "pub",
-		AssignedRoute:  "10.42.0.5/16",
-		ServerPubkey:   "srv-key",
-		ServerEndpoint: "1.1.1.1:51820",
-		ServerRoute:    "10.42.0.1/32",
-		ServerAPIPort:  8443,
-		CreatedAt:      now,
+	if err := db.InsertNetwork(&service.NetworkConfig{
+		Name:          "cascadenet",
+		PrivateKey:    "priv",
+		InterfaceName: "wg-cascadenet",
+		AssignedRoute: "10.42.0.5/16",
+		Server: service.ServerInfo{
+			PublicKey: "srv-key",
+			Endpoint:  "1.1.1.1:51820",
+			Route:     "10.42.0.1/32",
+			APIPort:   8443,
+		},
+		CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("insert network: %v", err)
 	}
@@ -257,17 +266,19 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 func TestSetNetworkEnabled(t *testing.T) {
 	db := testutil.SetupDB(t)
 
-	net := &service.Network{
-		Name:           "toggle",
-		PrivateKey:     "priv",
-		PublicKey:      "pub",
-		AssignedRoute:  "10.42.0.5/16",
-		ServerPubkey:   "srv-key",
-		ServerEndpoint: "1.1.1.1:51820",
-		ServerRoute:    "10.42.0.1/32",
-		ServerAPIPort:  8443,
-		Enabled:        false,
-		CreatedAt:      time.Now(),
+	net := &service.NetworkConfig{
+		Name:          "toggle",
+		PrivateKey:    "priv",
+		InterfaceName: "wg-toggle",
+		AssignedRoute: "10.42.0.5/16",
+		Server: service.ServerInfo{
+			PublicKey: "srv-key",
+			Endpoint:  "1.1.1.1:51820",
+			Route:     "10.42.0.1/32",
+			APIPort:   8443,
+		},
+		Enabled:   false,
+		CreatedAt: time.Now(),
 	}
 	if err := db.InsertNetwork(net); err != nil {
 		t.Fatalf("insert: %v", err)

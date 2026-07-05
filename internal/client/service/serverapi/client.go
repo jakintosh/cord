@@ -8,92 +8,7 @@ import (
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 )
 
-// Client is a typed HTTP client for the cord server's peer-facing and
-// invite-facing APIs. It communicates over the WireGuard tunnel using
-// the wire envelope protocol ({data, error}).
-type Client struct {
-	main   wire.Client
-	invite wire.Client
-}
-
-// NewClient returns a Client configured to reach the server's main and
-// invite API listeners. Both addresses are in "host:port" form (plain
-// HTTP, no TLS over the tunnel). An optional httpClient replaces the
-// default transport for testing.
-func NewClient(
-	mainAddr string,
-	inviteAddr string,
-	httpClient *http.Client,
-) *Client {
-	return &Client{
-		main: wire.Client{
-			BaseURL:    "http://" + mainAddr,
-			HTTPClient: httpClient,
-		},
-		invite: wire.Client{
-			BaseURL:    "http://" + inviteAddr,
-			HTTPClient: httpClient,
-		},
-	}
-}
-
-// ListPeers calls GET /peers on the main peer API and returns the
-// visible peer list for the authenticated peer.
-func (c *Client) ListPeers() (
-	[]VisiblePeerDTO,
-	error,
-) {
-	var peers []VisiblePeerDTO
-	err := c.main.Get("/peers", &peers)
-	return peers, err
-}
-
-// ConfirmPeer calls POST /confirm on the main peer API, proving
-// WireGuard reachability from the assigned IP.
-func (c *Client) ConfirmPeer() error {
-	var result map[string]string
-	return withRetry(func() error {
-		return c.main.Post("/confirm", nil, &result)
-	})
-}
-
-// ReportEndpoints calls POST /endpoints on the main peer API, sending
-// locally-observed peer endpoints for gossip distribution.
-func (c *Client) ReportEndpoints(
-	sightings []EndpointSightingDTO,
-) error {
-	body, err := json.Marshal(sightings)
-	if err != nil {
-		return err
-	}
-	var result map[string]string
-	return withRetry(func() error {
-		return c.main.Post("/endpoints", body, &result)
-	})
-}
-
-// RedeemInvitation calls POST /redeem on the invite API, exchanging a
-// temporary invite key for a permanent peer identity and the main
-// network server details.
-func (c *Client) RedeemInvitation(
-	req RedeemInvitationRequest,
-) (
-	*InvitationDTO,
-	error,
-) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
-	var result InvitationDTO
-	err = withRetry(func() error {
-		return c.invite.Post("/redeem", body, &result)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
+// --- Shared helpers ---
 
 // retryMaxAttempts is the maximum number of attempts for retried calls.
 const retryMaxAttempts = 3
@@ -129,4 +44,109 @@ func withRetry(fn func() error) error {
 		}
 	}
 	return lastErr
+}
+
+// --- PeerClient (main network API) ---
+
+// PeerClient is a typed HTTP client for the cord server's peer-facing
+// API. It communicates over the WireGuard tunnel.
+type PeerClient struct {
+	client wire.Client
+}
+
+// NewPeerClient returns a PeerClient for the given API address
+// ("host:port" form). An optional httpClient replaces the default
+// transport for testing.
+func NewPeerClient(
+	apiAddr string,
+	httpClient *http.Client,
+) *PeerClient {
+	return &PeerClient{
+		client: wire.Client{
+			BaseURL:    "http://" + apiAddr,
+			HTTPClient: httpClient,
+		},
+	}
+}
+
+// ListPeers calls GET /peers and returns the visible peer list.
+func (c *PeerClient) ListPeers() (
+	[]VisiblePeerDTO,
+	error,
+) {
+	var peers []VisiblePeerDTO
+	err := c.client.Get("/peers", &peers)
+	return peers, err
+}
+
+// ConfirmPeer calls POST /confirm, proving WireGuard reachability.
+func (c *PeerClient) ConfirmPeer() error {
+	var result map[string]string
+	return withRetry(func() error {
+		return c.client.Post("/confirm", nil, &result)
+	})
+}
+
+// ReportEndpoints calls POST /endpoints, sending locally-observed
+// peer endpoints for gossip distribution.
+func (c *PeerClient) ReportEndpoints(
+	sightings []EndpointSightingDTO,
+) error {
+	body, err := json.Marshal(sightings)
+	if err != nil {
+		return err
+	}
+
+	var result map[string]string
+	return withRetry(func() error {
+		return c.client.Post("/endpoints", body, &result)
+	})
+}
+
+// --- InviteClient (invite network API) ---
+
+// InviteClient is a typed HTTP client for the cord server's invite API.
+type InviteClient struct {
+	client wire.Client
+}
+
+// NewInviteClient returns an InviteClient for the given API address.
+func NewInviteClient(
+	apiAddr string,
+	httpClient *http.Client,
+) *InviteClient {
+	return &InviteClient{
+		client: wire.Client{
+			BaseURL:    "http://" + apiAddr,
+			HTTPClient: httpClient,
+		},
+	}
+}
+
+// RedeemInvitation calls POST /redeem, exchanging a temporary invite
+// key for a permanent peer identity and the main network server details.
+func (c *InviteClient) RedeemInvitation(
+	permPubKey string,
+) (
+	*InvitationDTO,
+	error,
+) {
+	req := RedeemInvitationRequest{
+		PermPubKey: permPubKey,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	var result InvitationDTO
+	err = withRetry(func() error {
+		return c.client.Post("/redeem", body, &result)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
 }
