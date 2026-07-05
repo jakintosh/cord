@@ -101,6 +101,45 @@ func (s *Service) ListInstalls() (
 	return s.store.ListInstalls()
 }
 
+// InstallNetwork runs the full onboarding flow: BeginInstall → Redeem →
+// Confirm. It is a convenience driver for callers that want to complete
+// onboarding in a single call. For retry-safe onboarding, call each step
+// individually — the permanent key is persisted at BeginInstall and
+// reused across retries.
+//
+// If the install already exists (from a previous partial run),
+// InstallNetwork resumes from whatever phase it is at.
+func (s *Service) InstallNetwork(
+	invite Invite,
+) (
+	*NetworkConfig,
+	error,
+) {
+	inst, err := s.BeginInstall(invite)
+	if err != nil {
+		return nil, err
+	}
+
+	if inst.Phase == PhaseInvited {
+		if _, err := s.Redeem(inst.Name); err != nil {
+			return nil, err
+		}
+	}
+
+	inst, err = s.store.GetInstall(inst.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	if inst.Phase == PhaseRedeemed {
+		if err := s.Confirm(inst.Name); err != nil {
+			return nil, err
+		}
+	}
+
+	return s.store.GetNetwork(inst.Name)
+}
+
 // BeginInstall validates an invite, generates a permanent keypair, and
 // persists an Install record at phase "invited". No WireGuard devices
 // are brought up. Idempotent: if a completed network already exists,
@@ -117,16 +156,12 @@ func (s *Service) BeginInstall(
 	}
 
 	// Validate interface names up front.
-	if err := wireguard.ValidateDeviceName(invite.NetworkName); err != nil {
+	mainIfaceName := invite.NetworkName
+	if err := wireguard.ValidateDeviceName(mainIfaceName); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 	inviteIfaceName := invite.NetworkName + inviteSuffix
 	if err := wireguard.ValidateDeviceName(inviteIfaceName); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
-	}
-
-	mainIfaceName := invite.NetworkName
-	if err := wireguard.ValidateDeviceName(mainIfaceName); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 
@@ -146,12 +181,12 @@ func (s *Service) BeginInstall(
 	install := &Install{
 		Name:                invite.NetworkName,
 		Phase:               PhaseInvited,
-		MainIfaceName:       mainIfaceName,
-		MainPrivateKey:      permPrivKey,
 		InviteIfaceName:     inviteIfaceName,
 		InvitePrivateKey:    invite.PrivateKey,
 		InviteAssignedRoute: invite.AssignedRoute,
 		InviteServer:        invite.Server,
+		MainIfaceName:       mainIfaceName,
+		MainPrivateKey:      permPrivKey,
 		CreatedAt:           s.clock(),
 	}
 	if err := s.store.InsertInstall(install); err != nil {
@@ -171,32 +206,32 @@ func (s *Service) Redeem(
 	*serverapi.InvitationDTO,
 	error,
 ) {
-	inst, err := s.store.GetInstall(name)
+	install, err := s.store.GetInstall(name)
 	if err != nil {
 		return nil, err
 	}
 
-	if inst.Phase != PhaseInvited && inst.Phase != PhaseRedeemed {
+	if install.Phase != PhaseInvited && install.Phase != PhaseRedeemed {
 		return nil, fmt.Errorf("%w: install %q is in phase %q, expected invited or redeemed",
-			ErrInvalidInput, name, inst.Phase)
+			ErrInvalidInput, name, install.Phase)
 	}
 
-	permPubKey, err := wireguard.PublicKey(inst.MainPrivateKey)
+	permPubKey, err := wireguard.PublicKey(install.MainPrivateKey)
 	if err != nil {
 		return nil, err
 	}
 
-	inviteHostRoute, err := netaddr.HostRouteFromCidr(inst.InviteAssignedRoute)
+	inviteHostRoute, err := netaddr.HostRouteFromCidr(install.InviteAssignedRoute)
 	if err != nil {
-		return nil, fmt.Errorf("%w: invalid invite route %q", ErrInvalidInput, inst.InviteAssignedRoute)
+		return nil, fmt.Errorf("%w: invalid invite route %q", ErrInvalidInput, install.InviteAssignedRoute)
 	}
 
 	tunnel, err := newTunnel(
 		s.wireguard,
-		inst.InviteIfaceName,
-		inst.InvitePrivateKey,
+		install.InviteIfaceName,
+		install.InvitePrivateKey,
 		inviteHostRoute.String(),
-		inst.InviteServer,
+		install.InviteServer,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create invite tunnel: %w", err)
@@ -237,21 +272,22 @@ func (s *Service) Redeem(
 func (s *Service) Confirm(
 	name string,
 ) error {
-	inst, err := s.store.GetInstall(name)
+	install, err := s.store.GetInstall(name)
 	if err != nil {
 		return err
 	}
-	if inst.Phase != PhaseRedeemed {
+
+	if install.Phase != PhaseRedeemed {
 		return fmt.Errorf("%w: install %q is in phase %q, expected redeemed",
-			ErrInvalidInput, name, inst.Phase)
+			ErrInvalidInput, name, install.Phase)
 	}
 
 	tunnel, err := newTunnel(
 		s.wireguard,
-		inst.MainIfaceName,
-		inst.MainPrivateKey,
-		inst.MainAssignedRoute,
-		inst.MainServer,
+		install.MainIfaceName,
+		install.MainPrivateKey,
+		install.MainAssignedRoute,
+		install.MainServer,
 	)
 	if err != nil {
 		return fmt.Errorf("create main tunnel: %w", err)
@@ -265,10 +301,10 @@ func (s *Service) Confirm(
 
 	nc := &NetworkConfig{
 		Name:          name,
-		PrivateKey:    inst.MainPrivateKey,
-		InterfaceName: inst.MainIfaceName,
-		AssignedRoute: inst.MainAssignedRoute,
-		Server:        inst.MainServer,
+		PrivateKey:    install.MainPrivateKey,
+		InterfaceName: install.MainIfaceName,
+		AssignedRoute: install.MainAssignedRoute,
+		Server:        install.MainServer,
 		Enabled:       true,
 		CreatedAt:     s.clock(),
 	}
@@ -291,41 +327,17 @@ func (s *Service) Confirm(
 	return nil
 }
 
-// InstallNetwork runs the full onboarding flow: BeginInstall → Redeem →
-// Confirm. It is a convenience driver for callers that want to complete
-// onboarding in a single call. For retry-safe onboarding, call each step
-// individually — the permanent key is persisted at BeginInstall and
-// reused across retries.
-//
-// If the install already exists (from a previous partial run),
-// InstallNetwork resumes from whatever phase it is at.
-func (s *Service) InstallNetwork(
-	invite Invite,
-) (
-	*NetworkConfig,
-	error,
-) {
-	inst, err := s.BeginInstall(invite)
-	if err != nil {
-		return nil, err
+// UninstallNetwork removes a network and all its local state. If the
+// network is currently enabled, it is disabled first. If a mid-install
+// Install record exists but no network, the install row is deleted.
+func (s *Service) UninstallNetwork(
+	networkName string,
+) error {
+	_ = s.DisableNetwork(networkName)
+
+	if err := s.store.DeleteNetwork(networkName); err == nil {
+		return nil
 	}
 
-	if inst.Phase == PhaseInvited {
-		if _, err := s.Redeem(inst.Name); err != nil {
-			return nil, err
-		}
-	}
-
-	inst, err = s.store.GetInstall(inst.Name)
-	if err != nil {
-		return nil, err
-	}
-
-	if inst.Phase == PhaseRedeemed {
-		if err := s.Confirm(inst.Name); err != nil {
-			return nil, err
-		}
-	}
-
-	return s.store.GetNetwork(inst.Name)
+	return s.store.DeleteInstall(networkName)
 }

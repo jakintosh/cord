@@ -434,3 +434,139 @@ func TestSetPeerEndpoints_CascadeDelete(t *testing.T) {
 		t.Fatalf("expected 0 endpoints after peer delete, got %d", len(eps))
 	}
 }
+
+func TestMarkPeerEndpointAttempt(t *testing.T) {
+	db := testutil.SetupDB(t)
+	seedNetwork(t, db)
+
+	if err := db.SetPeers("testnet", []service.Peer{
+		{Name: "alice", PublicKey: "alice-key", Route: "10.42.1.5/32"},
+	}); err != nil {
+		t.Fatalf("set peers: %v", err)
+	}
+
+	if err := db.SetPeerEndpoints("testnet", "alice-key", []service.PeerEndpoint{
+		{Endpoint: "1.1.1.1:51820", ServerObservedAt: 100},
+	}); err != nil {
+		t.Fatalf("set endpoints: %v", err)
+	}
+
+	if err := db.MarkPeerEndpointAttempt("testnet", "alice-key", "1.1.1.1:51820", 700); err != nil {
+		t.Fatalf("mark attempt: %v", err)
+	}
+
+	eps, err := db.ListPeerEndpoints("testnet", "alice-key")
+	if err != nil {
+		t.Fatalf("list endpoints: %v", err)
+	}
+	if len(eps) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(eps))
+	}
+	if eps[0].LastAttemptedAt != 700 {
+		t.Errorf("last_attempted_at = %d, want 700", eps[0].LastAttemptedAt)
+	}
+}
+
+func TestMarkPeerEndpointAttempt_SurvivesUpsert(t *testing.T) {
+	db := testutil.SetupDB(t)
+	seedNetwork(t, db)
+
+	if err := db.SetPeers("testnet", []service.Peer{
+		{Name: "alice", PublicKey: "alice-key", Route: "10.42.1.5/32"},
+	}); err != nil {
+		t.Fatalf("set peers: %v", err)
+	}
+
+	if err := db.SetPeerEndpoints("testnet", "alice-key", []service.PeerEndpoint{
+		{Endpoint: "1.1.1.1:51820", ServerObservedAt: 100},
+	}); err != nil {
+		t.Fatalf("set endpoints: %v", err)
+	}
+	if err := db.MarkPeerEndpointAttempt("testnet", "alice-key", "1.1.1.1:51820", 700); err != nil {
+		t.Fatalf("mark attempt: %v", err)
+	}
+
+	// A later sync upserting the same endpoint must not reset the
+	// attempt timestamp.
+	if err := db.SetPeerEndpoints("testnet", "alice-key", []service.PeerEndpoint{
+		{Endpoint: "1.1.1.1:51820", ServerObservedAt: 200},
+	}); err != nil {
+		t.Fatalf("second set endpoints: %v", err)
+	}
+
+	eps, err := db.ListPeerEndpoints("testnet", "alice-key")
+	if err != nil {
+		t.Fatalf("list endpoints: %v", err)
+	}
+	if eps[0].LastAttemptedAt != 700 {
+		t.Errorf("last_attempted_at = %d, want 700 after upsert", eps[0].LastAttemptedAt)
+	}
+}
+
+func TestListLocalEndpointsSince(t *testing.T) {
+	db := testutil.SetupDB(t)
+	seedNetwork(t, db)
+
+	if err := db.SetPeers("testnet", []service.Peer{
+		{Name: "alice", PublicKey: "alice-key", Route: "10.42.1.5/32"},
+		{Name: "bob", PublicKey: "bob-key", Route: "10.42.1.6/32"},
+	}); err != nil {
+		t.Fatalf("set peers: %v", err)
+	}
+
+	if err := db.SetPeerEndpoints("testnet", "alice-key", []service.PeerEndpoint{
+		{Endpoint: "1.1.1.1:51820", ServerObservedAt: 100},
+	}); err != nil {
+		t.Fatalf("set alice endpoints: %v", err)
+	}
+	if err := db.SetPeerEndpoints("testnet", "bob-key", []service.PeerEndpoint{
+		{Endpoint: "2.2.2.2:51820", ServerObservedAt: 100},
+	}); err != nil {
+		t.Fatalf("set bob endpoints: %v", err)
+	}
+
+	// Alice observed recently, bob long ago.
+	if err := db.UpdatePeerEndpointLocal("testnet", "alice-key", "1.1.1.1:51820", 900); err != nil {
+		t.Fatalf("update alice local: %v", err)
+	}
+	if err := db.UpdatePeerEndpointLocal("testnet", "bob-key", "2.2.2.2:51820", 100); err != nil {
+		t.Fatalf("update bob local: %v", err)
+	}
+
+	sightings, err := db.ListLocalEndpointsSince("testnet", 500)
+	if err != nil {
+		t.Fatalf("list local endpoints: %v", err)
+	}
+	if len(sightings) != 1 {
+		t.Fatalf("expected 1 sighting, got %d", len(sightings))
+	}
+	if sightings[0].PeerKey != "alice-key" || sightings[0].Endpoint != "1.1.1.1:51820" {
+		t.Errorf("sighting = %+v, want alice-key / 1.1.1.1:51820", sightings[0])
+	}
+}
+
+func TestListLocalEndpointsSince_ExcludesNeverObserved(t *testing.T) {
+	db := testutil.SetupDB(t)
+	seedNetwork(t, db)
+
+	if err := db.SetPeers("testnet", []service.Peer{
+		{Name: "alice", PublicKey: "alice-key", Route: "10.42.1.5/32"},
+	}); err != nil {
+		t.Fatalf("set peers: %v", err)
+	}
+
+	// Endpoint known from server gossip but never observed locally.
+	if err := db.SetPeerEndpoints("testnet", "alice-key", []service.PeerEndpoint{
+		{Endpoint: "1.1.1.1:51820", ServerObservedAt: 100},
+	}); err != nil {
+		t.Fatalf("set endpoints: %v", err)
+	}
+
+	sightings, err := db.ListLocalEndpointsSince("testnet", 1)
+	if err != nil {
+		t.Fatalf("list local endpoints: %v", err)
+	}
+	if len(sightings) != 0 {
+		t.Fatalf("expected 0 sightings, got %d", len(sightings))
+	}
+}

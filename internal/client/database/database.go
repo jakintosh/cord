@@ -15,8 +15,6 @@ type Scanner interface {
 	Scan(dest ...any) error
 }
 
-var errScan = errors.New("scan failed")
-
 type Options struct {
 	Path string
 	WAL  bool

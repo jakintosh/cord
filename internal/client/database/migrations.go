@@ -65,6 +65,7 @@ CREATE TABLE endpoint (
     endpoint            TEXT NOT NULL,
     server_observed_at  INTEGER NOT NULL DEFAULT 0,
     local_observed_at   INTEGER NOT NULL DEFAULT 0,
+    last_attempted_at   INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (network_name)
         REFERENCES network (name)
         ON DELETE CASCADE,

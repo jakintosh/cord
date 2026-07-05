@@ -50,9 +50,17 @@ type Store interface {
 	// matching endpoint row. No-op if the endpoint doesn't exist.
 	UpdatePeerEndpointLocal(network, pubKey, endpoint string, when int64) error
 
+	// MarkPeerEndpointAttempt sets last_attempted_at on the matching
+	// endpoint row. No-op if the endpoint doesn't exist.
+	MarkPeerEndpointAttempt(network, pubKey, endpoint string, when int64) error
+
 	// ListPeerEndpoints returns all known endpoints for a peer,
 	// ordered by server_observed_at DESC, local_observed_at DESC.
 	ListPeerEndpoints(network, pubKey string) ([]PeerEndpoint, error)
+
+	// ListLocalEndpointsSince returns endpoints across all peers of
+	// the named network with local_observed_at at or after since.
+	ListLocalEndpointsSince(network string, since int64) ([]EndpointSighting, error)
 
 	// Close releases the database connection.
 	Close() error

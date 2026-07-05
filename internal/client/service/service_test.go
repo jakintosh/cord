@@ -26,14 +26,8 @@ func TestClose_StopsRunningNetworks(t *testing.T) {
 		t.Errorf("close calls = %d, want 1", dev.CloseCalls)
 	}
 
-	statuses, err := env.Service.ListNetworkStatuses()
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	for _, st := range statuses {
-		if st.Running {
-			t.Errorf("%s should not be running after close", st.Name)
-		}
+	if env.Service.IsNetworkRunning("close-me") {
+		t.Error("network should not be running after close")
 	}
 }
 

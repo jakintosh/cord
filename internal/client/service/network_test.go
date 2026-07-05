@@ -441,45 +441,24 @@ func TestDisableNetwork_NotEnabled(t *testing.T) {
 	}
 }
 
-func TestStatus_Empty(t *testing.T) {
+func TestIsNetworkRunning_WithoutNetworks(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	statuses, err := env.Service.ListNetworkStatuses()
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	if len(statuses) != 0 {
-		t.Errorf("expected 0 statuses, got %d", len(statuses))
+	if env.Service.IsNetworkRunning("nonexistent") {
+		t.Error("nonexistent network should not be running")
 	}
 }
 
-func TestStatus_WithInstalledNetworks(t *testing.T) {
+func TestIsNetworkRunning_InstalledNotEnabled(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "net-a")
-	testutil.SeedNetworkDirect(t, env.Service, "net-b")
 
-	statuses, err := env.Service.ListNetworkStatuses()
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	if len(statuses) != 2 {
-		t.Fatalf("expected 2 statuses, got %d", len(statuses))
-	}
-
-	for _, st := range statuses {
-		if st.Enabled {
-			t.Errorf("%s should not be enabled", st.Name)
-		}
-		if st.Running {
-			t.Errorf("%s should not be running", st.Name)
-		}
-		if st.PeerCount != 0 {
-			t.Errorf("%s peer_count = %d, want 0", st.Name, st.PeerCount)
-		}
+	if env.Service.IsNetworkRunning("net-a") {
+		t.Error("non-enabled network should not be running")
 	}
 }
 
-func TestStatus_WithRunningNetworks(t *testing.T) {
+func TestIsNetworkRunning_EnabledNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "running-net")
 
@@ -487,30 +466,15 @@ func TestStatus_WithRunningNetworks(t *testing.T) {
 		t.Fatalf("enable: %v", err)
 	}
 
-	statuses, err := env.Service.ListNetworkStatuses()
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	if len(statuses) != 1 {
-		t.Fatalf("expected 1 status, got %d", len(statuses))
-	}
-
-	st := statuses[0]
-	if st.Name != "running-net" {
-		t.Errorf("name = %q, want running-net", st.Name)
-	}
-	if !st.Enabled {
-		t.Error("expected enabled=true")
-	}
-	if !st.Running {
-		t.Error("expected running=true")
+	if !env.Service.IsNetworkRunning("running-net") {
+		t.Error("enabled network should be running")
 	}
 }
 
 func TestFetchNetwork_NotRunning(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	err := env.Service.Sync("any")
+	err := env.Service.SyncNetwork("any")
 	if !errors.Is(err, service.ErrNetworkNotEnabled) {
 		t.Errorf("err = %v, want ErrNetworkNotEnabled", err)
 	}

@@ -108,17 +108,15 @@ func TestListPeers_NetworkNotFound(t *testing.T) {
 	}
 }
 
-func TestNetworkStatus_HasPeerCount(t *testing.T) {
+func TestListPeers_EmptyForNewNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "count-test")
 
-	statuses, err := env.Service.ListNetworkStatuses()
+	peers, err := env.Service.ListPeers("count-test")
 	if err != nil {
-		t.Fatalf("status: %v", err)
+		t.Fatalf("list peers: %v", err)
 	}
-	for _, st := range statuses {
-		if st.PeerCount != 0 {
-			t.Errorf("peer_count = %d, want 0 before any fetch", st.PeerCount)
-		}
+	if len(peers) != 0 {
+		t.Errorf("peer count = %d, want 0 before any fetch", len(peers))
 	}
 }

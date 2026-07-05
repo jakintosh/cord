@@ -39,8 +39,8 @@ func SetupServiceWithServer(
 	mgr := wireguard.NewManagerWithBackend(backend)
 
 	var server *httptest.Server
-	// The runtime loop issues an immediate sync on start; when no test
-	// server backs the tunnel address the call must fail fast instead of
+	// The sync timer fires immediately on start; when no test server
+	// backs the tunnel address the call must fail fast instead of
 	// waiting out the default dial timeout.
 	httpClient := &http.Client{Timeout: 100 * time.Millisecond}
 	if handler != nil {

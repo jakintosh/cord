@@ -7,51 +7,6 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 )
 
-func (db *DB) InsertInstall(
-	install *service.Install,
-) error {
-	_, err := db.Conn.Exec(`
-		INSERT INTO install (
-			name,
-			phase,
-			invite_iface_name,
-			invite_peer_private_key,
-			invite_peer_route,
-			invite_server_pubkey,
-			invite_server_endpoint,
-			invite_server_route,
-			invite_server_api_port,
-			main_iface_name,
-			main_peer_private_key,
-			main_peer_route,
-			main_server_pubkey,
-			main_server_endpoint,
-			main_server_route,
-			main_server_api_port,
-			created_at_unix
-		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)`,
-		install.Name,
-		install.Phase,
-		install.InviteIfaceName,
-		install.InvitePrivateKey,
-		install.InviteAssignedRoute,
-		install.InviteServer.PublicKey,
-		install.InviteServer.Endpoint,
-		install.InviteServer.Route,
-		install.InviteServer.APIPort,
-		install.MainIfaceName,
-		install.MainPrivateKey,
-		install.MainAssignedRoute,
-		install.MainServer.PublicKey,
-		install.MainServer.Endpoint,
-		install.MainServer.Route,
-		install.MainServer.APIPort,
-		install.CreatedAt.Unix(),
-	)
-	return CheckSqliteErr("insert install", err)
-}
-
 func (db *DB) GetInstall(
 	name string,
 ) (
@@ -176,60 +131,49 @@ func (db *DB) ListInstalls() (
 	return installs, nil
 }
 
-func (db *DB) SetInstallRedeemed(
-	name string,
-	assignedRoute string,
-	server service.ServerInfo,
+func (db *DB) InsertInstall(
+	install *service.Install,
 ) error {
-	result, err := db.Conn.Exec(`
-		UPDATE install
-		SET
-			phase = 'redeemed',
-			main_peer_route = ?2,
-			main_server_pubkey = ?3,
-			main_server_endpoint = ?4,
-			main_server_route = ?5,
-			main_server_api_port = ?6
-		WHERE name = ?1`,
-		name,
-		assignedRoute,
-		server.PublicKey,
-		server.Endpoint,
-		server.Route,
-		server.APIPort,
+	_, err := db.Conn.Exec(`
+		INSERT INTO install (
+			name,
+			phase,
+			invite_iface_name,
+			invite_peer_private_key,
+			invite_peer_route,
+			invite_server_pubkey,
+			invite_server_endpoint,
+			invite_server_route,
+			invite_server_api_port,
+			main_iface_name,
+			main_peer_private_key,
+			main_peer_route,
+			main_server_pubkey,
+			main_server_endpoint,
+			main_server_route,
+			main_server_api_port,
+			created_at_unix
+		)
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)`,
+		install.Name,
+		install.Phase,
+		install.InviteIfaceName,
+		install.InvitePrivateKey,
+		install.InviteAssignedRoute,
+		install.InviteServer.PublicKey,
+		install.InviteServer.Endpoint,
+		install.InviteServer.Route,
+		install.InviteServer.APIPort,
+		install.MainIfaceName,
+		install.MainPrivateKey,
+		install.MainAssignedRoute,
+		install.MainServer.PublicKey,
+		install.MainServer.Endpoint,
+		install.MainServer.Route,
+		install.MainServer.APIPort,
+		install.CreatedAt.Unix(),
 	)
-	if err != nil {
-		return CheckSqliteErr("set install redeemed", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("set install redeemed: %w", err)
-	}
-	if affected == 0 {
-		return fmt.Errorf("%w: install %q not found", service.ErrNotFound, name)
-	}
-	return nil
-}
-
-func (db *DB) DeleteInstall(
-	name string,
-) error {
-	result, err := db.Conn.Exec(`
-		DELETE FROM install
-		WHERE name = ?1`,
-		name,
-	)
-	if err != nil {
-		return CheckSqliteErr("delete install", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete install: %w", err)
-	}
-	if affected == 0 {
-		return fmt.Errorf("%w: install %q not found", service.ErrNotFound, name)
-	}
-	return nil
+	return CheckSqliteErr("insert install", err)
 }
 
 func (db *DB) ConfirmInstall(
@@ -289,6 +233,62 @@ func (db *DB) ConfirmInstall(
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit confirm tx: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) SetInstallRedeemed(
+	name string,
+	assignedRoute string,
+	server service.ServerInfo,
+) error {
+	result, err := db.Conn.Exec(`
+		UPDATE install
+		SET
+			phase = 'redeemed',
+			main_peer_route = ?2,
+			main_server_pubkey = ?3,
+			main_server_endpoint = ?4,
+			main_server_route = ?5,
+			main_server_api_port = ?6
+		WHERE name = ?1`,
+		name,
+		assignedRoute,
+		server.PublicKey,
+		server.Endpoint,
+		server.Route,
+		server.APIPort,
+	)
+	if err != nil {
+		return CheckSqliteErr("set install redeemed", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set install redeemed: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("%w: install %q not found", service.ErrNotFound, name)
+	}
+	return nil
+}
+
+func (db *DB) DeleteInstall(
+	name string,
+) error {
+	result, err := db.Conn.Exec(`
+		DELETE FROM install
+		WHERE name = ?1`,
+		name,
+	)
+	if err != nil {
+		return CheckSqliteErr("delete install", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete install: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("%w: install %q not found", service.ErrNotFound, name)
 	}
 	return nil
 }

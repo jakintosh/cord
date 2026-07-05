@@ -11,20 +11,23 @@ import (
 )
 
 const (
-	// SyncInterval is the default period between full peer-set reconciles
-	// for each enabled network.
+	// SyncInterval is the default period between full peer-set syncs
+	// from the server. Syncs are 1:N — every client polls the same
+	// server — so this stays coarse.
 	SyncInterval = 2 * time.Minute
 
-	// ScanInterval governs how often the loop reads live handshake state,
-	// classifies peers as healthy or degraded, and checks for due rotations.
+	// ScanInterval governs how often live handshake state is read
+	// from the local device. Scans are purely local, so this can be
+	// frequent.
 	ScanInterval = 30 * time.Second
 
-	// ReportInterval governs how often accumulated endpoint sightings are
-	// flushed to the server.
+	// ReportInterval governs how often locally observed endpoints are
+	// sent to the server. Reports are 1:N, so this stays coarse.
 	ReportInterval = 5 * time.Minute
 
-	// StaleThreshold is the duration after which a peer with no handshake
-	// is considered unhealthy and eligible for endpoint rotation.
+	// StaleThreshold is the duration after which a peer with no
+	// handshake is considered stale and eligible for endpoint
+	// rotation.
 	StaleThreshold = 90 * time.Second
 )
 
@@ -40,25 +43,12 @@ type NetworkConfig struct {
 	CreatedAt     time.Time
 }
 
-// NetworkStatus carries the runtime state of a single client network
-// for the status endpoint. It combines persisted fields with live
-// daemon state.
-type NetworkStatus struct {
-	Name      string
-	Enabled   bool
-	Running   bool
-	Degraded  bool
-	LastSync  time.Time
-	LastError string
-	PeerCount int
-}
-
 // --- Runtime Network ---
 
-// Network is the runtime owner of one enabled network. It owns a Tunnel,
-// a peer API client, and a background goroutine that drives sync, scan,
-// and report. The loop goroutine owns all mutable state; only the
-// status fields are shared, guarded by statusMu.
+// Network is a running client network: one Tunnel plus three
+// self-rearming activity timers. All durable state lives in the store;
+// the activities (sync, scan, report) are projections between the
+// store, the device, and the server.
 type Network struct {
 	cfg    NetworkConfig
 	tunnel *Tunnel
@@ -71,203 +61,33 @@ type Network struct {
 	scanInterval   time.Duration
 	reportInterval time.Duration
 
-	statusMu      sync.Mutex
-	lastSync      time.Time
-	lastErr       string
-	degradedCount int
+	mu      sync.Mutex // one activity at a time
+	stopped bool
 
-	degraded  map[string]*degradedPeer
-	sightings []serverapi.EndpointSightingDTO
-
-	stopCh  chan struct{}
-	syncReq chan chan error
-	doneCh  chan struct{}
+	syncTimer   *time.Timer
+	scanTimer   *time.Timer
+	reportTimer *time.Timer
 }
 
-// InsertNetworkDirect persists a pre-built NetworkConfig record.
-// Exported for test seeding only.
-func (s *Service) InsertNetworkDirect(
-	nc *NetworkConfig,
-) error {
-	return s.store.InsertNetwork(nc)
-}
-
-// EnableNetwork brings up the WireGuard interface for the named
-// network and starts the background loop. It persists enabled=true.
-// Idempotent: enabling an already-running network is a no-op.
-func (s *Service) EnableNetwork(
-	networkName string,
-) error {
+// IsNetworkRunning reports whether the named network is currently
+// running.
+func (s *Service) IsNetworkRunning(
+	name string,
+) bool {
 	s.mu.Lock()
-	if _, ok := s.running[networkName]; ok {
-		s.mu.Unlock()
-		return nil
-	}
+	_, ok := s.running[name]
 	s.mu.Unlock()
-
-	nc, err := s.store.GetNetwork(networkName)
-	if err != nil {
-		return err
-	}
-
-	tunnel, err := newTunnel(
-		s.wireguard,
-		nc.InterfaceName,
-		nc.PrivateKey,
-		nc.AssignedRoute,
-		nc.Server,
-	)
-	if err != nil {
-		return err
-	}
-
-	var committed bool
-	defer func() {
-		if !committed {
-			_ = tunnel.stop()
-			_ = s.store.SetNetworkEnabled(networkName, false)
-		}
-	}()
-
-	client := s.newPeerClient(tunnel)
-	network := s.newNetwork(nc, tunnel, client)
-
-	if err := network.start(); err != nil {
-		return err
-	}
-
-	if err := s.store.SetNetworkEnabled(networkName, true); err != nil {
-		return err
-	}
-
-	s.mu.Lock()
-	s.running[networkName] = network
-	s.mu.Unlock()
-
-	committed = true
-	return nil
-}
-
-// DisableNetwork stops the background loop and brings down the
-// WireGuard interface for the named network. It persists enabled=false.
-// Idempotent: disabling an already-disabled network is a no-op.
-func (s *Service) DisableNetwork(
-	networkName string,
-) error {
-	s.mu.Lock()
-	n, ok := s.running[networkName]
-	if ok {
-		delete(s.running, networkName)
-	}
-	s.mu.Unlock()
-
-	if ok {
-		if err := n.stop(); err != nil {
-			s.logf("disable: stop network %q: %v", networkName, err)
-		}
-	}
-
-	return s.store.SetNetworkEnabled(networkName, false)
-}
-
-// Sync triggers an on-demand peer fetch and device reconciliation
-// for the named running network. Returns ErrNetworkNotEnabled if the
-// network is not running.
-func (s *Service) Sync(
-	networkName string,
-) error {
-	s.mu.Lock()
-	n, ok := s.running[networkName]
-	s.mu.Unlock()
-
-	if !ok {
-		return ErrNetworkNotEnabled
-	}
-
-	return n.requestSync()
-}
-
-// UninstallNetwork removes a network and all its local state. If the
-// network is currently enabled, it is disabled first. If a mid-install
-// Install record exists but no network, the install row is deleted.
-func (s *Service) UninstallNetwork(
-	networkName string,
-) error {
-	_ = s.DisableNetwork(networkName)
-
-	if err := s.store.DeleteNetwork(networkName); err == nil {
-		return nil
-	}
-
-	return s.store.DeleteInstall(networkName)
-}
-
-// GetNetworkStatus returns the runtime status for a single named network.
-func (s *Service) GetNetworkStatus(
-	networkName string,
-) (
-	NetworkStatus,
-	error,
-) {
-	nc, err := s.store.GetNetwork(networkName)
-	if err != nil {
-		return NetworkStatus{}, err
-	}
-
-	peers, _ := s.store.ListPeers(networkName)
-
-	status := NetworkStatus{
-		Name:      networkName,
-		Enabled:   nc.Enabled,
-		PeerCount: len(peers),
-	}
-
-	s.mu.Lock()
-	n, ok := s.running[networkName]
-	s.mu.Unlock()
-
-	if ok {
-		lastSync, lastErr, degradedCount := n.snapshot()
-		status.Running = true
-		status.LastSync = lastSync
-		status.LastError = lastErr
-		status.Degraded = degradedCount > 0
-	}
-
-	return status, nil
-}
-
-// ListNetworkStatuses returns the runtime status for every installed
-// network.
-func (s *Service) ListNetworkStatuses() (
-	[]NetworkStatus,
-	error,
-) {
-	names, err := s.store.ListNetworkNames()
-	if err != nil {
-		return nil, err
-	}
-
-	statuses := make([]NetworkStatus, 0, len(names))
-	for _, name := range names {
-		status, err := s.GetNetworkStatus(name)
-		if err != nil {
-			continue
-		}
-		statuses = append(statuses, status)
-	}
-
-	return statuses, nil
+	return ok
 }
 
 // GetNetwork returns the persisted network config by name.
 func (s *Service) GetNetwork(
-	networkName string,
+	name string,
 ) (
 	*NetworkConfig,
 	error,
 ) {
-	return s.store.GetNetwork(networkName)
+	return s.store.GetNetwork(name)
 }
 
 // ListNetworks returns the names of all installed networks.
@@ -278,16 +98,118 @@ func (s *Service) ListNetworks() (
 	return s.store.ListNetworkNames()
 }
 
-// newNetwork builds a runtime Network fully wired for its loop: the
-// degraded map and all loop channels are initialized so the struct is
-// never half-built.
+// InsertNetworkDirect persists a pre-built NetworkConfig record.
+// Exported for test seeding only.
+func (s *Service) InsertNetworkDirect(
+	cfg *NetworkConfig,
+) error {
+	return s.store.InsertNetwork(cfg)
+}
+
+// EnableNetwork brings up the WireGuard interface for the named
+// network and starts the activity timers. It persists enabled=true.
+// Idempotent: enabling an already-running network is a no-op.
+func (s *Service) EnableNetwork(
+	name string,
+) error {
+	s.mu.Lock()
+	if _, ok := s.running[name]; ok {
+		s.mu.Unlock()
+		return nil
+	}
+	s.mu.Unlock()
+
+	cfg, err := s.store.GetNetwork(name)
+	if err != nil {
+		return err
+	}
+
+	tunnel, err := newTunnel(
+		s.wireguard,
+		cfg.InterfaceName,
+		cfg.PrivateKey,
+		cfg.AssignedRoute,
+		cfg.Server,
+	)
+	if err != nil {
+		return err
+	}
+
+	var committed bool
+	defer func() {
+		if !committed {
+			_ = tunnel.stop()
+			_ = s.store.SetNetworkEnabled(name, false)
+		}
+	}()
+
+	client := s.newPeerClient(tunnel)
+	network := s.newNetwork(cfg, tunnel, client)
+
+	if err := network.start(); err != nil {
+		return err
+	}
+
+	if err := s.store.SetNetworkEnabled(name, true); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.running[name] = network
+	s.mu.Unlock()
+
+	committed = true
+	return nil
+}
+
+// DisableNetwork stops the activity timers and brings down the
+// WireGuard interface for the named network. It persists enabled=false.
+// Idempotent: disabling an already-disabled network is a no-op.
+func (s *Service) DisableNetwork(
+	name string,
+) error {
+	s.mu.Lock()
+	n, ok := s.running[name]
+	if ok {
+		delete(s.running, name)
+	}
+	s.mu.Unlock()
+
+	if ok {
+		if err := n.stop(); err != nil {
+			s.logf("disable: stop network %q: %v", name, err)
+		}
+	}
+
+	return s.store.SetNetworkEnabled(name, false)
+}
+
+// SyncNetwork triggers an on-demand peer fetch and device reconciliation
+// for the named running network. Returns ErrNetworkNotEnabled if the
+// network is not running.
+func (s *Service) SyncNetwork(
+	name string,
+) error {
+	s.mu.Lock()
+	n, ok := s.running[name]
+	s.mu.Unlock()
+
+	if !ok {
+		return ErrNetworkNotEnabled
+	}
+
+	return n.sync()
+}
+
+// newNetwork builds a runtime Network. The activity timers are armed
+// by start.
 func (s *Service) newNetwork(
-	nc *NetworkConfig,
+	cfg *NetworkConfig,
 	tunnel *Tunnel,
 	client *serverapi.PeerClient,
 ) *Network {
 	return &Network{
-		cfg:            *nc,
+		cfg:            *cfg,
 		tunnel:         tunnel,
 		store:          s.store,
 		client:         client,
@@ -296,106 +218,71 @@ func (s *Service) newNetwork(
 		syncInterval:   s.syncInterval,
 		scanInterval:   s.scanInterval,
 		reportInterval: s.reportInterval,
-		degraded:       make(map[string]*degradedPeer),
-		stopCh:         make(chan struct{}),
-		syncReq:        make(chan chan error),
-		doneCh:         make(chan struct{}),
 	}
 }
 
-// snapshot returns the last sync time, last error string, and current
-// degraded peer count under the status lock.
-func (n *Network) snapshot() (
-	time.Time,
-	string,
-	int,
-) {
-	n.statusMu.Lock()
-	defer n.statusMu.Unlock()
-	return n.lastSync, n.lastErr, n.degradedCount
-}
-
-// start reconciles the device from the local peer cache synchronously,
-// then launches the background loop. Applying the cached peer set is
-// local-only and must happen at enable time; the first server sync
-// happens immediately in the loop.
+// start reconciles the device from the local peer cache, then arms the
+// activity timers. Applying the cached peer set is local-only: it
+// works offline, and its failure aborts the enable synchronously —
+// the first server sync, firing immediately on its own timer, is a
+// freshness upgrade that can only be logged. The lock is held so the
+// immediate sync cannot run against a partially armed timer set.
+//
+// The timers report to no caller, so errors are captured in logging
+// closures here.
 func (n *Network) start() error {
-	if err := n.reconcilePeers(); err != nil {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if err := n.reconcile(); err != nil {
 		return err
 	}
-	go n.loop()
+
+	n.syncTimer = time.AfterFunc(0, func() {
+		if err := n.sync(); err != nil {
+			n.logf("sync %s: %v", n.cfg.Name, err)
+		}
+	})
+	n.scanTimer = time.AfterFunc(n.scanInterval, func() {
+		if err := n.scan(); err != nil {
+			n.logf("scan %s: %v", n.cfg.Name, err)
+		}
+	})
+	n.reportTimer = time.AfterFunc(n.reportInterval, func() {
+		if err := n.report(); err != nil {
+			n.logf("report %s: %v", n.cfg.Name, err)
+		}
+	})
 	return nil
 }
 
-// stop signals the loop, waits for it to exit, then stops the tunnel.
-// Called exactly once per Network — removal from the Service registry
-// is the ownership transfer that guarantees it.
+// stop halts the activity timers and closes the tunnel. An activity
+// already in flight finishes first; one already waiting on the lock
+// sees stopped and returns without touching the device.
 func (n *Network) stop() error {
-	close(n.stopCh)
-	<-n.doneCh
+	n.mu.Lock()
+	n.stopped = true
+	n.syncTimer.Stop()
+	n.scanTimer.Stop()
+	n.reportTimer.Stop()
+	n.mu.Unlock()
+
 	return n.tunnel.stop()
 }
 
-// requestSync sends a sync request to the loop goroutine and blocks
-// until it completes.
-func (n *Network) requestSync() error {
-	reply := make(chan error, 1)
-	select {
-	case n.syncReq <- reply:
-		return <-reply
-	case <-n.doneCh:
+// sync fetches the visible peer list from the server, persists it,
+// projects it onto the device, and schedules the next sync. It is the
+// only writer of the full device peer set. Called by both the sync
+// timer and on-demand Service.Sync, so an on-demand sync defers the
+// next scheduled one.
+func (n *Network) sync() error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.stopped {
 		return ErrNetworkNotEnabled
 	}
-}
-
-// loop is the single background goroutine for the network.
-func (n *Network) loop() {
-	defer close(n.doneCh)
-
-	if err := n.sync(); err != nil {
-		n.logf("sync %s: %v", n.cfg.Name, err)
-	}
-
-	syncTicker := time.NewTicker(n.syncInterval)
-	scanTicker := time.NewTicker(n.scanInterval)
-	reportTicker := time.NewTicker(n.reportInterval)
-	defer syncTicker.Stop()
-	defer scanTicker.Stop()
-	defer reportTicker.Stop()
-
-	for {
-		select {
-		case <-n.stopCh:
-			return
-		case <-syncTicker.C:
-			if err := n.sync(); err != nil {
-				n.logf("sync %s: %v", n.cfg.Name, err)
-			}
-		case <-scanTicker.C:
-			n.scan(n.clock())
-		case <-reportTicker.C:
-			n.report()
-		case replyCh := <-n.syncReq:
-			replyCh <- n.sync()
-		}
-	}
-}
-
-// sync is the ONLY writer of the device peer set. It fetches the
-// visible peer list from the server, persists the cache, reconciles
-// the device, and refreshes degraded candidates. The last sync time and
-// error are recorded for status readers.
-func (n *Network) sync() (err error) {
-	defer func() {
-		n.statusMu.Lock()
-		n.lastSync = n.clock()
-		if err != nil {
-			n.lastErr = err.Error()
-		} else {
-			n.lastErr = ""
-		}
-		n.statusMu.Unlock()
-	}()
+	defer n.syncTimer.Reset(n.syncInterval)
 
 	peerDtos, err := n.client.ListPeers()
 	if err != nil {
@@ -409,132 +296,101 @@ func (n *Network) sync() (err error) {
 
 	for _, dto := range peerDtos {
 		eps := endpointsFromDTO(dto)
-		if len(eps) > 0 {
-			if err := n.store.SetPeerEndpoints(n.cfg.Name, dto.PublicKey, eps); err != nil {
-				n.logf("sync %s: set endpoints for %q: %v", n.cfg.Name, dto.PublicKey, err)
-			}
+		if len(eps) == 0 {
+			continue
+		}
+		if err := n.store.SetPeerEndpoints(n.cfg.Name, dto.PublicKey, eps); err != nil {
+			n.logf("sync %s: set endpoints for %q: %v", n.cfg.Name, dto.PublicKey, err)
 		}
 	}
 
-	if err := n.reconcilePeers(); err != nil {
-		return err
-	}
-
-	n.refreshDegraded()
-	return nil
+	return n.reconcile()
 }
 
-// scan reads the live WireGuard state, classifies peers as healthy or
-// degraded, records local endpoint observations, and attempts due
-// rotations.
-func (n *Network) scan(now time.Time) {
+// scan reads live handshake state from the device and schedules the
+// next scan. Healthy peers get their current endpoint recorded as
+// locally observed; stale peers get their next candidate endpoint
+// applied.
+func (n *Network) scan() error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.stopped {
+		return nil
+	}
+	defer n.scanTimer.Reset(n.scanInterval)
+
+	now := n.clock()
+
 	devicePeers, err := n.tunnel.device.Peers()
 	if err != nil {
-		n.logf("scan %s: peers: %v", n.cfg.Name, err)
-		return
+		return fmt.Errorf("peers: %w", err)
 	}
 
-	nowUnix := now.Unix()
-
-	activeDegraded := make(map[string]struct{})
-
-	for _, lp := range devicePeers {
-		pubKey := lp.PublicKey.String()
+	for _, peer := range devicePeers {
+		pubKey := peer.PublicKey.String()
 		if pubKey == n.cfg.Server.PublicKey {
 			continue
 		}
 
-		healthy := !lp.LastHandshake.IsZero() &&
-			now.Sub(lp.LastHandshake) < StaleThreshold
+		healthy := !peer.LastHandshake.IsZero() &&
+			now.Sub(peer.LastHandshake) < StaleThreshold
 
-		if healthy {
-			delete(n.degraded, pubKey)
-
-			if lp.Endpoint != nil {
-				endpoint := lp.Endpoint.String()
-				if err := n.store.UpdatePeerEndpointLocal(
-					n.cfg.Name, pubKey, endpoint, nowUnix,
-				); err != nil {
-					n.logf("scan %s: update local endpoint for %q: %v",
-						n.cfg.Name, pubKey, err)
-				}
-				n.sightings = append(n.sightings, serverapi.EndpointSightingDTO{
-					PeerKey:  pubKey,
-					Endpoint: endpoint,
-				})
-			}
+		if !healthy {
+			n.rotate(pubKey, now)
 			continue
 		}
 
-		activeDegraded[pubKey] = struct{}{}
-
-		if _, ok := n.degraded[pubKey]; !ok {
-			endpoints, e := n.store.ListPeerEndpoints(n.cfg.Name, pubKey)
-			if e != nil {
-				n.logf("scan %s: list endpoints for %q: %v",
-					n.cfg.Name, pubKey, e)
-				continue
-			}
-			candidates := make([]string, len(endpoints))
-			for i, ep := range endpoints {
-				candidates[i] = ep.Endpoint
-			}
-			n.degraded[pubKey] = newDegradedPeer(candidates, now)
-		}
-	}
-
-	for pubKey := range n.degraded {
-		if _, active := activeDegraded[pubKey]; !active {
-			delete(n.degraded, pubKey)
-		}
-	}
-
-	for pubKey, dp := range n.degraded {
-		endpoint, ok := dp.rotate(now)
-		if !ok {
+		if peer.Endpoint == nil {
 			continue
 		}
-		if err := n.tunnel.device.SetPeerEndpoint(pubKey, endpoint); err != nil {
-			n.logf("scan %s: update endpoint for %q to %q: %v",
-				n.cfg.Name, pubKey, endpoint, err)
+
+		if err := n.store.UpdatePeerEndpointLocal(
+			n.cfg.Name, pubKey, peer.Endpoint.String(), now.Unix(),
+		); err != nil {
+			n.logf("scan %s: record endpoint for %q: %v", n.cfg.Name, pubKey, err)
 		}
 	}
 
-	n.statusMu.Lock()
-	n.degradedCount = len(n.degraded)
-	n.statusMu.Unlock()
+	return nil
 }
 
-// report flushes accumulated endpoint sightings to the server.
-func (n *Network) report() {
-	if len(n.sightings) == 0 {
-		return
-	}
-	if err := n.client.ReportEndpoints(n.sightings); err != nil {
-		n.logf("report %s: %v", n.cfg.Name, err)
-	}
-	n.sightings = nil
-}
+// report sends endpoints observed locally within the last report
+// window to the server for gossip distribution, and schedules the
+// next report.
+func (n *Network) report() error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 
-// refreshDegraded updates the candidate lists for all degraded peers
-// using the latest endpoint data from the store.
-func (n *Network) refreshDegraded() {
-	for pubKey, dp := range n.degraded {
-		fresh, err := n.store.ListPeerEndpoints(n.cfg.Name, pubKey)
-		if err != nil {
-			n.logf("sync %s: list endpoints for degraded %q: %v", n.cfg.Name, pubKey, err)
-			continue
+	if n.stopped {
+		return nil
+	}
+	defer n.reportTimer.Reset(n.reportInterval)
+
+	since := n.clock().Add(-n.reportInterval).Unix()
+	sightings, err := n.store.ListLocalEndpointsSince(n.cfg.Name, since)
+	if err != nil {
+		return fmt.Errorf("list local endpoints: %w", err)
+	}
+	if len(sightings) == 0 {
+		return nil
+	}
+
+	// TODO: I don't like how we're constructing a "DTO" here, but this is
+	// a bigger question about where the `serverapi` package lives that I'll
+	// need to come back to later
+	dtos := make([]serverapi.EndpointSightingDTO, len(sightings))
+	for i, s := range sightings {
+		dtos[i] = serverapi.EndpointSightingDTO{
+			PeerKey:  s.PeerKey,
+			Endpoint: s.Endpoint,
 		}
-		candidates := make([]string, len(fresh))
-		for i, ep := range fresh {
-			candidates[i] = ep.Endpoint
-		}
-		dp.refresh(candidates)
 	}
+	return n.client.ReportEndpoints(dtos)
 }
 
-// reconcilePeers applies the current peer cache to the WireGuard device.
-func (n *Network) reconcilePeers() error {
+// reconcile applies the current peer cache to the WireGuard device.
+func (n *Network) reconcile() error {
 	peers, err := n.store.ListPeers(n.cfg.Name)
 	if err != nil {
 		return err
