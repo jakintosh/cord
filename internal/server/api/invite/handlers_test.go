@@ -44,8 +44,6 @@ func TestHandleRedeemInvite_InvalidJSON(t *testing.T) {
 func TestHandleRedeemInvite_IdentityFails(t *testing.T) {
 	_, api := setupInviteTest(t)
 
-	api.resolver = &testutil.FailResolver{}
-
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/redeem", strings.NewReader(`{"perm_pubkey": "y"}`))
 	r.RemoteAddr = "10.1.0.99:12345"

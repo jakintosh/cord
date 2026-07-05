@@ -1,11 +1,8 @@
 package testutil
 
 import (
-	"net"
-	"net/http"
 	"testing"
 
-	"git.studiopollinator.com/pollinator/cord/internal/server/api/identity"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -33,12 +30,4 @@ func SeedNetwork(
 		t.Fatalf("seed network: %v", err)
 	}
 	return nw
-}
-
-type FailResolver struct{}
-
-func (f *FailResolver) ResolveIdentity(
-	sourceIP net.IP,
-) (*identity.Peer, error) {
-	return nil, http.ErrNoLocation
 }

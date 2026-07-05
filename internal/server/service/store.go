@@ -36,6 +36,10 @@ type Store interface {
 
 	// Peer records within a network.
 
+	// PeerExists reports whether a peer with the given name exists
+	// in the network.
+	PeerExists(network, name string) (bool, error)
+
 	// GetPeer returns a peer by name within the given network.
 	GetPeer(network, name string) (*Peer, error)
 
@@ -68,10 +72,6 @@ type Store interface {
 	// UpdatePeer applies a partial update to the named peer and
 	// returns the updated record. Nil pointers mean no change.
 	UpdatePeer(network, name string, newName *string, admin *bool, enabled *bool, confirmed *bool) (*Peer, error)
-
-	// PeerExists reports whether a peer with the given name exists
-	// in the network.
-	PeerExists(network, name string) (bool, error)
 
 	// CIDR records within a network.
 

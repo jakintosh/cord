@@ -1,9 +1,11 @@
 package identity
 
 import (
-	"fmt"
+	"context"
 	"net"
 	"net/http"
+
+	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 )
 
 type Peer struct {
@@ -11,55 +13,46 @@ type Peer struct {
 	Name      string
 }
 
-// Resolver identifies a confirmed peer by source IP. Used for
-// ordinary peer API calls where the caller must be fully onboarded.
-type Resolver interface {
-	ResolveIdentity(sourceIP net.IP) (*Peer, error)
+type contextKey struct{}
+
+// LookupFunc resolves a WireGuard-validated source IP to a caller.
+type LookupFunc func(ip net.IP) (*Peer, error)
+
+// Require wraps a handler with identity resolution: parse the source IP
+// from r.RemoteAddr, call lookup, write 403 "identity unknown" on any
+// failure, otherwise stash the *Peer in the request context and call next.
+func Require(
+	lookup LookupFunc,
+	next http.HandlerFunc,
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			wire.WriteError(w, http.StatusForbidden, "identity unknown")
+			return
+		}
+
+		ip := net.ParseIP(host)
+		if ip == nil {
+			wire.WriteError(w, http.StatusForbidden, "identity unknown")
+			return
+		}
+
+		peer, err := lookup(ip)
+		if err != nil {
+			wire.WriteError(w, http.StatusForbidden, "identity unknown")
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), contextKey{}, peer)
+		next(w, r.WithContext(ctx))
+	}
 }
 
-// ProvisionalResolver identifies a peer that has redeemed but not
-// yet confirmed. Used for the /confirm endpoint, which is the only
-// call a provisional peer is allowed to make.
-type ProvisionalResolver interface {
-	ResolveProvisionalIdentity(sourceIP net.IP) (*Peer, error)
-}
-
-func Resolve(
-	r *http.Request,
-	resolver Resolver,
-) (
-	*Peer,
-	error,
-) {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return nil, fmt.Errorf("parse remote addr: %w", err)
-	}
-
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return nil, fmt.Errorf("invalid remote IP: %s", host)
-	}
-
-	return resolver.ResolveIdentity(ip)
-}
-
-func ResolveProvisional(
-	r *http.Request,
-	resolver ProvisionalResolver,
-) (
-	*Peer,
-	error,
-) {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return nil, fmt.Errorf("parse remote addr: %w", err)
-	}
-
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return nil, fmt.Errorf("invalid remote IP: %s", host)
-	}
-
-	return resolver.ResolveProvisionalIdentity(ip)
+// Caller returns the *Peer stored by Require.
+func Caller(
+	ctx context.Context,
+) *Peer {
+	p, _ := ctx.Value(contextKey{}).(*Peer)
+	return p
 }

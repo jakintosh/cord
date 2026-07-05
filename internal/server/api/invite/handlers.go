@@ -13,11 +13,7 @@ func (a *API) handleRedeemInvite(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	peer, err := identity.Resolve(r, a.resolver)
-	if err != nil {
-		wire.WriteError(w, http.StatusForbidden, "identity unknown")
-		return
-	}
+	peer := identity.Caller(r.Context())
 
 	var req protocol.RedeemRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

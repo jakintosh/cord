@@ -28,8 +28,6 @@ func TestHandleVisiblePeers_Success(t *testing.T) {
 func TestHandleVisiblePeers_IdentityFails(t *testing.T) {
 	_, api := setupPeerTest(t)
 
-	api.resolver = &testutil.FailResolver{}
-
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/peers", nil)
 	r.RemoteAddr = "10.0.0.99:12345"
@@ -75,8 +73,6 @@ func TestHandleReportEndpoints_InvalidJSON(t *testing.T) {
 func TestHandleReportEndpoints_IdentityFails(t *testing.T) {
 	_, api := setupPeerTest(t)
 
-	api.resolver = &testutil.FailResolver{}
-
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/endpoints", strings.NewReader(`[]`))
 	r.RemoteAddr = "10.0.0.99:12345"
@@ -118,8 +114,6 @@ func TestHandleConfirmPeer_Success(t *testing.T) {
 
 func TestHandleConfirmPeer_IdentityFails(t *testing.T) {
 	_, api := setupPeerTest(t)
-
-	api.resolver = &testutil.FailResolver{}
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/confirm", nil)

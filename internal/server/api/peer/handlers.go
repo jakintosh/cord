@@ -15,11 +15,7 @@ func (a *API) handleVisiblePeers(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	caller, err := identity.Resolve(r, a.resolver)
-	if err != nil {
-		wire.WriteError(w, http.StatusForbidden, "identity unknown")
-		return
-	}
+	caller := identity.Caller(r.Context())
 
 	peers, err := a.service.ListVisiblePeers(a.network, caller.Name)
 	if err != nil {
@@ -39,11 +35,7 @@ func (a *API) handleReportEndpoints(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	caller, err := identity.Resolve(r, a.resolver)
-	if err != nil {
-		wire.WriteError(w, http.StatusForbidden, "identity unknown")
-		return
-	}
+	caller := identity.Caller(r.Context())
 
 	var sightings []protocol.EndpointSighting
 	if err := json.NewDecoder(r.Body).Decode(&sightings); err != nil {
@@ -76,11 +68,7 @@ func (a *API) handleConfirmPeer(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	caller, err := identity.ResolveProvisional(r, a)
-	if err != nil {
-		wire.WriteError(w, http.StatusForbidden, "identity unknown")
-		return
-	}
+	caller := identity.Caller(r.Context())
 
 	if err := a.service.ConfirmPeer(a.network, caller.Name); err != nil {
 		wire.WriteError(w, http.StatusInternalServerError, err.Error())

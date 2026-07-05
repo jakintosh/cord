@@ -11,10 +11,9 @@ import (
 )
 
 type API struct {
-	service  *service.Service
-	network  string
-	resolver identity.Resolver
-	log      *log.Logger
+	service *service.Service
+	network string
+	log     *log.Logger
 }
 
 func New(
@@ -22,24 +21,23 @@ func New(
 	network string,
 	log *log.Logger,
 ) *API {
-	a := &API{
+	return &API{
 		service: service,
 		network: network,
 		log:     log,
 	}
-	a.resolver = a
-	return a
 }
 
-func (a *API) SetResolver(
-	resolver identity.Resolver,
-) {
-	a.resolver = resolver
+func (a *API) Router() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /peers", identity.Require(a.lookupPeer, a.handleVisiblePeers))
+	mux.HandleFunc("POST /endpoints", identity.Require(a.lookupPeer, a.handleReportEndpoints))
+	mux.HandleFunc("POST /confirm", identity.Require(a.lookupProvisional, a.handleConfirmPeer))
+	return mux
 }
 
-// ResolveIdentity looks up a confirmed, enabled peer by source IP.
-// Satisfies identity.Resolver. Used for /peers and /endpoints.
-func (a *API) ResolveIdentity(
+// lookupPeer looks up a confirmed, enabled peer by source IP.
+func (a *API) lookupPeer(
 	ip net.IP,
 ) (
 	*identity.Peer,
@@ -55,9 +53,8 @@ func (a *API) ResolveIdentity(
 	}, nil
 }
 
-// ResolveProvisionalIdentity looks up an unconfirmed, enabled peer by
-// source IP. Satisfies identity.ProvisionalResolver. Used for /confirm.
-func (a *API) ResolveProvisionalIdentity(
+// lookupProvisional looks up an unconfirmed, enabled peer by source IP.
+func (a *API) lookupProvisional(
 	ip net.IP,
 ) (
 	*identity.Peer,
@@ -71,12 +68,4 @@ func (a *API) ResolveProvisionalIdentity(
 		PublicKey: p.PublicKey,
 		Name:      p.Name,
 	}, nil
-}
-
-func (a *API) Router() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /peers", a.handleVisiblePeers)
-	mux.HandleFunc("POST /endpoints", a.handleReportEndpoints)
-	mux.HandleFunc("POST /confirm", a.handleConfirmPeer)
-	return mux
 }
