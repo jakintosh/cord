@@ -122,13 +122,12 @@ var serverNetworkDelete = &args.Command{
 		name := i.GetOperand("name")
 
 		client := admin.NewClient(socketPath)
-		result, err := client.DeleteNetwork(context.Background(), name)
-		if err != nil {
+		if err := client.DeleteNetwork(context.Background(), name); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("network %q deleted\n", name)
 		return nil
@@ -179,17 +178,7 @@ var serverNetworkShow = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(network)
 		}
-		fmt.Printf("name: %s\n", network.Name)
-		fmt.Printf("external_ip: %s\n", network.ExternalIP)
-		fmt.Printf("main_name: %s\n", network.MainName)
-		fmt.Printf("main_cidr: %s\n", network.MainCidr)
-		fmt.Printf("main_wg_port: %d\n", network.MainWgPort)
-		fmt.Printf("main_api_port: %d\n", network.MainApiPort)
-		fmt.Printf("invite_name: %s\n", network.InviteName)
-		fmt.Printf("invite_cidr: %s\n", network.InviteCidr)
-		fmt.Printf("invite_wg_port: %d\n", network.InviteWgPort)
-		fmt.Printf("invite_api_port: %d\n", network.InviteApiPort)
-		fmt.Printf("enabled: %t\n", network.Enabled)
+		printServerNetworkDetail(network)
 		return nil
 	},
 }
@@ -208,13 +197,12 @@ var serverNetworkEnable = &args.Command{
 		name := i.GetOperand("name")
 
 		client := admin.NewClient(socketPath)
-		result, err := client.EnableNetwork(context.Background(), name)
-		if err != nil {
+		if err := client.EnableNetwork(context.Background(), name); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("network %q enabled\n", name)
 		return nil
@@ -235,13 +223,12 @@ var serverNetworkDisable = &args.Command{
 		name := i.GetOperand("name")
 
 		client := admin.NewClient(socketPath)
-		result, err := client.DisableNetwork(context.Background(), name)
-		if err != nil {
+		if err := client.DisableNetwork(context.Background(), name); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("network %q disabled\n", name)
 		return nil
@@ -254,4 +241,22 @@ func toUint16Ptr(v *int) *uint16 {
 	}
 	u := uint16(*v)
 	return &u
+}
+
+// printServerNetworkDetail prints the key: value detail view for a single
+// network, as shown by `server network show`.
+func printServerNetworkDetail(
+	n admin.NetworkDTO,
+) {
+	fmt.Printf("name: %s\n", n.Name)
+	fmt.Printf("external_ip: %s\n", n.ExternalIP)
+	fmt.Printf("main_name: %s\n", n.MainName)
+	fmt.Printf("main_cidr: %s\n", n.MainCidr)
+	fmt.Printf("main_wg_port: %d\n", n.MainWgPort)
+	fmt.Printf("main_api_port: %d\n", n.MainApiPort)
+	fmt.Printf("invite_name: %s\n", n.InviteName)
+	fmt.Printf("invite_cidr: %s\n", n.InviteCidr)
+	fmt.Printf("invite_wg_port: %d\n", n.InviteWgPort)
+	fmt.Printf("invite_api_port: %d\n", n.InviteApiPort)
+	fmt.Printf("enabled: %t\n", n.Enabled)
 }

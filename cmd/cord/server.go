@@ -78,17 +78,26 @@ var serverStatusCmd = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(result)
 		}
-		fmt.Printf("server daemon ok (version %s)\n", result.Version)
-		rows := make([][]string, len(result.Networks))
-		for idx, n := range result.Networks {
-			rows[idx] = []string{
-				n.Name,
-				strconv.FormatBool(n.Enabled),
-				strconv.Itoa(n.PeerCount),
-				strconv.Itoa(n.PendingRegistrationCount),
-			}
-		}
-		printTable([]string{"NAME", "ENABLED", "PEERS", "PENDING REGISTRATIONS"}, rows)
+		printServerStatus(result)
 		return nil
 	},
+}
+
+// printServerStatus prints the ok/version line followed by a per-network
+// status table.
+func printServerStatus(
+	s admin.StatusDTO,
+) {
+	fmt.Printf("server daemon ok (version %s)\n", s.Version)
+
+	rows := make([][]string, len(s.Networks))
+	for idx, n := range s.Networks {
+		rows[idx] = []string{
+			n.Name,
+			strconv.FormatBool(n.Enabled),
+			strconv.Itoa(n.PeerCount),
+			strconv.Itoa(n.PendingRegistrationCount),
+		}
+	}
+	printTable([]string{"NAME", "ENABLED", "PEERS", "PENDING REGISTRATIONS"}, rows)
 }

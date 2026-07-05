@@ -11,7 +11,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
-	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
@@ -112,14 +112,14 @@ func NewInstallServer(apiAddr string) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
-			Network: serverapi.NetworkInfoDTO{
+		wire.WriteData(w, http.StatusOK, protocol.Invitation{
+			Network: protocol.NetworkInfo{
 				PublicKey:   "server-pub-key",
 				Endpoint:    "1.2.3.4:51820",
 				ServerRoute: "10.42.0.1/32",
 				APIPort:     8443,
 			},
-			Peer: serverapi.PeerIdentityDTO{
+			Peer: protocol.PeerIdentity{
 				Route: "10.42.0.5/32",
 			},
 		})

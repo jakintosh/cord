@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
@@ -105,16 +104,10 @@ func TestAPIRevokeRegistration_Success(
 
 	// revoke the registration
 	url := "/networks/testnet/registrations/alice"
-	result := wire.TestDelete[api.DeleteResponse](env.Router, url)
+	result := wire.TestDelete[any](env.Router, url)
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Status != "deleted" {
-		t.Fatalf("status = %q, want deleted", data.Status)
-	}
-	if data.ID != "alice" {
-		t.Fatalf("id = %q, want alice", data.ID)
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
 
 	// verify registration is gone
 	listURL := "/networks/testnet/registrations"

@@ -7,7 +7,6 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -79,10 +78,7 @@ func (a *API) handleCidrAdd(
 		return
 	}
 
-	wire.WriteData(w, http.StatusCreated, CidrDTO{
-		Name: req.Name,
-		Cidr: req.Cidr,
-	})
+	wire.WriteData(w, http.StatusCreated, nil)
 }
 
 func (a *API) handleCidrRename(
@@ -103,9 +99,7 @@ func (a *API) handleCidrRename(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, CidrDTO{
-		Name: req.Name,
-	})
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handleCidrDelete(
@@ -120,10 +114,7 @@ func (a *API) handleCidrDelete(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, api.DeleteResponse{
-		Status: "deleted",
-		ID:     cidr,
-	})
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (c *Client) ListCidrs(
@@ -144,15 +135,12 @@ func (c *Client) AddCidr(
 	ctx context.Context,
 	network string,
 	req AddCidrRequest,
-) (
-	CidrDTO,
-	error,
-) {
+) error {
 	resp, err := c.t.Post(ctx, "/networks/"+network+"/cidrs", req)
 	if err != nil {
-		return CidrDTO{}, err
+		return err
 	}
-	return daemon.DecodeResponse[CidrDTO](resp)
+	return daemon.DecodeStatus(resp)
 }
 
 func (c *Client) RenameCidr(
@@ -160,29 +148,23 @@ func (c *Client) RenameCidr(
 	network string,
 	cidr string,
 	newName string,
-) (
-	CidrDTO,
-	error,
-) {
+) error {
 	req := RenameCidrRequest{Name: newName}
 	resp, err := c.t.Patch(ctx, "/networks/"+network+"/cidrs/"+cidr, req)
 	if err != nil {
-		return CidrDTO{}, err
+		return err
 	}
-	return daemon.DecodeResponse[CidrDTO](resp)
+	return daemon.DecodeStatus(resp)
 }
 
 func (c *Client) DeleteCidr(
 	ctx context.Context,
 	network string,
 	cidr string,
-) (
-	api.DeleteResponse,
-	error,
-) {
+) error {
 	resp, err := c.t.Delete(ctx, "/networks/"+network+"/cidrs/"+cidr)
 	if err != nil {
-		return api.DeleteResponse{}, err
+		return err
 	}
-	return daemon.DecodeResponse[api.DeleteResponse](resp)
+	return daemon.DecodeStatus(resp)
 }

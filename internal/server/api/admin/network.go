@@ -7,7 +7,6 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -149,10 +148,7 @@ func (a *API) handleNetworkDelete(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, api.DeleteResponse{
-		Status: "deleted",
-		ID:     name,
-	})
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handleNetworkEnable(
@@ -166,13 +162,7 @@ func (a *API) handleNetworkEnable(
 		return
 	}
 
-	network, err := a.service.GetNetwork(name)
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-
-	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*network))
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handleNetworkDisable(
@@ -186,13 +176,7 @@ func (a *API) handleNetworkDisable(
 		return
 	}
 
-	network, err := a.service.GetNetwork(name)
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-
-	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*network))
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (c *Client) ListNetworks(
@@ -239,41 +223,32 @@ func (c *Client) AddNetwork(
 func (c *Client) DeleteNetwork(
 	ctx context.Context,
 	name string,
-) (
-	api.DeleteResponse,
-	error,
-) {
+) error {
 	resp, err := c.t.Delete(ctx, "/networks/"+name)
 	if err != nil {
-		return api.DeleteResponse{}, err
+		return err
 	}
-	return daemon.DecodeResponse[api.DeleteResponse](resp)
+	return daemon.DecodeStatus(resp)
 }
 
 func (c *Client) EnableNetwork(
 	ctx context.Context,
 	name string,
-) (
-	NetworkDTO,
-	error,
-) {
+) error {
 	resp, err := c.t.Post(ctx, "/networks/"+name+"/enable", nil)
 	if err != nil {
-		return NetworkDTO{}, err
+		return err
 	}
-	return daemon.DecodeResponse[NetworkDTO](resp)
+	return daemon.DecodeStatus(resp)
 }
 
 func (c *Client) DisableNetwork(
 	ctx context.Context,
 	name string,
-) (
-	NetworkDTO,
-	error,
-) {
+) error {
 	resp, err := c.t.Post(ctx, "/networks/"+name+"/disable", nil)
 	if err != nil {
-		return NetworkDTO{}, err
+		return err
 	}
-	return daemon.DecodeResponse[NetworkDTO](resp)
+	return daemon.DecodeStatus(resp)
 }

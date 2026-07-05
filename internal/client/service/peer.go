@@ -3,20 +3,9 @@ package service
 import (
 	"time"
 
-	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
-
-// Peer is a cached peer record stored in the client's local database.
-// It represents another participant on the network as seen from this
-// client. Peers are fetched from the server during sync and reconciled
-// into the local cache.
-type Peer struct {
-	Name      string
-	PublicKey string
-	Route     string // explicit route for AllowedIPs, e.g. "10.42.0.5/32"
-	Endpoint  string // best known endpoint, populated by ListPeers
-}
 
 // PeerEndpoint is a single endpoint observation for a peer. Each row
 // records an endpoint address, when it was observed — either by the
@@ -29,36 +18,13 @@ type PeerEndpoint struct {
 	LastAttemptedAt  int64
 }
 
-// EndpointSighting is a locally observed peer endpoint, reported to
-// the server for gossip distribution.
-type EndpointSighting struct {
-	PeerKey  string
-	Endpoint string
-}
-
-// peersFromDTOs converts the server's visible peer list into local Peer
-// records.
-func peersFromDTOs(
-	dtos []serverapi.VisiblePeerDTO,
-) []Peer {
-	peers := make([]Peer, len(dtos))
-	for i, dto := range dtos {
-		peers[i] = Peer{
-			Name:      dto.Name,
-			PublicKey: dto.PublicKey,
-			Route:     dto.Route,
-		}
-	}
-	return peers
-}
-
-// endpointsFromDTOs extracts all endpoint observations for a single
-// peer from its DTO.
-func endpointsFromDTO(
-	dto serverapi.VisiblePeerDTO,
+// endpointsFromProtocol extracts all endpoint observations for a single
+// visible peer.
+func endpointsFromProtocol(
+	vp protocol.VisiblePeer,
 ) []PeerEndpoint {
-	eps := make([]PeerEndpoint, len(dto.Endpoints))
-	for i, ep := range dto.Endpoints {
+	eps := make([]PeerEndpoint, len(vp.Endpoints))
+	for i, ep := range vp.Endpoints {
 		eps[i] = PeerEndpoint{
 			Endpoint:         ep.Endpoint,
 			ServerObservedAt: ep.Timestamp.Unix(),
@@ -67,14 +33,57 @@ func endpointsFromDTO(
 	return eps
 }
 
-// ListPeers returns all cached peers for the named network.
-func (s *Service) ListPeers(
-	network string,
-) (
-	[]*Peer,
-	error,
-) {
-	return s.store.ListPeers(network)
+// EndpointSighting is a locally observed peer endpoint, reported to
+// the server for gossip distribution. It is stored in and read back from
+// the local database as domain state; the report path converts it to the
+// protocol wire shape at the network boundary.
+type EndpointSighting struct {
+	PeerKey  string
+	Endpoint string
+}
+
+func (es *EndpointSighting) toProtocol() protocol.EndpointSighting {
+	return protocol.EndpointSighting{
+		PeerKey:  es.PeerKey,
+		Endpoint: es.Endpoint,
+	}
+}
+
+func sightingsToProtocol(
+	sightings []EndpointSighting,
+) []protocol.EndpointSighting {
+	protoSightings := make([]protocol.EndpointSighting, len(sightings))
+	for i, s := range sightings {
+		protoSightings[i] = s.toProtocol()
+	}
+	return protoSightings
+}
+
+// Peer is a cached peer record stored in the client's local database.
+// It represents another participant on the network as seen from this
+// client. Peers are fetched from the server during sync and reconciled
+// into the local cache.
+type Peer struct {
+	Name      string
+	PublicKey string
+	Route     string // explicit route for AllowedIPs, e.g. "10.42.0.5/32"
+	Endpoint  string // best known endpoint, populated by ListPeers
+}
+
+// peersFromProtocol converts the server's visible peer list into local
+// Peer records.
+func peersFromProtocol(
+	visible []protocol.VisiblePeer,
+) []Peer {
+	peers := make([]Peer, len(visible))
+	for i, vp := range visible {
+		peers[i] = Peer{
+			Name:      vp.Name,
+			PublicKey: vp.PublicKey,
+			Route:     vp.Route,
+		}
+	}
+	return peers
 }
 
 // PeerStatus is a cached peer joined with its live WireGuard device
@@ -86,6 +95,16 @@ type PeerStatus struct {
 	Endpoint      string
 	LastHandshake time.Time
 	Connected     bool
+}
+
+// ListPeers returns all cached peers for the named network.
+func (s *Service) ListPeers(
+	network string,
+) (
+	[]*Peer,
+	error,
+) {
+	return s.store.ListPeers(network)
 }
 
 // ListPeerStatus returns the cached peers for the named network joined

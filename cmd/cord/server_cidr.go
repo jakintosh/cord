@@ -43,16 +43,15 @@ var serverCidrAdd = &args.Command{
 		cidr := i.GetOperand("cidr")
 
 		client := admin.NewClient(socketPath)
-		result, err := client.AddCidr(context.Background(), network, admin.AddCidrRequest{
+		if err := client.AddCidr(context.Background(), network, admin.AddCidrRequest{
 			Name: name,
 			Cidr: cidr,
-		})
-		if err != nil {
+		}); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("cidr %q added\n", name)
 		return nil
@@ -83,13 +82,12 @@ var serverCidrRename = &args.Command{
 		newName := i.GetOperand("new-name")
 
 		client := admin.NewClient(socketPath)
-		result, err := client.RenameCidr(context.Background(), network, cidr, newName)
-		if err != nil {
+		if err := client.RenameCidr(context.Background(), network, cidr, newName); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("cidr %q renamed to %q\n", cidr, newName)
 		return nil
@@ -115,13 +113,12 @@ var serverCidrDelete = &args.Command{
 		cidr := i.GetOperand("cidr")
 
 		client := admin.NewClient(socketPath)
-		result, err := client.DeleteCidr(context.Background(), network, cidr)
-		if err != nil {
+		if err := client.DeleteCidr(context.Background(), network, cidr); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("cidr %q deleted\n", cidr)
 		return nil
@@ -150,11 +147,18 @@ var serverCidrList = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(cidrs)
 		}
-		rows := make([][]string, len(cidrs))
-		for idx, c := range cidrs {
-			rows[idx] = []string{c.Name, c.Cidr}
-		}
-		printTable([]string{"NAME", "CIDR"}, rows)
+		printCidrs(cidrs)
 		return nil
 	},
+}
+
+// printCidrs prints a one-row-per-CIDR summary table.
+func printCidrs(
+	cidrs []admin.CidrDTO,
+) {
+	rows := make([][]string, len(cidrs))
+	for idx, c := range cidrs {
+		rows[idx] = []string{c.Name, c.Cidr}
+	}
+	printTable([]string{"NAME", "CIDR"}, rows)
 }

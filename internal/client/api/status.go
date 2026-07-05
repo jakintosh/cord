@@ -14,11 +14,6 @@ type StatusDTO struct {
 	Networks []NetworkDTO `json:"networks"`
 }
 
-type DeleteResponse struct {
-	Status string `json:"status"`
-	ID     string `json:"id"`
-}
-
 func (a *API) handleStatus(
 	w http.ResponseWriter,
 	r *http.Request,

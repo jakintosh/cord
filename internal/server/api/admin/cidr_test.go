@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
@@ -23,16 +22,10 @@ func TestAPIAddCidr_Success(
 		"name": "engineering",
 		"cidr": "10.0.1.0/24"
 	}`
-	result := wire.TestPost[admin.CidrDTO](env.Router, url, body)
+	result := wire.TestPost[any](env.Router, url, body)
 
-	// verify result
-	data := result.ExpectStatusOK(t, http.StatusCreated)
-	if data.Name != "engineering" {
-		t.Fatalf("name = %q, want engineering", data.Name)
-	}
-	if data.Cidr != "10.0.1.0/24" {
-		t.Fatalf("cidr = %q, want 10.0.1.0/24", data.Cidr)
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectStatusOK(t, http.StatusCreated)
 
 	// verify cidr exists in store
 	c, err := env.Service.GetCidr("testnet", "engineering")
@@ -180,13 +173,10 @@ func TestAPIRenameCidr_Success(
 	// rename cidr
 	url := "/networks/testnet/cidrs/engineering"
 	body := `{"name": "eng"}`
-	result := wire.TestPatch[admin.CidrDTO](env.Router, url, body)
+	result := wire.TestPatch[any](env.Router, url, body)
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Name != "eng" {
-		t.Fatalf("name = %q, want eng", data.Name)
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
 
 	// verify cidr was renamed in store
 	c, err := env.Service.GetCidr("testnet", "eng")
@@ -224,16 +214,10 @@ func TestAPIDeleteCidr_Success(
 
 	// delete cidr
 	url := "/networks/testnet/cidrs/engineering"
-	result := wire.TestDelete[api.DeleteResponse](env.Router, url)
+	result := wire.TestDelete[any](env.Router, url)
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Status != "deleted" {
-		t.Fatalf("status = %q, want deleted", data.Status)
-	}
-	if data.ID != "engineering" {
-		t.Fatalf("id = %q, want engineering", data.ID)
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
 
 	// verify cidr is gone
 	_, err := env.Service.GetCidr("testnet", "engineering")

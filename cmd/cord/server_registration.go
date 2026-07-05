@@ -120,17 +120,7 @@ var serverRegistrationList = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(registrations)
 		}
-		rows := make([][]string, len(registrations))
-		for idx, reg := range registrations {
-			rows[idx] = []string{
-				reg.Name,
-				reg.Route,
-				strconv.FormatBool(reg.Admin),
-				strconv.FormatBool(reg.Redeemed),
-				reg.ExpiresAt,
-			}
-		}
-		printTable([]string{"NAME", "ROUTE", "ADMIN", "REDEEMED", "EXPIRES AT"}, rows)
+		printRegistrations(registrations)
 		return nil
 	},
 }
@@ -154,15 +144,31 @@ var serverRegistrationRevoke = &args.Command{
 		name := i.GetOperand("name")
 
 		client := admin.NewClient(socketPath)
-		result, err := client.RevokeRegistration(context.Background(), network, name)
-		if err != nil {
+		if err := client.RevokeRegistration(context.Background(), network, name); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("registration %q revoked\n", name)
 		return nil
 	},
+}
+
+// printRegistrations prints a one-row-per-registration summary table.
+func printRegistrations(
+	registrations []admin.RegistrationDTO,
+) {
+	rows := make([][]string, len(registrations))
+	for idx, reg := range registrations {
+		rows[idx] = []string{
+			reg.Name,
+			reg.Route,
+			strconv.FormatBool(reg.Admin),
+			strconv.FormatBool(reg.Redeemed),
+			reg.ExpiresAt,
+		}
+	}
+	printTable([]string{"NAME", "ROUTE", "ADMIN", "REDEEMED", "EXPIRES AT"}, rows)
 }

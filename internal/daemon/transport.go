@@ -176,19 +176,12 @@ func DecodeResponse[T any](
 	error,
 ) {
 	var zero T
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := readBody(resp)
 	if err != nil {
-		return zero, fmt.Errorf("read response: %w", err)
+		return zero, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		var envelope struct {
-			Error *wire.Error `json:"error"`
-		}
-		if err := json.Unmarshal(body, &envelope); err == nil && envelope.Error != nil && envelope.Error.Message != "" {
-			return zero, errors.New(envelope.Error.Message)
-		}
-		return zero, fmt.Errorf("unexpected status %s: %s", resp.Status, string(body))
+		return zero, decodeErrorEnvelope(resp, body)
 	}
 	var envelope struct {
 		Data json.RawMessage `json:"data"`
@@ -204,4 +197,52 @@ func DecodeResponse[T any](
 		return zero, fmt.Errorf("decode: %w", err)
 	}
 	return v, nil
+}
+
+// DecodeStatus checks resp for a non-2xx status, decoding the wire error
+// envelope into an error if present. Use it for mutations whose response
+// body carries no data (wire.WriteData with a nil data value writes an
+// empty body on success).
+func DecodeStatus(
+	resp *http.Response,
+) error {
+	body, err := readBody(resp)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return decodeErrorEnvelope(resp, body)
+	}
+	return nil
+}
+
+// readBody reads and closes resp.Body.
+func readBody(
+	resp *http.Response,
+) (
+	[]byte,
+	error,
+) {
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	return body, nil
+}
+
+// decodeErrorEnvelope attempts to decode body as the wire error envelope,
+// returning an error containing just the message; if the body isn't a
+// valid envelope, it falls back to reporting the raw status and body.
+func decodeErrorEnvelope(
+	resp *http.Response,
+	body []byte,
+) error {
+	var envelope struct {
+		Error *wire.Error `json:"error"`
+	}
+	if err := json.Unmarshal(body, &envelope); err == nil && envelope.Error != nil && envelope.Error.Message != "" {
+		return errors.New(envelope.Error.Message)
+	}
+	return fmt.Errorf("unexpected status %s: %s", resp.Status, string(body))
 }

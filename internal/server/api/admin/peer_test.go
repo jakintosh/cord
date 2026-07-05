@@ -5,8 +5,7 @@ import (
 	"testing"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/invitation"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
@@ -26,7 +25,7 @@ func TestAPIInviteCreate_Success(
 		"ip": "10.0.0.5",
 		"admin": false
 	}`
-	result := wire.TestPost[invitation.Invitation](env.Router, url, body)
+	result := wire.TestPost[protocol.Invitation](env.Router, url, body)
 
 	// verify result — handler returns an Invitation payload
 	result.ExpectStatusOK(t, http.StatusCreated)
@@ -78,7 +77,7 @@ func TestAPIInviteCreate_AutoAssignIP(
 		"name": "bob",
 		"admin": false
 	}`
-	result := wire.TestPost[invitation.Invitation](env.Router, url, body)
+	result := wire.TestPost[protocol.Invitation](env.Router, url, body)
 
 	// verify result
 	result.ExpectStatusOK(t, http.StatusCreated)
@@ -134,7 +133,7 @@ func TestAPIInviteCreate_DuplicateName(
 		"name": "alice",
 		"ip": "10.0.0.5"
 	}`
-	result := wire.TestPost[invitation.Invitation](env.Router, url, body)
+	result := wire.TestPost[protocol.Invitation](env.Router, url, body)
 	result.ExpectStatusOK(t, http.StatusCreated)
 
 	// add duplicate
@@ -233,13 +232,10 @@ func TestAPIRenamePeer_Success(
 	// rename peer
 	url := "/networks/testnet/peers/alice"
 	body := `{"name": "alicia"}`
-	result := wire.TestPatch[admin.PeerDTO](env.Router, url, body)
+	result := wire.TestPatch[any](env.Router, url, body)
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Name != "alicia" {
-		t.Fatalf("name = %q, want alicia", data.Name)
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
 
 	// verify peer was renamed in store
 	_, err := env.Service.GetPeer("testnet", "alicia")
@@ -285,16 +281,10 @@ func TestAPIDeletePeer_Success(
 
 	// delete peer
 	url := "/networks/testnet/peers/alice"
-	result := wire.TestDelete[api.DeleteResponse](env.Router, url)
+	result := wire.TestDelete[any](env.Router, url)
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Status != "deleted" {
-		t.Fatalf("status = %q, want deleted", data.Status)
-	}
-	if data.ID != "alice" {
-		t.Fatalf("id = %q, want alice", data.ID)
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
 
 	// verify peer is gone
 	_, err := env.Service.GetPeer("testnet", "alice")
@@ -339,16 +329,10 @@ func TestAPIEnablePeer_Success(
 
 	// enable peer
 	url := "/networks/testnet/peers/alice/enable"
-	result := wire.TestPost[admin.PeerDTO](env.Router, url, "")
+	result := wire.TestPost[any](env.Router, url, "")
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Name != "alice" {
-		t.Fatalf("name = %q, want alice", data.Name)
-	}
-	if !data.Enabled {
-		t.Fatal("expected peer to be enabled")
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
 
 	// verify peer is enabled in store
 	peer, err := env.Service.GetPeer("testnet", "alice")
@@ -381,13 +365,10 @@ func TestAPIDisablePeer_Success(
 
 	// disable peer
 	url := "/networks/testnet/peers/alice/disable"
-	result := wire.TestPost[admin.PeerDTO](env.Router, url, "")
+	result := wire.TestPost[any](env.Router, url, "")
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Enabled {
-		t.Fatal("expected peer to be disabled")
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
 
 	// verify peer is disabled in store
 	peer, err := env.Service.GetPeer("testnet", "alice")

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 )
 
 func TestListPeers_Success(t *testing.T) {
@@ -15,12 +16,12 @@ func TestListPeers_Success(t *testing.T) {
 			wire.WriteError(w, http.StatusNotFound, "not found")
 			return
 		}
-		wire.WriteData(w, http.StatusOK, []VisiblePeerDTO{
+		wire.WriteData(w, http.StatusOK, []protocol.VisiblePeer{
 			{
 				Name:      "alice",
 				Route:     "10.42.0.5/32",
 				PublicKey: "alice-key",
-				Endpoints: []EndpointWitnessDTO{
+				Endpoints: []protocol.EndpointWitness{
 					{
 						Endpoint:  "1.2.3.4:51820",
 						Timestamp: time.Unix(1718956800, 0),
@@ -111,7 +112,7 @@ func TestReportEndpoints_Success(t *testing.T) {
 	})
 	defer teardown()
 
-	err := c.ReportEndpoints([]EndpointSightingDTO{
+	err := c.ReportEndpoints([]protocol.EndpointSighting{
 		{PeerKey: "peer-a", Endpoint: "5.6.7.8:51820"},
 	})
 	if err != nil {
@@ -140,14 +141,14 @@ func TestRedeemInvite_Success(t *testing.T) {
 			wire.WriteError(w, http.StatusNotFound, "not found")
 			return
 		}
-		wire.WriteData(w, http.StatusOK, InvitationDTO{
-			Network: NetworkInfoDTO{
+		wire.WriteData(w, http.StatusOK, protocol.Invitation{
+			Network: protocol.NetworkInfo{
 				PublicKey:   "server-key",
 				Endpoint:    "1.2.3.4:51820",
 				ServerRoute: "10.42.0.1/32",
 				APIPort:     8443,
 			},
-			Peer: PeerIdentityDTO{
+			Peer: protocol.PeerIdentity{
 				Route: "10.42.0.5/32",
 			},
 		})

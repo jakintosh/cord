@@ -4,19 +4,22 @@ import (
 	"testing"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 const DefaultNetworkName = "testnet"
 
-var defaultInvite = service.Invite{
-	PrivateKey:    mustGenerateKey(),
-	AssignedRoute: "10.42.0.5/32",
-	Server: service.ServerInfo{
-		PublicKey: "server-pub-key",
-		Endpoint:  "1.2.3.4:51820",
-		Route:     "10.42.0.1/32",
-		APIPort:   8443,
+var defaultInvite = protocol.Invitation{
+	Network: protocol.NetworkInfo{
+		PublicKey:   "server-pub-key",
+		Endpoint:    "1.2.3.4:51820",
+		ServerRoute: "10.42.0.1/32",
+		APIPort:     8443,
+	},
+	Peer: protocol.PeerIdentity{
+		Route:      "10.42.0.5/32",
+		PrivateKey: mustGenerateKey(),
 	},
 }
 
@@ -43,7 +46,7 @@ func SeedNetworkWithName(
 	t.Helper()
 
 	invite := defaultInvite
-	invite.NetworkName = name
+	invite.Network.Name = name
 	nc, err := svc.InstallNetwork(invite)
 	if err != nil {
 		t.Fatalf("seed network %q: %v", name, err)

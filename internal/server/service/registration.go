@@ -5,8 +5,8 @@ import (
 	"net"
 	"time"
 
-	"git.studiopollinator.com/pollinator/cord/internal/invitation"
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -51,7 +51,7 @@ func (s *Service) CreateRegistration(
 	admin bool,
 	expiresIn *time.Duration,
 ) (
-	*invitation.Invitation,
+	*protocol.Invitation,
 	error,
 ) {
 	network, err := s.store.GetNetwork(networkName)
@@ -143,15 +143,15 @@ func (s *Service) CreateRegistration(
 	serverRoute := netaddr.HostRoute(serverInternalIP)
 	peerRoute := netaddr.HostRoute(peerTempAssignedIP)
 
-	payload := &invitation.Invitation{
-		Network: invitation.NetworkInfo{
+	payload := &protocol.Invitation{
+		Network: protocol.NetworkInfo{
 			Name:        network.Name,
 			PublicKey:   network.PublicKey,
 			Endpoint:    serverInviteExternalAddr,
 			ServerRoute: serverRoute.String(),
 			APIPort:     network.Invite.ApiPort,
 		},
-		Peer: invitation.PeerIdentity{
+		Peer: protocol.PeerIdentity{
 			Route:      peerRoute.String(),
 			PrivateKey: peerTempPrivKey,
 		},
@@ -168,7 +168,7 @@ func (s *Service) RedeemRegistration(
 	tempPubKey string,
 	permPubKey string,
 ) (
-	*invitation.Invitation,
+	*protocol.Invitation,
 	error,
 ) {
 	network, err := s.store.GetNetwork(networkName)
@@ -215,7 +215,7 @@ func (s *Service) buildInvitation(
 	network *NetworkConfig,
 	peer *Peer,
 ) (
-	*invitation.Invitation,
+	*protocol.Invitation,
 	error,
 ) {
 	_, rootNet, err := net.ParseCIDR(network.Main.Cidr)
@@ -231,15 +231,15 @@ func (s *Service) buildInvitation(
 		return nil, fmt.Errorf("parse peer route %q: %w", peer.Route, err)
 	}
 
-	return &invitation.Invitation{
-		Network: invitation.NetworkInfo{
+	return &protocol.Invitation{
+		Network: protocol.NetworkInfo{
 			Name:        network.Name,
 			PublicKey:   network.PublicKey,
 			Endpoint:    netaddr.Endpoint(net.ParseIP(network.ExternalIP), network.Main.WireguardPort),
 			ServerRoute: serverRoute.String(),
 			APIPort:     network.Main.ApiPort,
 		},
-		Peer: invitation.PeerIdentity{
+		Peer: protocol.PeerIdentity{
 			Route: peerRoute.String(),
 		},
 	}, nil

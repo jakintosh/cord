@@ -284,23 +284,23 @@ func (n *Network) sync() error {
 	}
 	defer n.syncTimer.Reset(n.syncInterval)
 
-	peerDtos, err := n.client.ListPeers()
+	visible, err := n.client.ListPeers()
 	if err != nil {
 		return fmt.Errorf("fetch peers: %w", err)
 	}
 
-	peers := peersFromDTOs(peerDtos)
+	peers := peersFromProtocol(visible)
 	if err := n.store.SetPeers(n.cfg.Name, peers); err != nil {
 		return fmt.Errorf("set peers: %w", err)
 	}
 
-	for _, dto := range peerDtos {
-		eps := endpointsFromDTO(dto)
+	for _, vp := range visible {
+		eps := endpointsFromProtocol(vp)
 		if len(eps) == 0 {
 			continue
 		}
-		if err := n.store.SetPeerEndpoints(n.cfg.Name, dto.PublicKey, eps); err != nil {
-			n.logf("sync %s: set endpoints for %q: %v", n.cfg.Name, dto.PublicKey, err)
+		if err := n.store.SetPeerEndpoints(n.cfg.Name, vp.PublicKey, eps); err != nil {
+			n.logf("sync %s: set endpoints for %q: %v", n.cfg.Name, vp.PublicKey, err)
 		}
 	}
 
@@ -376,17 +376,11 @@ func (n *Network) report() error {
 		return nil
 	}
 
-	// TODO: I don't like how we're constructing a "DTO" here, but this is
-	// a bigger question about where the `serverapi` package lives that I'll
-	// need to come back to later
-	dtos := make([]serverapi.EndpointSightingDTO, len(sightings))
-	for i, s := range sightings {
-		dtos[i] = serverapi.EndpointSightingDTO{
-			PeerKey:  s.PeerKey,
-			Endpoint: s.Endpoint,
-		}
-	}
-	return n.client.ReportEndpoints(dtos)
+	// Convert the stored domain sightings into the protocol wire shape
+	// at this single network boundary. Storage stays wire-agnostic; the
+	// report path owns the transformation.
+	reports := sightingsToProtocol(sightings)
+	return n.client.ReportEndpoints(reports)
 }
 
 // reconcile applies the current peer cache to the WireGuard device.

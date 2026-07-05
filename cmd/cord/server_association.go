@@ -42,16 +42,15 @@ var serverAssociationAdd = &args.Command{
 		cidr2 := i.GetOperand("cidr2")
 
 		client := admin.NewClient(socketPath)
-		result, err := client.AddAssociation(context.Background(), network, admin.AddAssociationRequest{
+		if err := client.AddAssociation(context.Background(), network, admin.AddAssociationRequest{
 			Cidr1: cidr1,
 			Cidr2: cidr2,
-		})
-		if err != nil {
+		}); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("cidrs %q and %q associated\n", cidr1, cidr2)
 		return nil
@@ -82,7 +81,7 @@ var serverAssociationDelete = &args.Command{
 		cidr2 := i.GetOperand("cidr2")
 
 		client := admin.NewClient(socketPath)
-		result, err := client.DeleteAssociation(context.Background(), network, admin.DeleteAssociationRequest{
+		err := client.DeleteAssociation(context.Background(), network, admin.DeleteAssociationRequest{
 			Cidr1: cidr1,
 			Cidr2: cidr2,
 		})
@@ -91,7 +90,7 @@ var serverAssociationDelete = &args.Command{
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("association %q deleted\n", cidr1+"/"+cidr2)
 		return nil
@@ -120,11 +119,18 @@ var serverAssociationList = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(associations)
 		}
-		rows := make([][]string, len(associations))
-		for idx, a := range associations {
-			rows[idx] = []string{a.Cidr1, a.Cidr2}
-		}
-		printTable([]string{"CIDR1", "CIDR2"}, rows)
+		printAssociations(associations)
 		return nil
 	},
+}
+
+// printAssociations prints a one-row-per-association summary table.
+func printAssociations(
+	associations []admin.AssociationDTO,
+) {
+	rows := make([][]string, len(associations))
+	for idx, a := range associations {
+		rows[idx] = []string{a.Cidr1, a.Cidr2}
+	}
+	printTable([]string{"CIDR1", "CIDR2"}, rows)
 }

@@ -45,13 +45,12 @@ var serverPeerRename = &args.Command{
 		newName := i.GetOperand("new-name")
 
 		client := admin.NewClient(socketPath)
-		result, err := client.RenamePeer(context.Background(), network, peer, newName)
-		if err != nil {
+		if err := client.RenamePeer(context.Background(), network, peer, newName); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("peer %q renamed to %q\n", peer, newName)
 		return nil
@@ -77,13 +76,12 @@ var serverPeerEnable = &args.Command{
 		peer := i.GetOperand("peer")
 
 		client := admin.NewClient(socketPath)
-		result, err := client.EnablePeer(context.Background(), network, peer)
-		if err != nil {
+		if err := client.EnablePeer(context.Background(), network, peer); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("peer %q enabled\n", peer)
 		return nil
@@ -109,13 +107,12 @@ var serverPeerDisable = &args.Command{
 		peer := i.GetOperand("peer")
 
 		client := admin.NewClient(socketPath)
-		result, err := client.DisablePeer(context.Background(), network, peer)
-		if err != nil {
+		if err := client.DisablePeer(context.Background(), network, peer); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("peer %q disabled\n", peer)
 		return nil
@@ -141,13 +138,12 @@ var serverPeerDelete = &args.Command{
 		peer := i.GetOperand("peer")
 
 		client := admin.NewClient(socketPath)
-		result, err := client.DeletePeer(context.Background(), network, peer)
-		if err != nil {
+		if err := client.DeletePeer(context.Background(), network, peer); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("peer %q deleted\n", peer)
 		return nil
@@ -176,17 +172,24 @@ var serverPeerList = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(peers)
 		}
-		rows := make([][]string, len(peers))
-		for idx, p := range peers {
-			rows[idx] = []string{
-				p.Name,
-				p.Route,
-				strconv.FormatBool(p.Admin),
-				strconv.FormatBool(p.Enabled),
-				p.PublicKey,
-			}
-		}
-		printTable([]string{"NAME", "ROUTE", "ADMIN", "ENABLED", "PUBLIC KEY"}, rows)
+		printServerPeers(peers)
 		return nil
 	},
+}
+
+// printServerPeers prints a one-row-per-peer summary table.
+func printServerPeers(
+	peers []admin.PeerDTO,
+) {
+	rows := make([][]string, len(peers))
+	for idx, p := range peers {
+		rows[idx] = []string{
+			p.Name,
+			p.Route,
+			strconv.FormatBool(p.Admin),
+			strconv.FormatBool(p.Enabled),
+			p.PublicKey,
+		}
+	}
+	printTable([]string{"NAME", "ROUTE", "ADMIN", "ENABLED", "PUBLIC KEY"}, rows)
 }

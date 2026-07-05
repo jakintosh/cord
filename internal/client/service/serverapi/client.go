@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 )
 
 // --- Shared helpers ---
@@ -71,10 +72,10 @@ func NewPeerClient(
 
 // ListPeers calls GET /peers and returns the visible peer list.
 func (c *PeerClient) ListPeers() (
-	[]VisiblePeerDTO,
+	[]protocol.VisiblePeer,
 	error,
 ) {
-	var peers []VisiblePeerDTO
+	var peers []protocol.VisiblePeer
 	err := c.client.Get("/peers", &peers)
 	return peers, err
 }
@@ -90,7 +91,7 @@ func (c *PeerClient) ConfirmPeer() error {
 // ReportEndpoints calls POST /endpoints, sending locally-observed
 // peer endpoints for gossip distribution.
 func (c *PeerClient) ReportEndpoints(
-	sightings []EndpointSightingDTO,
+	sightings []protocol.EndpointSighting,
 ) error {
 	body, err := json.Marshal(sightings)
 	if err != nil {
@@ -128,10 +129,10 @@ func NewInviteClient(
 func (c *InviteClient) RedeemInvitation(
 	permPubKey string,
 ) (
-	*InvitationDTO,
+	*protocol.Invitation,
 	error,
 ) {
-	req := RedeemInvitationRequest{
+	req := protocol.RedeemRequest{
 		PermPubKey: permPubKey,
 	}
 
@@ -140,7 +141,7 @@ func (c *InviteClient) RedeemInvitation(
 		return nil, err
 	}
 
-	var result InvitationDTO
+	var result protocol.Invitation
 	err = withRetry(func() error {
 		return c.client.Post("/redeem", body, &result)
 	})

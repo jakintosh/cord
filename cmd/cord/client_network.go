@@ -42,11 +42,8 @@ var clientNetworkList = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(networks)
 		}
-		rows := make([][]string, len(networks))
-		for idx, n := range networks {
-			rows[idx] = []string{n.Name, n.State, strconv.FormatBool(n.Enabled), strconv.FormatBool(n.Connected)}
-		}
-		printTable([]string{"NAME", "STATE", "ENABLED", "CONNECTED"}, rows)
+
+		printClientNetworks(networks)
 		return nil
 	},
 }
@@ -73,20 +70,7 @@ var clientNetworkShow = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(result)
 		}
-		fmt.Printf("name: %s\n", result.Name)
-		fmt.Printf("state: %s\n", result.State)
-		fmt.Printf("enabled: %t\n", result.Enabled)
-		fmt.Printf("connected: %t\n", result.Connected)
-		if result.Address != "" {
-			fmt.Printf("address: %s\n", result.Address)
-		}
-		if result.Interface != "" {
-			fmt.Printf("interface: %s\n", result.Interface)
-		}
-		if result.ServerEndpoint != "" {
-			fmt.Printf("server_endpoint: %s\n", result.ServerEndpoint)
-		}
-		fmt.Printf("peer_count: %d\n", result.PeerCount)
+		printClientNetworkDetail(result)
 		return nil
 	},
 }
@@ -126,7 +110,11 @@ var clientNetworkInstall = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(result)
 		}
-		fmt.Printf("network %q installed\n", result.Name)
+		if result.Address != "" {
+			fmt.Printf("network %q installed (%s)\n", result.Name, result.Address)
+		} else {
+			fmt.Printf("network %q installed\n", result.Name)
+		}
 		return nil
 	},
 }
@@ -153,7 +141,11 @@ var clientNetworkRedeem = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(result)
 		}
-		fmt.Printf("network %q redeemed\n", network)
+		if result.Address != "" {
+			fmt.Printf("network %q redeemed (%s)\n", network, result.Address)
+		} else {
+			fmt.Printf("network %q redeemed\n", network)
+		}
 		return nil
 	},
 }
@@ -172,13 +164,12 @@ var clientNetworkConfirm = &args.Command{
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
-		result, err := client.ConfirmNetwork(context.Background(), network)
-		if err != nil {
+		if err := client.ConfirmNetwork(context.Background(), network); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("network %q confirmed\n", network)
 		return nil
@@ -199,13 +190,12 @@ var clientNetworkUninstall = &args.Command{
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
-		result, err := client.UninstallNetwork(context.Background(), network)
-		if err != nil {
+		if err := client.UninstallNetwork(context.Background(), network); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("network %q deleted\n", network)
 		return nil
@@ -226,13 +216,12 @@ var clientNetworkEnable = &args.Command{
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
-		result, err := client.EnableNetwork(context.Background(), network)
-		if err != nil {
+		if err := client.EnableNetwork(context.Background(), network); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("network %q enabled\n", network)
 		return nil
@@ -253,13 +242,12 @@ var clientNetworkDisable = &args.Command{
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
-		result, err := client.DisableNetwork(context.Background(), network)
-		if err != nil {
+		if err := client.DisableNetwork(context.Background(), network); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return printJSON(result)
+			return nil
 		}
 		fmt.Printf("network %q disabled\n", network)
 		return nil
@@ -288,7 +276,44 @@ var clientNetworkSync = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(result)
 		}
-		fmt.Printf("network %q synced\n", network)
+		fmt.Printf("network %q synced (%d peers)\n", network, result.PeerCount)
 		return nil
 	},
+}
+
+// printClientNetworks prints a one-row-per-network summary table.
+func printClientNetworks(
+	networks []api.NetworkDTO,
+) {
+	rows := make([][]string, len(networks))
+	for idx, n := range networks {
+		rows[idx] = []string{
+			n.Name,
+			n.State,
+			strconv.FormatBool(n.Enabled),
+			strconv.FormatBool(n.Connected),
+		}
+	}
+	printTable([]string{"NAME", "STATE", "ENABLED", "CONNECTED"}, rows)
+}
+
+// printClientNetworkDetail prints the key: value detail view for a single
+// network, as shown by `client network show`.
+func printClientNetworkDetail(
+	n api.NetworkDTO,
+) {
+	fmt.Printf("name: %s\n", n.Name)
+	fmt.Printf("state: %s\n", n.State)
+	fmt.Printf("enabled: %t\n", n.Enabled)
+	fmt.Printf("connected: %t\n", n.Connected)
+	if n.Address != "" {
+		fmt.Printf("address: %s\n", n.Address)
+	}
+	if n.Interface != "" {
+		fmt.Printf("interface: %s\n", n.Interface)
+	}
+	if n.ServerEndpoint != "" {
+		fmt.Printf("server_endpoint: %s\n", n.ServerEndpoint)
+	}
+	fmt.Printf("peer_count: %d\n", n.PeerCount)
 }

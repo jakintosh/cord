@@ -8,8 +8,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
-	"git.studiopollinator.com/pollinator/cord/internal/invitation"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -115,13 +114,12 @@ func (a *API) handlePeerRename(
 		return
 	}
 
-	updated, err := a.service.UpdatePeer(network, peer, &req.Name, nil, nil, nil)
-	if err != nil {
+	if _, err := a.service.UpdatePeer(network, peer, &req.Name, nil, nil, nil); err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, PeerDTOFromService(*updated))
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handlePeerDelete(
@@ -136,10 +134,7 @@ func (a *API) handlePeerDelete(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, api.DeleteResponse{
-		Status: "deleted",
-		ID:     peer,
-	})
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handlePeerEnable(
@@ -154,13 +149,7 @@ func (a *API) handlePeerEnable(
 		return
 	}
 
-	updated, err := a.service.GetPeer(network, peer)
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-
-	wire.WriteData(w, http.StatusOK, PeerDTOFromService(*updated))
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handlePeerDisable(
@@ -175,13 +164,7 @@ func (a *API) handlePeerDisable(
 		return
 	}
 
-	updated, err := a.service.GetPeer(network, peer)
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-
-	wire.WriteData(w, http.StatusOK, PeerDTOFromService(*updated))
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (c *Client) ListPeers(
@@ -203,14 +186,14 @@ func (c *Client) CreateInvite(
 	network string,
 	req CreateInviteRequest,
 ) (
-	*invitation.Invitation,
+	*protocol.Invitation,
 	error,
 ) {
 	resp, err := c.t.Post(ctx, "/networks/"+network+"/registrations", req)
 	if err != nil {
 		return nil, err
 	}
-	return daemon.DecodeResponse[*invitation.Invitation](resp)
+	return daemon.DecodeResponse[*protocol.Invitation](resp)
 }
 
 func (c *Client) RenamePeer(
@@ -218,59 +201,47 @@ func (c *Client) RenamePeer(
 	network string,
 	peer string,
 	newName string,
-) (
-	PeerDTO,
-	error,
-) {
+) error {
 	req := RenamePeerRequest{Name: newName}
 	resp, err := c.t.Patch(ctx, "/networks/"+network+"/peers/"+peer, req)
 	if err != nil {
-		return PeerDTO{}, err
+		return err
 	}
-	return daemon.DecodeResponse[PeerDTO](resp)
+	return daemon.DecodeStatus(resp)
 }
 
 func (c *Client) DeletePeer(
 	ctx context.Context,
 	network string,
 	peer string,
-) (
-	api.DeleteResponse,
-	error,
-) {
+) error {
 	resp, err := c.t.Delete(ctx, "/networks/"+network+"/peers/"+peer)
 	if err != nil {
-		return api.DeleteResponse{}, err
+		return err
 	}
-	return daemon.DecodeResponse[api.DeleteResponse](resp)
+	return daemon.DecodeStatus(resp)
 }
 
 func (c *Client) EnablePeer(
 	ctx context.Context,
 	network string,
 	peer string,
-) (
-	PeerDTO,
-	error,
-) {
+) error {
 	resp, err := c.t.Post(ctx, "/networks/"+network+"/peers/"+peer+"/enable", nil)
 	if err != nil {
-		return PeerDTO{}, err
+		return err
 	}
-	return daemon.DecodeResponse[PeerDTO](resp)
+	return daemon.DecodeStatus(resp)
 }
 
 func (c *Client) DisablePeer(
 	ctx context.Context,
 	network string,
 	peer string,
-) (
-	PeerDTO,
-	error,
-) {
+) error {
 	resp, err := c.t.Post(ctx, "/networks/"+network+"/peers/"+peer+"/disable", nil)
 	if err != nil {
-		return PeerDTO{}, err
+		return err
 	}
-	return daemon.DecodeResponse[PeerDTO](resp)
+	return daemon.DecodeStatus(resp)
 }

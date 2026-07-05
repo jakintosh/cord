@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/identity"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
@@ -26,12 +27,12 @@ func (a *API) handleVisiblePeers(
 		return
 	}
 
-	dtos := make([]VisiblePeerDTO, len(peers))
+	visible := make([]protocol.VisiblePeer, len(peers))
 	for i, p := range peers {
-		dtos[i] = toVisiblePeerDTO(p)
+		visible[i] = toVisiblePeer(p)
 	}
 
-	wire.WriteData(w, http.StatusOK, dtos)
+	wire.WriteData(w, http.StatusOK, visible)
 }
 
 func (a *API) handleReportEndpoints(
@@ -44,12 +45,15 @@ func (a *API) handleReportEndpoints(
 		return
 	}
 
-	var sightings []EndpointSightingDTO
+	var sightings []protocol.EndpointSighting
 	if err := json.NewDecoder(r.Body).Decode(&sightings); err != nil {
 		wire.WriteError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
+	// Witness attribution is server-internal: the caller reports which
+	// peer it saw and where, and the server stamps its own identity
+	// (resolved from the tunnel source IP) and a receipt timestamp.
 	svcSightings := make([]service.EndpointSighting, len(sightings))
 	for i, s := range sightings {
 		svcSightings[i] = service.EndpointSighting{

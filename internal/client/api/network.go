@@ -7,7 +7,7 @@ import (
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
-	"git.studiopollinator.com/pollinator/cord/internal/invitation"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 )
 
 type NetworkDTO struct {
@@ -42,28 +42,9 @@ func networkDTOFromInstall(
 	inst service.Install,
 ) NetworkDTO {
 	return NetworkDTO{
-		Name:  inst.Name,
-		State: inst.Phase,
-	}
-}
-
-// inviteFromInvitation maps a wire-format invitation payload into the
-// client service's Invite. The invitation IS the install request body;
-// this keeps the wire type shared with the server while the service
-// keeps its own internal Invite shape.
-func inviteFromInvitation(
-	inv invitation.Invitation,
-) service.Invite {
-	return service.Invite{
-		NetworkName:   inv.Network.Name,
-		PrivateKey:    inv.Peer.PrivateKey,
-		AssignedRoute: inv.Peer.Route,
-		Server: service.ServerInfo{
-			PublicKey: inv.Network.PublicKey,
-			Endpoint:  inv.Network.Endpoint,
-			Route:     inv.Network.ServerRoute,
-			APIPort:   inv.Network.APIPort,
-		},
+		Name:    inst.Name,
+		State:   inst.Phase,
+		Address: inst.MainAssignedRoute,
 	}
 }
 
@@ -149,14 +130,13 @@ func (a *API) handleNetworkInstall(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	inv, err := invitation.Parse(r.Body)
+	inv, err := protocol.Parse(r.Body)
 	if err != nil {
 		wire.WriteError(w, http.StatusBadRequest, "malformed invitation")
 		return
 	}
 
-	invite := inviteFromInvitation(*inv)
-	network, err := a.service.InstallNetwork(invite)
+	network, err := a.service.InstallNetwork(*inv)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -197,13 +177,7 @@ func (a *API) handleNetworkConfirm(
 		return
 	}
 
-	nc, err := a.service.GetNetwork(name)
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-
-	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name), a.peerCount(name)))
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handleNetworkUninstall(
@@ -217,10 +191,7 @@ func (a *API) handleNetworkUninstall(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, DeleteResponse{
-		Status: "deleted",
-		ID:     name,
-	})
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handleNetworkEnable(
@@ -234,13 +205,7 @@ func (a *API) handleNetworkEnable(
 		return
 	}
 
-	nc, err := a.service.GetNetwork(name)
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-
-	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name), a.peerCount(name)))
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handleNetworkDisable(
@@ -254,13 +219,7 @@ func (a *API) handleNetworkDisable(
 		return
 	}
 
-	nc, err := a.service.GetNetwork(name)
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-
-	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name), a.peerCount(name)))
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handleNetworkSync(
@@ -345,57 +304,45 @@ func (c *Client) RedeemNetwork(
 func (c *Client) ConfirmNetwork(
 	ctx context.Context,
 	name string,
-) (
-	NetworkDTO,
-	error,
-) {
+) error {
 	resp, err := c.t.Post(ctx, "/networks/"+name+"/confirm", nil)
 	if err != nil {
-		return NetworkDTO{}, err
+		return err
 	}
-	return daemon.DecodeResponse[NetworkDTO](resp)
+	return daemon.DecodeStatus(resp)
 }
 
 func (c *Client) UninstallNetwork(
 	ctx context.Context,
 	name string,
-) (
-	DeleteResponse,
-	error,
-) {
+) error {
 	resp, err := c.t.Delete(ctx, "/networks/"+name)
 	if err != nil {
-		return DeleteResponse{}, err
+		return err
 	}
-	return daemon.DecodeResponse[DeleteResponse](resp)
+	return daemon.DecodeStatus(resp)
 }
 
 func (c *Client) EnableNetwork(
 	ctx context.Context,
 	name string,
-) (
-	NetworkDTO,
-	error,
-) {
+) error {
 	resp, err := c.t.Post(ctx, "/networks/"+name+"/enable", nil)
 	if err != nil {
-		return NetworkDTO{}, err
+		return err
 	}
-	return daemon.DecodeResponse[NetworkDTO](resp)
+	return daemon.DecodeStatus(resp)
 }
 
 func (c *Client) DisableNetwork(
 	ctx context.Context,
 	name string,
-) (
-	NetworkDTO,
-	error,
-) {
+) error {
 	resp, err := c.t.Post(ctx, "/networks/"+name+"/disable", nil)
 	if err != nil {
-		return NetworkDTO{}, err
+		return err
 	}
-	return daemon.DecodeResponse[NetworkDTO](resp)
+	return daemon.DecodeStatus(resp)
 }
 
 func (c *Client) SyncNetwork(

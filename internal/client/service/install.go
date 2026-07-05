@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -20,48 +20,13 @@ const (
 const inviteSuffix = "-i"
 
 // ServerInfo describes how to reach the coordination server over one
-// WireGuard network (invite or main). Shared by Install, NetworkConfig,
-// and the parsed Invite payload.
+// WireGuard network (invite or main). Shared by Install and
+// NetworkConfig as persisted domain state.
 type ServerInfo struct {
 	PublicKey string
 	Endpoint  string // public WG endpoint, host:port
 	Route     string // server's in-network route
 	APIPort   uint16
-}
-
-// Invite carries the parsed contents of a server-issued invite file.
-// It is the caller's responsibility to read and parse the invite
-// payload from whatever format it arrives in (JSON file, clipboard, etc.).
-type Invite struct {
-	NetworkName   string
-	PrivateKey    string
-	AssignedRoute string
-	Server        ServerInfo
-}
-
-func (inv Invite) Validate() error {
-	if inv.NetworkName == "" {
-		return ErrInvalidInput
-	}
-	if inv.PrivateKey == "" {
-		return ErrInvalidInput
-	}
-	if inv.AssignedRoute == "" {
-		return ErrInvalidInput
-	}
-	if inv.Server.PublicKey == "" {
-		return ErrInvalidInput
-	}
-	if inv.Server.Endpoint == "" {
-		return ErrInvalidInput
-	}
-	if inv.Server.Route == "" {
-		return ErrInvalidInput
-	}
-	if inv.Server.APIPort == 0 {
-		return ErrInvalidInput
-	}
-	return nil
 }
 
 // Install is the transient record of an in-progress network install.
@@ -110,12 +75,12 @@ func (s *Service) ListInstalls() (
 // If the install already exists (from a previous partial run),
 // InstallNetwork resumes from whatever phase it is at.
 func (s *Service) InstallNetwork(
-	invite Invite,
+	invitation protocol.Invitation,
 ) (
 	*NetworkConfig,
 	error,
 ) {
-	inst, err := s.BeginInstall(invite)
+	inst, err := s.BeginInstall(invitation)
 	if err != nil {
 		return nil, err
 	}
@@ -146,30 +111,35 @@ func (s *Service) InstallNetwork(
 // returns ErrNetworkExists; if an install with the same name already
 // exists at any phase, the existing record is returned unchanged.
 func (s *Service) BeginInstall(
-	invite Invite,
+	invitation protocol.Invitation,
 ) (
 	*Install,
 	error,
 ) {
-	if err := invite.Validate(); err != nil {
-		return nil, err
+	// A parseable-but-incomplete invitation is a bad request; the
+	// completeness check is a protocol concern, but the resulting error
+	// maps to invalid input at the service boundary.
+	if err := invitation.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 
+	networkName := invitation.Network.Name
+
 	// Validate interface names up front.
-	mainIfaceName := invite.NetworkName
+	mainIfaceName := networkName
 	if err := wireguard.ValidateDeviceName(mainIfaceName); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
-	inviteIfaceName := invite.NetworkName + inviteSuffix
+	inviteIfaceName := networkName + inviteSuffix
 	if err := wireguard.ValidateDeviceName(inviteIfaceName); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 
-	if _, err := s.store.GetNetwork(invite.NetworkName); err == nil {
+	if _, err := s.store.GetNetwork(networkName); err == nil {
 		return nil, ErrNetworkExists
 	}
 
-	if existing, err := s.store.GetInstall(invite.NetworkName); err == nil {
+	if existing, err := s.store.GetInstall(networkName); err == nil {
 		return existing, nil
 	}
 
@@ -179,15 +149,20 @@ func (s *Service) BeginInstall(
 	}
 
 	install := &Install{
-		Name:                invite.NetworkName,
+		Name:                networkName,
 		Phase:               PhaseInvited,
 		InviteIfaceName:     inviteIfaceName,
-		InvitePrivateKey:    invite.PrivateKey,
-		InviteAssignedRoute: invite.AssignedRoute,
-		InviteServer:        invite.Server,
-		MainIfaceName:       mainIfaceName,
-		MainPrivateKey:      permPrivKey,
-		CreatedAt:           s.clock(),
+		InvitePrivateKey:    invitation.Peer.PrivateKey,
+		InviteAssignedRoute: invitation.Peer.Route,
+		InviteServer: ServerInfo{
+			PublicKey: invitation.Network.PublicKey,
+			Endpoint:  invitation.Network.Endpoint,
+			Route:     invitation.Network.ServerRoute,
+			APIPort:   invitation.Network.APIPort,
+		},
+		MainIfaceName:  mainIfaceName,
+		MainPrivateKey: permPrivKey,
+		CreatedAt:      s.clock(),
 	}
 	if err := s.store.InsertInstall(install); err != nil {
 		return nil, err
@@ -203,7 +178,7 @@ func (s *Service) BeginInstall(
 func (s *Service) Redeem(
 	name string,
 ) (
-	*serverapi.InvitationDTO,
+	*protocol.Invitation,
 	error,
 ) {
 	install, err := s.store.GetInstall(name)

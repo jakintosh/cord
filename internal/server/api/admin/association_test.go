@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
@@ -25,16 +24,10 @@ func TestAPIAddAssociation_Success(
 		"cidr1": "engineering",
 		"cidr2": "marketing"
 	}`
-	result := wire.TestPost[admin.AssociationDTO](env.Router, url, body)
+	result := wire.TestPost[any](env.Router, url, body)
 
-	// verify result
-	data := result.ExpectStatusOK(t, http.StatusCreated)
-	if data.Cidr1 != "engineering" {
-		t.Fatalf("cidr1 = %q, want engineering", data.Cidr1)
-	}
-	if data.Cidr2 != "marketing" {
-		t.Fatalf("cidr2 = %q, want marketing", data.Cidr2)
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectStatusOK(t, http.StatusCreated)
 
 	// verify association exists
 	assocs, err := env.Service.ListAssociations("testnet")
@@ -145,13 +138,10 @@ func TestAPIDeleteAssociation_Success(
 		"cidr1": "engineering",
 		"cidr2": "marketing"
 	}`
-	result := wire.TestPost[api.DeleteResponse](env.Router, url, body)
+	result := wire.TestPost[any](env.Router, url, body)
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Status != "deleted" {
-		t.Fatalf("status = %q, want deleted", data.Status)
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
 
 	// verify association is gone
 	assocs, err := env.Service.ListAssociations("testnet")

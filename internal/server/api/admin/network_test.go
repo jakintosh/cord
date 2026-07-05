@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
@@ -303,16 +302,10 @@ func TestAPIDeleteNetwork_Success(
 
 	// delete network
 	url := "/networks/testnet"
-	result := wire.TestDelete[api.DeleteResponse](env.Router, url)
+	result := wire.TestDelete[any](env.Router, url)
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Status != "deleted" {
-		t.Fatalf("status = %q, want deleted", data.Status)
-	}
-	if data.ID != "testnet" {
-		t.Fatalf("id = %q, want testnet", data.ID)
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
 
 	// verify network is gone
 	_, err := env.Service.GetNetwork("testnet")
@@ -344,15 +337,18 @@ func TestAPIEnableNetwork_Success(
 
 	// enable network
 	url := "/networks/testnet/enable"
-	result := wire.TestPost[admin.NetworkDTO](env.Router, url, "")
+	result := wire.TestPost[any](env.Router, url, "")
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Name != "testnet" {
-		t.Fatalf("name = %q, want testnet", data.Name)
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
+
+	// verify network is enabled in store
+	nw, err := env.Service.GetNetwork("testnet")
+	if err != nil {
+		t.Fatalf("get network: %v", err)
 	}
-	if !data.Enabled {
-		t.Fatal("expected enabled=true")
+	if !nw.Enabled {
+		t.Fatal("expected network to be enabled in store")
 	}
 }
 
@@ -379,18 +375,21 @@ func TestAPIDisableNetwork_Success(
 
 	// enable then disable network
 	enableURL := "/networks/testnet/enable"
-	wire.TestPost[admin.NetworkDTO](env.Router, enableURL, "").ExpectOK(t)
+	wire.TestPost[any](env.Router, enableURL, "").ExpectOK(t)
 
 	url := "/networks/testnet/disable"
-	result := wire.TestPost[admin.NetworkDTO](env.Router, url, "")
+	result := wire.TestPost[any](env.Router, url, "")
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Name != "testnet" {
-		t.Fatalf("name = %q, want testnet", data.Name)
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
+
+	// verify network is disabled in store
+	nw, err := env.Service.GetNetwork("testnet")
+	if err != nil {
+		t.Fatalf("get network: %v", err)
 	}
-	if data.Enabled {
-		t.Fatal("expected enabled=false")
+	if nw.Enabled {
+		t.Fatal("expected network to be disabled in store")
 	}
 }
 

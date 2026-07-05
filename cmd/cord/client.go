@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
@@ -75,13 +74,16 @@ var clientStatusCmd = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(result)
 		}
-		fmt.Printf("client daemon ok (version %s)\n", result.Version)
-
-		rows := make([][]string, len(result.Networks))
-		for idx, n := range result.Networks {
-			rows[idx] = []string{n.Name, n.State, strconv.FormatBool(n.Enabled), strconv.FormatBool(n.Connected)}
-		}
-		printTable([]string{"NAME", "STATE", "ENABLED", "CONNECTED"}, rows)
+		printClientStatus(result)
 		return nil
 	},
+}
+
+// printClientStatus prints the ok/version line followed by the networks
+// table, reusing the same per-network rows as `client network list`.
+func printClientStatus(
+	s api.StatusDTO,
+) {
+	fmt.Printf("client daemon ok (version %s)\n", s.Version)
+	printClientNetworks(s.Networks)
 }

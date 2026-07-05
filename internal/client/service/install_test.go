@@ -9,8 +9,8 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
-	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -28,15 +28,17 @@ func mustGenKey(t *testing.T) string {
 func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	inst, err := env.Service.BeginInstall(service.Invite{
-		NetworkName:   "keytest",
-		PrivateKey:    "temp-key",
-		AssignedRoute: "10.43.0.2/24",
-		Server: service.ServerInfo{
-			PublicKey: "srv-pub",
-			Endpoint:  "1.2.3.4:51821",
-			Route:     "10.43.0.1/32",
-			APIPort:   8443,
+	inst, err := env.Service.BeginInstall(protocol.Invitation{
+		Network: protocol.NetworkInfo{
+			Name:        "keytest",
+			PublicKey:   "srv-pub",
+			Endpoint:    "1.2.3.4:51821",
+			ServerRoute: "10.43.0.1/32",
+			APIPort:     8443,
+		},
+		Peer: protocol.PeerIdentity{
+			Route:      "10.43.0.2/24",
+			PrivateKey: "temp-key",
 		},
 	})
 	if err != nil {
@@ -66,15 +68,17 @@ func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
 func TestBeginInstall_Idempotent(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	invite := service.Invite{
-		NetworkName:   "idempotent",
-		PrivateKey:    "temp-key",
-		AssignedRoute: "10.43.0.2/24",
-		Server: service.ServerInfo{
-			PublicKey: "srv-pub",
-			Endpoint:  "1.2.3.4:51821",
-			Route:     "10.43.0.1/32",
-			APIPort:   8443,
+	invite := protocol.Invitation{
+		Network: protocol.NetworkInfo{
+			Name:        "idempotent",
+			PublicKey:   "srv-pub",
+			Endpoint:    "1.2.3.4:51821",
+			ServerRoute: "10.43.0.1/32",
+			APIPort:     8443,
+		},
+		Peer: protocol.PeerIdentity{
+			Route:      "10.43.0.2/24",
+			PrivateKey: "temp-key",
 		},
 	}
 
@@ -104,15 +108,17 @@ func TestBeginInstall_ExistingConfirmedNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "already-here")
 
-	_, err := env.Service.BeginInstall(service.Invite{
-		NetworkName:   "already-here",
-		PrivateKey:    "temp-key",
-		AssignedRoute: "10.43.0.2/24",
-		Server: service.ServerInfo{
-			PublicKey: "srv-pub",
-			Endpoint:  "1.2.3.4:51821",
-			Route:     "10.43.0.1/32",
-			APIPort:   8443,
+	_, err := env.Service.BeginInstall(protocol.Invitation{
+		Network: protocol.NetworkInfo{
+			Name:        "already-here",
+			PublicKey:   "srv-pub",
+			Endpoint:    "1.2.3.4:51821",
+			ServerRoute: "10.43.0.1/32",
+			APIPort:     8443,
+		},
+		Peer: protocol.PeerIdentity{
+			Route:      "10.43.0.2/24",
+			PrivateKey: "temp-key",
 		},
 	})
 	if err == nil {
@@ -128,7 +134,7 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 	var redeemPubKey string
 	srvPubKey := mustGenKey(t)
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
-		var req serverapi.RedeemInvitationRequest
+		var req protocol.RedeemRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			wire.WriteError(w, http.StatusBadRequest, err.Error())
 			return
@@ -136,14 +142,14 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 		redeemPubKey = req.PermPubKey
 		srvHost, srvPortStr, _ := net.SplitHostPort(r.Host)
 		srvPort, _ := strconv.Atoi(srvPortStr)
-		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
-			Network: serverapi.NetworkInfoDTO{
+		wire.WriteData(w, http.StatusOK, protocol.Invitation{
+			Network: protocol.NetworkInfo{
 				PublicKey:   srvPubKey,
 				Endpoint:    "1.2.3.4:51820",
 				ServerRoute: srvHost + "/32",
 				APIPort:     uint16(srvPort),
 			},
-			Peer: serverapi.PeerIdentityDTO{
+			Peer: protocol.PeerIdentity{
 				Route: "10.42.0.5/32",
 			},
 		})
@@ -152,7 +158,7 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 		wire.WriteData(w, http.StatusOK, map[string]string{"status": "confirmed"})
 	})
 	mux.HandleFunc("GET /peers", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, []serverapi.VisiblePeerDTO{})
+		wire.WriteData(w, http.StatusOK, []protocol.VisiblePeer{})
 	})
 
 	env := testutil.SetupServiceWithServer(t, mux)
@@ -160,15 +166,17 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 	srvHost, srvPortStr, _ := net.SplitHostPort(env.Server.Listener.Addr().String())
 	srvPort, _ := strconv.Atoi(srvPortStr)
 
-	invite := service.Invite{
-		NetworkName:   "resume-test",
-		PrivateKey:    mustGenKey(t),
-		AssignedRoute: "10.43.0.2/24",
-		Server: service.ServerInfo{
-			PublicKey: srvPubKey,
-			Endpoint:  "5.6.7.8:51821",
-			Route:     srvHost + "/32",
-			APIPort:   uint16(srvPort),
+	invite := protocol.Invitation{
+		Network: protocol.NetworkInfo{
+			Name:        "resume-test",
+			PublicKey:   srvPubKey,
+			Endpoint:    "5.6.7.8:51821",
+			ServerRoute: srvHost + "/32",
+			APIPort:     uint16(srvPort),
+		},
+		Peer: protocol.PeerIdentity{
+			Route:      "10.43.0.2/24",
+			PrivateKey: mustGenKey(t),
 		},
 	}
 
@@ -207,14 +215,14 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
 		srvHost, srvPortStr, _ := net.SplitHostPort(r.Host)
 		srvPort, _ := strconv.Atoi(srvPortStr)
-		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
-			Network: serverapi.NetworkInfoDTO{
+		wire.WriteData(w, http.StatusOK, protocol.Invitation{
+			Network: protocol.NetworkInfo{
 				PublicKey:   srvPubKey,
 				Endpoint:    "1.2.3.4:51820",
 				ServerRoute: srvHost + "/32",
 				APIPort:     uint16(srvPort),
 			},
-			Peer: serverapi.PeerIdentityDTO{
+			Peer: protocol.PeerIdentity{
 				Route: "10.42.0.5/32",
 			},
 		})
@@ -224,7 +232,7 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 		wire.WriteData(w, http.StatusOK, map[string]string{"status": "confirmed"})
 	})
 	mux.HandleFunc("GET /peers", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, []serverapi.VisiblePeerDTO{})
+		wire.WriteData(w, http.StatusOK, []protocol.VisiblePeer{})
 	})
 
 	env := testutil.SetupServiceWithServer(t, mux)
@@ -232,15 +240,17 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 	srvHost, srvPortStr, _ := net.SplitHostPort(env.Server.Listener.Addr().String())
 	srvPort, _ := strconv.Atoi(srvPortStr)
 
-	invite := service.Invite{
-		NetworkName:   "res-redeemed",
-		PrivateKey:    mustGenKey(t),
-		AssignedRoute: "10.43.0.2/24",
-		Server: service.ServerInfo{
-			PublicKey: srvPubKey,
-			Endpoint:  "5.6.7.8:51821",
-			Route:     srvHost + "/32",
-			APIPort:   uint16(srvPort),
+	invite := protocol.Invitation{
+		Network: protocol.NetworkInfo{
+			Name:        "res-redeemed",
+			PublicKey:   srvPubKey,
+			Endpoint:    "5.6.7.8:51821",
+			ServerRoute: srvHost + "/32",
+			APIPort:     uint16(srvPort),
+		},
+		Peer: protocol.PeerIdentity{
+			Route:      "10.43.0.2/24",
+			PrivateKey: mustGenKey(t),
 		},
 	}
 
@@ -280,14 +290,14 @@ func TestBeginInstall_IdempotentRedeemed(t *testing.T) {
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
 		srvHost, srvPortStr, _ := net.SplitHostPort(r.Host)
 		srvPort, _ := strconv.Atoi(srvPortStr)
-		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
-			Network: serverapi.NetworkInfoDTO{
+		wire.WriteData(w, http.StatusOK, protocol.Invitation{
+			Network: protocol.NetworkInfo{
 				PublicKey:   srvPubKey,
 				Endpoint:    "1.2.3.4:51820",
 				ServerRoute: srvHost + "/32",
 				APIPort:     uint16(srvPort),
 			},
-			Peer: serverapi.PeerIdentityDTO{
+			Peer: protocol.PeerIdentity{
 				Route: "10.42.0.5/32",
 			},
 		})
@@ -298,15 +308,17 @@ func TestBeginInstall_IdempotentRedeemed(t *testing.T) {
 	srvHost, srvPortStr, _ := net.SplitHostPort(env.Server.Listener.Addr().String())
 	srvPort, _ := strconv.Atoi(srvPortStr)
 
-	invite := service.Invite{
-		NetworkName:   "redeemed-idem",
-		PrivateKey:    mustGenKey(t),
-		AssignedRoute: "10.43.0.2/24",
-		Server: service.ServerInfo{
-			PublicKey: srvPubKey,
-			Endpoint:  "5.6.7.8:51821",
-			Route:     srvHost + "/32",
-			APIPort:   uint16(srvPort),
+	invite := protocol.Invitation{
+		Network: protocol.NetworkInfo{
+			Name:        "redeemed-idem",
+			PublicKey:   srvPubKey,
+			Endpoint:    "5.6.7.8:51821",
+			ServerRoute: srvHost + "/32",
+			APIPort:     uint16(srvPort),
+		},
+		Peer: protocol.PeerIdentity{
+			Route:      "10.43.0.2/24",
+			PrivateKey: mustGenKey(t),
 		},
 	}
 
@@ -338,14 +350,14 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
 		srvHost, srvPortStr, _ := net.SplitHostPort(r.Host)
 		srvPort, _ := strconv.Atoi(srvPortStr)
-		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
-			Network: serverapi.NetworkInfoDTO{
+		wire.WriteData(w, http.StatusOK, protocol.Invitation{
+			Network: protocol.NetworkInfo{
 				PublicKey:   srvPubKey,
 				Endpoint:    "1.2.3.4:51820",
 				ServerRoute: srvHost + "/32",
 				APIPort:     uint16(srvPort),
 			},
-			Peer: serverapi.PeerIdentityDTO{
+			Peer: protocol.PeerIdentity{
 				Route: "10.42.0.5/32",
 			},
 		})
@@ -354,7 +366,7 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 		wire.WriteData(w, http.StatusOK, map[string]string{"status": "confirmed"})
 	})
 	mux.HandleFunc("GET /peers", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, []serverapi.VisiblePeerDTO{})
+		wire.WriteData(w, http.StatusOK, []protocol.VisiblePeer{})
 	})
 
 	env := testutil.SetupServiceWithServer(t, mux)
@@ -362,15 +374,17 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 	srvHost, srvPortStr, _ := net.SplitHostPort(env.Server.Listener.Addr().String())
 	srvPort, _ := strconv.Atoi(srvPortStr)
 
-	invite := service.Invite{
-		NetworkName:   "clear-test",
-		PrivateKey:    mustGenKey(t),
-		AssignedRoute: "10.43.0.2/24",
-		Server: service.ServerInfo{
-			PublicKey: srvPubKey,
-			Endpoint:  "5.6.7.8:51821",
-			Route:     srvHost + "/32",
-			APIPort:   uint16(srvPort),
+	invite := protocol.Invitation{
+		Network: protocol.NetworkInfo{
+			Name:        "clear-test",
+			PublicKey:   srvPubKey,
+			Endpoint:    "5.6.7.8:51821",
+			ServerRoute: srvHost + "/32",
+			APIPort:     uint16(srvPort),
+		},
+		Peer: protocol.PeerIdentity{
+			Route:      "10.43.0.2/24",
+			PrivateKey: mustGenKey(t),
 		},
 	}
 
@@ -403,15 +417,17 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 func TestEnableNetwork_RefusesUnconfirmed(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.BeginInstall(service.Invite{
-		NetworkName:   "not-confirmed",
-		PrivateKey:    "temp-key",
-		AssignedRoute: "10.43.0.2/24",
-		Server: service.ServerInfo{
-			PublicKey: "srv-pub",
-			Endpoint:  "1.2.3.4:51821",
-			Route:     "10.43.0.1/32",
-			APIPort:   8443,
+	_, err := env.Service.BeginInstall(protocol.Invitation{
+		Network: protocol.NetworkInfo{
+			Name:        "not-confirmed",
+			PublicKey:   "srv-pub",
+			Endpoint:    "1.2.3.4:51821",
+			ServerRoute: "10.43.0.1/32",
+			APIPort:     8443,
+		},
+		Peer: protocol.PeerIdentity{
+			Route:      "10.43.0.2/24",
+			PrivateKey: "temp-key",
 		},
 	})
 	if err != nil {

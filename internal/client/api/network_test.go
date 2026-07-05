@@ -8,9 +8,8 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
-	"git.studiopollinator.com/pollinator/cord/internal/client/service"
-	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -353,6 +352,104 @@ func TestAPIInstallNetwork_Duplicate(
 }
 
 //
+// Redeem
+//
+
+func TestAPIRedeemNetwork_IncludesAssignedAddress(
+	t *testing.T,
+) {
+	// setup env with a server that answers /redeem
+	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
+
+	inst, err := env.Service.BeginInstall(installInvite(t, env, "mid-install"))
+	if err != nil {
+		t.Fatalf("begin install: %v", err)
+	}
+
+	// redeem via the HTTP handler
+	url := "/networks/" + inst.Name + "/redeem"
+	result := wire.TestPost[api.NetworkDTO](env.Router, url, "")
+
+	// verify result — the server-assigned address is real information the
+	// caller didn't already know, so redeem keeps a response body
+	data := result.ExpectOK(t)
+	if data.Name != "mid-install" {
+		t.Fatalf("name = %q, want mid-install", data.Name)
+	}
+	if data.State != "redeemed" {
+		t.Fatalf("state = %q, want redeemed", data.State)
+	}
+	if data.Address != "10.42.0.5/32" {
+		t.Fatalf("address = %q, want 10.42.0.5/32", data.Address)
+	}
+}
+
+//
+// Confirm
+//
+
+func TestAPIConfirmNetwork_Success(
+	t *testing.T,
+) {
+	// setup env with a server that answers /redeem and /confirm using a
+	// real wireguard key, since Confirm configures a live tunnel peer
+	srvPub, err := wireguard.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate server pub key: %v", err)
+	}
+	handler := func(apiAddr string) http.Handler {
+		return newInstallServer(apiAddr, srvPub)
+	}
+	env := testutil.SetupWithServer(t, handler)
+
+	tempKey, err := wireguard.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate temp key: %v", err)
+	}
+	apiAddr := env.Server.Listener.Addr().String()
+	apiHost, apiPortStr, _ := net.SplitHostPort(apiAddr)
+	apiPort, _ := strconv.Atoi(apiPortStr)
+
+	invite := protocol.Invitation{
+		Network: protocol.NetworkInfo{
+			Name:        "mid-install",
+			PublicKey:   srvPub,
+			Endpoint:    "1.2.3.4:51820",
+			ServerRoute: apiHost + "/32",
+			APIPort:     uint16(apiPort),
+		},
+		Peer: protocol.PeerIdentity{
+			Route:      "10.42.0.5/16",
+			PrivateKey: tempKey,
+		},
+	}
+
+	inst, err := env.Service.BeginInstall(invite)
+	if err != nil {
+		t.Fatalf("begin install: %v", err)
+	}
+	if _, err := env.Service.Redeem(inst.Name); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	// confirm via the HTTP handler
+	url := "/networks/" + inst.Name + "/confirm"
+	result := wire.TestPost[any](env.Router, url, "")
+
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
+
+	// verify network is installed in store
+	nw, err := env.Service.GetNetwork("mid-install")
+	if err != nil {
+		t.Fatalf("get network: %v", err)
+	}
+	if !nw.Enabled {
+		t.Fatal("expected network to be enabled after confirm")
+	}
+}
+
+//
 // Uninstall
 //
 
@@ -365,16 +462,10 @@ func TestAPIUninstallNetwork_Success(
 
 	// uninstall network
 	url := "/networks/to-delete"
-	result := wire.TestDelete[api.DeleteResponse](env.Router, url)
+	result := wire.TestDelete[any](env.Router, url)
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Status != "deleted" {
-		t.Fatalf("status = %q, want deleted", data.Status)
-	}
-	if data.ID != "to-delete" {
-		t.Fatalf("id = %q, want to-delete", data.ID)
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
 
 	// verify network is gone
 	_, err := env.Service.GetNetwork("to-delete")
@@ -410,16 +501,10 @@ func TestAPIEnableNetwork_Success(
 
 	// enable network
 	url := "/networks/enable-me/enable"
-	result := wire.TestPost[api.NetworkDTO](env.Router, url, "")
+	result := wire.TestPost[any](env.Router, url, "")
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Name != "enable-me" {
-		t.Fatalf("name = %q, want enable-me", data.Name)
-	}
-	if !data.Enabled {
-		t.Fatal("expected enabled=true")
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
 
 	// verify network is enabled in store
 	nw, err := env.Service.GetNetwork("enable-me")
@@ -454,13 +539,10 @@ func TestAPIEnableNetwork_AlreadyEnabled(
 
 	// enable again — should be idempotent
 	url := "/networks/already-on/enable"
-	result := wire.TestPost[api.NetworkDTO](env.Router, url, "")
+	result := wire.TestPost[any](env.Router, url, "")
 
-	// verify result
-	data := result.ExpectOK(t)
-	if !data.Enabled {
-		t.Fatal("expected enabled=true")
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
 
 	// verify enabled in store
 	nw, err := env.Service.GetNetwork("already-on")
@@ -485,16 +567,10 @@ func TestAPIDisableNetwork_Success(
 
 	// disable network
 	url := "/networks/disable-me/disable"
-	result := wire.TestPost[api.NetworkDTO](env.Router, url, "")
+	result := wire.TestPost[any](env.Router, url, "")
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Name != "disable-me" {
-		t.Fatalf("name = %q, want disable-me", data.Name)
-	}
-	if data.Enabled {
-		t.Fatal("expected enabled=false")
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
 
 	// verify network is disabled in store
 	nw, err := env.Service.GetNetwork("disable-me")
@@ -529,13 +605,10 @@ func TestAPIDisableNetwork_AlreadyDisabled(
 
 	// disable again — should be idempotent
 	url := "/networks/already-off/disable"
-	result := wire.TestPost[api.NetworkDTO](env.Router, url, "")
+	result := wire.TestPost[any](env.Router, url, "")
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Enabled {
-		t.Fatal("expected enabled=false")
-	}
+	// verify result — status-only mutation, no response body
+	result.ExpectOK(t)
 }
 
 //
@@ -550,14 +623,14 @@ func newInstallServer(
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
 		srvHost, srvPortStr, _ := net.SplitHostPort(apiAddr)
 		srvPort, _ := strconv.Atoi(srvPortStr)
-		wire.WriteData(w, http.StatusOK, serverapi.InvitationDTO{
-			Network: serverapi.NetworkInfoDTO{
+		wire.WriteData(w, http.StatusOK, protocol.Invitation{
+			Network: protocol.NetworkInfo{
 				PublicKey:   serverPubKey,
 				Endpoint:    "1.2.3.4:51820",
 				ServerRoute: srvHost + "/32",
 				APIPort:     uint16(srvPort),
 			},
-			Peer: serverapi.PeerIdentityDTO{
+			Peer: protocol.PeerIdentity{
 				Route: "10.42.0.5/32",
 			},
 		})
@@ -575,7 +648,7 @@ func installInvite(
 	t *testing.T,
 	env *testutil.APIEnv,
 	networkName string,
-) service.Invite {
+) protocol.Invitation {
 	t.Helper()
 
 	tempKey, err := wireguard.GenerateKey()
@@ -591,15 +664,17 @@ func installInvite(
 	apiHost, apiPortStr, _ := net.SplitHostPort(apiAddr)
 	apiPort, _ := strconv.Atoi(apiPortStr)
 
-	return service.Invite{
-		NetworkName:   networkName,
-		PrivateKey:    tempKey,
-		AssignedRoute: "10.42.0.5/16",
-		Server: service.ServerInfo{
-			PublicKey: srvPub,
-			Endpoint:  "1.2.3.4:51820",
-			Route:     apiHost + "/32",
-			APIPort:   uint16(apiPort),
+	return protocol.Invitation{
+		Network: protocol.NetworkInfo{
+			Name:        networkName,
+			PublicKey:   srvPub,
+			Endpoint:    "1.2.3.4:51820",
+			ServerRoute: apiHost + "/32",
+			APIPort:     uint16(apiPort),
+		},
+		Peer: protocol.PeerIdentity{
+			Route:      "10.42.0.5/16",
+			PrivateKey: tempKey,
 		},
 	}
 }
