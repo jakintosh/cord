@@ -45,6 +45,15 @@ type ServerInfoDTO struct {
 	APIPort   uint16 `json:"api_port"`
 }
 
+func (s *ServerInfoDTO) ToServerInfo() service.ServerInfo {
+	return service.ServerInfo{
+		PublicKey: s.PublicKey,
+		Endpoint:  s.Endpoint,
+		Route:     s.Route,
+		APIPort:   s.APIPort,
+	}
+}
+
 type InstallNetworkRequest struct {
 	NetworkName   string        `json:"network_name"`
 	PrivateKey    string        `json:"private_key"`
@@ -52,19 +61,12 @@ type InstallNetworkRequest struct {
 	Server        ServerInfoDTO `json:"server"`
 }
 
-func installRequestToInvite(
-	req InstallNetworkRequest,
-) service.Invite {
+func (i *InstallNetworkRequest) ToInvite() service.Invite {
 	return service.Invite{
-		NetworkName:   req.NetworkName,
-		PrivateKey:    req.PrivateKey,
-		AssignedRoute: req.AssignedRoute,
-		Server: service.ServerInfo{
-			PublicKey: req.Server.PublicKey,
-			Endpoint:  req.Server.Endpoint,
-			Route:     req.Server.Route,
-			APIPort:   req.Server.APIPort,
-		},
+		NetworkName:   i.NetworkName,
+		PrivateKey:    i.PrivateKey,
+		AssignedRoute: i.AssignedRoute,
+		Server:        i.Server.ToServerInfo(),
 	}
 }
 
@@ -129,8 +131,8 @@ func (a *API) handleNetworkInstall(
 		wire.WriteError(w, http.StatusBadRequest, "malformed json")
 		return
 	}
-	invite := installRequestToInvite(req)
 
+	invite := req.ToInvite()
 	network, err := a.service.InstallNetwork(invite)
 	if err != nil {
 		writeServiceError(w, err)

@@ -244,7 +244,7 @@ func (s *Service) Redeem(
 		return nil, fmt.Errorf("redeem invite: %w", err)
 	}
 
-	if err := s.store.SetInstallRedeemed(
+	if err := s.store.RedeemInstall(
 		name,
 		result.Peer.Route,
 		ServerInfo{

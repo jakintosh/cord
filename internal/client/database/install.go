@@ -38,29 +38,9 @@ func (db *DB) GetInstall(
 	)
 
 	var inst service.Install
-	var createdUnix int64
-	if err := Scanner(row).Scan(
-		&inst.Name,
-		&inst.Phase,
-		&inst.InviteIfaceName,
-		&inst.InvitePrivateKey,
-		&inst.InviteAssignedRoute,
-		&inst.InviteServer.PublicKey,
-		&inst.InviteServer.Endpoint,
-		&inst.InviteServer.Route,
-		&inst.InviteServer.APIPort,
-		&inst.MainIfaceName,
-		&inst.MainPrivateKey,
-		&inst.MainAssignedRoute,
-		&inst.MainServer.PublicKey,
-		&inst.MainServer.Endpoint,
-		&inst.MainServer.Route,
-		&inst.MainServer.APIPort,
-		&createdUnix,
-	); err != nil {
+	if err := scanInstallRow(row, &inst); err != nil {
 		return nil, CheckSqliteErr("scan install", err)
 	}
-	inst.CreatedAt = time.Unix(createdUnix, 0)
 	return &inst, nil
 }
 
@@ -98,29 +78,9 @@ func (db *DB) ListInstalls() (
 	var installs []*service.Install
 	for rows.Next() {
 		var inst service.Install
-		var createdUnix int64
-		if err := rows.Scan(
-			&inst.Name,
-			&inst.Phase,
-			&inst.InviteIfaceName,
-			&inst.InvitePrivateKey,
-			&inst.InviteAssignedRoute,
-			&inst.InviteServer.PublicKey,
-			&inst.InviteServer.Endpoint,
-			&inst.InviteServer.Route,
-			&inst.InviteServer.APIPort,
-			&inst.MainIfaceName,
-			&inst.MainPrivateKey,
-			&inst.MainAssignedRoute,
-			&inst.MainServer.PublicKey,
-			&inst.MainServer.Endpoint,
-			&inst.MainServer.Route,
-			&inst.MainServer.APIPort,
-			&createdUnix,
-		); err != nil {
+		if err := scanInstallRow(rows, &inst); err != nil {
 			return nil, fmt.Errorf("scan install: %w", err)
 		}
-		inst.CreatedAt = time.Unix(createdUnix, 0)
 		installs = append(installs, &inst)
 	}
 
@@ -237,7 +197,7 @@ func (db *DB) ConfirmInstall(
 	return nil
 }
 
-func (db *DB) SetInstallRedeemed(
+func (db *DB) RedeemInstall(
 	name string,
 	assignedRoute string,
 	server service.ServerInfo,
@@ -260,11 +220,11 @@ func (db *DB) SetInstallRedeemed(
 		server.APIPort,
 	)
 	if err != nil {
-		return CheckSqliteErr("set install redeemed", err)
+		return CheckSqliteErr("redeem install", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("set install redeemed: %w", err)
+		return fmt.Errorf("redeem install: %w", err)
 	}
 	if affected == 0 {
 		return fmt.Errorf("%w: install %q not found", service.ErrNotFound, name)
@@ -290,5 +250,35 @@ func (db *DB) DeleteInstall(
 	if affected == 0 {
 		return fmt.Errorf("%w: install %q not found", service.ErrNotFound, name)
 	}
+	return nil
+}
+
+func scanInstallRow(
+	scanner Scanner,
+	inst *service.Install,
+) error {
+	var createdUnix int64
+	if err := scanner.Scan(
+		&inst.Name,
+		&inst.Phase,
+		&inst.InviteIfaceName,
+		&inst.InvitePrivateKey,
+		&inst.InviteAssignedRoute,
+		&inst.InviteServer.PublicKey,
+		&inst.InviteServer.Endpoint,
+		&inst.InviteServer.Route,
+		&inst.InviteServer.APIPort,
+		&inst.MainIfaceName,
+		&inst.MainPrivateKey,
+		&inst.MainAssignedRoute,
+		&inst.MainServer.PublicKey,
+		&inst.MainServer.Endpoint,
+		&inst.MainServer.Route,
+		&inst.MainServer.APIPort,
+		&createdUnix,
+	); err != nil {
+		return err
+	}
+	inst.CreatedAt = time.Unix(createdUnix, 0)
 	return nil
 }

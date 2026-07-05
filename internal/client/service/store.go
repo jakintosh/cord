@@ -9,7 +9,7 @@ type Store interface {
 	InsertInstall(install *Install) error
 	GetInstall(name string) (*Install, error)
 	ListInstalls() ([]*Install, error)
-	SetInstallRedeemed(name string, assignedRoute string, server ServerInfo) error
+	RedeemInstall(name string, assignedRoute string, server ServerInfo) error
 	DeleteInstall(name string) error
 
 	// ConfirmInstall inserts a NetworkConfig and deletes the matching
