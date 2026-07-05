@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol/client"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -53,7 +53,7 @@ type Network struct {
 	cfg    NetworkConfig
 	tunnel *Tunnel
 	store  Store
-	client *serverapi.PeerClient
+	client *client.PeerClient
 	clock  func() time.Time
 	logf   func(string, ...any)
 
@@ -206,7 +206,7 @@ func (s *Service) SyncNetwork(
 func (s *Service) newNetwork(
 	cfg *NetworkConfig,
 	tunnel *Tunnel,
-	client *serverapi.PeerClient,
+	client *client.PeerClient,
 ) *Network {
 	return &Network{
 		cfg:            *cfg,

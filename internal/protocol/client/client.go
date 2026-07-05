@@ -1,4 +1,6 @@
-package serverapi
+// Package client provides typed HTTP clients for the cord server's peer
+// and invite APIs, speaking the wire types defined in package protocol.
+package client
 
 import (
 	"encoding/json"

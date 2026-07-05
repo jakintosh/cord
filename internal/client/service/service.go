@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol/client"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -130,14 +130,14 @@ func (s *Service) Close() error {
 
 func (s *Service) newInviteClient(
 	tunnel *Tunnel,
-) *serverapi.InviteClient {
-	return serverapi.NewInviteClient(tunnel.apiAddr, s.httpClient)
+) *client.InviteClient {
+	return client.NewInviteClient(tunnel.apiAddr, s.httpClient)
 }
 
 func (s *Service) newPeerClient(
 	tunnel *Tunnel,
-) *serverapi.PeerClient {
-	return serverapi.NewPeerClient(tunnel.apiAddr, s.httpClient)
+) *client.PeerClient {
+	return client.NewPeerClient(tunnel.apiAddr, s.httpClient)
 }
 
 func (s *Service) logf(
