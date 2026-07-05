@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
@@ -14,43 +13,60 @@ import (
 type NetworkDTO struct {
 	Name      string `json:"name"`
 	State     string `json:"state"`
-	Installed bool   `json:"installed"`
 	Enabled   bool   `json:"enabled"`
 	Connected bool   `json:"connected"`
 }
 
-type InstallNetworkRequest struct {
-	NetworkName           string `json:"network_name"`
-	TempPeerPrivKey       string `json:"temp_private_key"`
-	TempPeerAssignedRoute string `json:"temp_route"`
-	InviteServerPubkey    string `json:"server_pubkey"`
-	InviteServerEndpoint  string `json:"server_endpoint"`
-	InviteServerRoute     string `json:"server_route"`
-	InviteServerPort      uint16 `json:"server_port"`
-}
-
-func installRequestToInvite(req InstallNetworkRequest) service.Invite {
-	return service.Invite{
-		NetworkName:           req.NetworkName,
-		TempPeerPrivKey:       req.TempPeerPrivKey,
-		TempPeerAssignedRoute: req.TempPeerAssignedRoute,
-		InviteServerPubkey:    req.InviteServerPubkey,
-		InviteServerEndpoint:  req.InviteServerEndpoint,
-		InviteServerRoute:     req.InviteServerRoute,
-		InviteServerPort:      req.InviteServerPort,
-	}
-}
-
-func NetworkDTOFromService(
-	nw service.Network,
+func networkDTOFromConfig(
+	nc service.NetworkConfig,
 	connected bool,
 ) NetworkDTO {
 	return NetworkDTO{
-		Name:      nw.Name,
-		State:     nw.State,
-		Installed: true,
-		Enabled:   nw.Enabled,
+		Name:      nc.Name,
+		State:     "installed",
+		Enabled:   nc.Enabled,
 		Connected: connected,
+	}
+}
+
+func networkDTOFromInstall(
+	inst service.Install,
+) NetworkDTO {
+	return NetworkDTO{
+		Name:  inst.Name,
+		State: inst.Phase,
+	}
+}
+
+type ServerInfoDTO struct {
+	PublicKey string `json:"public_key"`
+	Endpoint  string `json:"endpoint"`
+	Route     string `json:"server_route"`
+	APIPort   uint16 `json:"api_port"`
+}
+
+func (s *ServerInfoDTO) ToServerInfo() service.ServerInfo {
+	return service.ServerInfo{
+		PublicKey: s.PublicKey,
+		Endpoint:  s.Endpoint,
+		Route:     s.Route,
+		APIPort:   s.APIPort,
+	}
+}
+
+type InstallNetworkRequest struct {
+	NetworkName   string        `json:"network_name"`
+	PrivateKey    string        `json:"private_key"`
+	AssignedRoute string        `json:"route"`
+	Server        ServerInfoDTO `json:"server"`
+}
+
+func (i *InstallNetworkRequest) ToInvite() service.Invite {
+	return service.Invite{
+		NetworkName:   i.NetworkName,
+		PrivateKey:    i.PrivateKey,
+		AssignedRoute: i.AssignedRoute,
+		Server:        i.Server.ToServerInfo(),
 	}
 }
 
@@ -64,23 +80,22 @@ func (a *API) handleNetworkList(
 		return
 	}
 
-	statuses, err := a.service.Status()
+	dtos := make([]NetworkDTO, 0)
+	for _, name := range names {
+		nc, err := a.service.GetNetwork(name)
+		if err != nil {
+			continue
+		}
+		dtos = append(dtos, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name)))
+	}
+
+	installs, err := a.service.ListInstalls()
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	connected := make(map[string]bool, len(statuses))
-	for _, st := range statuses {
-		connected[st.Name] = st.Running
-	}
-
-	dtos := make([]NetworkDTO, 0, len(names))
-	for _, name := range names {
-		nw, err := a.service.GetNetwork(name)
-		if err != nil {
-			continue
-		}
-		dtos = append(dtos, NetworkDTOFromService(*nw, connected[name]))
+	for _, inst := range installs {
+		dtos = append(dtos, networkDTOFromInstall(*inst))
 	}
 
 	wire.WriteData(w, http.StatusOK, dtos)
@@ -92,26 +107,19 @@ func (a *API) handleNetworkShow(
 ) {
 	name := r.PathValue("name")
 
-	nw, err := a.service.GetNetwork(name)
+	nc, err := a.service.GetNetwork(name)
+	if err == nil {
+		wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name)))
+		return
+	}
+
+	inst, err := a.service.GetInstall(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	statuses, err := a.service.Status()
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-	connected := false
-	for _, st := range statuses {
-		if st.Name == name {
-			connected = st.Running
-			break
-		}
-	}
-
-	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*nw, connected))
+	wire.WriteData(w, http.StatusOK, networkDTOFromInstall(*inst))
 }
 
 func (a *API) handleNetworkInstall(
@@ -123,15 +131,15 @@ func (a *API) handleNetworkInstall(
 		wire.WriteError(w, http.StatusBadRequest, "malformed json")
 		return
 	}
-	invite := installRequestToInvite(req)
 
-	network, err := a.service.Install(invite)
+	invite := req.ToInvite()
+	network, err := a.service.InstallNetwork(invite)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	networkDTO := NetworkDTOFromService(*network, false)
+	networkDTO := networkDTOFromConfig(*network, a.service.IsNetworkRunning(network.Name))
 	wire.WriteData(w, http.StatusCreated, networkDTO)
 }
 
@@ -146,13 +154,13 @@ func (a *API) handleNetworkRedeem(
 		return
 	}
 
-	nw, err := a.service.GetNetwork(name)
+	inst, err := a.service.GetInstall(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*nw, false))
+	wire.WriteData(w, http.StatusOK, networkDTOFromInstall(*inst))
 }
 
 func (a *API) handleNetworkConfirm(
@@ -166,13 +174,13 @@ func (a *API) handleNetworkConfirm(
 		return
 	}
 
-	nw, err := a.service.GetNetwork(name)
+	nc, err := a.service.GetNetwork(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*nw, false))
+	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name)))
 }
 
 func (a *API) handleNetworkUninstall(
@@ -198,18 +206,18 @@ func (a *API) handleNetworkEnable(
 ) {
 	name := r.PathValue("name")
 
-	if err := a.service.EnableNetwork(r.Context(), name); err != nil {
+	if err := a.service.EnableNetwork(name); err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	nw, err := a.service.GetNetwork(name)
+	nc, err := a.service.GetNetwork(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*nw, true))
+	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name)))
 }
 
 func (a *API) handleNetworkDisable(
@@ -223,70 +231,33 @@ func (a *API) handleNetworkDisable(
 		return
 	}
 
-	nw, err := a.service.GetNetwork(name)
+	nc, err := a.service.GetNetwork(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*nw, false))
+	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name)))
 }
 
-func (a *API) handleNetworkFetch(
+func (a *API) handleNetworkSync(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
 	name := r.PathValue("name")
 
-	if err := a.service.FetchNetwork(name); err != nil {
+	if err := a.service.SyncNetwork(name); err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	nw, err := a.service.GetNetwork(name)
+	nc, err := a.service.GetNetwork(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	statuses, err := a.service.Status()
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-	connected := false
-	for _, st := range statuses {
-		if st.Name == name {
-			connected = st.Running
-			break
-		}
-	}
-
-	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*nw, connected))
-}
-
-func writeServiceError(
-	w http.ResponseWriter,
-	err error,
-) {
-	switch {
-	case errors.Is(err, service.ErrNotFound):
-		wire.WriteError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, service.ErrNetworkNotInstalled):
-		wire.WriteError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, service.ErrConflict):
-		wire.WriteError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, service.ErrNetworkExists):
-		wire.WriteError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, service.ErrNetworkEnabled):
-		wire.WriteError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, service.ErrNetworkNotEnabled):
-		wire.WriteError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, service.ErrInvalidInput):
-		wire.WriteError(w, http.StatusBadRequest, err.Error())
-	default:
-		wire.WriteError(w, http.StatusInternalServerError, err.Error())
-	}
+	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name)))
 }
 
 func (c *Client) ListNetworks(
@@ -398,14 +369,14 @@ func (c *Client) DisableNetwork(
 	return daemon.DecodeResponse[NetworkDTO](resp)
 }
 
-func (c *Client) FetchNetwork(
+func (c *Client) SyncNetwork(
 	ctx context.Context,
 	name string,
 ) (
 	NetworkDTO,
 	error,
 ) {
-	resp, err := c.t.Post(ctx, "/networks/"+name+"/fetch", nil)
+	resp, err := c.t.Post(ctx, "/networks/"+name+"/sync", nil)
 	if err != nil {
 		return NetworkDTO{}, err
 	}

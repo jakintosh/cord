@@ -43,7 +43,7 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("POST /networks/{name}/confirm", a.handleNetworkConfirm)
 	mux.HandleFunc("POST /networks/{name}/enable", a.handleNetworkEnable)
 	mux.HandleFunc("POST /networks/{name}/disable", a.handleNetworkDisable)
-	mux.HandleFunc("POST /networks/{name}/fetch", a.handleNetworkFetch)
+	mux.HandleFunc("POST /networks/{name}/sync", a.handleNetworkSync)
 
 	return mux
 }

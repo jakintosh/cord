@@ -26,11 +26,6 @@ var clientCmd = &args.Command{
 			Type: args.OptionTypeParameter,
 			Help: "wireguard backend: auto, kernel, or userspace",
 		},
-		{
-			Long: "sync-interval",
-			Type: args.OptionTypeParameter,
-			Help: "client sync interval (e.g. 30s, 1m, 5m)",
-		},
 	},
 	Subcommands: []*args.Command{
 		clientDaemonCmd,
@@ -45,12 +40,6 @@ var clientDaemonCmd = &args.Command{
 	Handler: func(i *args.Input) error {
 		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
 		backend := i.GetParameterOr("backend", "auto")
-		syncIntervalOpt := i.GetParameter("sync-interval")
-
-		syncInterval, err := parseDurationOpt(syncIntervalOpt)
-		if err != nil {
-			return fmt.Errorf("invalid 'sync-interval': %w", err)
-		}
 
 		ctx, cancel := signal.NotifyContext(
 			context.Background(), os.Interrupt, syscall.SIGTERM,
@@ -58,9 +47,8 @@ var clientDaemonCmd = &args.Command{
 		defer cancel()
 
 		opts := client.Options{
-			SocketPath:   socketPath,
-			Backend:      backend,
-			SyncInterval: syncInterval,
+			SocketPath: socketPath,
+			Backend:    backend,
 		}
 		return client.Serve(ctx, opts)
 	},

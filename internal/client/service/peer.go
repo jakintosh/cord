@@ -14,12 +14,21 @@ type Peer struct {
 }
 
 // PeerEndpoint is a single endpoint observation for a peer. Each row
-// records an endpoint address and when it was observed — either by
-// the server (gossip from other peers) or locally (direct contact).
+// records an endpoint address, when it was observed — either by the
+// server (gossip from other peers) or locally (direct contact) — and
+// when it was last tried as a rotation candidate for a stale peer.
 type PeerEndpoint struct {
 	Endpoint         string
 	ServerObservedAt int64
 	LocalObservedAt  int64
+	LastAttemptedAt  int64
+}
+
+// EndpointSighting is a locally observed peer endpoint, reported to
+// the server for gossip distribution.
+type EndpointSighting struct {
+	PeerKey  string
+	Endpoint string
 }
 
 // peersFromDTOs converts the server's visible peer list into local Peer

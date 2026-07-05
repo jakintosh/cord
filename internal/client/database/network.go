@@ -10,28 +10,19 @@ import (
 func (db *DB) GetNetwork(
 	name string,
 ) (
-	*service.Network,
+	*service.NetworkConfig,
 	error,
 ) {
 	row := db.Conn.QueryRow(`
 		SELECT
 			name,
-			state,
-			private_key,
-			public_key,
-			main_interface_name,
-			invite_interface_name,
-			assigned_route,
+			peer_private_key,
+			interface_name,
+			peer_route,
 			server_pubkey,
 			server_endpoint,
 			server_route,
 			server_api_port,
-			temp_priv_key,
-			temp_route,
-			invite_server_pubkey,
-			invite_server_endpoint,
-			invite_server_route,
-			invite_server_port,
 			enabled,
 			created_at_unix
 		FROM network
@@ -39,35 +30,26 @@ func (db *DB) GetNetwork(
 		name,
 	)
 
-	var net service.Network
+	var nc service.NetworkConfig
 	var enabledInt int64
 	var createdUnix int64
 	if err := Scanner(row).Scan(
-		&net.Name,
-		&net.State,
-		&net.PrivateKey,
-		&net.PublicKey,
-		&net.MainInterfaceName,
-		&net.InviteInterfaceName,
-		&net.AssignedRoute,
-		&net.ServerPubkey,
-		&net.ServerEndpoint,
-		&net.ServerRoute,
-		&net.ServerAPIPort,
-		&net.TempPeerPrivKey,
-		&net.TempPeerAssignedRoute,
-		&net.InviteServerPubkey,
-		&net.InviteServerEndpoint,
-		&net.InviteServerRoute,
-		&net.InviteServerPort,
+		&nc.Name,
+		&nc.PrivateKey,
+		&nc.InterfaceName,
+		&nc.AssignedRoute,
+		&nc.Server.PublicKey,
+		&nc.Server.Endpoint,
+		&nc.Server.Route,
+		&nc.Server.APIPort,
 		&enabledInt,
 		&createdUnix,
 	); err != nil {
 		return nil, CheckSqliteErr("scan network", err)
 	}
-	net.Enabled = enabledInt != 0
-	net.CreatedAt = time.Unix(createdUnix, 0)
-	return &net, nil
+	nc.Enabled = enabledInt != 0
+	nc.CreatedAt = time.Unix(createdUnix, 0)
+	return &nc, nil
 }
 
 func (db *DB) ListNetworkNames() (
@@ -101,119 +83,34 @@ func (db *DB) ListNetworkNames() (
 }
 
 func (db *DB) InsertNetwork(
-	network *service.Network,
+	nc *service.NetworkConfig,
 ) error {
 	_, err := db.Conn.Exec(`
 		INSERT INTO network (
 			name,
-			state,
-			private_key,
-			public_key,
-			main_interface_name,
-			invite_interface_name,
-			assigned_route,
+			peer_private_key,
+			interface_name,
+			peer_route,
 			server_pubkey,
 			server_endpoint,
 			server_route,
 			server_api_port,
-			temp_priv_key,
-			temp_route,
-			invite_server_pubkey,
-			invite_server_endpoint,
-			invite_server_route,
-			invite_server_port,
 			enabled,
 			created_at_unix
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)`,
-		network.Name,
-		network.State,
-		network.PrivateKey,
-		network.PublicKey,
-		network.MainInterfaceName,
-		network.InviteInterfaceName,
-		network.AssignedRoute,
-		network.ServerPubkey,
-		network.ServerEndpoint,
-		network.ServerRoute,
-		network.ServerAPIPort,
-		network.TempPeerPrivKey,
-		network.TempPeerAssignedRoute,
-		network.InviteServerPubkey,
-		network.InviteServerEndpoint,
-		network.InviteServerRoute,
-		network.InviteServerPort,
-		boolToInt(network.Enabled),
-		network.CreatedAt.Unix(),
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
+		nc.Name,
+		nc.PrivateKey,
+		nc.InterfaceName,
+		nc.AssignedRoute,
+		nc.Server.PublicKey,
+		nc.Server.Endpoint,
+		nc.Server.Route,
+		nc.Server.APIPort,
+		boolToInt(nc.Enabled),
+		nc.CreatedAt.Unix(),
 	)
 	return CheckSqliteErr("insert network", err)
-}
-
-func (db *DB) SetNetworkRedeemed(
-	name string,
-	assignedRoute string,
-	serverPubkey string,
-	serverEndpoint string,
-	serverRoute string,
-	serverAPIPort uint16,
-) error {
-	result, err := db.Conn.Exec(`
-		UPDATE network
-		SET
-			state = 'redeemed',
-			assigned_route = ?2,
-			server_pubkey = ?3,
-			server_endpoint = ?4,
-			server_route = ?5,
-			server_api_port = ?6
-		WHERE name = ?1`,
-		name,
-		assignedRoute,
-		serverPubkey,
-		serverEndpoint,
-		serverRoute,
-		serverAPIPort,
-	)
-	if err != nil {
-		return CheckSqliteErr("set network redeemed", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("set network redeemed: %w", err)
-	}
-	if affected == 0 {
-		return fmt.Errorf("%w: network %q not found", service.ErrNotFound, name)
-	}
-	return nil
-}
-
-func (db *DB) SetNetworkConfirmed(
-	name string,
-) error {
-	result, err := db.Conn.Exec(`
-		UPDATE network
-		SET
-			state = 'confirmed',
-			temp_priv_key = '',
-			temp_route = '',
-			invite_server_pubkey = '',
-			invite_server_endpoint = '',
-			invite_server_route = '',
-			invite_server_port = 0
-		WHERE name = ?1`,
-		name,
-	)
-	if err != nil {
-		return CheckSqliteErr("set network confirmed", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("set network confirmed: %w", err)
-	}
-	if affected == 0 {
-		return fmt.Errorf("%w: network %q not found", service.ErrNotFound, name)
-	}
-	return nil
 }
 
 func (db *DB) SetNetworkEnabled(

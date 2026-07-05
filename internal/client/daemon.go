@@ -25,10 +25,6 @@ type Options struct {
 	// Backend selects the WireGuard implementation: "auto" (default),
 	// "kernel", or "userspace".
 	Backend string
-
-	// SyncInterval controls the client sync interval. Defaults to 30s
-	// when zero.
-	SyncInterval time.Duration
 }
 
 // DefaultSocketPath is the default Unix socket path used when none is
@@ -74,18 +70,17 @@ func Serve(
 	}
 
 	svcOpts := service.Options{
-		Store:        db,
-		WireGuard:    wg,
-		Clock:        time.Now,
-		Logger:       log.Default(),
-		SyncInterval: opts.SyncInterval,
+		Store:     db,
+		WireGuard: wg,
+		Clock:     time.Now,
+		Logger:    log.Default(),
 	}
 	svc, err := service.New(svcOpts)
 	if err != nil {
 		return fmt.Errorf("client: new service: %w", err)
 	}
 
-	if err := svc.Start(ctx); err != nil {
+	if err := svc.Start(); err != nil {
 		return fmt.Errorf("client: start service: %w", err)
 	}
 	defer svc.Close()

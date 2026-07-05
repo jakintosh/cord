@@ -66,7 +66,7 @@ func (p *Plane) start(
 		return fmt.Errorf("parse cidr: %v", err)
 	}
 
-	// create we device
+	// create wg device
 	p.device, err = wg.CreateDevice(wireguard.DeviceConfig{
 		Name:       p.config.Name,
 		PrivateKey: p.privateKey,

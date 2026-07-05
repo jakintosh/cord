@@ -24,7 +24,7 @@ var clientNetworkCmd = &args.Command{
 		clientNetworkUninstall,
 		clientNetworkEnable,
 		clientNetworkDisable,
-		clientNetworkFetch,
+		clientNetworkSync,
 	},
 }
 
@@ -220,8 +220,8 @@ var clientNetworkDisable = &args.Command{
 	},
 }
 
-var clientNetworkFetch = &args.Command{
-	Name: "fetch",
+var clientNetworkSync = &args.Command{
+	Name: "sync",
 	Help: "sync peer state from server",
 	Operands: []args.Operand{
 		{
@@ -234,7 +234,7 @@ var clientNetworkFetch = &args.Command{
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
-		result, err := client.FetchNetwork(context.Background(), network)
+		result, err := client.SyncNetwork(context.Background(), network)
 		if err != nil {
 			return err
 		}
@@ -260,12 +260,14 @@ func parseInviteFile(
 	}
 
 	return api.InstallNetworkRequest{
-		NetworkName:           payload.Network.Name,
-		InviteServerPubkey:    payload.Network.PublicKey,
-		InviteServerEndpoint:  payload.Network.Endpoint,
-		InviteServerRoute:     payload.Network.ServerRoute,
-		InviteServerPort:      payload.Network.APIPort,
-		TempPeerAssignedRoute: payload.Peer.Route,
-		TempPeerPrivKey:       payload.Peer.PrivateKey,
+		NetworkName:   payload.Network.Name,
+		PrivateKey:    payload.Peer.PrivateKey,
+		AssignedRoute: payload.Peer.Route,
+		Server: api.ServerInfoDTO{
+			PublicKey: payload.Network.PublicKey,
+			Endpoint:  payload.Network.Endpoint,
+			Route:     payload.Network.ServerRoute,
+			APIPort:   payload.Network.APIPort,
+		},
 	}, nil
 }

@@ -8,6 +8,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
+	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service/serverapi"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
@@ -63,6 +64,39 @@ func TestAPIListNetworks_WithData(
 	}
 }
 
+func TestAPIListNetworks_IncludesRedeemedInstall(
+	t *testing.T,
+) {
+	// setup env with a server that answers /redeem
+	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
+	env.SeedNetwork(t, "net-a")
+
+	inst, err := env.Service.BeginInstall(installInvite(t, env, "mid-install"))
+	if err != nil {
+		t.Fatalf("begin install: %v", err)
+	}
+	if _, err := env.Service.Redeem(inst.Name); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	// list networks
+	url := "/networks"
+	result := wire.TestGet[[]api.NetworkDTO](env.Router, url)
+
+	// verify result
+	data := result.ExpectOK(t)
+	states := make(map[string]string, len(data))
+	for _, n := range data {
+		states[n.Name] = n.State
+	}
+	if states["net-a"] != "installed" {
+		t.Fatalf("net-a state = %q, want installed", states["net-a"])
+	}
+	if states["mid-install"] != "redeemed" {
+		t.Fatalf("mid-install state = %q, want redeemed", states["mid-install"])
+	}
+}
+
 //
 // Show
 //
@@ -83,8 +117,8 @@ func TestAPIShowNetwork_Success(
 	if data.Name != "mynet" {
 		t.Fatalf("name = %q, want mynet", data.Name)
 	}
-	if !data.Installed {
-		t.Fatal("expected installed=true")
+	if data.State != "installed" {
+		t.Fatalf("state = %q, want installed", data.State)
 	}
 	if data.Enabled {
 		t.Fatal("expected enabled=false for new network")
@@ -106,6 +140,34 @@ func TestAPIShowNetwork_NotFound(
 
 	// verify result
 	result.ExpectStatusError(t, http.StatusNotFound)
+}
+
+func TestAPIShowNetwork_MidInstall(
+	t *testing.T,
+) {
+	// setup env with a server that answers /redeem
+	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
+
+	inst, err := env.Service.BeginInstall(installInvite(t, env, "mid-install"))
+	if err != nil {
+		t.Fatalf("begin install: %v", err)
+	}
+	if _, err := env.Service.Redeem(inst.Name); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	// show mid-install network
+	url := "/networks/mid-install"
+	result := wire.TestGet[api.NetworkDTO](env.Router, url)
+
+	// verify result
+	data := result.ExpectOK(t)
+	if data.Name != "mid-install" {
+		t.Fatalf("name = %q, want mid-install", data.Name)
+	}
+	if data.State != "redeemed" {
+		t.Fatalf("state = %q, want redeemed", data.State)
+	}
 }
 
 //
@@ -135,12 +197,14 @@ func TestAPIInstallNetwork_Success(
 	url := "/networks"
 	body := `{
 		"network_name": "mynet",
-		"temp_private_key": "` + tempKey + `",
-		"temp_route": "10.42.0.5/16",
-		"server_pubkey": "` + srvPub + `",
-		"server_endpoint": "1.2.3.4:51820",
-		"server_route": "` + apiHost + `/32",
-		"server_port": ` + strconv.Itoa(apiPort) + `
+		"private_key": "` + tempKey + `",
+		"route": "10.42.0.5/16",
+		"server": {
+			"public_key": "` + srvPub + `",
+			"endpoint": "1.2.3.4:51820",
+			"server_route": "` + apiHost + `/32",
+			"api_port": ` + strconv.Itoa(apiPort) + `
+		}
 	}`
 	result := wire.TestPost[api.NetworkDTO](env.Router, url, body)
 
@@ -148,14 +212,14 @@ func TestAPIInstallNetwork_Success(
 	if data.Name != "mynet" {
 		t.Fatalf("name = %q, want mynet", data.Name)
 	}
-	if !data.Installed {
-		t.Fatal("expected installed=true")
+	if data.State != "installed" {
+		t.Fatalf("state = %q, want installed", data.State)
 	}
-	if data.Enabled {
-		t.Fatal("expected enabled=false for new network")
+	if !data.Enabled {
+		t.Fatal("expected enabled=true for new network")
 	}
-	if data.Connected {
-		t.Fatal("expected connected=false for new network")
+	if !data.Connected {
+		t.Fatal("expected connected=true: install adopts the live tunnel")
 	}
 
 	nw, err := env.Service.GetNetwork("mynet")
@@ -165,23 +229,20 @@ func TestAPIInstallNetwork_Success(
 	if nw.Name != "mynet" {
 		t.Fatalf("name = %q, want mynet", nw.Name)
 	}
-	if nw.ServerPubkey != srvPub {
-		t.Fatalf("server_pubkey = %q, want %q", nw.ServerPubkey, srvPub)
+	if nw.Server.PublicKey != srvPub {
+		t.Fatalf("server public_key = %q, want %q", nw.Server.PublicKey, srvPub)
 	}
-	if nw.ServerEndpoint != "1.2.3.4:51820" {
-		t.Fatalf("server_endpoint = %q, want 1.2.3.4:51820", nw.ServerEndpoint)
+	if nw.Server.Endpoint != "1.2.3.4:51820" {
+		t.Fatalf("server endpoint = %q, want 1.2.3.4:51820", nw.Server.Endpoint)
 	}
-	if nw.ServerRoute != apiHost+"/32" {
-		t.Fatalf("server_route = %q, want %q", nw.ServerRoute, apiHost+"/32")
+	if nw.Server.Route != apiHost+"/32" {
+		t.Fatalf("server route = %q, want %q", nw.Server.Route, apiHost+"/32")
 	}
-	if nw.ServerAPIPort != uint16(apiPort) {
-		t.Fatalf("server_api_port = %d, want %d", nw.ServerAPIPort, apiPort)
+	if nw.Server.APIPort != uint16(apiPort) {
+		t.Fatalf("server api_port = %d, want %d", nw.Server.APIPort, apiPort)
 	}
 	if nw.PrivateKey == "" {
 		t.Fatal("private_key should not be empty")
-	}
-	if nw.PublicKey == "" {
-		t.Fatal("public_key should not be empty")
 	}
 }
 
@@ -207,12 +268,14 @@ func TestAPIInstallNetwork_MissingName(
 
 	url := "/networks"
 	body := `{
-		"temp_private_key": "test-temp-key",
-		"temp_route": "10.42.0.5/16",
-		"server_pubkey": "srv-pub",
-		"server_endpoint": "1.2.3.4:51820",
-		"server_route": "10.42.0.1/32",
-		"server_port": 8443
+		"private_key": "test-temp-key",
+		"route": "10.42.0.5/16",
+		"server": {
+			"public_key": "srv-pub",
+			"endpoint": "1.2.3.4:51820",
+			"server_route": "10.42.0.1/32",
+			"api_port": 8443
+		}
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 
@@ -228,12 +291,14 @@ func TestAPIInstallNetwork_Duplicate(
 	url := "/networks"
 	body := `{
 		"network_name": "dupnet",
-		"temp_private_key": "test-temp-key",
-		"temp_route": "10.42.0.5/16",
-		"server_pubkey": "srv-pub",
-		"server_endpoint": "1.2.3.4:51820",
-		"server_route": "10.42.0.1/32",
-		"server_port": 8443
+		"private_key": "test-temp-key",
+		"route": "10.42.0.5/16",
+		"server": {
+			"public_key": "srv-pub",
+			"endpoint": "1.2.3.4:51820",
+			"server_route": "10.42.0.1/32",
+			"api_port": 8443
+		}
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 
@@ -456,6 +521,42 @@ func newInstallServer(
 	return mux
 }
 
+// installInvite builds a valid invite whose invite-server route points at
+// env's httptest server, so the invite tunnel's /redeem call actually
+// reaches testutil.NewInstallServer.
+func installInvite(
+	t *testing.T,
+	env *testutil.APIEnv,
+	networkName string,
+) service.Invite {
+	t.Helper()
+
+	tempKey, err := wireguard.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate temp key: %v", err)
+	}
+	srvPub, err := wireguard.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate server pub key: %v", err)
+	}
+
+	apiAddr := env.Server.Listener.Addr().String()
+	apiHost, apiPortStr, _ := net.SplitHostPort(apiAddr)
+	apiPort, _ := strconv.Atoi(apiPortStr)
+
+	return service.Invite{
+		NetworkName:   networkName,
+		PrivateKey:    tempKey,
+		AssignedRoute: "10.42.0.5/16",
+		Server: service.ServerInfo{
+			PublicKey: srvPub,
+			Endpoint:  "1.2.3.4:51820",
+			Route:     apiHost + "/32",
+			APIPort:   uint16(apiPort),
+		},
+	}
+}
+
 //
 // Fetch
 //
@@ -467,8 +568,8 @@ func TestAPIFetchNetwork_NotEnabled(
 	env := testutil.Setup(t)
 	env.SeedNetwork(t, "mynet")
 
-	// fetch — currently returns 501 until server tunnel is wired
-	url := "/networks/mynet/fetch"
+	// sync — returns conflict until enabled
+	url := "/networks/mynet/sync"
 	result := wire.TestPost[any](env.Router, url, "")
 
 	// verify result

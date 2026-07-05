@@ -43,62 +43,62 @@ type NetworkConfig struct {
 // Normalize applies defaults and validates the config. Zero-valued
 // fields are filled with sensible defaults. Returns ErrInvalidInput
 // or ErrCIDROverlap on failure.
-func (nc *NetworkConfig) Normalize() error {
-	if nc.Name == "" {
+func (n *NetworkConfig) Normalize() error {
+	if n.Name == "" {
 		return fmt.Errorf("%w: network name required", ErrInvalidInput)
 	}
-	if nc.ExternalIP == "" {
+	if n.ExternalIP == "" {
 		return fmt.Errorf("%w: external IP required", ErrInvalidInput)
 	}
 
 	// Main plane defaults
-	if nc.Main.Name == "" {
-		nc.Main.Name = nc.Name
+	if n.Main.Name == "" {
+		n.Main.Name = n.Name
 	}
-	if nc.Main.WireguardPort == 0 {
-		nc.Main.WireguardPort = 51820
+	if n.Main.WireguardPort == 0 {
+		n.Main.WireguardPort = 51820
 	}
-	if nc.Main.ApiPort == 0 {
-		nc.Main.ApiPort = 80
+	if n.Main.ApiPort == 0 {
+		n.Main.ApiPort = 80
 	}
 
 	// Invite plane defaults
-	if nc.Invite.Name == "" {
-		nc.Invite.Name = nc.Name + inviteSuffix
+	if n.Invite.Name == "" {
+		n.Invite.Name = n.Name + inviteSuffix
 	}
-	if nc.Invite.Cidr == "" {
-		nc.Invite.Cidr = defaultInviteCidr
+	if n.Invite.Cidr == "" {
+		n.Invite.Cidr = defaultInviteCidr
 	}
-	if nc.Invite.WireguardPort == 0 {
-		nc.Invite.WireguardPort = nc.Main.WireguardPort + 1
+	if n.Invite.WireguardPort == 0 {
+		n.Invite.WireguardPort = n.Main.WireguardPort + 1
 	}
-	if nc.Invite.ApiPort == 0 {
-		nc.Invite.ApiPort = 80
+	if n.Invite.ApiPort == 0 {
+		n.Invite.ApiPort = 80
 	}
 
 	// Validate main plane
-	if err := nc.Main.validate(); err != nil {
+	if err := n.Main.validate(); err != nil {
 		return fmt.Errorf("main: %w", err)
 	}
 
 	// Validate invite plane
-	if err := nc.Invite.validate(); err != nil {
+	if err := n.Invite.validate(); err != nil {
 		return fmt.Errorf("invite: %w", err)
 	}
 
 	// Cross-plane overlap check
-	_, mainNet, err := net.ParseCIDR(nc.Main.Cidr)
+	_, mainNet, err := net.ParseCIDR(n.Main.Cidr)
 	if err != nil {
-		return fmt.Errorf("%w: invalid main CIDR %q: %v", ErrInvalidInput, nc.Main.Cidr, err)
+		return fmt.Errorf("%w: invalid main CIDR %q: %v", ErrInvalidInput, n.Main.Cidr, err)
 	}
-	_, inviteNet, err := net.ParseCIDR(nc.Invite.Cidr)
+	_, inviteNet, err := net.ParseCIDR(n.Invite.Cidr)
 	if err != nil {
-		return fmt.Errorf("%w: invalid invite CIDR %q: %v", ErrInvalidInput, nc.Invite.Cidr, err)
+		return fmt.Errorf("%w: invalid invite CIDR %q: %v", ErrInvalidInput, n.Invite.Cidr, err)
 	}
 	if netaddr.Overlaps(mainNet, inviteNet) {
 		return fmt.Errorf(
 			"%w: invite CIDR %q overlaps main CIDR %q",
-			ErrCIDROverlap, nc.Invite.Cidr, nc.Main.Cidr,
+			ErrCIDROverlap, n.Invite.Cidr, n.Main.Cidr,
 		)
 	}
 

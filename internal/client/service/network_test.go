@@ -1,7 +1,6 @@
 package service_test
 
 import (
-	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -29,20 +28,20 @@ func TestGetNetwork_Success(t *testing.T) {
 	if nw.PrivateKey == "" {
 		t.Error("private_key should not be empty")
 	}
-	if nw.PublicKey == "" {
+	if pub, _ := wireguard.PublicKey(nw.PrivateKey); pub == "" {
 		t.Error("public_key should not be empty")
 	}
-	if nw.ServerPubkey == "" {
-		t.Errorf("server_pubkey = %q, should not be empty", nw.ServerPubkey)
+	if nw.Server.PublicKey == "" {
+		t.Errorf("server_pubkey = %q, should not be empty", nw.Server.PublicKey)
 	}
-	if nw.ServerEndpoint != "1.2.3.4:51820" {
-		t.Errorf("server_endpoint = %q, want 1.2.3.4:51820", nw.ServerEndpoint)
+	if nw.Server.Endpoint != "1.2.3.4:51820" {
+		t.Errorf("server_endpoint = %q, want 1.2.3.4:51820", nw.Server.Endpoint)
 	}
-	if nw.ServerRoute != "10.42.0.1/32" {
-		t.Errorf("server_route = %q, want 10.42.0.1/32", nw.ServerRoute)
+	if nw.Server.Route != "10.42.0.1/32" {
+		t.Errorf("server_route = %q, want 10.42.0.1/32", nw.Server.Route)
 	}
-	if nw.ServerAPIPort != 8443 {
-		t.Errorf("server_api_port = %d, want 8443", nw.ServerAPIPort)
+	if nw.Server.APIPort != 8443 {
+		t.Errorf("server_api_port = %d, want 8443", nw.Server.APIPort)
 	}
 	if nw.Enabled {
 		t.Error("new network should be disabled")
@@ -113,6 +112,9 @@ func TestInstall_Success(t *testing.T) {
 	mux.HandleFunc("POST /confirm", func(w http.ResponseWriter, r *http.Request) {
 		wire.WriteData(w, http.StatusOK, map[string]string{"status": "confirmed"})
 	})
+	mux.HandleFunc("GET /peers", func(w http.ResponseWriter, r *http.Request) {
+		wire.WriteData(w, http.StatusOK, []serverapi.VisiblePeerDTO{})
+	})
 
 	env := testutil.SetupServiceWithServer(t, mux)
 
@@ -124,24 +126,26 @@ func TestInstall_Success(t *testing.T) {
 		t.Fatalf("generate invite key: %v", err)
 	}
 	invite := service.Invite{
-		NetworkName:           "install-me",
-		TempPeerPrivKey:       inviteKey,
-		TempPeerAssignedRoute: "10.43.0.2/24",
-		InviteServerPubkey:    serverPubKeyStr,
-		InviteServerEndpoint:  "5.6.7.8:51821",
-		InviteServerRoute:     srvHost + "/32",
-		InviteServerPort:      uint16(srvPort),
+		NetworkName:   "install-me",
+		PrivateKey:    inviteKey,
+		AssignedRoute: "10.43.0.2/24",
+		Server: service.ServerInfo{
+			PublicKey: serverPubKeyStr,
+			Endpoint:  "5.6.7.8:51821",
+			Route:     srvHost + "/32",
+			APIPort:   uint16(srvPort),
+		},
 	}
 
-	nw, err := env.Service.Install(invite)
+	nc, err := env.Service.InstallNetwork(invite)
 	if err != nil {
 		t.Fatalf("install network: %v", err)
 	}
-	if nw.Name != "install-me" {
-		t.Fatalf("name = %q, want install-me", nw.Name)
+	if nc.Name != "install-me" {
+		t.Fatalf("name = %q, want install-me", nc.Name)
 	}
-	if nw.AssignedRoute != "10.42.0.5/32" {
-		t.Fatalf("assigned cidr = %q, want 10.42.0.5/32", nw.AssignedRoute)
+	if nc.AssignedRoute != "10.42.0.5/32" {
+		t.Fatalf("assigned cidr = %q, want 10.42.0.5/32", nc.AssignedRoute)
 	}
 
 	d := env.Backend.Device("install-me-i")
@@ -156,8 +160,8 @@ func TestInstall_Success(t *testing.T) {
 	if d2 == nil {
 		t.Fatal("expected main device was created")
 	}
-	if d2.CloseCalls != 1 {
-		t.Fatalf("main down calls = %d, want 1", d2.CloseCalls)
+	if d2.CloseCalls != 0 {
+		t.Fatalf("main down calls = %d, want 0 (network stays running)", d2.CloseCalls)
 	}
 
 	ops := env.Backend.AppliedOpsFor("install-me")
@@ -168,8 +172,8 @@ func TestInstall_Success(t *testing.T) {
 	if len(addOps) != 1 {
 		t.Fatalf("main peer ops = %d, want 1", len(addOps))
 	}
-	if nw.ServerEndpoint != "1.2.3.4:51820" {
-		t.Fatalf("persisted ServerEndpoint = %q, want 1.2.3.4:51820", nw.ServerEndpoint)
+	if nc.Server.Endpoint != "1.2.3.4:51820" {
+		t.Fatalf("persisted ServerEndpoint = %q, want 1.2.3.4:51820", nc.Server.Endpoint)
 	}
 }
 
@@ -181,12 +185,14 @@ func TestBeginInstall_MissingNetworkName(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.BeginInstall(service.Invite{
-		TempPeerPrivKey:       "temp-key",
-		TempPeerAssignedRoute: "10.42.0.5/16",
-		InviteServerPubkey:    "srv",
-		InviteServerEndpoint:  "1.2.3.4:51820",
-		InviteServerRoute:     "10.42.0.1/32",
-		InviteServerPort:      8443,
+		PrivateKey:    "temp-key",
+		AssignedRoute: "10.42.0.5/16",
+		Server: service.ServerInfo{
+			PublicKey: "srv",
+			Endpoint:  "1.2.3.4:51820",
+			Route:     "10.42.0.1/32",
+			APIPort:   8443,
+		},
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -197,12 +203,14 @@ func TestBeginInstall_MissingTempPrivKey(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.BeginInstall(service.Invite{
-		NetworkName:           "noname",
-		TempPeerAssignedRoute: "10.42.0.5/16",
-		InviteServerPubkey:    "srv",
-		InviteServerEndpoint:  "1.2.3.4:51820",
-		InviteServerRoute:     "10.42.0.1/32",
-		InviteServerPort:      8443,
+		NetworkName:   "noname",
+		AssignedRoute: "10.42.0.5/16",
+		Server: service.ServerInfo{
+			PublicKey: "srv",
+			Endpoint:  "1.2.3.4:51820",
+			Route:     "10.42.0.1/32",
+			APIPort:   8443,
+		},
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -213,12 +221,14 @@ func TestBeginInstall_MissingTempCidr(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.BeginInstall(service.Invite{
-		NetworkName:          "noname",
-		TempPeerPrivKey:      "temp-key",
-		InviteServerPubkey:   "srv",
-		InviteServerEndpoint: "1.2.3.4:51820",
-		InviteServerRoute:    "10.42.0.1/32",
-		InviteServerPort:     8443,
+		NetworkName: "noname",
+		PrivateKey:  "temp-key",
+		Server: service.ServerInfo{
+			PublicKey: "srv",
+			Endpoint:  "1.2.3.4:51820",
+			Route:     "10.42.0.1/32",
+			APIPort:   8443,
+		},
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -229,12 +239,14 @@ func TestBeginInstall_MissingServerPubkey(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.BeginInstall(service.Invite{
-		NetworkName:           "noname",
-		TempPeerPrivKey:       "temp-key",
-		TempPeerAssignedRoute: "10.42.0.5/16",
-		InviteServerEndpoint:  "1.2.3.4:51820",
-		InviteServerRoute:     "10.42.0.1/32",
-		InviteServerPort:      8443,
+		NetworkName:   "noname",
+		PrivateKey:    "temp-key",
+		AssignedRoute: "10.42.0.5/16",
+		Server: service.ServerInfo{
+			Endpoint: "1.2.3.4:51820",
+			Route:    "10.42.0.1/32",
+			APIPort:  8443,
+		},
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -245,12 +257,14 @@ func TestBeginInstall_MissingServerEndpoint(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.BeginInstall(service.Invite{
-		NetworkName:           "noname",
-		TempPeerPrivKey:       "temp-key",
-		TempPeerAssignedRoute: "10.42.0.5/16",
-		InviteServerPubkey:    "srv",
-		InviteServerRoute:     "10.42.0.1/32",
-		InviteServerPort:      8443,
+		NetworkName:   "noname",
+		PrivateKey:    "temp-key",
+		AssignedRoute: "10.42.0.5/16",
+		Server: service.ServerInfo{
+			PublicKey: "srv",
+			Route:     "10.42.0.1/32",
+			APIPort:   8443,
+		},
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -261,11 +275,14 @@ func TestBeginInstall_MissingTempApiAddr(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.BeginInstall(service.Invite{
-		NetworkName:           "noname",
-		TempPeerPrivKey:       "temp-key",
-		TempPeerAssignedRoute: "10.42.0.5/16",
-		InviteServerPubkey:    "srv",
-		InviteServerEndpoint:  "1.2.3.4:51820",
+		NetworkName:   "noname",
+		PrivateKey:    "temp-key",
+		AssignedRoute: "10.42.0.5/16",
+		Server: service.ServerInfo{
+			PublicKey: "srv",
+			Endpoint:  "1.2.3.4:51820",
+			Route:     "10.42.0.1/32",
+		},
 	})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
@@ -294,8 +311,7 @@ func TestUninstallNetwork_DisablesFirst(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "enabled-net")
 
-	ctx := context.Background()
-	if err := env.Service.EnableNetwork(ctx, "enabled-net"); err != nil {
+	if err := env.Service.EnableNetwork("enabled-net"); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
@@ -316,8 +332,7 @@ func TestEnableNetwork_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "enable-me")
 
-	ctx := context.Background()
-	if err := env.Service.EnableNetwork(ctx, "enable-me"); err != nil {
+	if err := env.Service.EnableNetwork("enable-me"); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
@@ -338,12 +353,11 @@ func TestEnableNetwork_AlreadyRunning(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "running")
 
-	ctx := context.Background()
-	if err := env.Service.EnableNetwork(ctx, "running"); err != nil {
+	if err := env.Service.EnableNetwork("running"); err != nil {
 		t.Fatalf("first enable: %v", err)
 	}
 
-	if err := env.Service.EnableNetwork(ctx, "running"); err != nil {
+	if err := env.Service.EnableNetwork("running"); err != nil {
 		t.Fatalf("second enable: %v", err)
 	}
 
@@ -355,7 +369,7 @@ func TestEnableNetwork_AlreadyRunning(t *testing.T) {
 func TestEnableNetwork_NotFound(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	err := env.Service.EnableNetwork(context.Background(), "ghost")
+	err := env.Service.EnableNetwork("ghost")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
@@ -367,7 +381,7 @@ func TestEnableNetwork_DeviceError(t *testing.T) {
 
 	env.Backend.CreateErr = errors.New("device create failed")
 
-	err := env.Service.EnableNetwork(context.Background(), "bad-device")
+	err := env.Service.EnableNetwork("bad-device")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -385,8 +399,7 @@ func TestDisableNetwork_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "disable-me")
 
-	ctx := context.Background()
-	if err := env.Service.EnableNetwork(ctx, "disable-me"); err != nil {
+	if err := env.Service.EnableNetwork("disable-me"); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
@@ -428,77 +441,40 @@ func TestDisableNetwork_NotEnabled(t *testing.T) {
 	}
 }
 
-func TestStatus_Empty(t *testing.T) {
+func TestIsNetworkRunning_WithoutNetworks(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	statuses, err := env.Service.Status()
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	if len(statuses) != 0 {
-		t.Errorf("expected 0 statuses, got %d", len(statuses))
+	if env.Service.IsNetworkRunning("nonexistent") {
+		t.Error("nonexistent network should not be running")
 	}
 }
 
-func TestStatus_WithInstalledNetworks(t *testing.T) {
+func TestIsNetworkRunning_InstalledNotEnabled(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "net-a")
-	testutil.SeedNetworkDirect(t, env.Service, "net-b")
 
-	statuses, err := env.Service.Status()
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	if len(statuses) != 2 {
-		t.Fatalf("expected 2 statuses, got %d", len(statuses))
-	}
-
-	for _, st := range statuses {
-		if st.Enabled {
-			t.Errorf("%s should not be enabled", st.Name)
-		}
-		if st.Running {
-			t.Errorf("%s should not be running", st.Name)
-		}
-		if st.PeerCount != 0 {
-			t.Errorf("%s peer_count = %d, want 0", st.Name, st.PeerCount)
-		}
+	if env.Service.IsNetworkRunning("net-a") {
+		t.Error("non-enabled network should not be running")
 	}
 }
 
-func TestStatus_WithRunningNetworks(t *testing.T) {
+func TestIsNetworkRunning_EnabledNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "running-net")
 
-	ctx := context.Background()
-	if err := env.Service.EnableNetwork(ctx, "running-net"); err != nil {
+	if err := env.Service.EnableNetwork("running-net"); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
-	statuses, err := env.Service.Status()
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	if len(statuses) != 1 {
-		t.Fatalf("expected 1 status, got %d", len(statuses))
-	}
-
-	st := statuses[0]
-	if st.Name != "running-net" {
-		t.Errorf("name = %q, want running-net", st.Name)
-	}
-	if !st.Enabled {
-		t.Error("expected enabled=true")
-	}
-	if !st.Running {
-		t.Error("expected running=true")
+	if !env.Service.IsNetworkRunning("running-net") {
+		t.Error("enabled network should be running")
 	}
 }
 
 func TestFetchNetwork_NotRunning(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	err := env.Service.FetchNetwork("any")
+	err := env.Service.SyncNetwork("any")
 	if !errors.Is(err, service.ErrNetworkNotEnabled) {
 		t.Errorf("err = %v, want ErrNetworkNotEnabled", err)
 	}

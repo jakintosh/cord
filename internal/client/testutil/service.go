@@ -38,20 +38,26 @@ func SetupServiceWithServer(
 	backend := wireguardtest.NewMockBackend()
 	mgr := wireguard.NewManagerWithBackend(backend)
 
-	var httpClient *http.Client
 	var server *httptest.Server
+	// The sync timer fires immediately on start; when no test server
+	// backs the tunnel address the call must fail fast instead of
+	// waiting out the default dial timeout.
+	httpClient := &http.Client{Timeout: 100 * time.Millisecond}
 	if handler != nil {
 		server = httptest.NewServer(handler)
 		httpClient = server.Client()
 	}
 
 	svc, err := service.New(service.Options{
-		Store:        db,
-		WireGuard:    mgr,
-		Clock:        func() time.Time { return FixedTime },
-		Logger:       log.Default(),
-		HTTPClient:   httpClient,
-		SyncInterval: 30 * time.Second,
+		Store:      db,
+		WireGuard:  mgr,
+		Clock:      func() time.Time { return FixedTime },
+		Logger:     log.Default(),
+		HTTPClient: httpClient,
+
+		SyncInterval:   30 * time.Second,
+		ScanInterval:   30 * time.Second,
+		ReportInterval: 30 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -75,11 +81,15 @@ func SetupServiceWithManager(
 	db := SetupDB(t)
 
 	svc, err := service.New(service.Options{
-		Store:        db,
-		WireGuard:    mgr,
-		Clock:        func() time.Time { return FixedTime },
-		Logger:       log.Default(),
-		SyncInterval: 30 * time.Second,
+		Store:      db,
+		WireGuard:  mgr,
+		Clock:      func() time.Time { return FixedTime },
+		Logger:     log.Default(),
+		HTTPClient: &http.Client{Timeout: 100 * time.Millisecond},
+
+		SyncInterval:   30 * time.Second,
+		ScanInterval:   30 * time.Second,
+		ReportInterval: 30 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)

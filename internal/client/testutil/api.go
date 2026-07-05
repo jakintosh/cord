@@ -1,7 +1,6 @@
 package testutil
 
 import (
-	"context"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -43,8 +42,11 @@ func SetupWithServer(
 	backend := wireguardtest.NewMockBackend()
 	mgr := wireguard.NewManagerWithBackend(backend)
 
-	var httpClient *http.Client
 	var server *httptest.Server
+	// The runtime loop issues an immediate sync on start; when no test
+	// server backs the tunnel address the call must fail fast instead of
+	// waiting out the default dial timeout.
+	httpClient := &http.Client{Timeout: 100 * time.Millisecond}
 	if handlerFactory != nil {
 		server = httptest.NewUnstartedServer(nil)
 		handler := handlerFactory(server.Listener.Addr().String())
@@ -54,12 +56,15 @@ func SetupWithServer(
 	}
 
 	svc, err := service.New(service.Options{
-		Store:        db,
-		WireGuard:    mgr,
-		Clock:        func() time.Time { return FixedTime },
-		Logger:       log.Default(),
-		HTTPClient:   httpClient,
-		SyncInterval: 30 * time.Second,
+		Store:      db,
+		WireGuard:  mgr,
+		Clock:      func() time.Time { return FixedTime },
+		Logger:     log.Default(),
+		HTTPClient: httpClient,
+
+		SyncInterval:   30 * time.Second,
+		ScanInterval:   30 * time.Second,
+		ReportInterval: 30 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -84,21 +89,21 @@ func SetupWithServer(
 func (e *APIEnv) SeedNetwork(
 	t *testing.T,
 	name string,
-) *service.Network {
+) *service.NetworkConfig {
 	return SeedNetworkDirect(t, e.Service, name)
 }
 
 func (e *APIEnv) SeedEnabledNetwork(
 	t *testing.T,
 	name string,
-) *service.Network {
+) *service.NetworkConfig {
 	t.Helper()
 
-	nw := e.SeedNetwork(t, name)
-	if err := e.Service.EnableNetwork(context.Background(), name); err != nil {
+	nc := e.SeedNetwork(t, name)
+	if err := e.Service.EnableNetwork(name); err != nil {
 		t.Fatalf("enable network %q: %v", name, err)
 	}
-	return nw
+	return nc
 }
 
 // NewInstallServer creates an httptest server handler that responds to

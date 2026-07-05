@@ -42,7 +42,7 @@ func TestOpen_TablesExist(t *testing.T) {
 	}
 	defer db.Close()
 
-	for _, table := range []string{"network", "peer", "endpoint"} {
+	for _, table := range []string{"network", "peer", "endpoint", "install"} {
 		var name string
 		err := db.Conn.QueryRow(`
 			SELECT name FROM sqlite_master

@@ -4,33 +4,24 @@ package service
 // It uses domain vocabulary and domain types. The concrete SQLite
 // implementation lives in internal/client/database.
 type Store interface {
-	// Network records.
+	// Install records (transient, consumed at confirm).
 
-	// GetNetwork returns the persisted network record by name.
-	GetNetwork(name string) (*Network, error)
+	InsertInstall(install *Install) error
+	GetInstall(name string) (*Install, error)
+	ListInstalls() ([]*Install, error)
+	RedeemInstall(name string, assignedRoute string, server ServerInfo) error
+	DeleteInstall(name string) error
 
-	// ListNetworkNames returns the names of all installed networks,
-	// ordered by name ascending.
+	// ConfirmInstall inserts a NetworkConfig and deletes the matching
+	// Install row in a single transaction.
+	ConfirmInstall(name string, nc *NetworkConfig) error
+
+	// Network records (permanent membership).
+
+	GetNetwork(name string) (*NetworkConfig, error)
 	ListNetworkNames() ([]string, error)
-
-	// InsertNetwork persists a new network record. Returns
-	// ErrConflict when a network with this name already exists.
-	InsertNetwork(network *Network) error
-
-	// SetNetworkRedeemed transitions a network to the redeemed
-	// state, recording the main network parameters returned by
-	// the server's /redeem endpoint.
-	SetNetworkRedeemed(name string, assignedRoute string, serverPubkey string, serverEndpoint string, serverRoute string, serverAPIPort uint16) error
-
-	// SetNetworkConfirmed transitions a network to the confirmed
-	// state and clears the temporary install scratch fields.
-	SetNetworkConfirmed(name string) error
-
-	// DeleteNetwork removes the named network and all of its peer
-	// cache entries via foreign-key cascade.
+	InsertNetwork(nc *NetworkConfig) error
 	DeleteNetwork(name string) error
-
-	// SetNetworkEnabled updates the enabled flag for a network.
 	SetNetworkEnabled(name string, enabled bool) error
 
 	// Peer cache within a network.
@@ -59,9 +50,17 @@ type Store interface {
 	// matching endpoint row. No-op if the endpoint doesn't exist.
 	UpdatePeerEndpointLocal(network, pubKey, endpoint string, when int64) error
 
+	// MarkPeerEndpointAttempt sets last_attempted_at on the matching
+	// endpoint row. No-op if the endpoint doesn't exist.
+	MarkPeerEndpointAttempt(network, pubKey, endpoint string, when int64) error
+
 	// ListPeerEndpoints returns all known endpoints for a peer,
 	// ordered by server_observed_at DESC, local_observed_at DESC.
 	ListPeerEndpoints(network, pubKey string) ([]PeerEndpoint, error)
+
+	// ListLocalEndpointsSince returns endpoints across all peers of
+	// the named network with local_observed_at at or after since.
+	ListLocalEndpointsSince(network string, since int64) ([]EndpointSighting, error)
 
 	// Close releases the database connection.
 	Close() error

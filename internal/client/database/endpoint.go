@@ -99,6 +99,29 @@ func (db *DB) UpdatePeerEndpointLocal(
 	return nil
 }
 
+func (db *DB) MarkPeerEndpointAttempt(
+	network string,
+	pubKey string,
+	endpoint string,
+	when int64,
+) error {
+	_, err := db.Conn.Exec(`
+		UPDATE endpoint
+		SET last_attempted_at = ?4
+		WHERE network_name = ?1
+			AND peer_id = (SELECT id FROM peer WHERE network_name = ?1 AND public_key = ?2)
+			AND endpoint = ?3`,
+		network,
+		pubKey,
+		endpoint,
+		when,
+	)
+	if err != nil {
+		return fmt.Errorf("mark peer endpoint attempt: %w", err)
+	}
+	return nil
+}
+
 func (db *DB) ListPeerEndpoints(
 	network string,
 	pubKey string,
@@ -107,7 +130,7 @@ func (db *DB) ListPeerEndpoints(
 	error,
 ) {
 	rows, err := db.Conn.Query(`
-		SELECT e.endpoint, e.server_observed_at, e.local_observed_at
+		SELECT e.endpoint, e.server_observed_at, e.local_observed_at, e.last_attempted_at
 		FROM endpoint e
 		JOIN peer p ON p.id = e.peer_id
 		WHERE p.network_name = ?1 AND p.public_key = ?2
@@ -127,6 +150,7 @@ func (db *DB) ListPeerEndpoints(
 			&ep.Endpoint,
 			&ep.ServerObservedAt,
 			&ep.LocalObservedAt,
+			&ep.LastAttemptedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan endpoint: %w", err)
 		}
@@ -138,4 +162,41 @@ func (db *DB) ListPeerEndpoints(
 	}
 
 	return endpoints, nil
+}
+
+func (db *DB) ListLocalEndpointsSince(
+	network string,
+	since int64,
+) (
+	[]service.EndpointSighting,
+	error,
+) {
+	rows, err := db.Conn.Query(`
+		SELECT p.public_key, e.endpoint
+		FROM endpoint e
+		JOIN peer p ON p.id = e.peer_id
+		WHERE e.network_name = ?1 AND e.local_observed_at >= ?2
+		ORDER BY p.public_key, e.endpoint`,
+		network,
+		since,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query local endpoints: %w", err)
+	}
+	defer rows.Close()
+
+	var sightings []service.EndpointSighting
+	for rows.Next() {
+		var s service.EndpointSighting
+		if err := rows.Scan(&s.PeerKey, &s.Endpoint); err != nil {
+			return nil, fmt.Errorf("scan local endpoint: %w", err)
+		}
+		sightings = append(sightings, s)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate local endpoints: %w", err)
+	}
+
+	return sightings, nil
 }
