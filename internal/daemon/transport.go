@@ -4,10 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
+	"syscall"
+
+	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 )
 
 type Transport struct {
@@ -38,7 +44,15 @@ func (t *Transport) Get(
 	*http.Response,
 	error,
 ) {
-	return t.http.Get("http://unix" + path)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix"+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := t.http.Do(req)
+	if err != nil {
+		return nil, t.friendlyDialErr(err)
+	}
+	return resp, nil
 }
 
 func (t *Transport) Post(
@@ -53,7 +67,40 @@ func (t *Transport) Post(
 	if err != nil {
 		return nil, fmt.Errorf("marshal: %w", err)
 	}
-	return t.http.Post("http://unix"+path, "application/json", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix"+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := t.http.Do(req)
+	if err != nil {
+		return nil, t.friendlyDialErr(err)
+	}
+	return resp, nil
+}
+
+// PostRaw sends body verbatim as the request body, without JSON
+// re-encoding. Use it when the caller already holds an opaque JSON
+// payload (e.g. an invitation file) that the daemon should parse and
+// validate itself.
+func (t *Transport) PostRaw(
+	ctx context.Context,
+	path string,
+	body []byte,
+) (
+	*http.Response,
+	error,
+) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix"+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := t.http.Do(req)
+	if err != nil {
+		return nil, t.friendlyDialErr(err)
+	}
+	return resp, nil
 }
 
 func (t *Transport) Delete(
@@ -67,7 +114,11 @@ func (t *Transport) Delete(
 	if err != nil {
 		return nil, err
 	}
-	return t.http.Do(req)
+	resp, err := t.http.Do(req)
+	if err != nil {
+		return nil, t.friendlyDialErr(err)
+	}
+	return resp, nil
 }
 
 func (t *Transport) Patch(
@@ -87,9 +138,37 @@ func (t *Transport) Patch(
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return t.http.Do(req)
+	resp, err := t.http.Do(req)
+	if err != nil {
+		return nil, t.friendlyDialErr(err)
+	}
+	return resp, nil
 }
 
+// friendlyDialErr detects unix-socket dial failures (daemon not running,
+// socket file missing) and rewrites them into a message naming the socket
+// path, rather than surfacing the raw *url.Error/*net.OpError chain.
+func (t *Transport) friendlyDialErr(
+	err error,
+) error {
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		return err
+	}
+	var opErr *net.OpError
+	if !errors.As(urlErr.Err, &opErr) {
+		return err
+	}
+	if errors.Is(opErr.Err, syscall.ECONNREFUSED) || errors.Is(opErr.Err, syscall.ENOENT) || os.IsNotExist(opErr.Err) {
+		return fmt.Errorf("cannot reach cord daemon at %s (is the daemon running?)", t.socketPath)
+	}
+	return err
+}
+
+// DecodeResponse decodes the wire envelope from resp. On a non-2xx status,
+// it attempts to decode the wire error envelope and returns an error
+// containing just the message; if the body isn't a valid envelope, it falls
+// back to reporting the raw status and body.
 func DecodeResponse[T any](
 	resp *http.Response,
 ) (
@@ -98,14 +177,23 @@ func DecodeResponse[T any](
 ) {
 	var zero T
 	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return zero, fmt.Errorf("read response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		body, _ := io.ReadAll(resp.Body)
+		var envelope struct {
+			Error *wire.Error `json:"error"`
+		}
+		if err := json.Unmarshal(body, &envelope); err == nil && envelope.Error != nil && envelope.Error.Message != "" {
+			return zero, errors.New(envelope.Error.Message)
+		}
 		return zero, fmt.Errorf("unexpected status %s: %s", resp.Status, string(body))
 	}
 	var envelope struct {
 		Data json.RawMessage `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+	if err := json.Unmarshal(body, &envelope); err != nil {
 		return zero, fmt.Errorf("decode: %w", err)
 	}
 	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {

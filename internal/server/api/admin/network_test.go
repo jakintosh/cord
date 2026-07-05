@@ -334,3 +334,76 @@ func TestAPIDeleteNetwork_NotFound(
 	// verify result
 	result.ExpectStatusError(t, http.StatusNotFound)
 }
+
+func TestAPIEnableNetwork_Success(
+	t *testing.T,
+) {
+	// setup env and seed network
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+
+	// enable network
+	url := "/networks/testnet/enable"
+	result := wire.TestPost[admin.NetworkDTO](env.Router, url, "")
+
+	// verify result
+	data := result.ExpectOK(t)
+	if data.Name != "testnet" {
+		t.Fatalf("name = %q, want testnet", data.Name)
+	}
+	if !data.Enabled {
+		t.Fatal("expected enabled=true")
+	}
+}
+
+func TestAPIEnableNetwork_NotFound(
+	t *testing.T,
+) {
+	// setup env
+	env := testutil.Setup(t)
+
+	// enable nonexistent network
+	url := "/networks/ghost/enable"
+	result := wire.TestPost[any](env.Router, url, "")
+
+	// verify result
+	result.ExpectStatusError(t, http.StatusNotFound)
+}
+
+func TestAPIDisableNetwork_Success(
+	t *testing.T,
+) {
+	// setup env and seed network
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+
+	// enable then disable network
+	enableURL := "/networks/testnet/enable"
+	wire.TestPost[admin.NetworkDTO](env.Router, enableURL, "").ExpectOK(t)
+
+	url := "/networks/testnet/disable"
+	result := wire.TestPost[admin.NetworkDTO](env.Router, url, "")
+
+	// verify result
+	data := result.ExpectOK(t)
+	if data.Name != "testnet" {
+		t.Fatalf("name = %q, want testnet", data.Name)
+	}
+	if data.Enabled {
+		t.Fatal("expected enabled=false")
+	}
+}
+
+func TestAPIDisableNetwork_NotFound(
+	t *testing.T,
+) {
+	// setup env
+	env := testutil.Setup(t)
+
+	// disable nonexistent network
+	url := "/networks/ghost/disable"
+	result := wire.TestPost[any](env.Router, url, "")
+
+	// verify result
+	result.ExpectStatusError(t, http.StatusNotFound)
+}

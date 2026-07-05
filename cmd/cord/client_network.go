@@ -2,14 +2,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"strconv"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/client"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
-	server "git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
 var clientNetworkCmd = &args.Command{
@@ -29,11 +28,10 @@ var clientNetworkCmd = &args.Command{
 }
 
 var clientNetworkList = &args.Command{
-	Name:    "list",
-	Help:    "list installed networks",
-	Options: []args.Option{jsonOption},
+	Name: "list",
+	Help: "list installed networks",
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
+		socketPath := clientSocket(i)
 
 		client := api.NewClient(socketPath)
 		networks, err := client.ListNetworks(context.Background())
@@ -44,9 +42,11 @@ var clientNetworkList = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(networks)
 		}
-		for _, n := range networks {
-			fmt.Println(n.Name)
+		rows := make([][]string, len(networks))
+		for idx, n := range networks {
+			rows[idx] = []string{n.Name, n.State, strconv.FormatBool(n.Enabled), strconv.FormatBool(n.Connected)}
 		}
+		printTable([]string{"NAME", "STATE", "ENABLED", "CONNECTED"}, rows)
 		return nil
 	},
 }
@@ -60,9 +60,8 @@ var clientNetworkShow = &args.Command{
 			Help: "network name",
 		},
 	},
-	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
+		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
@@ -71,7 +70,24 @@ var clientNetworkShow = &args.Command{
 			return err
 		}
 
-		return printJSON(result)
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("name: %s\n", result.Name)
+		fmt.Printf("state: %s\n", result.State)
+		fmt.Printf("enabled: %t\n", result.Enabled)
+		fmt.Printf("connected: %t\n", result.Connected)
+		if result.Address != "" {
+			fmt.Printf("address: %s\n", result.Address)
+		}
+		if result.Interface != "" {
+			fmt.Printf("interface: %s\n", result.Interface)
+		}
+		if result.ServerEndpoint != "" {
+			fmt.Printf("server_endpoint: %s\n", result.ServerEndpoint)
+		}
+		fmt.Printf("peer_count: %d\n", result.PeerCount)
+		return nil
 	},
 }
 
@@ -81,25 +97,37 @@ var clientNetworkInstall = &args.Command{
 	Operands: []args.Operand{
 		{
 			Name: "invite",
-			Help: "path to the invite file",
+			Help: "path to the invite file, or - to read from stdin",
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
+		socketPath := clientSocket(i)
 		invitePath := i.GetOperand("invite")
 
-		req, err := parseInviteFile(invitePath)
+		var (
+			invite []byte
+			err    error
+		)
+		if invitePath == "-" {
+			invite, err = io.ReadAll(os.Stdin)
+		} else {
+			invite, err = os.ReadFile(invitePath)
+		}
 		if err != nil {
-			return fmt.Errorf("parse invite: %w", err)
+			return fmt.Errorf("read invite: %w", err)
 		}
 
 		client := api.NewClient(socketPath)
-		result, err := client.InstallNetwork(context.Background(), req)
+		result, err := client.InstallNetwork(context.Background(), invite)
 		if err != nil {
 			return err
 		}
 
-		return printJSON(result)
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("network %q installed\n", result.Name)
+		return nil
 	},
 }
 
@@ -113,7 +141,7 @@ var clientNetworkRedeem = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
+		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
@@ -122,7 +150,11 @@ var clientNetworkRedeem = &args.Command{
 			return err
 		}
 
-		return printJSON(result)
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("network %q redeemed\n", network)
+		return nil
 	},
 }
 
@@ -136,7 +168,7 @@ var clientNetworkConfirm = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
+		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
@@ -145,7 +177,11 @@ var clientNetworkConfirm = &args.Command{
 			return err
 		}
 
-		return printJSON(result)
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("network %q confirmed\n", network)
+		return nil
 	},
 }
 
@@ -159,18 +195,20 @@ var clientNetworkUninstall = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
+		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
-		if err := client.UninstallNetwork(context.Background(), network); err != nil {
+		result, err := client.UninstallNetwork(context.Background(), network)
+		if err != nil {
 			return err
 		}
 
-		return printJSON(api.DeleteResponse{
-			Status: "deleted",
-			ID:     network,
-		})
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("network %q deleted\n", network)
+		return nil
 	},
 }
 
@@ -184,7 +222,7 @@ var clientNetworkEnable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
+		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
@@ -193,7 +231,11 @@ var clientNetworkEnable = &args.Command{
 			return err
 		}
 
-		return printJSON(result)
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("network %q enabled\n", network)
+		return nil
 	},
 }
 
@@ -207,7 +249,7 @@ var clientNetworkDisable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
+		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
@@ -216,7 +258,11 @@ var clientNetworkDisable = &args.Command{
 			return err
 		}
 
-		return printJSON(result)
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("network %q disabled\n", network)
+		return nil
 	},
 }
 
@@ -230,7 +276,7 @@ var clientNetworkSync = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", client.DefaultSocketPath)
+		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
 		client := api.NewClient(socketPath)
@@ -239,35 +285,10 @@ var clientNetworkSync = &args.Command{
 			return err
 		}
 
-		return printJSON(result)
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("network %q synced\n", network)
+		return nil
 	},
-}
-
-func parseInviteFile(
-	path string,
-) (
-	api.InstallNetworkRequest,
-	error,
-) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return api.InstallNetworkRequest{}, err
-	}
-
-	var payload server.Invitation
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return api.InstallNetworkRequest{}, err
-	}
-
-	return api.InstallNetworkRequest{
-		NetworkName:   payload.Network.Name,
-		PrivateKey:    payload.Peer.PrivateKey,
-		AssignedRoute: payload.Peer.Route,
-		Server: api.ServerInfoDTO{
-			PublicKey: payload.Network.PublicKey,
-			Endpoint:  payload.Network.Endpoint,
-			Route:     payload.Network.ServerRoute,
-			APIPort:   payload.Network.APIPort,
-		},
-	}, nil
 }

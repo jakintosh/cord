@@ -2,10 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/server"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 )
 
@@ -38,7 +37,7 @@ var serverCidrAdd = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		name := i.GetOperand("name")
 		cidr := i.GetOperand("cidr")
@@ -52,7 +51,11 @@ var serverCidrAdd = &args.Command{
 			return err
 		}
 
-		return printJSON(result)
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("cidr %q added\n", name)
+		return nil
 	},
 }
 
@@ -74,7 +77,7 @@ var serverCidrRename = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		cidr := i.GetOperand("cidr")
 		newName := i.GetOperand("new-name")
@@ -85,7 +88,11 @@ var serverCidrRename = &args.Command{
 			return err
 		}
 
-		return printJSON(result)
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("cidr %q renamed to %q\n", cidr, newName)
+		return nil
 	},
 }
 
@@ -103,19 +110,21 @@ var serverCidrDelete = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		cidr := i.GetOperand("cidr")
 
 		client := admin.NewClient(socketPath)
-		if err := client.DeleteCidr(context.Background(), network, cidr); err != nil {
+		result, err := client.DeleteCidr(context.Background(), network, cidr)
+		if err != nil {
 			return err
 		}
 
-		return printJSON(api.DeleteResponse{
-			Status: "deleted",
-			ID:     cidr,
-		})
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("cidr %q deleted\n", cidr)
+		return nil
 	},
 }
 
@@ -128,9 +137,8 @@ var serverCidrList = &args.Command{
 			Help: "network name",
 		},
 	},
-	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 
 		client := admin.NewClient(socketPath)
@@ -139,6 +147,14 @@ var serverCidrList = &args.Command{
 			return err
 		}
 
-		return printJSON(cidrs)
+		if i.GetFlag("json") {
+			return printJSON(cidrs)
+		}
+		rows := make([][]string, len(cidrs))
+		for idx, c := range cidrs {
+			rows[idx] = []string{c.Name, c.Cidr}
+		}
+		printTable([]string{"NAME", "CIDR"}, rows)
+		return nil
 	},
 }

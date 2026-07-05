@@ -6,11 +6,14 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
 type RegistrationDTO struct {
 	Name      string `json:"name"`
+	Route     string `json:"route"`
+	Admin     bool   `json:"admin"`
 	Redeemed  bool   `json:"redeemed"`
 	ExpiresAt string `json:"expires_at"`
 }
@@ -20,6 +23,8 @@ func RegistrationDTOFromService(
 ) RegistrationDTO {
 	return RegistrationDTO{
 		Name:      reg.Name,
+		Route:     reg.MainRoute,
+		Admin:     reg.Admin,
 		Redeemed:  reg.Redeemed,
 		ExpiresAt: reg.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -53,6 +58,24 @@ func (a *API) handleRegistrationList(
 	wire.WriteData(w, http.StatusOK, RegistrationDTOsFromService(regs))
 }
 
+func (a *API) handleRegistrationRevoke(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	network := r.PathValue("name")
+	registration := r.PathValue("registration")
+
+	if err := a.service.RevokeRegistration(network, registration); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, api.DeleteResponse{
+		Status: "deleted",
+		ID:     registration,
+	})
+}
+
 func (c *Client) ListRegistrations(
 	ctx context.Context,
 	network string,
@@ -65,4 +88,19 @@ func (c *Client) ListRegistrations(
 		return nil, err
 	}
 	return daemon.DecodeResponse[[]RegistrationDTO](resp)
+}
+
+func (c *Client) RevokeRegistration(
+	ctx context.Context,
+	network string,
+	registration string,
+) (
+	api.DeleteResponse,
+	error,
+) {
+	resp, err := c.t.Delete(ctx, "/networks/"+network+"/registrations/"+registration)
+	if err != nil {
+		return api.DeleteResponse{}, err
+	}
+	return daemon.DecodeResponse[api.DeleteResponse](resp)
 }

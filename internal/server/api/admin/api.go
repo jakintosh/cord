@@ -10,11 +10,13 @@ import (
 type Options struct {
 	Service *service.Service
 	Logger  *log.Logger
+	Version string
 }
 
 type API struct {
 	service *service.Service
 	log     *log.Logger
+	version string
 }
 
 func New(
@@ -26,6 +28,7 @@ func New(
 	return &API{
 		service: opts.Service,
 		log:     opts.Logger,
+		version: opts.Version,
 	}, nil
 }
 
@@ -58,6 +61,7 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("POST /networks/{name}/associations/delete", a.handleAssociationDelete)
 
 	mux.HandleFunc("GET /networks/{name}/registrations", a.handleRegistrationList)
+	mux.HandleFunc("DELETE /networks/{name}/registrations/{registration}", a.handleRegistrationRevoke)
 
 	return mux
 }

@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/server"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 )
 
@@ -39,7 +39,7 @@ var serverPeerRename = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 		newName := i.GetOperand("new-name")
@@ -50,7 +50,11 @@ var serverPeerRename = &args.Command{
 			return err
 		}
 
-		return printJSON(result)
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("peer %q renamed to %q\n", peer, newName)
+		return nil
 	},
 }
 
@@ -68,7 +72,7 @@ var serverPeerEnable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
@@ -78,7 +82,11 @@ var serverPeerEnable = &args.Command{
 			return err
 		}
 
-		return printJSON(result)
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("peer %q enabled\n", peer)
+		return nil
 	},
 }
 
@@ -96,7 +104,7 @@ var serverPeerDisable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
@@ -106,7 +114,11 @@ var serverPeerDisable = &args.Command{
 			return err
 		}
 
-		return printJSON(result)
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("peer %q disabled\n", peer)
+		return nil
 	},
 }
 
@@ -124,19 +136,21 @@ var serverPeerDelete = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
 		client := admin.NewClient(socketPath)
-		if err := client.DeletePeer(context.Background(), network, peer); err != nil {
+		result, err := client.DeletePeer(context.Background(), network, peer)
+		if err != nil {
 			return err
 		}
 
-		return printJSON(api.DeleteResponse{
-			Status: "deleted",
-			ID:     peer,
-		})
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("peer %q deleted\n", peer)
+		return nil
 	},
 }
 
@@ -149,9 +163,8 @@ var serverPeerList = &args.Command{
 			Help: "network name",
 		},
 	},
-	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 
 		client := admin.NewClient(socketPath)
@@ -160,6 +173,20 @@ var serverPeerList = &args.Command{
 			return err
 		}
 
-		return printJSON(peers)
+		if i.GetFlag("json") {
+			return printJSON(peers)
+		}
+		rows := make([][]string, len(peers))
+		for idx, p := range peers {
+			rows[idx] = []string{
+				p.Name,
+				p.Route,
+				strconv.FormatBool(p.Admin),
+				strconv.FormatBool(p.Enabled),
+				p.PublicKey,
+			}
+		}
+		printTable([]string{"NAME", "ROUTE", "ADMIN", "ENABLED", "PUBLIC KEY"}, rows)
+		return nil
 	},
 }

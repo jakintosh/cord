@@ -8,8 +8,10 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 )
 
-type StatusResponse struct {
-	Status string `json:"status"`
+type StatusDTO struct {
+	Status   string       `json:"status"`
+	Version  string       `json:"version"`
+	Networks []NetworkDTO `json:"networks"`
 }
 
 type DeleteResponse struct {
@@ -21,18 +23,28 @@ func (a *API) handleStatus(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	wire.WriteData(w, http.StatusOK, StatusResponse{
-		Status: "ok",
+	dtos, err := a.listNetworkDTOs()
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, StatusDTO{
+		Status:   "ok",
+		Version:  a.version,
+		Networks: dtos,
 	})
 }
 
 func (c *Client) Status(
 	ctx context.Context,
-) error {
+) (
+	StatusDTO,
+	error,
+) {
 	resp, err := c.t.Get(ctx, "/status")
 	if err != nil {
-		return err
+		return StatusDTO{}, err
 	}
-	_, err = daemon.DecodeResponse[StatusResponse](resp)
-	return err
+	return daemon.DecodeResponse[StatusDTO](resp)
 }

@@ -142,11 +142,13 @@ func (c *Client) DeleteAssociation(
 	ctx context.Context,
 	network string,
 	req DeleteAssociationRequest,
-) error {
+) (
+	api.DeleteResponse,
+	error,
+) {
 	resp, err := c.t.Post(ctx, "/networks/"+network+"/associations/delete", req)
 	if err != nil {
-		return err
+		return api.DeleteResponse{}, err
 	}
-	_, err = daemon.DecodeResponse[struct{}](resp)
-	return err
+	return daemon.DecodeResponse[api.DeleteResponse](resp)
 }

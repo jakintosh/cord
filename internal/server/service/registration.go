@@ -1,65 +1,14 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/invitation"
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
-
-// NetworkInfo describes a cord network and how to reach it. It travels
-// in invitation payloads and is stored in client-side network config.
-type NetworkInfo struct {
-	Name        string `json:"name"`
-	PublicKey   string `json:"public_key"`
-	Endpoint    string `json:"endpoint"`     // external WG endpoint
-	ServerRoute string `json:"server_route"` // server's host route on the overlay (e.g. "10.42.0.1/32")
-	APIPort     uint16 `json:"api_port"`     // server API port on the overlay
-}
-
-// PeerIdentity describes a peer's assigned identity on the network.
-// The PrivateKey is only present in the initial invitation; it is
-// omitted from redemption responses.
-type PeerIdentity struct {
-	Route      string `json:"route"`
-	PrivateKey string `json:"private_key,omitempty"`
-}
-
-// Invitation is the opaque JSON payload delivered to a peer. It contains
-// everything the peer needs to connect to and authenticate on the invite
-// network and redeem a permanent identity.
-type Invitation struct {
-	Network NetworkInfo  `json:"network"`
-	Peer    PeerIdentity `json:"peer"`
-}
-
-// ParseInvitation reads and validates an Invitation from a JSON reader.
-func ParseInvitation(
-	r io.Reader,
-) (
-	*Invitation,
-	error,
-) {
-	var inv Invitation
-	if err := json.NewDecoder(r).Decode(&inv); err != nil {
-		return nil, fmt.Errorf("%w: parse invitation: %v", ErrInvalidInput, err)
-	}
-	return &inv, nil
-}
-
-// Write serializes the invitation as JSON to the writer.
-func (inv *Invitation) Write(
-	w io.Writer,
-) error {
-	if err := json.NewEncoder(w).Encode(inv); err != nil {
-		return fmt.Errorf("write invitation: %w", err)
-	}
-	return nil
-}
 
 // Registration is the server-side stored representation of a pending peer
 // registration. It tracks the temporary key, assigned routes, and redemption state.
@@ -102,7 +51,7 @@ func (s *Service) CreateRegistration(
 	admin bool,
 	expiresIn *time.Duration,
 ) (
-	*Invitation,
+	*invitation.Invitation,
 	error,
 ) {
 	network, err := s.store.GetNetwork(networkName)
@@ -194,15 +143,15 @@ func (s *Service) CreateRegistration(
 	serverRoute := netaddr.HostRoute(serverInternalIP)
 	peerRoute := netaddr.HostRoute(peerTempAssignedIP)
 
-	payload := &Invitation{
-		Network: NetworkInfo{
+	payload := &invitation.Invitation{
+		Network: invitation.NetworkInfo{
 			Name:        network.Name,
 			PublicKey:   network.PublicKey,
 			Endpoint:    serverInviteExternalAddr,
 			ServerRoute: serverRoute.String(),
 			APIPort:     network.Invite.ApiPort,
 		},
-		Peer: PeerIdentity{
+		Peer: invitation.PeerIdentity{
 			Route:      peerRoute.String(),
 			PrivateKey: peerTempPrivKey,
 		},
@@ -219,7 +168,7 @@ func (s *Service) RedeemRegistration(
 	tempPubKey string,
 	permPubKey string,
 ) (
-	*Invitation,
+	*invitation.Invitation,
 	error,
 ) {
 	network, err := s.store.GetNetwork(networkName)
@@ -266,7 +215,7 @@ func (s *Service) buildInvitation(
 	network *NetworkConfig,
 	peer *Peer,
 ) (
-	*Invitation,
+	*invitation.Invitation,
 	error,
 ) {
 	_, rootNet, err := net.ParseCIDR(network.Main.Cidr)
@@ -282,15 +231,15 @@ func (s *Service) buildInvitation(
 		return nil, fmt.Errorf("parse peer route %q: %w", peer.Route, err)
 	}
 
-	return &Invitation{
-		Network: NetworkInfo{
+	return &invitation.Invitation{
+		Network: invitation.NetworkInfo{
 			Name:        network.Name,
 			PublicKey:   network.PublicKey,
 			Endpoint:    netaddr.Endpoint(net.ParseIP(network.ExternalIP), network.Main.WireguardPort),
 			ServerRoute: serverRoute.String(),
 			APIPort:     network.Main.ApiPort,
 		},
-		Peer: PeerIdentity{
+		Peer: invitation.PeerIdentity{
 			Route: peerRoute.String(),
 		},
 	}, nil

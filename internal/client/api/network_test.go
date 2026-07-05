@@ -128,6 +128,33 @@ func TestAPIShowNetwork_Success(
 	}
 }
 
+func TestAPIShowNetwork_IncludesEnrichedFields(
+	t *testing.T,
+) {
+	// setup env
+	env := testutil.Setup(t)
+	nc := env.SeedNetwork(t, "mynet")
+
+	// show network
+	url := "/networks/mynet"
+	result := wire.TestGet[api.NetworkDTO](env.Router, url)
+
+	// verify result
+	data := result.ExpectOK(t)
+	if data.Address != nc.AssignedRoute {
+		t.Fatalf("address = %q, want %q", data.Address, nc.AssignedRoute)
+	}
+	if data.Interface != nc.InterfaceName {
+		t.Fatalf("interface = %q, want %q", data.Interface, nc.InterfaceName)
+	}
+	if data.ServerEndpoint != nc.Server.Endpoint {
+		t.Fatalf("server_endpoint = %q, want %q", data.ServerEndpoint, nc.Server.Endpoint)
+	}
+	if data.PeerCount != 0 {
+		t.Fatalf("peer_count = %d, want 0", data.PeerCount)
+	}
+}
+
 func TestAPIShowNetwork_NotFound(
 	t *testing.T,
 ) {
@@ -196,14 +223,16 @@ func TestAPIInstallNetwork_Success(
 
 	url := "/networks"
 	body := `{
-		"network_name": "mynet",
-		"private_key": "` + tempKey + `",
-		"route": "10.42.0.5/16",
-		"server": {
+		"network": {
+			"name": "mynet",
 			"public_key": "` + srvPub + `",
 			"endpoint": "1.2.3.4:51820",
 			"server_route": "` + apiHost + `/32",
 			"api_port": ` + strconv.Itoa(apiPort) + `
+		},
+		"peer": {
+			"route": "10.42.0.5/16",
+			"private_key": "` + tempKey + `"
 		}
 	}`
 	result := wire.TestPost[api.NetworkDTO](env.Router, url, body)
@@ -268,15 +297,31 @@ func TestAPIInstallNetwork_MissingName(
 
 	url := "/networks"
 	body := `{
-		"private_key": "test-temp-key",
-		"route": "10.42.0.5/16",
-		"server": {
+		"network": {
 			"public_key": "srv-pub",
 			"endpoint": "1.2.3.4:51820",
 			"server_route": "10.42.0.1/32",
 			"api_port": 8443
+		},
+		"peer": {
+			"route": "10.42.0.5/16",
+			"private_key": "test-temp-key"
 		}
 	}`
+	result := wire.TestPost[any](env.Router, url, body)
+
+	result.ExpectStatusError(t, http.StatusBadRequest)
+}
+
+func TestAPIInstallNetwork_MalformedInvitation(
+	t *testing.T,
+) {
+	env := testutil.Setup(t)
+
+	// well-formed JSON but not a valid invitation object: the daemon
+	// parses the payload itself and must reject it with a clean 400.
+	url := "/networks"
+	body := `["not", "an", "invitation"]`
 	result := wire.TestPost[any](env.Router, url, body)
 
 	result.ExpectStatusError(t, http.StatusBadRequest)
@@ -290,14 +335,16 @@ func TestAPIInstallNetwork_Duplicate(
 
 	url := "/networks"
 	body := `{
-		"network_name": "dupnet",
-		"private_key": "test-temp-key",
-		"route": "10.42.0.5/16",
-		"server": {
+		"network": {
+			"name": "dupnet",
 			"public_key": "srv-pub",
 			"endpoint": "1.2.3.4:51820",
 			"server_route": "10.42.0.1/32",
 			"api_port": 8443
+		},
+		"peer": {
+			"route": "10.42.0.5/16",
+			"private_key": "test-temp-key"
 		}
 	}`
 	result := wire.TestPost[any](env.Router, url, body)

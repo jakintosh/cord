@@ -8,6 +8,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
+	"git.studiopollinator.com/pollinator/cord/internal/invitation"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
@@ -202,14 +203,14 @@ func (c *Client) CreateInvite(
 	network string,
 	req CreateInviteRequest,
 ) (
-	*service.Invitation,
+	*invitation.Invitation,
 	error,
 ) {
 	resp, err := c.t.Post(ctx, "/networks/"+network+"/registrations", req)
 	if err != nil {
 		return nil, err
 	}
-	return daemon.DecodeResponse[*service.Invitation](resp)
+	return daemon.DecodeResponse[*invitation.Invitation](resp)
 }
 
 func (c *Client) RenamePeer(
@@ -233,13 +234,15 @@ func (c *Client) DeletePeer(
 	ctx context.Context,
 	network string,
 	peer string,
-) error {
+) (
+	api.DeleteResponse,
+	error,
+) {
 	resp, err := c.t.Delete(ctx, "/networks/"+network+"/peers/"+peer)
 	if err != nil {
-		return err
+		return api.DeleteResponse{}, err
 	}
-	_, err = daemon.DecodeResponse[struct{}](resp)
-	return err
+	return daemon.DecodeResponse[api.DeleteResponse](resp)
 }
 
 func (c *Client) EnablePeer(

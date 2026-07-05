@@ -2,30 +2,39 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
+	"git.studiopollinator.com/pollinator/cord/internal/invitation"
 )
 
 type NetworkDTO struct {
-	Name      string `json:"name"`
-	State     string `json:"state"`
-	Enabled   bool   `json:"enabled"`
-	Connected bool   `json:"connected"`
+	Name           string `json:"name"`
+	State          string `json:"state"`
+	Enabled        bool   `json:"enabled"`
+	Connected      bool   `json:"connected"`
+	Address        string `json:"address,omitempty"`
+	Interface      string `json:"interface,omitempty"`
+	ServerEndpoint string `json:"server_endpoint,omitempty"`
+	PeerCount      int    `json:"peer_count,omitempty"`
 }
 
 func networkDTOFromConfig(
 	nc service.NetworkConfig,
 	connected bool,
+	peerCount int,
 ) NetworkDTO {
 	return NetworkDTO{
-		Name:      nc.Name,
-		State:     "installed",
-		Enabled:   nc.Enabled,
-		Connected: connected,
+		Name:           nc.Name,
+		State:          "installed",
+		Enabled:        nc.Enabled,
+		Connected:      connected,
+		Address:        nc.AssignedRoute,
+		Interface:      nc.InterfaceName,
+		ServerEndpoint: nc.Server.Endpoint,
+		PeerCount:      peerCount,
 	}
 }
 
@@ -38,46 +47,48 @@ func networkDTOFromInstall(
 	}
 }
 
-type ServerInfoDTO struct {
-	PublicKey string `json:"public_key"`
-	Endpoint  string `json:"endpoint"`
-	Route     string `json:"server_route"`
-	APIPort   uint16 `json:"api_port"`
-}
-
-func (s *ServerInfoDTO) ToServerInfo() service.ServerInfo {
-	return service.ServerInfo{
-		PublicKey: s.PublicKey,
-		Endpoint:  s.Endpoint,
-		Route:     s.Route,
-		APIPort:   s.APIPort,
-	}
-}
-
-type InstallNetworkRequest struct {
-	NetworkName   string        `json:"network_name"`
-	PrivateKey    string        `json:"private_key"`
-	AssignedRoute string        `json:"route"`
-	Server        ServerInfoDTO `json:"server"`
-}
-
-func (i *InstallNetworkRequest) ToInvite() service.Invite {
+// inviteFromInvitation maps a wire-format invitation payload into the
+// client service's Invite. The invitation IS the install request body;
+// this keeps the wire type shared with the server while the service
+// keeps its own internal Invite shape.
+func inviteFromInvitation(
+	inv invitation.Invitation,
+) service.Invite {
 	return service.Invite{
-		NetworkName:   i.NetworkName,
-		PrivateKey:    i.PrivateKey,
-		AssignedRoute: i.AssignedRoute,
-		Server:        i.Server.ToServerInfo(),
+		NetworkName:   inv.Network.Name,
+		PrivateKey:    inv.Peer.PrivateKey,
+		AssignedRoute: inv.Peer.Route,
+		Server: service.ServerInfo{
+			PublicKey: inv.Network.PublicKey,
+			Endpoint:  inv.Network.Endpoint,
+			Route:     inv.Network.ServerRoute,
+			APIPort:   inv.Network.APIPort,
+		},
 	}
 }
 
-func (a *API) handleNetworkList(
-	w http.ResponseWriter,
-	r *http.Request,
+// peerCount returns the number of cached peers for network, or 0 if the
+// count can't be determined.
+func (a *API) peerCount(
+	network string,
+) int {
+	peers, err := a.service.ListPeers(network)
+	if err != nil {
+		return 0
+	}
+	return len(peers)
+}
+
+// listNetworkDTOs composes the full network list: installed networks
+// enriched with live/cached state, plus networks still mid-install.
+// Shared by the network list handler and the status handler.
+func (a *API) listNetworkDTOs() (
+	[]NetworkDTO,
+	error,
 ) {
 	names, err := a.service.ListNetworks()
 	if err != nil {
-		writeServiceError(w, err)
-		return
+		return nil, err
 	}
 
 	dtos := make([]NetworkDTO, 0)
@@ -86,16 +97,28 @@ func (a *API) handleNetworkList(
 		if err != nil {
 			continue
 		}
-		dtos = append(dtos, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name)))
+		dtos = append(dtos, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name), a.peerCount(name)))
 	}
 
 	installs, err := a.service.ListInstalls()
 	if err != nil {
-		writeServiceError(w, err)
-		return
+		return nil, err
 	}
 	for _, inst := range installs {
 		dtos = append(dtos, networkDTOFromInstall(*inst))
+	}
+
+	return dtos, nil
+}
+
+func (a *API) handleNetworkList(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	dtos, err := a.listNetworkDTOs()
+	if err != nil {
+		writeServiceError(w, err)
+		return
 	}
 
 	wire.WriteData(w, http.StatusOK, dtos)
@@ -109,7 +132,7 @@ func (a *API) handleNetworkShow(
 
 	nc, err := a.service.GetNetwork(name)
 	if err == nil {
-		wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name)))
+		wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name), a.peerCount(name)))
 		return
 	}
 
@@ -126,20 +149,20 @@ func (a *API) handleNetworkInstall(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	var req InstallNetworkRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		wire.WriteError(w, http.StatusBadRequest, "malformed json")
+	inv, err := invitation.Parse(r.Body)
+	if err != nil {
+		wire.WriteError(w, http.StatusBadRequest, "malformed invitation")
 		return
 	}
 
-	invite := req.ToInvite()
+	invite := inviteFromInvitation(*inv)
 	network, err := a.service.InstallNetwork(invite)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	networkDTO := networkDTOFromConfig(*network, a.service.IsNetworkRunning(network.Name))
+	networkDTO := networkDTOFromConfig(*network, a.service.IsNetworkRunning(network.Name), a.peerCount(network.Name))
 	wire.WriteData(w, http.StatusCreated, networkDTO)
 }
 
@@ -180,7 +203,7 @@ func (a *API) handleNetworkConfirm(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name)))
+	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name), a.peerCount(name)))
 }
 
 func (a *API) handleNetworkUninstall(
@@ -217,7 +240,7 @@ func (a *API) handleNetworkEnable(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name)))
+	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name), a.peerCount(name)))
 }
 
 func (a *API) handleNetworkDisable(
@@ -237,7 +260,7 @@ func (a *API) handleNetworkDisable(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name)))
+	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name), a.peerCount(name)))
 }
 
 func (a *API) handleNetworkSync(
@@ -257,7 +280,7 @@ func (a *API) handleNetworkSync(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name)))
+	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name), a.peerCount(name)))
 }
 
 func (c *Client) ListNetworks(
@@ -287,14 +310,18 @@ func (c *Client) GetNetwork(
 	return daemon.DecodeResponse[NetworkDTO](resp)
 }
 
+// InstallNetwork sends a raw invitation payload to the daemon, which
+// parses and validates it. Passing the bytes verbatim means a malformed
+// invitation surfaces as a clean 400 from the daemon rather than a
+// client-side parse error.
 func (c *Client) InstallNetwork(
 	ctx context.Context,
-	req InstallNetworkRequest,
+	payload []byte,
 ) (
 	NetworkDTO,
 	error,
 ) {
-	resp, err := c.t.Post(ctx, "/networks", req)
+	resp, err := c.t.PostRaw(ctx, "/networks", payload)
 	if err != nil {
 		return NetworkDTO{}, err
 	}
@@ -332,13 +359,15 @@ func (c *Client) ConfirmNetwork(
 func (c *Client) UninstallNetwork(
 	ctx context.Context,
 	name string,
-) error {
+) (
+	DeleteResponse,
+	error,
+) {
 	resp, err := c.t.Delete(ctx, "/networks/"+name)
 	if err != nil {
-		return err
+		return DeleteResponse{}, err
 	}
-	_, err = daemon.DecodeResponse[struct{}](resp)
-	return err
+	return daemon.DecodeResponse[DeleteResponse](resp)
 }
 
 func (c *Client) EnableNetwork(

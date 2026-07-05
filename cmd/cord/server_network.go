@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/server"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 )
 
@@ -78,7 +76,7 @@ var serverNetworkAdd = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 
 		req := admin.AddNetworkRequest{
 			Name:          i.GetOperand("name"),
@@ -99,10 +97,13 @@ var serverNetworkAdd = &args.Command{
 			return err
 		}
 
-		if err := printJSON(network); err != nil {
-			return err
+		if i.GetFlag("json") {
+			return printJSON(network)
 		}
-		fmt.Fprintf(os.Stderr, "Network created and disabled. Use 'cord server network enable %s' to start it.\n", req.Name)
+		fmt.Printf(
+			"network %q created (disabled); enable with 'cord server network enable %s'\n",
+			req.Name, req.Name,
+		)
 		return nil
 	},
 }
@@ -117,25 +118,28 @@ var serverNetworkDelete = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		name := i.GetOperand("name")
 
 		client := admin.NewClient(socketPath)
-		if err := client.DeleteNetwork(context.Background(), name); err != nil {
+		result, err := client.DeleteNetwork(context.Background(), name)
+		if err != nil {
 			return err
 		}
 
-		fmt.Println("ok")
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("network %q deleted\n", name)
 		return nil
 	},
 }
 
 var serverNetworkList = &args.Command{
-	Name:    "list",
-	Help:    "list server networks",
-	Options: []args.Option{jsonOption},
+	Name: "list",
+	Help: "list server networks",
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 
 		client := admin.NewClient(socketPath)
 		networks, err := client.ListNetworks(context.Background())
@@ -162,9 +166,8 @@ var serverNetworkShow = &args.Command{
 			Help: "network name",
 		},
 	},
-	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		name := i.GetOperand("name")
 
 		client := admin.NewClient(socketPath)
@@ -173,7 +176,21 @@ var serverNetworkShow = &args.Command{
 			return err
 		}
 
-		return printJSON(network)
+		if i.GetFlag("json") {
+			return printJSON(network)
+		}
+		fmt.Printf("name: %s\n", network.Name)
+		fmt.Printf("external_ip: %s\n", network.ExternalIP)
+		fmt.Printf("main_name: %s\n", network.MainName)
+		fmt.Printf("main_cidr: %s\n", network.MainCidr)
+		fmt.Printf("main_wg_port: %d\n", network.MainWgPort)
+		fmt.Printf("main_api_port: %d\n", network.MainApiPort)
+		fmt.Printf("invite_name: %s\n", network.InviteName)
+		fmt.Printf("invite_cidr: %s\n", network.InviteCidr)
+		fmt.Printf("invite_wg_port: %d\n", network.InviteWgPort)
+		fmt.Printf("invite_api_port: %d\n", network.InviteApiPort)
+		fmt.Printf("enabled: %t\n", network.Enabled)
+		return nil
 	},
 }
 
@@ -187,15 +204,19 @@ var serverNetworkEnable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		name := i.GetOperand("name")
 
 		client := admin.NewClient(socketPath)
-		if err := client.EnableNetwork(context.Background(), name); err != nil {
+		result, err := client.EnableNetwork(context.Background(), name)
+		if err != nil {
 			return err
 		}
 
-		fmt.Println("enabled")
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("network %q enabled\n", name)
 		return nil
 	},
 }
@@ -210,15 +231,19 @@ var serverNetworkDisable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		name := i.GetOperand("name")
 
 		client := admin.NewClient(socketPath)
-		if err := client.DisableNetwork(context.Background(), name); err != nil {
+		result, err := client.DisableNetwork(context.Background(), name)
+		if err != nil {
 			return err
 		}
 
-		fmt.Println("disabled")
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("network %q disabled\n", name)
 		return nil
 	},
 }

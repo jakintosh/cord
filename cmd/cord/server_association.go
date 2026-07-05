@@ -2,10 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/server"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 )
 
@@ -37,7 +36,7 @@ var serverAssociationAdd = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		cidr1 := i.GetOperand("cidr1")
 		cidr2 := i.GetOperand("cidr2")
@@ -51,7 +50,11 @@ var serverAssociationAdd = &args.Command{
 			return err
 		}
 
-		return printJSON(result)
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("cidrs %q and %q associated\n", cidr1, cidr2)
+		return nil
 	},
 }
 
@@ -73,23 +76,25 @@ var serverAssociationDelete = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		cidr1 := i.GetOperand("cidr1")
 		cidr2 := i.GetOperand("cidr2")
 
 		client := admin.NewClient(socketPath)
-		if err := client.DeleteAssociation(context.Background(), network, admin.DeleteAssociationRequest{
+		result, err := client.DeleteAssociation(context.Background(), network, admin.DeleteAssociationRequest{
 			Cidr1: cidr1,
 			Cidr2: cidr2,
-		}); err != nil {
+		})
+		if err != nil {
 			return err
 		}
 
-		return printJSON(api.DeleteResponse{
-			Status: "deleted",
-			ID:     cidr1 + "/" + cidr2,
-		})
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("association %q deleted\n", cidr1+"/"+cidr2)
+		return nil
 	},
 }
 
@@ -102,9 +107,8 @@ var serverAssociationList = &args.Command{
 			Help: "network name",
 		},
 	},
-	Options: []args.Option{jsonOption},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 
 		client := admin.NewClient(socketPath)
@@ -113,6 +117,14 @@ var serverAssociationList = &args.Command{
 			return err
 		}
 
-		return printJSON(associations)
+		if i.GetFlag("json") {
+			return printJSON(associations)
+		}
+		rows := make([][]string, len(associations))
+		for idx, a := range associations {
+			rows[idx] = []string{a.Cidr1, a.Cidr2}
+		}
+		printTable([]string{"CIDR1", "CIDR2"}, rows)
+		return nil
 	},
 }

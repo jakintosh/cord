@@ -166,7 +166,13 @@ func (a *API) handleNetworkEnable(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, nil)
+	network, err := a.service.GetNetwork(name)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*network))
 }
 
 func (a *API) handleNetworkDisable(
@@ -180,7 +186,13 @@ func (a *API) handleNetworkDisable(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, nil)
+	network, err := a.service.GetNetwork(name)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*network))
 }
 
 func (c *Client) ListNetworks(
@@ -227,35 +239,41 @@ func (c *Client) AddNetwork(
 func (c *Client) DeleteNetwork(
 	ctx context.Context,
 	name string,
-) error {
+) (
+	api.DeleteResponse,
+	error,
+) {
 	resp, err := c.t.Delete(ctx, "/networks/"+name)
 	if err != nil {
-		return err
+		return api.DeleteResponse{}, err
 	}
-	_, err = daemon.DecodeResponse[struct{}](resp)
-	return err
+	return daemon.DecodeResponse[api.DeleteResponse](resp)
 }
 
 func (c *Client) EnableNetwork(
 	ctx context.Context,
 	name string,
-) error {
+) (
+	NetworkDTO,
+	error,
+) {
 	resp, err := c.t.Post(ctx, "/networks/"+name+"/enable", nil)
 	if err != nil {
-		return err
+		return NetworkDTO{}, err
 	}
-	_, err = daemon.DecodeResponse[api.StatusResponse](resp)
-	return err
+	return daemon.DecodeResponse[NetworkDTO](resp)
 }
 
 func (c *Client) DisableNetwork(
 	ctx context.Context,
 	name string,
-) error {
+) (
+	NetworkDTO,
+	error,
+) {
 	resp, err := c.t.Post(ctx, "/networks/"+name+"/disable", nil)
 	if err != nil {
-		return err
+		return NetworkDTO{}, err
 	}
-	_, err = daemon.DecodeResponse[api.StatusResponse](resp)
-	return err
+	return daemon.DecodeResponse[NetworkDTO](resp)
 }

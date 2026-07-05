@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
+	"git.studiopollinator.com/pollinator/cord/internal/invitation"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
@@ -25,7 +26,7 @@ func TestAPIInviteCreate_Success(
 		"ip": "10.0.0.5",
 		"admin": false
 	}`
-	result := wire.TestPost[service.Invitation](env.Router, url, body)
+	result := wire.TestPost[invitation.Invitation](env.Router, url, body)
 
 	// verify result — handler returns an Invitation payload
 	result.ExpectStatusOK(t, http.StatusCreated)
@@ -77,7 +78,7 @@ func TestAPIInviteCreate_AutoAssignIP(
 		"name": "bob",
 		"admin": false
 	}`
-	result := wire.TestPost[service.Invitation](env.Router, url, body)
+	result := wire.TestPost[invitation.Invitation](env.Router, url, body)
 
 	// verify result
 	result.ExpectStatusOK(t, http.StatusCreated)
@@ -133,7 +134,7 @@ func TestAPIInviteCreate_DuplicateName(
 		"name": "alice",
 		"ip": "10.0.0.5"
 	}`
-	result := wire.TestPost[service.Invitation](env.Router, url, body)
+	result := wire.TestPost[invitation.Invitation](env.Router, url, body)
 	result.ExpectStatusOK(t, http.StatusCreated)
 
 	// add duplicate

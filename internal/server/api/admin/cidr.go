@@ -176,11 +176,13 @@ func (c *Client) DeleteCidr(
 	ctx context.Context,
 	network string,
 	cidr string,
-) error {
+) (
+	api.DeleteResponse,
+	error,
+) {
 	resp, err := c.t.Delete(ctx, "/networks/"+network+"/cidrs/"+cidr)
 	if err != nil {
-		return err
+		return api.DeleteResponse{}, err
 	}
-	_, err = daemon.DecodeResponse[struct{}](resp)
-	return err
+	return daemon.DecodeResponse[api.DeleteResponse](resp)
 }

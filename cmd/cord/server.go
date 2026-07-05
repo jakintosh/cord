@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
@@ -21,11 +22,7 @@ var serverCmd = &args.Command{
 			Type: args.OptionTypeParameter,
 			Help: "path to the server daemon unix socket",
 		},
-		{
-			Long: "backend",
-			Type: args.OptionTypeParameter,
-			Help: "wireguard backend: auto, kernel, or userspace",
-		},
+		jsonOption,
 	},
 	Subcommands: []*args.Command{
 		serverDaemonCmd,
@@ -34,15 +31,22 @@ var serverCmd = &args.Command{
 		serverPeerCmd,
 		serverCidrCmd,
 		serverAssociationCmd,
-		serverInviteCmd,
+		serverRegistrationCmd,
 	},
 }
 
 var serverDaemonCmd = &args.Command{
 	Name: "daemon",
 	Help: "run the cord server daemon",
+	Options: []args.Option{
+		{
+			Long: "backend",
+			Type: args.OptionTypeParameter,
+			Help: "wireguard backend: auto, kernel, or userspace",
+		},
+	},
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 		backend := i.GetParameterOr("backend", "auto")
 
 		ctx, cancel := signal.NotifyContext(
@@ -53,6 +57,7 @@ var serverDaemonCmd = &args.Command{
 		opts := server.Options{
 			SocketPath: socketPath,
 			Backend:    backend,
+			Version:    VersionInfo.Version,
 		}
 		return server.Serve(ctx, opts)
 	},
@@ -62,14 +67,28 @@ var serverStatusCmd = &args.Command{
 	Name: "status",
 	Help: "check if the cord server daemon is running",
 	Handler: func(i *args.Input) error {
-		socketPath := i.GetParameterOr("socket-path", server.DefaultSocketPath)
+		socketPath := serverSocket(i)
 
 		client := admin.NewClient(socketPath)
-		if err := client.Status(context.Background()); err != nil {
+		result, err := client.Status(context.Background())
+		if err != nil {
 			return err
 		}
 
-		fmt.Println("ok")
+		if i.GetFlag("json") {
+			return printJSON(result)
+		}
+		fmt.Printf("server daemon ok (version %s)\n", result.Version)
+		rows := make([][]string, len(result.Networks))
+		for idx, n := range result.Networks {
+			rows[idx] = []string{
+				n.Name,
+				strconv.FormatBool(n.Enabled),
+				strconv.Itoa(n.PeerCount),
+				strconv.Itoa(n.PendingRegistrationCount),
+			}
+		}
+		printTable([]string{"NAME", "ENABLED", "PEERS", "PENDING REGISTRATIONS"}, rows)
 		return nil
 	},
 }

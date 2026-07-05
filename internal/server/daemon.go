@@ -33,6 +33,9 @@ type Options struct {
 	// Backend selects the WireGuard implementation: "auto" (default),
 	// "kernel", or "userspace".
 	Backend string
+
+	// Version is the daemon build version, surfaced over the status API.
+	Version string
 }
 
 // Serve is the production composition root for the cord server daemon.
@@ -96,6 +99,7 @@ func Serve(
 
 	apiOpts := admin.Options{
 		Service: svc,
+		Version: opts.Version,
 	}
 	apiServer, err := admin.New(apiOpts)
 	if err != nil {
