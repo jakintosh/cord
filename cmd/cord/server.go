@@ -67,10 +67,12 @@ var serverStatusCmd = &args.Command{
 	Name: "status",
 	Help: "check if the cord server daemon is running",
 	Handler: func(i *args.Input) error {
-		socketPath := serverSocket(i)
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
 
-		client := admin.NewClient(socketPath)
-		result, err := client.Status(context.Background())
+		result, err := client.Status(i.Context())
 		if err != nil {
 			return err
 		}

@@ -130,13 +130,19 @@ func (s *Service) Close() error {
 
 func (s *Service) newInviteClient(
 	tunnel *Tunnel,
-) *client.InviteClient {
+) (
+	*client.InviteClient,
+	error,
+) {
 	return client.NewInviteClient(tunnel.apiAddr, s.httpClient)
 }
 
 func (s *Service) newPeerClient(
 	tunnel *Tunnel,
-) *client.PeerClient {
+) (
+	*client.PeerClient,
+	error,
+) {
 	return client.NewPeerClient(tunnel.apiAddr, s.httpClient)
 }
 

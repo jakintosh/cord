@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
@@ -174,26 +173,27 @@ func (c *Client) ListPeers(
 	[]PeerDTO,
 	error,
 ) {
-	resp, err := c.t.Get(ctx, "/networks/"+network+"/peers")
-	if err != nil {
-		return nil, err
-	}
-	return daemon.DecodeResponse[[]PeerDTO](resp)
+	var result []PeerDTO
+	return result, c.wire.Get(ctx, "/networks/"+network+"/peers", &result)
 }
 
 func (c *Client) CreateInvite(
 	ctx context.Context,
 	network string,
-	req CreateInviteRequest,
+	name string,
+	ip *string,
+	admin bool,
 ) (
 	*protocol.Invitation,
 	error,
 ) {
-	resp, err := c.t.Post(ctx, "/networks/"+network+"/registrations", req)
+	req := CreateInviteRequest{Name: name, Ip: ip, Admin: admin}
+	body, err := marshalJSON(req)
 	if err != nil {
 		return nil, err
 	}
-	return daemon.DecodeResponse[*protocol.Invitation](resp)
+	var result *protocol.Invitation
+	return result, c.wire.Post(ctx, "/networks/"+network+"/registrations", body, &result)
 }
 
 func (c *Client) RenamePeer(
@@ -203,11 +203,11 @@ func (c *Client) RenamePeer(
 	newName string,
 ) error {
 	req := RenamePeerRequest{Name: newName}
-	resp, err := c.t.Patch(ctx, "/networks/"+network+"/peers/"+peer, req)
+	body, err := marshalJSON(req)
 	if err != nil {
 		return err
 	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Patch(ctx, "/networks/"+network+"/peers/"+peer, body, nil)
 }
 
 func (c *Client) DeletePeer(
@@ -215,11 +215,7 @@ func (c *Client) DeletePeer(
 	network string,
 	peer string,
 ) error {
-	resp, err := c.t.Delete(ctx, "/networks/"+network+"/peers/"+peer)
-	if err != nil {
-		return err
-	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Delete(ctx, "/networks/"+network+"/peers/"+peer, nil)
 }
 
 func (c *Client) EnablePeer(
@@ -227,11 +223,7 @@ func (c *Client) EnablePeer(
 	network string,
 	peer string,
 ) error {
-	resp, err := c.t.Post(ctx, "/networks/"+network+"/peers/"+peer+"/enable", nil)
-	if err != nil {
-		return err
-	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Post(ctx, "/networks/"+network+"/peers/"+peer+"/enable", nil, nil)
 }
 
 func (c *Client) DisablePeer(
@@ -239,9 +231,5 @@ func (c *Client) DisablePeer(
 	network string,
 	peer string,
 ) error {
-	resp, err := c.t.Post(ctx, "/networks/"+network+"/peers/"+peer+"/disable", nil)
-	if err != nil {
-		return err
-	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Post(ctx, "/networks/"+network+"/peers/"+peer+"/disable", nil, nil)
 }

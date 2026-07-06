@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 	"time"
@@ -28,11 +27,14 @@ var clientPeerList = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
-		client := api.NewClient(socketPath)
-		peers, err := client.ListPeers(context.Background(), network)
+		client, err := clientClient(i)
+		if err != nil {
+			return err
+		}
+
+		peers, err := client.ListPeers(i.Context(), network)
 		if err != nil {
 			return err
 		}

@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 )
 
 type NetworkStatusDTO struct {
@@ -90,9 +89,6 @@ func (c *Client) Status(
 	StatusDTO,
 	error,
 ) {
-	resp, err := c.t.Get(ctx, "/status")
-	if err != nil {
-		return StatusDTO{}, err
-	}
-	return daemon.DecodeResponse[StatusDTO](resp)
+	var result StatusDTO
+	return result, c.wire.Get(ctx, "/status", &result)
 }

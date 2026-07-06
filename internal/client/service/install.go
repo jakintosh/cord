@@ -213,7 +213,11 @@ func (s *Service) Redeem(
 	}
 	defer func() { _ = tunnel.stop() }()
 
-	inviteClient := s.newInviteClient(tunnel)
+	inviteClient, err := s.newInviteClient(tunnel)
+	if err != nil {
+		return nil, fmt.Errorf("create invite client: %w", err)
+	}
+
 	result, err := inviteClient.RedeemInvitation(permPubKey)
 	if err != nil {
 		return nil, fmt.Errorf("redeem invite: %w", err)
@@ -268,7 +272,12 @@ func (s *Service) Confirm(
 		return fmt.Errorf("create main tunnel: %w", err)
 	}
 
-	peerClient := s.newPeerClient(tunnel)
+	peerClient, err := s.newPeerClient(tunnel)
+	if err != nil {
+		_ = tunnel.stop()
+		return fmt.Errorf("create peer client: %w", err)
+	}
+
 	if err := peerClient.ConfirmPeer(); err != nil {
 		_ = tunnel.stop()
 		return fmt.Errorf("confirm peer: %w", err)

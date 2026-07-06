@@ -9,7 +9,9 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/client"
+	clientapi "git.studiopollinator.com/pollinator/cord/internal/client/api"
 	"git.studiopollinator.com/pollinator/cord/internal/server"
+	serverapi "git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 )
 
 var jsonOption = args.Option{
@@ -43,6 +45,28 @@ func clientSocket(
 	i *args.Input,
 ) string {
 	return i.GetParameterOr("socket-path", client.DefaultSocketPath)
+}
+
+// serverClient resolves the socket path and returns an admin API client
+// for the server daemon.
+func serverClient(
+	i *args.Input,
+) (
+	*serverapi.Client,
+	error,
+) {
+	return serverapi.NewClient(serverSocket(i))
+}
+
+// clientClient resolves the socket path and returns an API client for the
+// client daemon.
+func clientClient(
+	i *args.Input,
+) (
+	*clientapi.Client,
+	error,
+) {
+	return clientapi.NewClient(clientSocket(i))
 }
 
 // printTable prints an aligned table with a header row followed by data

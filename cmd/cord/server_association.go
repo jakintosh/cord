@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
@@ -36,22 +35,28 @@ var serverAssociationAdd = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		cidr1 := i.GetOperand("cidr1")
 		cidr2 := i.GetOperand("cidr2")
 
-		client := admin.NewClient(socketPath)
-		if err := client.AddAssociation(context.Background(), network, admin.AddAssociationRequest{
-			Cidr1: cidr1,
-			Cidr2: cidr2,
-		}); err != nil {
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+
+		if err := client.AddAssociation(
+			i.Context(),
+			network,
+			cidr1,
+			cidr2,
+		); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
 			return nil
 		}
+
 		fmt.Printf("cidrs %q and %q associated\n", cidr1, cidr2)
 		return nil
 	},
@@ -75,23 +80,28 @@ var serverAssociationDelete = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		cidr1 := i.GetOperand("cidr1")
 		cidr2 := i.GetOperand("cidr2")
 
-		client := admin.NewClient(socketPath)
-		err := client.DeleteAssociation(context.Background(), network, admin.DeleteAssociationRequest{
-			Cidr1: cidr1,
-			Cidr2: cidr2,
-		})
+		client, err := serverClient(i)
 		if err != nil {
+			return err
+		}
+
+		if err := client.DeleteAssociation(
+			i.Context(),
+			network,
+			cidr1,
+			cidr2,
+		); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
 			return nil
 		}
+
 		fmt.Printf("association %q deleted\n", cidr1+"/"+cidr2)
 		return nil
 	},
@@ -107,11 +117,17 @@ var serverAssociationList = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 
-		client := admin.NewClient(socketPath)
-		associations, err := client.ListAssociations(context.Background(), network)
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+
+		associations, err := client.ListAssociations(
+			i.Context(),
+			network,
+		)
 		if err != nil {
 			return err
 		}
@@ -119,6 +135,7 @@ var serverAssociationList = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(associations)
 		}
+
 		printAssociations(associations)
 		return nil
 	},

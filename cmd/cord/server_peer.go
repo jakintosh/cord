@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 
@@ -39,19 +38,28 @@ var serverPeerRename = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 		newName := i.GetOperand("new-name")
 
-		client := admin.NewClient(socketPath)
-		if err := client.RenamePeer(context.Background(), network, peer, newName); err != nil {
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+
+		if err := client.RenamePeer(
+			i.Context(),
+			network,
+			peer,
+			newName,
+		); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
 			return nil
 		}
+
 		fmt.Printf("peer %q renamed to %q\n", peer, newName)
 		return nil
 	},
@@ -71,18 +79,26 @@ var serverPeerEnable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
-		client := admin.NewClient(socketPath)
-		if err := client.EnablePeer(context.Background(), network, peer); err != nil {
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+
+		if err := client.EnablePeer(
+			i.Context(),
+			network,
+			peer,
+		); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
 			return nil
 		}
+
 		fmt.Printf("peer %q enabled\n", peer)
 		return nil
 	},
@@ -102,18 +118,26 @@ var serverPeerDisable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
-		client := admin.NewClient(socketPath)
-		if err := client.DisablePeer(context.Background(), network, peer); err != nil {
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+
+		if err := client.DisablePeer(
+			i.Context(),
+			network,
+			peer,
+		); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
 			return nil
 		}
+
 		fmt.Printf("peer %q disabled\n", peer)
 		return nil
 	},
@@ -133,18 +157,26 @@ var serverPeerDelete = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		peer := i.GetOperand("peer")
 
-		client := admin.NewClient(socketPath)
-		if err := client.DeletePeer(context.Background(), network, peer); err != nil {
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+
+		if err := client.DeletePeer(
+			i.Context(),
+			network,
+			peer,
+		); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
 			return nil
 		}
+
 		fmt.Printf("peer %q deleted\n", peer)
 		return nil
 	},
@@ -160,11 +192,14 @@ var serverPeerList = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 
-		client := admin.NewClient(socketPath)
-		peers, err := client.ListPeers(context.Background(), network)
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+
+		peers, err := client.ListPeers(i.Context(), network)
 		if err != nil {
 			return err
 		}
@@ -172,6 +207,7 @@ var serverPeerList = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(peers)
 		}
+
 		printServerPeers(peers)
 		return nil
 	},

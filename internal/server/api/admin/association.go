@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -109,33 +108,34 @@ func (c *Client) ListAssociations(
 	[]AssociationDTO,
 	error,
 ) {
-	resp, err := c.t.Get(ctx, "/networks/"+network+"/associations")
-	if err != nil {
-		return nil, err
-	}
-	return daemon.DecodeResponse[[]AssociationDTO](resp)
+	var result []AssociationDTO
+	return result, c.wire.Get(ctx, "/networks/"+network+"/associations", &result)
 }
 
 func (c *Client) AddAssociation(
 	ctx context.Context,
 	network string,
-	req AddAssociationRequest,
+	cidr1 string,
+	cidr2 string,
 ) error {
-	resp, err := c.t.Post(ctx, "/networks/"+network+"/associations", req)
+	req := AddAssociationRequest{Cidr1: cidr1, Cidr2: cidr2}
+	body, err := marshalJSON(req)
 	if err != nil {
 		return err
 	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Post(ctx, "/networks/"+network+"/associations", body, nil)
 }
 
 func (c *Client) DeleteAssociation(
 	ctx context.Context,
 	network string,
-	req DeleteAssociationRequest,
+	cidr1 string,
+	cidr2 string,
 ) error {
-	resp, err := c.t.Post(ctx, "/networks/"+network+"/associations/delete", req)
+	req := DeleteAssociationRequest{Cidr1: cidr1, Cidr2: cidr2}
+	body, err := marshalJSON(req)
 	if err != nil {
 		return err
 	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Post(ctx, "/networks/"+network+"/associations/delete", body, nil)
 }

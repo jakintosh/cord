@@ -7,7 +7,6 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
-	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 )
 
 // PeerDTO is a cached peer joined with live WireGuard device state, for
@@ -68,9 +67,6 @@ func (c *Client) ListPeers(
 	[]PeerDTO,
 	error,
 ) {
-	resp, err := c.t.Get(ctx, "/networks/"+network+"/peers")
-	if err != nil {
-		return nil, err
-	}
-	return daemon.DecodeResponse[[]PeerDTO](resp)
+	var result []PeerDTO
+	return result, c.wire.Get(ctx, "/networks/"+network+"/peers", &result)
 }

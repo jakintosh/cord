@@ -6,19 +6,23 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
-	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 )
 
 type Client struct {
-	t *daemon.Transport
+	wire wire.Client
 }
 
 func NewClient(
 	socketPath string,
-) *Client {
-	return &Client{
-		t: daemon.NewTransport(socketPath),
+) (
+	*Client,
+	error,
+) {
+	w, err := wire.NewClient("unix:///"+socketPath, wire.ClientOptions{})
+	if err != nil {
+		return nil, err
 	}
+	return &Client{wire: w}, nil
 }
 
 func writeServiceError(

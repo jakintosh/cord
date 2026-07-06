@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -53,8 +52,6 @@ var serverRegistrationCreate = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := serverSocket(i)
-
 		network := i.GetOperand("network")
 		name := i.GetOperand("name")
 
@@ -62,15 +59,17 @@ var serverRegistrationCreate = &args.Command{
 		adminFlag := i.GetFlag("admin")
 		outputPath := i.GetParameter("output")
 
-		client := admin.NewClient(socketPath)
-		inv, err := client.CreateInvite(
-			context.Background(),
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+
+		invitation, err := client.CreateInvite(
+			i.Context(),
 			network,
-			admin.CreateInviteRequest{
-				Name:  name,
-				Ip:    ip,
-				Admin: adminFlag,
-			},
+			name,
+			ip,
+			adminFlag,
 		)
 		if err != nil {
 			return err
@@ -83,7 +82,7 @@ var serverRegistrationCreate = &args.Command{
 			}
 			defer f.Close()
 
-			if err := inv.Write(f); err != nil {
+			if err := invitation.Write(f); err != nil {
 				return fmt.Errorf("write invitation file: %w", err)
 			}
 
@@ -94,7 +93,7 @@ var serverRegistrationCreate = &args.Command{
 		// The invitation payload is the deliverable, so it is printed
 		// as JSON in both human and --json modes unless redirected to
 		// a file via --output.
-		return printJSON(inv)
+		return printJSON(invitation)
 	},
 }
 
@@ -108,11 +107,14 @@ var serverRegistrationList = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 
-		client := admin.NewClient(socketPath)
-		registrations, err := client.ListRegistrations(context.Background(), network)
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+
+		registrations, err := client.ListRegistrations(i.Context(), network)
 		if err != nil {
 			return err
 		}
@@ -120,6 +122,7 @@ var serverRegistrationList = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(registrations)
 		}
+
 		printRegistrations(registrations)
 		return nil
 	},
@@ -139,18 +142,26 @@ var serverRegistrationRevoke = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := serverSocket(i)
 		network := i.GetOperand("network")
 		name := i.GetOperand("name")
 
-		client := admin.NewClient(socketPath)
-		if err := client.RevokeRegistration(context.Background(), network, name); err != nil {
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+
+		if err := client.RevokeRegistration(
+			i.Context(),
+			network,
+			name,
+		); err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
 			return nil
 		}
+
 		fmt.Printf("registration %q revoked\n", name)
 		return nil
 	},

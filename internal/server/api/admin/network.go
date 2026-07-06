@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -185,11 +184,8 @@ func (c *Client) ListNetworks(
 	[]string,
 	error,
 ) {
-	resp, err := c.t.Get(ctx, "/networks")
-	if err != nil {
-		return nil, err
-	}
-	return daemon.DecodeResponse[[]string](resp)
+	var result []string
+	return result, c.wire.Get(ctx, "/networks", &result)
 }
 
 func (c *Client) ShowNetwork(
@@ -199,11 +195,8 @@ func (c *Client) ShowNetwork(
 	NetworkDTO,
 	error,
 ) {
-	resp, err := c.t.Get(ctx, "/networks/"+name)
-	if err != nil {
-		return NetworkDTO{}, err
-	}
-	return daemon.DecodeResponse[NetworkDTO](resp)
+	var result NetworkDTO
+	return result, c.wire.Get(ctx, "/networks/"+name, &result)
 }
 
 func (c *Client) AddNetwork(
@@ -213,42 +206,31 @@ func (c *Client) AddNetwork(
 	NetworkDTO,
 	error,
 ) {
-	resp, err := c.t.Post(ctx, "/networks", req)
+	body, err := marshalJSON(req)
 	if err != nil {
 		return NetworkDTO{}, err
 	}
-	return daemon.DecodeResponse[NetworkDTO](resp)
+	var result NetworkDTO
+	return result, c.wire.Post(ctx, "/networks", body, &result)
 }
 
 func (c *Client) DeleteNetwork(
 	ctx context.Context,
 	name string,
 ) error {
-	resp, err := c.t.Delete(ctx, "/networks/"+name)
-	if err != nil {
-		return err
-	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Delete(ctx, "/networks/"+name, nil)
 }
 
 func (c *Client) EnableNetwork(
 	ctx context.Context,
 	name string,
 ) error {
-	resp, err := c.t.Post(ctx, "/networks/"+name+"/enable", nil)
-	if err != nil {
-		return err
-	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Post(ctx, "/networks/"+name+"/enable", nil, nil)
 }
 
 func (c *Client) DisableNetwork(
 	ctx context.Context,
 	name string,
 ) error {
-	resp, err := c.t.Post(ctx, "/networks/"+name+"/disable", nil)
-	if err != nil {
-		return err
-	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Post(ctx, "/networks/"+name+"/disable", nil, nil)
 }

@@ -200,7 +200,10 @@ func newTestPeerClient(
 	server := httptest.NewServer(http.HandlerFunc(handler))
 	addr := server.Listener.Addr().String()
 
-	c := NewPeerClient(addr, nil)
+	c, err := NewPeerClient(addr, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return c, server.Close
 }
 
@@ -214,6 +217,9 @@ func newTestInviteClient(
 	server := httptest.NewServer(http.HandlerFunc(handler))
 	addr := server.Listener.Addr().String()
 
-	c := NewInviteClient(addr, nil)
+	c, err := NewInviteClient(addr, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return c, server.Close
 }

@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -124,23 +123,24 @@ func (c *Client) ListCidrs(
 	[]CidrDTO,
 	error,
 ) {
-	resp, err := c.t.Get(ctx, "/networks/"+network+"/cidrs")
-	if err != nil {
-		return nil, err
-	}
-	return daemon.DecodeResponse[[]CidrDTO](resp)
+	var result []CidrDTO
+	return result, c.wire.Get(ctx, "/networks/"+network+"/cidrs", &result)
 }
 
 func (c *Client) AddCidr(
 	ctx context.Context,
 	network string,
-	req AddCidrRequest,
+	name string,
+	cidr string,
 ) error {
-	resp, err := c.t.Post(ctx, "/networks/"+network+"/cidrs", req)
+	body, err := marshalJSON(AddCidrRequest{
+		Name: name,
+		Cidr: cidr,
+	})
 	if err != nil {
 		return err
 	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Post(ctx, "/networks/"+network+"/cidrs", body, nil)
 }
 
 func (c *Client) RenameCidr(
@@ -150,11 +150,11 @@ func (c *Client) RenameCidr(
 	newName string,
 ) error {
 	req := RenameCidrRequest{Name: newName}
-	resp, err := c.t.Patch(ctx, "/networks/"+network+"/cidrs/"+cidr, req)
+	body, err := marshalJSON(req)
 	if err != nil {
 		return err
 	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Patch(ctx, "/networks/"+network+"/cidrs/"+cidr, body, nil)
 }
 
 func (c *Client) DeleteCidr(
@@ -162,9 +162,5 @@ func (c *Client) DeleteCidr(
 	network string,
 	cidr string,
 ) error {
-	resp, err := c.t.Delete(ctx, "/networks/"+network+"/cidrs/"+cidr)
-	if err != nil {
-		return err
-	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Delete(ctx, "/networks/"+network+"/cidrs/"+cidr, nil)
 }

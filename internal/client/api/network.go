@@ -2,11 +2,12 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
-	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 )
 
@@ -130,13 +131,13 @@ func (a *API) handleNetworkInstall(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	inv, err := protocol.Parse(r.Body)
+	invitation, err := protocol.Parse(r.Body)
 	if err != nil {
 		wire.WriteError(w, http.StatusBadRequest, "malformed invitation")
 		return
 	}
 
-	network, err := a.service.InstallNetwork(*inv)
+	network, err := a.service.InstallNetwork(*invitation)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -248,11 +249,8 @@ func (c *Client) ListNetworks(
 	[]NetworkDTO,
 	error,
 ) {
-	resp, err := c.t.Get(ctx, "/networks")
-	if err != nil {
-		return nil, err
-	}
-	return daemon.DecodeResponse[[]NetworkDTO](resp)
+	var result []NetworkDTO
+	return result, c.wire.Get(ctx, "/networks", &result)
 }
 
 func (c *Client) GetNetwork(
@@ -262,17 +260,10 @@ func (c *Client) GetNetwork(
 	NetworkDTO,
 	error,
 ) {
-	resp, err := c.t.Get(ctx, "/networks/"+name)
-	if err != nil {
-		return NetworkDTO{}, err
-	}
-	return daemon.DecodeResponse[NetworkDTO](resp)
+	var result NetworkDTO
+	return result, c.wire.Get(ctx, "/networks/"+name, &result)
 }
 
-// InstallNetwork sends a raw invitation payload to the daemon, which
-// parses and validates it. Passing the bytes verbatim means a malformed
-// invitation surfaces as a clean 400 from the daemon rather than a
-// client-side parse error.
 func (c *Client) InstallNetwork(
 	ctx context.Context,
 	payload []byte,
@@ -280,11 +271,11 @@ func (c *Client) InstallNetwork(
 	NetworkDTO,
 	error,
 ) {
-	resp, err := c.t.PostRaw(ctx, "/networks", payload)
-	if err != nil {
-		return NetworkDTO{}, err
+	if !json.Valid(payload) {
+		return NetworkDTO{}, errors.New("invalid invitation: not valid JSON")
 	}
-	return daemon.DecodeResponse[NetworkDTO](resp)
+	var result NetworkDTO
+	return result, c.wire.Post(ctx, "/networks", payload, &result)
 }
 
 func (c *Client) RedeemNetwork(
@@ -294,55 +285,36 @@ func (c *Client) RedeemNetwork(
 	NetworkDTO,
 	error,
 ) {
-	resp, err := c.t.Post(ctx, "/networks/"+name+"/redeem", nil)
-	if err != nil {
-		return NetworkDTO{}, err
-	}
-	return daemon.DecodeResponse[NetworkDTO](resp)
+	var result NetworkDTO
+	return result, c.wire.Post(ctx, "/networks/"+name+"/redeem", nil, &result)
 }
 
 func (c *Client) ConfirmNetwork(
 	ctx context.Context,
 	name string,
 ) error {
-	resp, err := c.t.Post(ctx, "/networks/"+name+"/confirm", nil)
-	if err != nil {
-		return err
-	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Post(ctx, "/networks/"+name+"/confirm", nil, nil)
 }
 
 func (c *Client) UninstallNetwork(
 	ctx context.Context,
 	name string,
 ) error {
-	resp, err := c.t.Delete(ctx, "/networks/"+name)
-	if err != nil {
-		return err
-	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Delete(ctx, "/networks/"+name, nil)
 }
 
 func (c *Client) EnableNetwork(
 	ctx context.Context,
 	name string,
 ) error {
-	resp, err := c.t.Post(ctx, "/networks/"+name+"/enable", nil)
-	if err != nil {
-		return err
-	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Post(ctx, "/networks/"+name+"/enable", nil, nil)
 }
 
 func (c *Client) DisableNetwork(
 	ctx context.Context,
 	name string,
 ) error {
-	resp, err := c.t.Post(ctx, "/networks/"+name+"/disable", nil)
-	if err != nil {
-		return err
-	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Post(ctx, "/networks/"+name+"/disable", nil, nil)
 }
 
 func (c *Client) SyncNetwork(
@@ -352,9 +324,6 @@ func (c *Client) SyncNetwork(
 	NetworkDTO,
 	error,
 ) {
-	resp, err := c.t.Post(ctx, "/networks/"+name+"/sync", nil)
-	if err != nil {
-		return NetworkDTO{}, err
-	}
-	return daemon.DecodeResponse[NetworkDTO](resp)
+	var result NetworkDTO
+	return result, c.wire.Post(ctx, "/networks/"+name+"/sync", nil, &result)
 }

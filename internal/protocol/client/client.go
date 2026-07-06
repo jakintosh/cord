@@ -3,6 +3,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -63,13 +64,20 @@ type PeerClient struct {
 func NewPeerClient(
 	apiAddr string,
 	httpClient *http.Client,
-) *PeerClient {
-	return &PeerClient{
-		client: wire.Client{
-			BaseURL:    "http://" + apiAddr,
-			HTTPClient: httpClient,
-		},
+) (
+	*PeerClient,
+	error,
+) {
+	opts := wire.ClientOptions{
+		HTTPClient: httpClient,
 	}
+	c, err := wire.NewClient("http://"+apiAddr, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &PeerClient{
+		client: c,
+	}, nil
 }
 
 // ListPeers calls GET /peers and returns the visible peer list.
@@ -78,7 +86,7 @@ func (c *PeerClient) ListPeers() (
 	error,
 ) {
 	var peers []protocol.VisiblePeer
-	err := c.client.Get("/peers", &peers)
+	err := c.client.Get(context.Background(), "/peers", &peers)
 	return peers, err
 }
 
@@ -86,7 +94,8 @@ func (c *PeerClient) ListPeers() (
 func (c *PeerClient) ConfirmPeer() error {
 	var result map[string]string
 	return withRetry(func() error {
-		return c.client.Post("/confirm", nil, &result)
+		// TODO: at some point we should figure out a real context to use here
+		return c.client.Post(context.Background(), "/confirm", nil, &result)
 	})
 }
 
@@ -102,7 +111,7 @@ func (c *PeerClient) ReportEndpoints(
 
 	var result map[string]string
 	return withRetry(func() error {
-		return c.client.Post("/endpoints", body, &result)
+		return c.client.Post(context.Background(), "/endpoints", body, &result)
 	})
 }
 
@@ -117,13 +126,15 @@ type InviteClient struct {
 func NewInviteClient(
 	apiAddr string,
 	httpClient *http.Client,
-) *InviteClient {
-	return &InviteClient{
-		client: wire.Client{
-			BaseURL:    "http://" + apiAddr,
-			HTTPClient: httpClient,
-		},
+) (
+	*InviteClient,
+	error,
+) {
+	c, err := wire.NewClient("http://"+apiAddr, wire.ClientOptions{HTTPClient: httpClient})
+	if err != nil {
+		return nil, err
 	}
+	return &InviteClient{client: c}, nil
 }
 
 // RedeemInvitation calls POST /redeem, exchanging a temporary invite
@@ -145,7 +156,7 @@ func (c *InviteClient) RedeemInvitation(
 
 	var result protocol.Invitation
 	err = withRetry(func() error {
-		return c.client.Post("/redeem", body, &result)
+		return c.client.Post(context.Background(), "/redeem", body, &result)
 	})
 	if err != nil {
 		return nil, err

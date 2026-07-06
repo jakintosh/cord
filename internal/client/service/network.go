@@ -143,9 +143,12 @@ func (s *Service) EnableNetwork(
 		}
 	}()
 
-	client := s.newPeerClient(tunnel)
-	network := s.newNetwork(cfg, tunnel, client)
+	client, err := s.newPeerClient(tunnel)
+	if err != nil {
+		return fmt.Errorf("create peer client: %w", err)
+	}
 
+	network := s.newNetwork(cfg, tunnel, client)
 	if err := network.start(); err != nil {
 		return err
 	}

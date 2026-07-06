@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
+	"os"
 	"time"
 
-	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
-	inviteApi "git.studiopollinator.com/pollinator/cord/internal/server/api/invite"
-	peerApi "git.studiopollinator.com/pollinator/cord/internal/server/api/peer"
+	inviteapi "git.studiopollinator.com/pollinator/cord/internal/server/api/invite"
+	peerapi "git.studiopollinator.com/pollinator/cord/internal/server/api/peer"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
@@ -51,9 +53,46 @@ func Serve(
 	if opts.SocketPath == "" {
 		return fmt.Errorf("server: socket path required")
 	}
+
+	deps, err := initDependencies(opts)
+	if err != nil {
+		return err
+	}
+	defer deps.close()
+
+	ln, err := listenUnix(opts.SocketPath)
+	if err != nil {
+		return err
+	}
+	defer ln.Close()
+
+	return serveHTTP(ctx, ln, deps.api.Router())
+}
+
+// daemonDeps holds the constructed dependencies for the daemon's lifetime.
+type daemonDeps struct {
+	db  *database.DB
+	svc *service.Service
+	api *admin.API
+}
+
+func (d *daemonDeps) close() {
+	d.svc.Close()
+	d.db.Close()
+}
+
+// initDependencies constructs and wires the database, WireGuard manager,
+// service, and admin API server. The caller must call close() on the
+// returned deps to shut down cleanly.
+func initDependencies(
+	opts Options,
+) (
+	*daemonDeps,
+	error,
+) {
 	backend, err := wireguard.ParseBackendType(opts.Backend)
 	if err != nil {
-		return fmt.Errorf("server: %w", err)
+		return nil, fmt.Errorf("server: %w", err)
 	}
 
 	dbOpts := database.Options{
@@ -62,16 +101,16 @@ func Serve(
 	}
 	db, err := database.Open(dbOpts)
 	if err != nil {
-		return fmt.Errorf("server: open database: %w", err)
+		return nil, fmt.Errorf("server: open database: %w", err)
 	}
-	defer db.Close()
 
 	wgOpts := wireguard.Options{
 		Backend: backend,
 	}
 	wg, err := wireguard.NewManager(wgOpts)
 	if err != nil {
-		return fmt.Errorf("server: new wireguard: %w", err)
+		db.Close()
+		return nil, fmt.Errorf("server: new wireguard: %w", err)
 	}
 
 	var svc *service.Service
@@ -83,18 +122,20 @@ func Serve(
 		// TODO: I don't like the way the APIFactory has this circular dependency
 		APIFactory: func(network string) service.APIHandlers {
 			return service.APIHandlers{
-				Main:   peerApi.New(svc, network, log.Default()).Router(),
-				Invite: inviteApi.New(svc, network, log.Default()).Router(),
+				Main:   peerapi.New(svc, network, log.Default()).Router(),
+				Invite: inviteapi.New(svc, network, log.Default()).Router(),
 			}
 		},
 	}
 	svc, err = service.New(svcOpts)
 	if err != nil {
-		return fmt.Errorf("server: new service: %w", err)
+		db.Close()
+		return nil, fmt.Errorf("server: new service: %w", err)
 	}
 
 	if err := svc.Start(); err != nil {
-		return fmt.Errorf("server: start networks: %w", err)
+		db.Close()
+		return nil, fmt.Errorf("server: start networks: %w", err)
 	}
 
 	apiOpts := admin.Options{
@@ -103,13 +144,62 @@ func Serve(
 	}
 	apiServer, err := admin.New(apiOpts)
 	if err != nil {
-		return fmt.Errorf("server: new api: %w", err)
+		svc.Close()
+		db.Close()
+		return nil, fmt.Errorf("server: new api: %w", err)
 	}
 
-	d, err := daemon.New(opts.SocketPath, apiServer.Router())
+	return &daemonDeps{
+		db:  db,
+		svc: svc,
+		api: apiServer,
+	}, nil
+}
+
+// listenUnix removes any stale socket at path, creates a new Unix
+// listener, sets permissive permissions, and returns it.
+func listenUnix(
+	path string,
+) (
+	net.Listener,
+	error,
+) {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("server: remove socket: %w", err)
+	}
+
+	ln, err := net.Listen("unix", path)
 	if err != nil {
-		return fmt.Errorf("server: new daemon: %w", err)
+		return nil, fmt.Errorf("server: listen: %w", err)
 	}
 
-	return d.Run(ctx)
+	if err := os.Chmod(path, 0666); err != nil {
+		ln.Close()
+		return nil, fmt.Errorf("server: chmod socket: %w", err)
+	}
+
+	return ln, nil
+}
+
+// serveHTTP starts an HTTP server on ln, blocks until ctx is cancelled,
+// then gracefully shuts down with a 5-second timeout.
+func serveHTTP(
+	ctx context.Context,
+	ln net.Listener,
+	handler http.Handler,
+) error {
+	srv := &http.Server{
+		Handler: handler,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(ln)
+	}()
+
+	<-ctx.Done()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return srv.Shutdown(shutdownCtx)
 }

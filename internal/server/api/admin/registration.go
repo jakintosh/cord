@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
@@ -79,11 +78,8 @@ func (c *Client) ListRegistrations(
 	[]RegistrationDTO,
 	error,
 ) {
-	resp, err := c.t.Get(ctx, "/networks/"+network+"/registrations")
-	if err != nil {
-		return nil, err
-	}
-	return daemon.DecodeResponse[[]RegistrationDTO](resp)
+	var result []RegistrationDTO
+	return result, c.wire.Get(ctx, "/networks/"+network+"/registrations", &result)
 }
 
 func (c *Client) RevokeRegistration(
@@ -91,9 +87,5 @@ func (c *Client) RevokeRegistration(
 	network string,
 	registration string,
 ) error {
-	resp, err := c.t.Delete(ctx, "/networks/"+network+"/registrations/"+registration)
-	if err != nil {
-		return err
-	}
-	return daemon.DecodeStatus(resp)
+	return c.wire.Delete(ctx, "/networks/"+network+"/registrations/"+registration, nil)
 }

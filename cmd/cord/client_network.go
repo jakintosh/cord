@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -31,10 +30,12 @@ var clientNetworkList = &args.Command{
 	Name: "list",
 	Help: "list installed networks",
 	Handler: func(i *args.Input) error {
-		socketPath := clientSocket(i)
+		client, err := clientClient(i)
+		if err != nil {
+			return err
+		}
 
-		client := api.NewClient(socketPath)
-		networks, err := client.ListNetworks(context.Background())
+		networks, err := client.ListNetworks(i.Context())
 		if err != nil {
 			return err
 		}
@@ -58,11 +59,14 @@ var clientNetworkShow = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
-		client := api.NewClient(socketPath)
-		result, err := client.GetNetwork(context.Background(), network)
+		client, err := clientClient(i)
+		if err != nil {
+			return err
+		}
+
+		result, err := client.GetNetwork(i.Context(), network)
 		if err != nil {
 			return err
 		}
@@ -85,7 +89,6 @@ var clientNetworkInstall = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := clientSocket(i)
 		invitePath := i.GetOperand("invite")
 
 		var (
@@ -101,8 +104,12 @@ var clientNetworkInstall = &args.Command{
 			return fmt.Errorf("read invite: %w", err)
 		}
 
-		client := api.NewClient(socketPath)
-		result, err := client.InstallNetwork(context.Background(), invite)
+		client, err := clientClient(i)
+		if err != nil {
+			return err
+		}
+
+		result, err := client.InstallNetwork(i.Context(), invite)
 		if err != nil {
 			return err
 		}
@@ -129,11 +136,14 @@ var clientNetworkRedeem = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
-		client := api.NewClient(socketPath)
-		result, err := client.RedeemNetwork(context.Background(), network)
+		client, err := clientClient(i)
+		if err != nil {
+			return err
+		}
+
+		result, err := client.RedeemNetwork(i.Context(), network)
 		if err != nil {
 			return err
 		}
@@ -160,11 +170,14 @@ var clientNetworkConfirm = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
-		client := api.NewClient(socketPath)
-		if err := client.ConfirmNetwork(context.Background(), network); err != nil {
+		client, err := clientClient(i)
+		if err != nil {
+			return err
+		}
+
+		if err := client.ConfirmNetwork(i.Context(), network); err != nil {
 			return err
 		}
 
@@ -186,11 +199,14 @@ var clientNetworkUninstall = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
-		client := api.NewClient(socketPath)
-		if err := client.UninstallNetwork(context.Background(), network); err != nil {
+		client, err := clientClient(i)
+		if err != nil {
+			return err
+		}
+
+		if err := client.UninstallNetwork(i.Context(), network); err != nil {
 			return err
 		}
 
@@ -212,11 +228,14 @@ var clientNetworkEnable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
-		client := api.NewClient(socketPath)
-		if err := client.EnableNetwork(context.Background(), network); err != nil {
+		client, err := clientClient(i)
+		if err != nil {
+			return err
+		}
+
+		if err := client.EnableNetwork(i.Context(), network); err != nil {
 			return err
 		}
 
@@ -238,11 +257,14 @@ var clientNetworkDisable = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
-		client := api.NewClient(socketPath)
-		if err := client.DisableNetwork(context.Background(), network); err != nil {
+		client, err := clientClient(i)
+		if err != nil {
+			return err
+		}
+
+		if err := client.DisableNetwork(i.Context(), network); err != nil {
 			return err
 		}
 
@@ -264,11 +286,14 @@ var clientNetworkSync = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		socketPath := clientSocket(i)
 		network := i.GetOperand("network")
 
-		client := api.NewClient(socketPath)
-		result, err := client.SyncNetwork(context.Background(), network)
+		client, err := clientClient(i)
+		if err != nil {
+			return err
+		}
+
+		result, err := client.SyncNetwork(i.Context(), network)
 		if err != nil {
 			return err
 		}
