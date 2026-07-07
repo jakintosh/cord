@@ -1,7 +1,6 @@
 package invite
 
 import (
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -77,7 +76,7 @@ func setupInviteTest(t *testing.T) (*testutil.ServiceEnv, *API) {
 		t.Fatalf("insert registration: %v", err)
 	}
 
-	api := New(env.Service, "testnet", log.Default())
+	api := New(env.Service, "testnet", nil)
 
 	return env, api
 }

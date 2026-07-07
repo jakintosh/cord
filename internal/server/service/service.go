@@ -3,12 +3,13 @@ package service
 import (
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -26,8 +27,9 @@ type Options struct {
 	// Clock returns the current time. Defaults to time.Now when nil.
 	Clock func() time.Time
 
-	// Logger receives internal diagnostics from the service.
-	Logger *log.Logger
+	// Logger receives internal diagnostics from the service. Nil
+	// discards everything.
+	Logger *slog.Logger
 
 	// APIFactory creates per-network HTTP handlers. Called when
 	// starting a network. Nil means no API listeners are started.
@@ -48,7 +50,7 @@ type Service struct {
 	store      Store
 	wireguard  *wireguard.Manager
 	clock      func() time.Time
-	log        *log.Logger
+	log        *slog.Logger
 	mu         sync.Mutex
 	apiFactory func(network string) APIHandlers
 
@@ -72,11 +74,16 @@ func New(
 		clock = time.Now
 	}
 
+	log := opts.Logger
+	if log == nil {
+		log = logging.Discard()
+	}
+
 	return &Service{
 		store:      opts.Store,
 		wireguard:  opts.WireGuard,
 		clock:      clock,
-		log:        opts.Logger,
+		log:        log,
 		running:    make(map[string]*Network),
 		apiFactory: opts.APIFactory,
 	}, nil
@@ -94,7 +101,7 @@ func (s *Service) Start() error {
 	for _, name := range names {
 		nc, err := s.store.GetNetwork(name)
 		if err != nil {
-			s.logf("start networks: get %q: %v", name, err)
+			s.log.Error("start: get network failed", "network", name, "err", err)
 			lastErr = err
 			continue
 		}
@@ -102,7 +109,7 @@ func (s *Service) Start() error {
 			continue
 		}
 		if err := s.startNetwork(name); err != nil {
-			s.logf("start networks: start %q: %v", name, err)
+			s.log.Error("start: network failed", "network", name, "err", err)
 			lastErr = err
 		}
 	}
@@ -127,13 +134,12 @@ func (s *Service) startNetwork(
 	}
 
 	n := &Network{
-		config:   nc,
-		store:    s.store,
-		wg:       s.wireguard,
-		api:      s.apiFactory,
-		clock:    s.clock,
-		logf:     s.logf,
-		registry: func() map[string]*Network { return s.running },
+		config: nc,
+		store:  s.store,
+		wg:     s.wireguard,
+		api:    s.apiFactory,
+		clock:  s.clock,
+		log:    s.log.With("network", name),
 	}
 
 	if err := n.start(); err != nil {
@@ -144,6 +150,7 @@ func (s *Service) startNetwork(
 	s.running[name] = n
 	s.mu.Unlock()
 
+	n.log.Info("network started")
 	return nil
 }
 
@@ -165,13 +172,6 @@ func (s *Service) Close() error {
 		}
 	}
 	return errors.Join(errs...)
-}
-
-// logf writes a message to the service logger if configured.
-func (s *Service) logf(format string, args ...any) {
-	if s.log != nil {
-		s.log.Printf(format, args...)
-	}
 }
 
 // ResolveRegistrationIdentity looks up an unredeemed, unexpired

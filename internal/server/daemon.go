@@ -3,12 +3,13 @@ package server
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	inviteapi "git.studiopollinator.com/pollinator/cord/internal/server/api/invite"
 	peerapi "git.studiopollinator.com/pollinator/cord/internal/server/api/peer"
@@ -38,6 +39,10 @@ type Options struct {
 
 	// Version is the daemon build version, surfaced over the status API.
 	Version string
+
+	// Debug enables verbose logging: requests, WireGuard handshakes,
+	// and reconciliation detail.
+	Debug bool
 }
 
 // Serve is the production composition root for the cord server daemon.
@@ -54,7 +59,9 @@ func Serve(
 		return fmt.Errorf("server: socket path required")
 	}
 
-	deps, err := initDependencies(opts)
+	log := logging.New(opts.Debug)
+
+	deps, err := initDependencies(opts, log)
 	if err != nil {
 		return err
 	}
@@ -66,6 +73,7 @@ func Serve(
 	}
 	defer ln.Close()
 
+	log.Info("daemon listening", "socket", opts.SocketPath, "version", opts.Version)
 	return serveHTTP(ctx, ln, deps.api.Router())
 }
 
@@ -86,6 +94,7 @@ func (d *daemonDeps) close() {
 // returned deps to shut down cleanly.
 func initDependencies(
 	opts Options,
+	log *slog.Logger,
 ) (
 	*daemonDeps,
 	error,
@@ -106,6 +115,7 @@ func initDependencies(
 
 	wgOpts := wireguard.Options{
 		Backend: backend,
+		Logger:  log,
 	}
 	wg, err := wireguard.NewManager(wgOpts)
 	if err != nil {
@@ -118,12 +128,12 @@ func initDependencies(
 		Store:     db,
 		WireGuard: wg,
 		Clock:     time.Now,
-		Logger:    log.Default(),
+		Logger:    log,
 		// TODO: I don't like the way the APIFactory has this circular dependency
 		APIFactory: func(network string) service.APIHandlers {
 			return service.APIHandlers{
-				Main:   peerapi.New(svc, network, log.Default()).Router(),
-				Invite: inviteapi.New(svc, network, log.Default()).Router(),
+				Main:   peerapi.New(svc, network, log.With("api", "peer", "network", network)).Router(),
+				Invite: inviteapi.New(svc, network, log.With("api", "invite", "network", network)).Router(),
 			}
 		},
 	}
@@ -140,6 +150,7 @@ func initDependencies(
 
 	apiOpts := admin.Options{
 		Service: svc,
+		Logger:  log.With("api", "admin"),
 		Version: opts.Version,
 	}
 	apiServer, err := admin.New(apiOpts)

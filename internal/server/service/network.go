@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -108,16 +109,15 @@ func (n *NetworkConfig) Normalize() error {
 // Network is a running server network: two Planes (main + invite) plus
 // a self-rearming reconciliation timer.
 type Network struct {
-	config   *NetworkConfig
-	main     *Plane
-	invite   *Plane
-	timer    *time.Timer
-	store    Store
-	wg       *wireguard.Manager
-	api      func(network string) APIHandlers
-	clock    func() time.Time
-	logf     func(string, ...any)
-	registry func() map[string]*Network
+	config *NetworkConfig
+	main   *Plane
+	invite *Plane
+	timer  *time.Timer
+	store  Store
+	wg     *wireguard.Manager
+	api    func(network string) APIHandlers
+	clock  func() time.Time
+	log    *slog.Logger
 }
 
 // GetNetwork returns the persisted network config by name.
@@ -301,12 +301,20 @@ func (n *Network) start() error {
 		inviteHandler = h.Invite
 	}
 
-	n.main = newPlane(n.config.Main, n.config.PrivateKey)
+	n.main = newPlane(
+		n.config.Main,
+		n.config.PrivateKey,
+		n.log.With("plane", "main"),
+	)
 	if err := n.main.start(n.wg, mainHandler); err != nil {
 		return fmt.Errorf("main plane: %w", err)
 	}
 
-	n.invite = newPlane(n.config.Invite, n.config.PrivateKey)
+	n.invite = newPlane(
+		n.config.Invite,
+		n.config.PrivateKey,
+		n.log.With("plane", "invite"),
+	)
 	if err := n.invite.start(n.wg, inviteHandler); err != nil {
 		_ = n.main.stop()
 		return fmt.Errorf("invite plane: %w", err)
@@ -333,6 +341,7 @@ func (n *Network) stop() error {
 			errs = append(errs, err)
 		}
 	}
+	n.log.Info("network stopped")
 	return errors.Join(errs...)
 }
 
@@ -344,35 +353,36 @@ func (n *Network) reconcile() {
 	now := n.clock()
 
 	if err := n.store.PruneExpiredRegistrations(netName, now); err != nil {
-		n.logf("reconcile %s: prune: %v", netName, err)
+		n.log.Warn("reconcile: prune failed", "err", err)
 		return
 	}
 
 	// reconcile main peers
 	peers, err := n.store.ListPeers(netName)
 	if err != nil {
-		n.logf("reconcile %s: list peers: %w", netName, err)
+		n.log.Warn("reconcile: list peers failed", "err", err)
 		return
 	}
 	mainPeers, err := peersToWireGuardPeers(peers)
 	if err != nil {
-		n.logf("reconcile %s: build main peers: %v", netName, err)
+		n.log.Warn("reconcile: build main peers failed", "err", err)
 		return
 	}
 	if err := n.main.device.SetPeers(mainPeers...); err != nil {
-		n.logf("reconcile %s: apply main peers: %v", netName, err)
+		n.log.Warn("reconcile: apply main peers failed", "err", err)
 	}
 
 	// reconcile invite peers
 	regs, err := n.store.ListActiveRegistrations(netName, now)
 	if err != nil {
-		n.logf("reconcile %s: list active registrations: %w", netName, err)
+		n.log.Warn("reconcile: list active registrations failed", "err", err)
 		return
 	}
 	invitePeers := registrationsToWireGuardPeers(regs)
 	if err := n.invite.device.SetPeers(invitePeers...); err != nil {
-		n.logf("reconcile %s: apply invite peers: %v", netName, err)
+		n.log.Warn("reconcile: apply invite peers failed", "err", err)
 	}
+	n.log.Debug("reconcile", "peers", len(peers), "registrations", len(regs))
 
 	// Rearm timer
 	next := now.Add(defaultReconcileCap)

@@ -167,6 +167,7 @@ func (s *Service) BeginInstall(
 	if err := s.store.InsertInstall(install); err != nil {
 		return nil, err
 	}
+	s.log.Info("install started", "network", networkName)
 	return install, nil
 }
 
@@ -236,6 +237,7 @@ func (s *Service) Redeem(
 		return nil, err
 	}
 
+	s.log.Info("invite redeemed", "network", name, "route", result.Peer.Route)
 	return result, nil
 }
 
@@ -308,6 +310,7 @@ func (s *Service) Confirm(
 	s.running[name] = network
 	s.mu.Unlock()
 
+	s.log.Info("network confirmed", "network", name, "interface", install.MainIfaceName)
 	return nil
 }
 

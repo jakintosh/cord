@@ -207,6 +207,7 @@ func (s *Service) ConfirmPeer(
 		}
 	}
 	s.reconcile(network)
+	s.log.Info("peer confirmed", "network", network, "peer", name)
 
 	return nil
 }

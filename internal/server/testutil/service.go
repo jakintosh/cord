@@ -1,10 +1,10 @@
 package testutil
 
 import (
-	"log"
 	"testing"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
@@ -39,7 +39,7 @@ func SetupServiceWithClock(
 		Store:     db,
 		WireGuard: mgr,
 		Clock:     clock,
-		Logger:    log.Default(),
+		Logger:    logging.Discard(),
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -65,7 +65,7 @@ func SetupServiceWithManager(
 		Store:     db,
 		WireGuard: mgr,
 		Clock:     func() time.Time { return FixedTime },
-		Logger:    log.Default(),
+		Logger:    logging.Discard(),
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)

@@ -25,7 +25,7 @@ func (n *Network) rotate(
 ) {
 	endpoints, err := n.store.ListPeerEndpoints(n.cfg.Name, pubKey)
 	if err != nil {
-		n.logf("scan %s: list endpoints for %q: %v", n.cfg.Name, pubKey, err)
+		n.log.Warn("rotate: list endpoints failed", "peer", pubKey, "err", err)
 		return
 	}
 
@@ -34,15 +34,16 @@ func (n *Network) rotate(
 		return
 	}
 
+	n.log.Debug("rotating endpoint", "peer", pubKey, "endpoint", candidate)
 	if err := n.tunnel.device.SetPeerEndpoint(pubKey, candidate); err != nil {
-		n.logf("scan %s: rotate %q to %q: %v", n.cfg.Name, pubKey, candidate, err)
+		n.log.Warn("rotate: set endpoint failed", "peer", pubKey, "endpoint", candidate, "err", err)
 		return
 	}
 
 	if err := n.store.MarkPeerEndpointAttempt(
 		n.cfg.Name, pubKey, candidate, now.Unix(),
 	); err != nil {
-		n.logf("scan %s: mark attempt for %q: %v", n.cfg.Name, pubKey, err)
+		n.log.Warn("rotate: mark attempt failed", "peer", pubKey, "err", err)
 	}
 }
 

@@ -1,11 +1,11 @@
 package testutil
 
 import (
-	"log"
 	"net/http"
 	"testing"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
@@ -37,7 +37,7 @@ func Setup(
 		Store:     db,
 		WireGuard: mgr,
 		Clock:     func() time.Time { return FixedTime },
-		Logger:    log.Default(),
+		Logger:    logging.Discard(),
 	}
 	svc, err := service.New(svcOpts)
 	if err != nil {
@@ -46,7 +46,7 @@ func Setup(
 
 	apiOpts := admin.Options{
 		Service: svc,
-		Logger:  log.Default(),
+		Logger:  logging.Discard(),
 	}
 	apiServer, err := admin.New(apiOpts)
 	if err != nil {

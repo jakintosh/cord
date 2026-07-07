@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -55,7 +56,7 @@ type Network struct {
 	store  Store
 	client *client.PeerClient
 	clock  func() time.Time
-	logf   func(string, ...any)
+	log    *slog.Logger
 
 	syncInterval   time.Duration
 	scanInterval   time.Duration
@@ -162,6 +163,7 @@ func (s *Service) EnableNetwork(
 	s.mu.Unlock()
 
 	committed = true
+	s.log.Info("network enabled", "network", name, "interface", cfg.InterfaceName)
 	return nil
 }
 
@@ -180,8 +182,9 @@ func (s *Service) DisableNetwork(
 
 	if ok {
 		if err := n.stop(); err != nil {
-			s.logf("disable: stop network %q: %v", name, err)
+			s.log.Warn("disable: stop network failed", "network", name, "err", err)
 		}
+		s.log.Info("network disabled", "network", name)
 	}
 
 	return s.store.SetNetworkEnabled(name, false)
@@ -217,7 +220,7 @@ func (s *Service) newNetwork(
 		store:          s.store,
 		client:         client,
 		clock:          s.clock,
-		logf:           s.logf,
+		log:            s.log.With("network", cfg.Name),
 		syncInterval:   s.syncInterval,
 		scanInterval:   s.scanInterval,
 		reportInterval: s.reportInterval,
@@ -243,17 +246,17 @@ func (n *Network) start() error {
 
 	n.syncTimer = time.AfterFunc(0, func() {
 		if err := n.sync(); err != nil {
-			n.logf("sync %s: %v", n.cfg.Name, err)
+			n.log.Warn("sync failed", "err", err)
 		}
 	})
 	n.scanTimer = time.AfterFunc(n.scanInterval, func() {
 		if err := n.scan(); err != nil {
-			n.logf("scan %s: %v", n.cfg.Name, err)
+			n.log.Warn("scan failed", "err", err)
 		}
 	})
 	n.reportTimer = time.AfterFunc(n.reportInterval, func() {
 		if err := n.report(); err != nil {
-			n.logf("report %s: %v", n.cfg.Name, err)
+			n.log.Warn("report failed", "err", err)
 		}
 	})
 	return nil
@@ -291,6 +294,7 @@ func (n *Network) sync() error {
 	if err != nil {
 		return fmt.Errorf("fetch peers: %w", err)
 	}
+	n.log.Debug("sync", "peers", len(visible))
 
 	peers := peersFromProtocol(visible)
 	if err := n.store.SetPeers(n.cfg.Name, peers); err != nil {
@@ -303,7 +307,7 @@ func (n *Network) sync() error {
 			continue
 		}
 		if err := n.store.SetPeerEndpoints(n.cfg.Name, vp.PublicKey, eps); err != nil {
-			n.logf("sync %s: set endpoints for %q: %v", n.cfg.Name, vp.PublicKey, err)
+			n.log.Warn("sync: set endpoints failed", "peer", vp.PublicKey, "err", err)
 		}
 	}
 
@@ -351,7 +355,7 @@ func (n *Network) scan() error {
 		if err := n.store.UpdatePeerEndpointLocal(
 			n.cfg.Name, pubKey, peer.Endpoint.String(), now.Unix(),
 		); err != nil {
-			n.logf("scan %s: record endpoint for %q: %v", n.cfg.Name, pubKey, err)
+			n.log.Warn("scan: record endpoint failed", "peer", pubKey, "err", err)
 		}
 	}
 
@@ -382,6 +386,7 @@ func (n *Network) report() error {
 	// Convert the stored domain sightings into the protocol wire shape
 	// at this single network boundary. Storage stays wire-agnostic; the
 	// report path owns the transformation.
+	n.log.Debug("report", "sightings", len(sightings))
 	reports := sightingsToProtocol(sightings)
 	return n.client.ReportEndpoints(reports)
 }

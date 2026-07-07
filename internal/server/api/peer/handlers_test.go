@@ -1,7 +1,6 @@
 package peer
 
 import (
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -99,7 +98,7 @@ func TestHandleConfirmPeer_Success(t *testing.T) {
 		t.Fatalf("seed provisional peer: %v", err)
 	}
 
-	api := New(env.Service, "testnet", log.Default())
+	api := New(env.Service, "testnet", nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/confirm", nil)
@@ -145,7 +144,7 @@ func setupPeerTest(t *testing.T) (*testutil.ServiceEnv, *API) {
 		t.Fatalf("seed peer: %v", err)
 	}
 
-	api := New(env.Service, "testnet", log.Default())
+	api := New(env.Service, "testnet", nil)
 
 	return env, api
 }

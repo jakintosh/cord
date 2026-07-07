@@ -1,21 +1,22 @@
 package admin
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
 type Options struct {
 	Service *service.Service
-	Logger  *log.Logger
+	Logger  *slog.Logger
 	Version string
 }
 
 type API struct {
 	service *service.Service
-	log     *log.Logger
+	log     *slog.Logger
 	version string
 }
 
@@ -25,9 +26,13 @@ func New(
 	*API,
 	error,
 ) {
+	log := opts.Logger
+	if log == nil {
+		log = logging.Discard()
+	}
 	return &API{
 		service: opts.Service,
-		log:     opts.Logger,
+		log:     log,
 		version: opts.Version,
 	}, nil
 }
@@ -63,5 +68,5 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("GET /networks/{name}/registrations", a.handleRegistrationList)
 	mux.HandleFunc("DELETE /networks/{name}/registrations/{registration}", a.handleRegistrationRevoke)
 
-	return mux
+	return logging.Middleware(a.log, mux)
 }

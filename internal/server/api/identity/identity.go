@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"net/http"
 
@@ -20,26 +21,32 @@ type LookupFunc func(ip net.IP) (*Peer, error)
 
 // Require wraps a handler with identity resolution: parse the source IP
 // from r.RemoteAddr, call lookup, write 403 "identity unknown" on any
-// failure, otherwise stash the *Peer in the request context and call next.
+// failure, otherwise stash the *Peer in the request context and call
+// next. Rejections are logged with the reason, since the caller only
+// ever sees the opaque 403.
 func Require(
+	log *slog.Logger,
 	lookup LookupFunc,
 	next http.HandlerFunc,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
+			log.Debug("identity rejected", "remote", r.RemoteAddr, "err", err)
 			wire.WriteError(w, http.StatusForbidden, "identity unknown")
 			return
 		}
 
 		ip := net.ParseIP(host)
 		if ip == nil {
+			log.Debug("identity rejected", "remote", r.RemoteAddr, "err", "unparseable IP")
 			wire.WriteError(w, http.StatusForbidden, "identity unknown")
 			return
 		}
 
 		peer, err := lookup(ip)
 		if err != nil {
+			log.Debug("identity rejected", "remote", r.RemoteAddr, "err", err)
 			wire.WriteError(w, http.StatusForbidden, "identity unknown")
 			return
 		}

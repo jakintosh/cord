@@ -2,11 +2,12 @@ package service
 
 import (
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol/client"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
@@ -16,7 +17,7 @@ type Options struct {
 	Store     Store
 	WireGuard *wireguard.Manager
 	Clock     func() time.Time
-	Logger    *log.Logger
+	Logger    *slog.Logger
 
 	// Overrides for tests only — defaults are package consts.
 	SyncInterval   time.Duration
@@ -34,7 +35,7 @@ type Service struct {
 	store      Store
 	wireguard  *wireguard.Manager
 	clock      func() time.Time
-	log        *log.Logger
+	log        *slog.Logger
 	httpClient *http.Client
 
 	syncInterval   time.Duration
@@ -73,11 +74,15 @@ func New(
 	if reportInterval == 0 {
 		reportInterval = ReportInterval
 	}
+	log := opts.Logger
+	if log == nil {
+		log = logging.Discard()
+	}
 	return &Service{
 		store:          opts.Store,
 		wireguard:      opts.WireGuard,
 		clock:          opts.Clock,
-		log:            opts.Logger,
+		log:            log,
 		httpClient:     opts.HTTPClient,
 		running:        make(map[string]*Network),
 		syncInterval:   syncInterval,
@@ -98,7 +103,7 @@ func (s *Service) Start() error {
 	for _, name := range names {
 		nc, err := s.store.GetNetwork(name)
 		if err != nil {
-			s.logf("start: get network %q: %v", name, err)
+			s.log.Error("start: get network failed", "network", name, "err", err)
 			continue
 		}
 		if !nc.Enabled {
@@ -106,7 +111,7 @@ func (s *Service) Start() error {
 		}
 
 		if err := s.EnableNetwork(name); err != nil {
-			s.logf("start: enable network %q: %v", name, err)
+			s.log.Error("start: enable network failed", "network", name, "err", err)
 		}
 	}
 
@@ -122,7 +127,7 @@ func (s *Service) Close() error {
 
 	for name, n := range running {
 		if err := n.stop(); err != nil {
-			s.logf("close: stop network %q: %v", name, err)
+			s.log.Warn("close: stop network failed", "network", name, "err", err)
 		}
 	}
 	return nil
@@ -144,13 +149,4 @@ func (s *Service) newPeerClient(
 	error,
 ) {
 	return client.NewPeerClient(tunnel.apiAddr, s.httpClient)
-}
-
-func (s *Service) logf(
-	format string,
-	args ...any,
-) {
-	if s.log != nil {
-		s.log.Printf(format, args...)
-	}
 }

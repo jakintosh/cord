@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -12,6 +12,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -30,6 +31,10 @@ type Options struct {
 
 	// Version is the daemon build version, surfaced over the status API.
 	Version string
+
+	// Debug enables verbose logging: requests, WireGuard handshakes,
+	// and sync/scan/report detail.
+	Debug bool
 }
 
 // DefaultSocketPath is the default Unix socket path used when none is
@@ -53,7 +58,9 @@ func Serve(
 		return fmt.Errorf("client: socket path required")
 	}
 
-	deps, err := initDependencies(opts)
+	log := logging.New(opts.Debug)
+
+	deps, err := initDependencies(opts, log)
 	if err != nil {
 		return err
 	}
@@ -65,6 +72,7 @@ func Serve(
 	}
 	defer ln.Close()
 
+	log.Info("daemon listening", "socket", opts.SocketPath, "version", opts.Version)
 	return serveHTTP(ctx, ln, deps.api.Router())
 }
 
@@ -85,6 +93,7 @@ func (d *daemonDeps) close() {
 // deps to shut down cleanly.
 func initDependencies(
 	opts Options,
+	log *slog.Logger,
 ) (
 	*daemonDeps,
 	error,
@@ -105,6 +114,7 @@ func initDependencies(
 	}
 	wgOpts := wireguard.Options{
 		Backend: backend,
+		Logger:  log,
 	}
 	wg, err := wireguard.NewManager(wgOpts)
 	if err != nil {
@@ -116,7 +126,7 @@ func initDependencies(
 		Store:     db,
 		WireGuard: wg,
 		Clock:     time.Now,
-		Logger:    log.Default(),
+		Logger:    log,
 	}
 	svc, err := service.New(svcOpts)
 	if err != nil {
@@ -131,6 +141,7 @@ func initDependencies(
 
 	apiOpts := api.Options{
 		Service: svc,
+		Logger:  log.With("api", "control"),
 		Version: opts.Version,
 	}
 	apiServer, err := api.New(apiOpts)

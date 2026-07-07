@@ -1,7 +1,6 @@
 package testutil
 
 import (
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,6 +8,7 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
@@ -52,7 +52,7 @@ func SetupServiceWithServer(
 		Store:      db,
 		WireGuard:  mgr,
 		Clock:      func() time.Time { return FixedTime },
-		Logger:     log.Default(),
+		Logger:     logging.Discard(),
 		HTTPClient: httpClient,
 
 		SyncInterval:   30 * time.Second,
@@ -84,7 +84,7 @@ func SetupServiceWithManager(
 		Store:      db,
 		WireGuard:  mgr,
 		Clock:      func() time.Time { return FixedTime },
-		Logger:     log.Default(),
+		Logger:     logging.Discard(),
 		HTTPClient: &http.Client{Timeout: 100 * time.Millisecond},
 
 		SyncInterval:   30 * time.Second,

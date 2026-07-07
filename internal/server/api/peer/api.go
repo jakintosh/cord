@@ -2,10 +2,11 @@ package peer
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/identity"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
@@ -13,14 +14,17 @@ import (
 type API struct {
 	service *service.Service
 	network string
-	log     *log.Logger
+	log     *slog.Logger
 }
 
 func New(
 	service *service.Service,
 	network string,
-	log *log.Logger,
+	log *slog.Logger,
 ) *API {
+	if log == nil {
+		log = logging.Discard()
+	}
 	return &API{
 		service: service,
 		network: network,
@@ -30,10 +34,10 @@ func New(
 
 func (a *API) Router() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /peers", identity.Require(a.lookupPeer, a.handleVisiblePeers))
-	mux.HandleFunc("POST /endpoints", identity.Require(a.lookupPeer, a.handleReportEndpoints))
-	mux.HandleFunc("POST /confirm", identity.Require(a.lookupProvisional, a.handleConfirmPeer))
-	return mux
+	mux.HandleFunc("GET /peers", identity.Require(a.log, a.lookupPeer, a.handleVisiblePeers))
+	mux.HandleFunc("POST /endpoints", identity.Require(a.log, a.lookupPeer, a.handleReportEndpoints))
+	mux.HandleFunc("POST /confirm", identity.Require(a.log, a.lookupProvisional, a.handleConfirmPeer))
+	return logging.Middleware(a.log, mux)
 }
 
 // lookupPeer looks up a confirmed, enabled peer by source IP.

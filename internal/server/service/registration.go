@@ -129,6 +129,12 @@ func (s *Service) CreateRegistration(
 		return nil, fmt.Errorf("insert registration: %w", mapStoreError(err))
 	}
 	s.reconcile(networkName)
+	s.log.Info("registration created",
+		"network", networkName,
+		"peer", name,
+		"route", mainRoute.String(),
+		"expires_at", reg.ExpiresAt,
+	)
 
 	_, inviteNet, err := net.ParseCIDR(network.Invite.Cidr)
 	if err != nil {
@@ -191,6 +197,11 @@ func (s *Service) RedeemRegistration(
 	if err != nil {
 		return nil, fmt.Errorf("get redeemed peer: %w", mapStoreError(err))
 	}
+	s.log.Info("registration redeemed",
+		"network", networkName,
+		"peer", peer.Name,
+		"route", peer.Route,
+	)
 
 	return s.buildInvitation(network, peer)
 }
@@ -206,6 +217,7 @@ func (s *Service) RevokeRegistration(
 		return fmt.Errorf("delete registration %q: %w", name, mapStoreError(err))
 	}
 	s.reconcile(network)
+	s.log.Info("registration revoked", "network", network, "peer", name)
 	return nil
 }
 

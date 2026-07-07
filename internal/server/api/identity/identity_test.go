@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 )
 
 func TestRequire_Success(t *testing.T) {
@@ -14,7 +16,7 @@ func TestRequire_Success(t *testing.T) {
 	}
 
 	var got *Peer
-	handler := Require(lookup, func(w http.ResponseWriter, r *http.Request) {
+	handler := Require(logging.Discard(), lookup, func(w http.ResponseWriter, r *http.Request) {
 		got = Caller(r.Context())
 		w.WriteHeader(http.StatusOK)
 	})
@@ -44,7 +46,7 @@ func TestRequire_BadRemoteAddr(t *testing.T) {
 		return nil, nil
 	}
 
-	handler := Require(lookup, func(w http.ResponseWriter, r *http.Request) {
+	handler := Require(logging.Discard(), lookup, func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next should not be called")
 	})
 
@@ -64,7 +66,7 @@ func TestRequire_InvalidRemoteAddr(t *testing.T) {
 		return nil, nil
 	}
 
-	handler := Require(lookup, func(w http.ResponseWriter, r *http.Request) {
+	handler := Require(logging.Discard(), lookup, func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next should not be called")
 	})
 
@@ -83,7 +85,7 @@ func TestRequire_LookupError(t *testing.T) {
 		return nil, errors.New("not found")
 	}
 
-	handler := Require(lookup, func(w http.ResponseWriter, r *http.Request) {
+	handler := Require(logging.Discard(), lookup, func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next should not be called")
 	})
 
@@ -102,7 +104,7 @@ func TestRequire_BodyWritten(t *testing.T) {
 		return nil, errors.New("not found")
 	}
 
-	handler := Require(lookup, func(w http.ResponseWriter, r *http.Request) {
+	handler := Require(logging.Discard(), lookup, func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next should not be called")
 	})
 

@@ -226,19 +226,19 @@ func kernelApplyDeviceConfig(
 func (op PeerOp) toWgPeerConfig() wgtypes.PeerConfig {
 	if op.Remove {
 		return wgtypes.PeerConfig{
-			PublicKey: op.Config.PublicKey,
+			PublicKey: op.Target.PublicKey,
 			Remove:    true,
 		}
 	}
 	cfg := wgtypes.PeerConfig{
-		PublicKey:         op.Config.PublicKey,
+		PublicKey:         op.Target.PublicKey,
 		ReplaceAllowedIPs: true,
-		AllowedIPs:        op.Config.AllowedIPs,
+		AllowedIPs:        op.Target.AllowedIPs,
 	}
-	keepalive := op.Config.PersistentKeepalive
+	keepalive := op.Target.PersistentKeepalive
 	cfg.PersistentKeepaliveInterval = &keepalive
-	if op.Config.Endpoint != nil {
-		cfg.Endpoint = op.Config.Endpoint
+	if op.Target.Endpoint != nil {
+		cfg.Endpoint = op.Target.Endpoint
 	}
 	return cfg
 }

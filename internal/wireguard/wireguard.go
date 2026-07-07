@@ -6,6 +6,9 @@ package wireguard
 
 import (
 	"fmt"
+	"log/slog"
+
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 )
 
 const maxInterfaceNameBytes = 15
@@ -13,12 +16,17 @@ const maxInterfaceNameBytes = 15
 // Options configures a WireGuard manager.
 type Options struct {
 	Backend BackendType
+
+	// Logger receives device lifecycle and reconciliation diagnostics.
+	// Nil discards everything.
+	Logger *slog.Logger
 }
 
 // Manager creates WireGuard devices. It is stateless beyond the
 // shared Backend — it does not track devices.
 type Manager struct {
 	backend Backend
+	log     *slog.Logger
 }
 
 // NewManager returns a Manager backed by the selected WireGuard
@@ -31,11 +39,18 @@ func NewManager(
 	*Manager,
 	error,
 ) {
-	backend, err := newBackend(opts.Backend)
+	log := opts.Logger
+	if log == nil {
+		log = logging.Discard()
+	}
+	backend, err := newBackend(opts.Backend, log)
 	if err != nil {
 		return nil, fmt.Errorf("wireguard: new backend: %w", err)
 	}
-	return NewManagerWithBackend(backend), nil
+	return &Manager{
+		backend: backend,
+		log:     log,
+	}, nil
 }
 
 // NewManagerWithBackend returns a Manager that uses the given Backend
@@ -46,6 +61,7 @@ func NewManagerWithBackend(
 ) *Manager {
 	return &Manager{
 		backend: backend,
+		log:     logging.Discard(),
 	}
 }
 
@@ -73,5 +89,7 @@ func (m *Manager) CreateDevice(
 		return nil, fmt.Errorf("wireguard: create device: %w", err)
 	}
 
-	return newDevice(cfg.Name, wgDevice), nil
+	log := m.log.With("device", cfg.Name)
+	log.Debug("device created", "route", cfg.Route.String(), "port", cfg.ListenPort)
+	return newDevice(cfg.Name, wgDevice, log), nil
 }

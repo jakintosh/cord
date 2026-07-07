@@ -1,7 +1,9 @@
 package wireguard
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"sync"
 
@@ -27,16 +29,19 @@ type Device struct {
 	mu      sync.Mutex
 	backend WgDevice
 	desired map[wgtypes.Key]Peer
+	log     *slog.Logger
 }
 
 func newDevice(
 	name string,
 	backend WgDevice,
+	log *slog.Logger,
 ) *Device {
 	return &Device{
 		name:    name,
 		backend: backend,
 		desired: make(map[wgtypes.Key]Peer),
+		log:     log,
 	}
 }
 
@@ -76,6 +81,11 @@ func (d *Device) SetPeers(
 	if len(ops) == 0 {
 		return nil
 	}
+
+	if d.log.Enabled(context.Background(), slog.LevelDebug) {
+		d.logOps(observed, ops)
+	}
+
 	return d.backend.ApplyPeers(ops)
 }
 
@@ -118,6 +128,7 @@ func (d *Device) SetPeerEndpoint(
 	peer.Endpoint = addr
 	d.desired[key] = peer
 
+	d.log.Debug("peer op", "op", "set-endpoint", "peer", shortKey(key), "endpoint", endpoint)
 	return d.backend.ApplyPeers([]PeerOp{{Target: peer}})
 }
 
@@ -137,4 +148,54 @@ func ValidateDeviceName(
 		return fmt.Errorf("wireguard: device name %q exceeds %d byte limit", name, maxInterfaceNameBytes)
 	}
 	return nil
+}
+
+func (d *Device) logOps(
+	observed []PeerStatus,
+	ops []PeerOp,
+) {
+
+	// udpAddrString renders an optional endpoint for log lines.
+	udpAddrString := func(addr *net.UDPAddr) string {
+		if addr == nil {
+			return ""
+		}
+		return addr.String()
+	}
+
+	live := make(map[wgtypes.Key]bool, len(observed))
+	for _, p := range observed {
+		live[p.PublicKey] = true
+	}
+	var added, removed, updated int
+	for _, op := range ops {
+		verb := "add"
+		switch {
+		case op.Remove:
+			verb = "remove"
+			removed++
+		case live[op.Target.PublicKey]:
+			verb = "update"
+			updated++
+		default:
+			added++
+		}
+		d.log.Debug("peer op",
+			"op", verb,
+			"peer", shortKey(op.Target.PublicKey),
+			"endpoint", udpAddrString(op.Target.Endpoint),
+		)
+	}
+}
+
+// shortKey renders a public key as a truncated prefix for log lines —
+// enough to tell peers apart without drowning the output.
+func shortKey(
+	key wgtypes.Key,
+) string {
+	s := key.String()
+	if len(s) > 8 {
+		return s[:8] + "…"
+	}
+	return s
 }

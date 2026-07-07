@@ -1,7 +1,9 @@
 package wireguard
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"time"
 
@@ -9,10 +11,14 @@ import (
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 )
 
 // UserspaceBackend implements Backend using wireguard-go.
-type UserspaceBackend struct{}
+type UserspaceBackend struct {
+	log *slog.Logger
+}
 
 func (b *UserspaceBackend) CreateDevice(
 	cfg DeviceConfig,
@@ -41,8 +47,7 @@ func (b *UserspaceBackend) CreateDevice(
 		return nil, fmt.Errorf("wireguard: configure tun: %w", err)
 	}
 
-	logger := device.NewLogger(device.LogLevelError, fmt.Sprintf("(%s) ", realName))
-	dev := device.NewDevice(tunDev, conn.NewDefaultBind(), logger)
+	dev := device.NewDevice(tunDev, conn.NewDefaultBind(), b.deviceLogger(realName))
 
 	privKey, err := parseKey(cfg.PrivateKey)
 	if err != nil {
@@ -68,6 +73,34 @@ func (b *UserspaceBackend) CreateDevice(
 		wg:   dev,
 		tun:  tunDev,
 	}, nil
+}
+
+// deviceLogger bridges wireguard-go's printf-style logger to slog.
+// Verbose lines (handshake initiations/responses, keepalives) forward
+// at Debug and are dropped entirely when debug is off, so the Sprintf
+// cost is only paid when someone is watching.
+func (b *UserspaceBackend) deviceLogger(
+	name string,
+) *device.Logger {
+	base := b.log
+	if base == nil {
+		base = logging.Discard()
+	}
+	log := base.With("device", name)
+
+	verbosef := device.DiscardLogf
+	if log.Enabled(context.Background(), slog.LevelDebug) {
+		verbosef = func(format string, args ...any) {
+			log.Debug(fmt.Sprintf(format, args...))
+		}
+	}
+
+	return &device.Logger{
+		Verbosef: verbosef,
+		Errorf: func(format string, args ...any) {
+			log.Error(fmt.Sprintf(format, args...))
+		},
+	}
 }
 
 // userspaceDeviceHandle is a WgDevice backed by wireguard-go.

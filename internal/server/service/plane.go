@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -41,15 +42,18 @@ type Plane struct {
 	server     *http.Server
 	config     *PlaneConfig
 	privateKey string
+	log        *slog.Logger
 }
 
 func newPlane(
 	config PlaneConfig,
 	privateKey string,
+	log *slog.Logger,
 ) *Plane {
 	return &Plane{
 		config:     &config,
 		privateKey: privateKey,
+		log:        log,
 	}
 }
 
@@ -89,9 +93,11 @@ func (p *Plane) start(
 			_ = p.device.Close()
 			return fmt.Errorf("listen %q on %s: %w", p.config.Name, apiEndpoint, err)
 		}
+		p.log.Debug("api listening", "addr", apiEndpoint)
 		go func() {
 			if err := p.server.Serve(ln); err != nil && err != http.ErrServerClosed {
-				// TODO: logged but not fatal — the device is still up
+				// not fatal — the device is still up
+				p.log.Error("api server exited", "addr", apiEndpoint, "err", err)
 			}
 		}()
 	}
