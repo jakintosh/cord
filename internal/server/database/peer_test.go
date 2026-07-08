@@ -20,8 +20,8 @@ func seedNetwork(t *testing.T, db *database.DB) {
 			PrivateKey: "priv-" + name,
 			PublicKey:  "pub-" + name,
 			ExternalIP: "1.1.1.1",
-			Main:       service.PlaneConfig{Name: name, Cidr: "10.0.0.0/16", WireguardPort: 51820, ApiPort: 80},
-			Invite:     service.PlaneConfig{Name: name + "-i", Cidr: "10.1.0.0/24", WireguardPort: 51821, ApiPort: 80},
+			Main:       service.PlaneConfig{Name: name, Cidr: "10.0.0.0/16", WireguardPort: 51820, ApiPort: 8080},
+			Invite:     service.PlaneConfig{Name: name + "-i", Cidr: "10.1.0.0/24", WireguardPort: 51821, ApiPort: 8080},
 			CreatedAt:  time.Now(),
 		},
 		&service.Cidr{

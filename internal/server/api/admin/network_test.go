@@ -45,11 +45,11 @@ func TestAPICreateNetwork_Success(
 	if data.InviteCidr != "172.16.10.0/24" {
 		t.Fatalf("invite_cidr = %q, want 172.16.10.0/24", data.InviteCidr)
 	}
-	if data.MainApiPort != 80 {
-		t.Fatalf("api_port = %d, want 80", data.MainApiPort)
+	if data.MainApiPort != 8080 {
+		t.Fatalf("api_port = %d, want 8080", data.MainApiPort)
 	}
-	if data.InviteApiPort != 80 {
-		t.Fatalf("invite_api_port = %d, want 80", data.InviteApiPort)
+	if data.InviteApiPort != 8080 {
+		t.Fatalf("invite_api_port = %d, want 8080", data.InviteApiPort)
 	}
 
 	// verify network exists in store

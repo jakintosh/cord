@@ -18,12 +18,12 @@ func SeedNetwork(
 		service.PlaneConfig{
 			Cidr:          "10.0.0.0/16",
 			WireguardPort: 51820,
-			ApiPort:       80,
+			ApiPort:       8080,
 		},
 		service.PlaneConfig{
 			Cidr:          "10.1.0.0/24",
 			WireguardPort: 51821,
-			ApiPort:       80,
+			ApiPort:       8080,
 		},
 	)
 	if err != nil {

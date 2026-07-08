@@ -46,7 +46,7 @@ var serverNetworkAdd = &args.Command{
 		{
 			Long: "main-api-port",
 			Type: args.OptionTypeParameter,
-			Help: "internal API port on the main tunnel (default 80)",
+			Help: "internal API port on the main tunnel (default 8080)",
 		},
 		{
 			Long: "main-name",
@@ -66,7 +66,7 @@ var serverNetworkAdd = &args.Command{
 		{
 			Long: "invite-api-port",
 			Type: args.OptionTypeParameter,
-			Help: "internal API port on the invite tunnel (default 80)",
+			Help: "internal API port on the invite tunnel (default 8080)",
 		},
 		{
 			Long: "invite-name",

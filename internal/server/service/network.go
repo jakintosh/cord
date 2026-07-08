@@ -60,7 +60,7 @@ func (n *NetworkConfig) Normalize() error {
 		n.Main.WireguardPort = 51820
 	}
 	if n.Main.ApiPort == 0 {
-		n.Main.ApiPort = 80
+		n.Main.ApiPort = 8080
 	}
 
 	// Invite plane defaults
@@ -74,7 +74,7 @@ func (n *NetworkConfig) Normalize() error {
 		n.Invite.WireguardPort = n.Main.WireguardPort + 1
 	}
 	if n.Invite.ApiPort == 0 {
-		n.Invite.ApiPort = 80
+		n.Invite.ApiPort = 8080
 	}
 
 	// Validate main plane
