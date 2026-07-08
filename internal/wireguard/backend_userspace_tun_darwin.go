@@ -8,6 +8,16 @@ import (
 	"os/exec"
 )
 
+// tunRequestName maps a logical device name to the name passed to
+// tun.CreateTUN. On macOS the TUN name must match utun[0-9]*; passing
+// the bare "utun" lets the kernel assign the next free unit, and the
+// real name is read back via tunDev.Name().
+func tunRequestName(
+	_ string,
+) string {
+	return "utun"
+}
+
 func configureTunOS(
 	name string,
 	addr net.IPNet,

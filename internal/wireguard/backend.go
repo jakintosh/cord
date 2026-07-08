@@ -47,6 +47,7 @@ type Backend interface {
 // WgDevice is a live WireGuard interface handle returned by Backend.
 // Each WgDevice is owned by exactly one Device, which serializes access.
 type WgDevice interface {
+	Name() string
 	Peers() ([]PeerStatus, error)
 	ApplyPeers(ops []PeerOp) error
 	Close() error

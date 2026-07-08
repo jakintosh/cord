@@ -111,15 +111,6 @@ func TestDevice_Close(t *testing.T) {
 	}
 }
 
-func TestDevice_Name(t *testing.T) {
-	backend := wireguardtest.NewMockBackend()
-	d := createTestDevice(t, "test", backend)
-
-	if d.Name() != "test" {
-		t.Errorf("Name = %q, want test", d.Name())
-	}
-}
-
 func TestDevice_UpdateEndpoint_AppliesTargetedOperation(t *testing.T) {
 	backend := wireguardtest.NewMockBackend()
 	d := createTestDevice(t, "test", backend)

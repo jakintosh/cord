@@ -25,28 +25,38 @@ type DeviceConfig struct {
 // All methods are safe for concurrent use; the Device serializes access
 // with a single mutex held across backend calls.
 type Device struct {
-	name    string
 	mu      sync.Mutex
 	backend WgDevice
 	desired map[wgtypes.Key]Peer
 	log     *slog.Logger
 }
 
+// newDevice builds a Device and its child logger. The logger's "device"
+// field carries the display name: the logical name, or "logical (real)"
+// when the backend renamed the interface (e.g. macOS utunN).
 func newDevice(
 	name string,
 	backend WgDevice,
 	log *slog.Logger,
 ) *Device {
 	return &Device{
-		name:    name,
 		backend: backend,
 		desired: make(map[wgtypes.Key]Peer),
-		log:     log,
+		log:     log.With("device", deviceDisplayName(name, backend.Name())),
 	}
 }
 
-func (d *Device) Name() string {
-	return d.name
+// deviceDisplayName combines the requested logical name with the real
+// interface name for use in logs. When the backend keeps the requested
+// name (or reports none), the logical name is returned unchanged.
+func deviceDisplayName(
+	logical string,
+	real string,
+) string {
+	if real != "" && real != logical {
+		return fmt.Sprintf("%s (%s)", logical, real)
+	}
+	return logical
 }
 
 // SetPeers replaces the desired peer set and reconciles it against

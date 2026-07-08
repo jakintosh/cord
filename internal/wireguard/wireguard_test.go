@@ -212,9 +212,6 @@ func TestCreateDevice_Valid(t *testing.T) {
 	if dev == nil {
 		t.Fatal("expected non-nil Device")
 	}
-	if dev.Name() != "test" {
-		t.Errorf("Name = %q, want test", dev.Name())
-	}
 }
 
 func TestCreateDevice_BackendError(t *testing.T) {

@@ -31,7 +31,7 @@ func (b *UserspaceBackend) CreateDevice(
 		mtu = defaultMTU
 	}
 
-	tunDev, err := tun.CreateTUN(cfg.Name, mtu)
+	tunDev, err := tun.CreateTUN(tunRequestName(cfg.Name), mtu)
 	if err != nil {
 		return nil, fmt.Errorf("wireguard: create tun: %w", err)
 	}
@@ -108,6 +108,10 @@ type userspaceDeviceHandle struct {
 	name string
 	wg   *device.Device
 	tun  tun.Device
+}
+
+func (d *userspaceDeviceHandle) Name() string {
+	return d.name
 }
 
 func (d *userspaceDeviceHandle) Peers() (

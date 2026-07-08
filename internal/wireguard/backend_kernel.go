@@ -61,6 +61,10 @@ type kernelDeviceHandle struct {
 	name string
 }
 
+func (h *kernelDeviceHandle) Name() string {
+	return h.name
+}
+
 func (h *kernelDeviceHandle) Peers() (
 	[]PeerStatus,
 	error,

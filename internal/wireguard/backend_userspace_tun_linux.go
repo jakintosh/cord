@@ -8,6 +8,15 @@ import (
 	"os/exec"
 )
 
+// tunRequestName maps a logical device name to the name passed to
+// tun.CreateTUN. On Linux the userspace backend uses the logical name
+// directly as the interface name.
+func tunRequestName(
+	name string,
+) string {
+	return name
+}
+
 func configureTunOS(
 	name string,
 	addr net.IPNet,

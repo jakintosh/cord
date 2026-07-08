@@ -24,6 +24,7 @@ type applyCall struct {
 // preserved.
 type MockDevice struct {
 	mu            sync.Mutex
+	name          string
 	peers         map[string]wireguard.PeerStatus
 	PeersCalls    int
 	ApplyCalls    []applyCall
@@ -31,6 +32,12 @@ type MockDevice struct {
 	PeersErr      error
 	ApplyPeersErr error
 	CloseErr      error
+}
+
+func (d *MockDevice) Name() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.name
 }
 
 func (d *MockDevice) Peers() (
@@ -164,6 +171,7 @@ func (b *MockBackend) CreateDevice(
 	}
 	b.CreateCalls = append(b.CreateCalls, cfg)
 	dev := &MockDevice{
+		name:  cfg.Name,
 		peers: make(map[string]wireguard.PeerStatus),
 	}
 	b.devices[cfg.Name] = dev

@@ -89,7 +89,7 @@ func (m *Manager) CreateDevice(
 		return nil, fmt.Errorf("wireguard: create device: %w", err)
 	}
 
-	log := m.log.With("device", cfg.Name)
-	log.Debug("device created", "route", cfg.Route.String(), "port", cfg.ListenPort)
-	return newDevice(cfg.Name, wgDevice, log), nil
+	dev := newDevice(cfg.Name, wgDevice, m.log)
+	dev.log.Debug("device created", "route", cfg.Route.String(), "port", cfg.ListenPort)
+	return dev, nil
 }
