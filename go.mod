@@ -3,7 +3,7 @@ module git.studiopollinator.com/pollinator/cord
 go 1.26.4
 
 require (
-	git.sr.ht/~jakintosh/command-go v0.7.1
+	git.sr.ht/~jakintosh/command-go v0.8.0
 	github.com/vishvananda/netlink v1.3.1
 	golang.zx2c4.com/wireguard v0.0.0-20260522210424-ecfc5a8d5446
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10

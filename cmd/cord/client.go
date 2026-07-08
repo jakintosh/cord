@@ -21,7 +21,11 @@ var clientCmd = &args.Command{
 			Type: args.OptionTypeParameter,
 			Help: "path to the client daemon unix socket",
 		},
-		jsonOption,
+		{
+			Long: "json",
+			Type: args.OptionTypeFlag,
+			Help: "emit JSON instead of text",
+		},
 	},
 	Subcommands: []*args.Command{
 		clientDaemonCmd,
@@ -40,6 +44,11 @@ var clientDaemonCmd = &args.Command{
 			Type: args.OptionTypeParameter,
 			Help: "wireguard backend: auto, kernel, or userspace",
 		},
+		{
+			Long: "debug",
+			Type: args.OptionTypeFlag,
+			Help: "enable verbose debug logging",
+		},
 	},
 	Handler: func(i *args.Input) error {
 		socketPath := clientSocket(i)
@@ -54,6 +63,7 @@ var clientDaemonCmd = &args.Command{
 			SocketPath: socketPath,
 			Backend:    backend,
 			Version:    VersionInfo.Version,
+			Debug:      i.GetFlag("debug"),
 		}
 		return client.Serve(ctx, opts)
 	},

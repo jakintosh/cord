@@ -22,7 +22,11 @@ var serverCmd = &args.Command{
 			Type: args.OptionTypeParameter,
 			Help: "path to the server daemon unix socket",
 		},
-		jsonOption,
+		{
+			Long: "json",
+			Type: args.OptionTypeFlag,
+			Help: "emit JSON instead of text",
+		},
 	},
 	Subcommands: []*args.Command{
 		serverDaemonCmd,
@@ -44,10 +48,16 @@ var serverDaemonCmd = &args.Command{
 			Type: args.OptionTypeParameter,
 			Help: "wireguard backend: auto, kernel, or userspace",
 		},
+		{
+			Long: "debug",
+			Type: args.OptionTypeFlag,
+			Help: "enable verbose debug logging",
+		},
 	},
 	Handler: func(i *args.Input) error {
 		socketPath := serverSocket(i)
 		backend := i.GetParameterOr("backend", "auto")
+		debug := i.GetFlag("debug")
 
 		ctx, cancel := signal.NotifyContext(
 			context.Background(), os.Interrupt, syscall.SIGTERM,
@@ -58,6 +68,7 @@ var serverDaemonCmd = &args.Command{
 			SocketPath: socketPath,
 			Backend:    backend,
 			Version:    VersionInfo.Version,
+			Debug:      debug,
 		}
 		return server.Serve(ctx, opts)
 	},

@@ -14,12 +14,6 @@ import (
 	serverapi "git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 )
 
-var jsonOption = args.Option{
-	Long: "json",
-	Type: args.OptionTypeFlag,
-	Help: "emit JSON instead of text",
-}
-
 func printJSON(
 	v any,
 ) error {
