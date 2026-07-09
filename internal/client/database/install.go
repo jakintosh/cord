@@ -23,6 +23,7 @@ func (db *DB) GetInstall(
 			invite_server_pubkey,
 			invite_server_endpoint,
 			invite_server_route,
+			invite_server_network_cidr,
 			invite_server_api_port,
 			main_iface_name,
 			main_peer_private_key,
@@ -30,6 +31,7 @@ func (db *DB) GetInstall(
 			main_server_pubkey,
 			main_server_endpoint,
 			main_server_route,
+			main_server_network_cidr,
 			main_server_api_port,
 			created_at_unix
 		FROM install
@@ -58,6 +60,7 @@ func (db *DB) ListInstalls() (
 			invite_server_pubkey,
 			invite_server_endpoint,
 			invite_server_route,
+			invite_server_network_cidr,
 			invite_server_api_port,
 			main_iface_name,
 			main_peer_private_key,
@@ -65,6 +68,7 @@ func (db *DB) ListInstalls() (
 			main_server_pubkey,
 			main_server_endpoint,
 			main_server_route,
+			main_server_network_cidr,
 			main_server_api_port,
 			created_at_unix
 		FROM install
@@ -104,6 +108,7 @@ func (db *DB) InsertInstall(
 			invite_server_pubkey,
 			invite_server_endpoint,
 			invite_server_route,
+			invite_server_network_cidr,
 			invite_server_api_port,
 			main_iface_name,
 			main_peer_private_key,
@@ -111,10 +116,11 @@ func (db *DB) InsertInstall(
 			main_server_pubkey,
 			main_server_endpoint,
 			main_server_route,
+			main_server_network_cidr,
 			main_server_api_port,
 			created_at_unix
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)`,
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)`,
 		install.Name,
 		install.Phase,
 		install.InviteIfaceName,
@@ -123,6 +129,7 @@ func (db *DB) InsertInstall(
 		install.InviteServer.PublicKey,
 		install.InviteServer.Endpoint,
 		install.InviteServer.Route,
+		install.InviteServer.NetworkCidr,
 		install.InviteServer.APIPort,
 		install.MainIfaceName,
 		install.MainPrivateKey,
@@ -130,6 +137,7 @@ func (db *DB) InsertInstall(
 		install.MainServer.PublicKey,
 		install.MainServer.Endpoint,
 		install.MainServer.Route,
+		install.MainServer.NetworkCidr,
 		install.MainServer.APIPort,
 		install.CreatedAt.Unix(),
 	)
@@ -171,11 +179,12 @@ func (db *DB) ConfirmInstall(
 			server_pubkey,
 			server_endpoint,
 			server_route,
+			server_network_cidr,
 			server_api_port,
 			enabled,
 			created_at_unix
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
 		nc.Name,
 		nc.PrivateKey,
 		nc.InterfaceName,
@@ -183,6 +192,7 @@ func (db *DB) ConfirmInstall(
 		nc.Server.PublicKey,
 		nc.Server.Endpoint,
 		nc.Server.Route,
+		nc.Server.NetworkCidr,
 		nc.Server.APIPort,
 		boolToInt(nc.Enabled),
 		nc.CreatedAt.Unix(),
@@ -210,13 +220,15 @@ func (db *DB) RedeemInstall(
 			main_server_pubkey = ?3,
 			main_server_endpoint = ?4,
 			main_server_route = ?5,
-			main_server_api_port = ?6
+			main_server_network_cidr = ?6,
+			main_server_api_port = ?7
 		WHERE name = ?1`,
 		name,
 		assignedRoute,
 		server.PublicKey,
 		server.Endpoint,
 		server.Route,
+		server.NetworkCidr,
 		server.APIPort,
 	)
 	if err != nil {
@@ -267,6 +279,7 @@ func scanInstallRow(
 		&inst.InviteServer.PublicKey,
 		&inst.InviteServer.Endpoint,
 		&inst.InviteServer.Route,
+		&inst.InviteServer.NetworkCidr,
 		&inst.InviteServer.APIPort,
 		&inst.MainIfaceName,
 		&inst.MainPrivateKey,
@@ -274,6 +287,7 @@ func scanInstallRow(
 		&inst.MainServer.PublicKey,
 		&inst.MainServer.Endpoint,
 		&inst.MainServer.Route,
+		&inst.MainServer.NetworkCidr,
 		&inst.MainServer.APIPort,
 		&createdUnix,
 	); err != nil {

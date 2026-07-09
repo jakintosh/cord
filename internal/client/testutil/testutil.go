@@ -15,6 +15,7 @@ var defaultInvite = protocol.Invitation{
 		PublicKey:   "server-pub-key",
 		Endpoint:    "1.2.3.4:51820",
 		ServerRoute: "10.42.0.1/32",
+		NetworkCidr: "10.42.0.0/16",
 		APIPort:     8443,
 	},
 	Peer: protocol.PeerIdentity{
@@ -72,10 +73,11 @@ func SeedNetworkDirect(
 		InterfaceName: name,
 		AssignedRoute: "10.42.0.5/32",
 		Server: service.ServerInfo{
-			PublicKey: mustGenerateKey(),
-			Endpoint:  "1.2.3.4:51820",
-			Route:     "10.42.0.1/32",
-			APIPort:   8443,
+			PublicKey:   mustGenerateKey(),
+			Endpoint:    "1.2.3.4:51820",
+			Route:       "10.42.0.1/32",
+			NetworkCidr: "10.42.0.0/16",
+			APIPort:     8443,
 		},
 		Enabled:   false,
 		CreatedAt: FixedTime,

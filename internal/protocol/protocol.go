@@ -29,6 +29,7 @@ type NetworkInfo struct {
 	PublicKey   string `json:"public_key"`
 	Endpoint    string `json:"endpoint"`     // external WG endpoint
 	ServerRoute string `json:"server_route"` // server's host route on the overlay (e.g. "10.42.0.1/32")
+	NetworkCidr string `json:"network_cidr"` // full overlay CIDR (e.g. "10.42.0.0/16")
 	APIPort     uint16 `json:"api_port"`     // server API port on the overlay
 }
 
@@ -73,14 +74,20 @@ func (inv *Invitation) Write(
 }
 
 // Validate reports whether the invitation carries every field a peer
-// needs to redeem a network. A parseable-but-incomplete invitation is
+// needs for the given form. A parseable-but-incomplete invitation is
 // still invalid: "is this a complete invitation" is a protocol concern.
-func (inv *Invitation) Validate() error {
+// The peer private key is required only for FormInitial; FormRedeemed
+// omits it by design.
+func (inv *Invitation) Validate(
+	reqPrivKey bool,
+) error {
+	if reqPrivKey && inv.Peer.PrivateKey == "" {
+		return fmt.Errorf("%w: missing peer private key", ErrInvalid)
+	}
+
 	switch {
 	case inv.Network.Name == "":
 		return fmt.Errorf("%w: missing network name", ErrInvalid)
-	case inv.Peer.PrivateKey == "":
-		return fmt.Errorf("%w: missing peer private key", ErrInvalid)
 	case inv.Peer.Route == "":
 		return fmt.Errorf("%w: missing peer route", ErrInvalid)
 	case inv.Network.PublicKey == "":
@@ -89,6 +96,8 @@ func (inv *Invitation) Validate() error {
 		return fmt.Errorf("%w: missing server endpoint", ErrInvalid)
 	case inv.Network.ServerRoute == "":
 		return fmt.Errorf("%w: missing server route", ErrInvalid)
+	case inv.Network.NetworkCidr == "":
+		return fmt.Errorf("%w: missing network cidr", ErrInvalid)
 	case inv.Network.APIPort == 0:
 		return fmt.Errorf("%w: missing server API port", ErrInvalid)
 	}

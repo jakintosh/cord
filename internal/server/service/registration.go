@@ -155,6 +155,7 @@ func (s *Service) CreateRegistration(
 			PublicKey:   network.PublicKey,
 			Endpoint:    serverInviteExternalAddr,
 			ServerRoute: serverRoute.String(),
+			NetworkCidr: network.Invite.Cidr,
 			APIPort:     network.Invite.ApiPort,
 		},
 		Peer: protocol.PeerIdentity{
@@ -249,6 +250,7 @@ func (s *Service) buildInvitation(
 			PublicKey:   network.PublicKey,
 			Endpoint:    netaddr.Endpoint(net.ParseIP(network.ExternalIP), network.Main.WireguardPort),
 			ServerRoute: serverRoute.String(),
+			NetworkCidr: network.Main.Cidr,
 			APIPort:     network.Main.ApiPort,
 		},
 		Peer: protocol.PeerIdentity{

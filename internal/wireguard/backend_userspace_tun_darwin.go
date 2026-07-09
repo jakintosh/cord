@@ -21,6 +21,7 @@ func tunRequestName(
 func configureTunOS(
 	name string,
 	addr net.IPNet,
+	networkCIDR net.IPNet,
 	mtu int,
 ) error {
 	cmd := exec.Command("ifconfig", name, "inet", addr.IP.String(), addr.IP.String(), "up")
@@ -33,13 +34,9 @@ func configureTunOS(
 		return fmt.Errorf("wireguard: set mtu on %s: %w (%s)", name, err, out)
 	}
 
-	network := net.IPNet{
-		IP:   addr.IP.Mask(addr.Mask),
-		Mask: addr.Mask,
-	}
-	cmd = exec.Command("route", "-q", "add", "-net", network.String(), "-interface", name)
+	cmd = exec.Command("route", "-q", "add", "-net", networkCIDR.String(), "-interface", name)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("wireguard: add route for %s: %w (%s)", network.String(), err, out)
+		return fmt.Errorf("wireguard: add route for %s: %w (%s)", networkCIDR.String(), err, out)
 	}
 
 	return nil

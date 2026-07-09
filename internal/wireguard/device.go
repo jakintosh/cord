@@ -14,11 +14,12 @@ import (
 // creates the interface, configures it, and brings it up in one
 // step — the "created but not up" state does not exist.
 type DeviceConfig struct {
-	Name       string
-	PrivateKey string
-	Route      net.IPNet
-	ListenPort uint16
-	MTU        int // 0 uses the default
+	Name        string
+	PrivateKey  string
+	Route       net.IPNet
+	NetworkCIDR net.IPNet
+	ListenPort  uint16
+	MTU         int // 0 uses the default
 }
 
 // Device is a live WireGuard network device backed by a WgDevice.

@@ -23,10 +23,11 @@ const inviteSuffix = "-i"
 // WireGuard network (invite or main). Shared by Install and
 // NetworkConfig as persisted domain state.
 type ServerInfo struct {
-	PublicKey string
-	Endpoint  string // public WG endpoint, host:port
-	Route     string // server's in-network route
-	APIPort   uint16
+	PublicKey   string
+	Endpoint    string // public WG endpoint, host:port
+	Route       string // server's in-network route
+	NetworkCidr string // full overlay CIDR, e.g. "10.42.0.0/16"
+	APIPort     uint16
 }
 
 // Install is the transient record of an in-progress network install.
@@ -119,7 +120,7 @@ func (s *Service) BeginInstall(
 	// A parseable-but-incomplete invitation is a bad request; the
 	// completeness check is a protocol concern, but the resulting error
 	// maps to invalid input at the service boundary.
-	if err := invitation.Validate(); err != nil {
+	if err := invitation.Validate(true); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 
@@ -155,10 +156,11 @@ func (s *Service) BeginInstall(
 		InvitePrivateKey:    invitation.Peer.PrivateKey,
 		InviteAssignedRoute: invitation.Peer.Route,
 		InviteServer: ServerInfo{
-			PublicKey: invitation.Network.PublicKey,
-			Endpoint:  invitation.Network.Endpoint,
-			Route:     invitation.Network.ServerRoute,
-			APIPort:   invitation.Network.APIPort,
+			PublicKey:   invitation.Network.PublicKey,
+			Endpoint:    invitation.Network.Endpoint,
+			Route:       invitation.Network.ServerRoute,
+			NetworkCidr: invitation.Network.NetworkCidr,
+			APIPort:     invitation.Network.APIPort,
 		},
 		MainIfaceName:  mainIfaceName,
 		MainPrivateKey: permPrivKey,
@@ -224,14 +226,19 @@ func (s *Service) Redeem(
 		return nil, fmt.Errorf("redeem invite: %w", err)
 	}
 
+	if err := result.Validate(false); err != nil {
+		return nil, fmt.Errorf("redeem invite: result invalid: %w", err)
+	}
+
 	if err := s.store.RedeemInstall(
 		name,
 		result.Peer.Route,
 		ServerInfo{
-			PublicKey: result.Network.PublicKey,
-			Endpoint:  result.Network.Endpoint,
-			Route:     result.Network.ServerRoute,
-			APIPort:   result.Network.APIPort,
+			PublicKey:   result.Network.PublicKey,
+			Endpoint:    result.Network.Endpoint,
+			Route:       result.Network.ServerRoute,
+			NetworkCidr: result.Network.NetworkCidr,
+			APIPort:     result.Network.APIPort,
 		},
 	); err != nil {
 		return nil, err

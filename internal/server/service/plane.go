@@ -70,12 +70,18 @@ func (p *Plane) start(
 		return fmt.Errorf("parse cidr: %v", err)
 	}
 
+	_, networkCIDR, err := net.ParseCIDR(p.config.Cidr)
+	if err != nil {
+		return fmt.Errorf("parse cidr: %v", err)
+	}
+
 	// create wg device
 	p.device, err = wg.CreateDevice(wireguard.DeviceConfig{
-		Name:       p.config.Name,
-		PrivateKey: p.privateKey,
-		Route:      ifaceRoute,
-		ListenPort: p.config.WireguardPort,
+		Name:        p.config.Name,
+		PrivateKey:  p.privateKey,
+		Route:       ifaceRoute,
+		NetworkCIDR: *networkCIDR,
+		ListenPort:  p.config.WireguardPort,
 	})
 	if err != nil {
 		return fmt.Errorf("create device %q: %w", p.config.Name, err)

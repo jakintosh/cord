@@ -227,6 +227,7 @@ func TestAPIInstallNetwork_Success(
 			"public_key": "` + srvPub + `",
 			"endpoint": "1.2.3.4:51820",
 			"server_route": "` + apiHost + `/32",
+			"network_cidr": "10.42.0.0/16",
 			"api_port": ` + strconv.Itoa(apiPort) + `
 		},
 		"peer": {
@@ -339,6 +340,7 @@ func TestAPIInstallNetwork_Duplicate(
 			"public_key": "srv-pub",
 			"endpoint": "1.2.3.4:51820",
 			"server_route": "10.42.0.1/32",
+			"network_cidr": "10.42.0.0/16",
 			"api_port": 8443
 		},
 		"peer": {
@@ -416,6 +418,7 @@ func TestAPIConfirmNetwork_Success(
 			PublicKey:   srvPub,
 			Endpoint:    "1.2.3.4:51820",
 			ServerRoute: apiHost + "/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     uint16(apiPort),
 		},
 		Peer: protocol.PeerIdentity{
@@ -625,9 +628,11 @@ func newInstallServer(
 		srvPort, _ := strconv.Atoi(srvPortStr)
 		wire.WriteData(w, http.StatusOK, protocol.Invitation{
 			Network: protocol.NetworkInfo{
+				Name:        "testnet",
 				PublicKey:   serverPubKey,
 				Endpoint:    "1.2.3.4:51820",
 				ServerRoute: srvHost + "/32",
+				NetworkCidr: "10.0.0.0/16",
 				APIPort:     uint16(srvPort),
 			},
 			Peer: protocol.PeerIdentity{
@@ -670,6 +675,7 @@ func installInvite(
 			PublicKey:   srvPub,
 			Endpoint:    "1.2.3.4:51820",
 			ServerRoute: apiHost + "/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     uint16(apiPort),
 		},
 		Peer: protocol.PeerIdentity{

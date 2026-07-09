@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"net"
 
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
@@ -31,10 +32,16 @@ func newTunnel(
 		return nil, fmt.Errorf("%w: parse route %q", ErrInvalidInput, route)
 	}
 
+	_, networkCIDR, err := net.ParseCIDR(server.NetworkCidr)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse network cidr %q", ErrInvalidInput, server.NetworkCidr)
+	}
+
 	dev, err := mgr.CreateDevice(wireguard.DeviceConfig{
-		Name:       ifaceName,
-		PrivateKey: privateKey,
-		Route:      deviceRoute,
+		Name:        ifaceName,
+		PrivateKey:  privateKey,
+		Route:       deviceRoute,
+		NetworkCIDR: *networkCIDR,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create device %q: %w", ifaceName, err)

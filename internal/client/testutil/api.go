@@ -114,9 +114,11 @@ func NewInstallServer(apiAddr string) http.Handler {
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
 		wire.WriteData(w, http.StatusOK, protocol.Invitation{
 			Network: protocol.NetworkInfo{
+				Name:        "testnet",
 				PublicKey:   "server-pub-key",
 				Endpoint:    "1.2.3.4:51820",
 				ServerRoute: "10.42.0.1/32",
+				NetworkCidr: "10.42.0.0/16",
 				APIPort:     8443,
 			},
 			Peer: protocol.PeerIdentity{

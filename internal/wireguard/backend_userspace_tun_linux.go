@@ -20,6 +20,7 @@ func tunRequestName(
 func configureTunOS(
 	name string,
 	addr net.IPNet,
+	networkCIDR net.IPNet,
 	mtu int,
 ) error {
 	cmd := exec.Command("ip", "addr", "replace", addr.String(), "dev", name)
@@ -35,6 +36,11 @@ func configureTunOS(
 	cmd = exec.Command("ip", "link", "set", name, "up")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("wireguard: bring %s up: %w (%s)", name, err, out)
+	}
+
+	cmd = exec.Command("ip", "route", "replace", networkCIDR.String(), "dev", name)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("wireguard: add route for %s: %w (%s)", networkCIDR.String(), err, out)
 	}
 
 	return nil

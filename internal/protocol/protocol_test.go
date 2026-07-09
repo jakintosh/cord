@@ -16,6 +16,7 @@ func validInvitation() *protocol.Invitation {
 			PublicKey:   "server-key",
 			Endpoint:    "1.2.3.4:51820",
 			ServerRoute: "10.0.0.1/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     8080,
 		},
 		Peer: protocol.PeerIdentity{
@@ -32,6 +33,7 @@ func TestParse_Success(t *testing.T) {
 			"public_key": "server-key",
 			"endpoint": "1.2.3.4:51820",
 			"server_route": "10.0.0.1/32",
+			"network_cidr": "10.0.0.0/16",
 			"api_port": 8080
 		},
 		"peer": {
@@ -62,6 +64,9 @@ func TestParse_Success(t *testing.T) {
 	}
 	if inv.Network.ServerRoute != "10.0.0.1/32" {
 		t.Errorf("server_route = %q, want 10.0.0.1/32", inv.Network.ServerRoute)
+	}
+	if inv.Network.NetworkCidr != "10.0.0.0/16" {
+		t.Errorf("network_cidr = %q, want 10.0.0.0/16", inv.Network.NetworkCidr)
 	}
 	if inv.Network.APIPort != 8080 {
 		t.Errorf("api_port = %d, want 8080", inv.Network.APIPort)
@@ -99,7 +104,7 @@ func TestInvitation_Write(t *testing.T) {
 }
 
 func TestInvitation_Validate(t *testing.T) {
-	if err := validInvitation().Validate(); err != nil {
+	if err := validInvitation().Validate(true); err != nil {
 		t.Fatalf("valid invitation rejected: %v", err)
 	}
 
@@ -110,13 +115,42 @@ func TestInvitation_Validate(t *testing.T) {
 		"missing server pubkey":    func(i *protocol.Invitation) { i.Network.PublicKey = "" },
 		"missing server endpoint":  func(i *protocol.Invitation) { i.Network.Endpoint = "" },
 		"missing server route":     func(i *protocol.Invitation) { i.Network.ServerRoute = "" },
+		"missing network cidr":     func(i *protocol.Invitation) { i.Network.NetworkCidr = "" },
 		"missing api port":         func(i *protocol.Invitation) { i.Network.APIPort = 0 },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			inv := validInvitation()
 			mutate(inv)
-			if err := inv.Validate(); !errors.Is(err, protocol.ErrInvalid) {
+			if err := inv.Validate(true); !errors.Is(err, protocol.ErrInvalid) {
+				t.Errorf("err = %v, want ErrInvalid", err)
+			}
+		})
+	}
+}
+
+func TestInvitation_Validate_Redeemed(t *testing.T) {
+	inv := validInvitation()
+	inv.Peer.PrivateKey = ""
+	if err := inv.Validate(false); err != nil {
+		t.Fatalf("redeemed invitation without private key rejected: %v", err)
+	}
+
+	cases := map[string]func(*protocol.Invitation){
+		"missing network name":    func(i *protocol.Invitation) { i.Network.Name = "" },
+		"missing peer route":      func(i *protocol.Invitation) { i.Peer.Route = "" },
+		"missing server pubkey":   func(i *protocol.Invitation) { i.Network.PublicKey = "" },
+		"missing server endpoint": func(i *protocol.Invitation) { i.Network.Endpoint = "" },
+		"missing server route":    func(i *protocol.Invitation) { i.Network.ServerRoute = "" },
+		"missing network cidr":    func(i *protocol.Invitation) { i.Network.NetworkCidr = "" },
+		"missing api port":        func(i *protocol.Invitation) { i.Network.APIPort = 0 },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			inv := validInvitation()
+			inv.Peer.PrivateKey = ""
+			mutate(inv)
+			if err := inv.Validate(false); !errors.Is(err, protocol.ErrInvalid) {
 				t.Errorf("err = %v, want ErrInvalid", err)
 			}
 		})

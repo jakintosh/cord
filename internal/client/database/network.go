@@ -22,6 +22,7 @@ func (db *DB) GetNetwork(
 			server_pubkey,
 			server_endpoint,
 			server_route,
+			server_network_cidr,
 			server_api_port,
 			enabled,
 			created_at_unix
@@ -41,6 +42,7 @@ func (db *DB) GetNetwork(
 		&nc.Server.PublicKey,
 		&nc.Server.Endpoint,
 		&nc.Server.Route,
+		&nc.Server.NetworkCidr,
 		&nc.Server.APIPort,
 		&enabledInt,
 		&createdUnix,
@@ -94,11 +96,12 @@ func (db *DB) InsertNetwork(
 			server_pubkey,
 			server_endpoint,
 			server_route,
+			server_network_cidr,
 			server_api_port,
 			enabled,
 			created_at_unix
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
 		nc.Name,
 		nc.PrivateKey,
 		nc.InterfaceName,
@@ -106,6 +109,7 @@ func (db *DB) InsertNetwork(
 		nc.Server.PublicKey,
 		nc.Server.Endpoint,
 		nc.Server.Route,
+		nc.Server.NetworkCidr,
 		nc.Server.APIPort,
 		boolToInt(nc.Enabled),
 		nc.CreatedAt.Unix(),

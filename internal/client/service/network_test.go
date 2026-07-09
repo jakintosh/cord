@@ -99,9 +99,11 @@ func TestInstall_Success(t *testing.T) {
 		srvPort, _ := strconv.Atoi(srvPortStr)
 		wire.WriteData(w, http.StatusOK, protocol.Invitation{
 			Network: protocol.NetworkInfo{
+				Name:        "testnet",
 				PublicKey:   serverPubKeyStr,
 				Endpoint:    "1.2.3.4:51820",
 				ServerRoute: srvHost + "/32",
+				NetworkCidr: "10.0.0.0/16",
 				APIPort:     uint16(srvPort),
 			},
 			Peer: protocol.PeerIdentity{
@@ -131,6 +133,7 @@ func TestInstall_Success(t *testing.T) {
 			PublicKey:   serverPubKeyStr,
 			Endpoint:    "5.6.7.8:51821",
 			ServerRoute: srvHost + "/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     uint16(srvPort),
 		},
 		Peer: protocol.PeerIdentity{
@@ -191,6 +194,7 @@ func TestBeginInstall_MissingNetworkName(t *testing.T) {
 			PublicKey:   "srv",
 			Endpoint:    "1.2.3.4:51820",
 			ServerRoute: "10.42.0.1/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     8443,
 		},
 		Peer: protocol.PeerIdentity{
@@ -212,6 +216,7 @@ func TestBeginInstall_MissingTempPrivKey(t *testing.T) {
 			PublicKey:   "srv",
 			Endpoint:    "1.2.3.4:51820",
 			ServerRoute: "10.42.0.1/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     8443,
 		},
 		Peer: protocol.PeerIdentity{
@@ -232,6 +237,7 @@ func TestBeginInstall_MissingTempCidr(t *testing.T) {
 			PublicKey:   "srv",
 			Endpoint:    "1.2.3.4:51820",
 			ServerRoute: "10.42.0.1/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     8443,
 		},
 		Peer: protocol.PeerIdentity{
@@ -251,6 +257,7 @@ func TestBeginInstall_MissingServerPubkey(t *testing.T) {
 			Name:        "noname",
 			Endpoint:    "1.2.3.4:51820",
 			ServerRoute: "10.42.0.1/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     8443,
 		},
 		Peer: protocol.PeerIdentity{
@@ -271,6 +278,7 @@ func TestBeginInstall_MissingServerEndpoint(t *testing.T) {
 			Name:        "noname",
 			PublicKey:   "srv",
 			ServerRoute: "10.42.0.1/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     8443,
 		},
 		Peer: protocol.PeerIdentity{
@@ -292,6 +300,7 @@ func TestBeginInstall_MissingTempApiAddr(t *testing.T) {
 			PublicKey:   "srv",
 			Endpoint:    "1.2.3.4:51820",
 			ServerRoute: "10.42.0.1/32",
+			NetworkCidr: "10.0.0.0/16",
 		},
 		Peer: protocol.PeerIdentity{
 			Route:      "10.42.0.5/16",

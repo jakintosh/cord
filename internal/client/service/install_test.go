@@ -34,6 +34,7 @@ func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
 			PublicKey:   "srv-pub",
 			Endpoint:    "1.2.3.4:51821",
 			ServerRoute: "10.43.0.1/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     8443,
 		},
 		Peer: protocol.PeerIdentity{
@@ -74,6 +75,7 @@ func TestBeginInstall_Idempotent(t *testing.T) {
 			PublicKey:   "srv-pub",
 			Endpoint:    "1.2.3.4:51821",
 			ServerRoute: "10.43.0.1/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     8443,
 		},
 		Peer: protocol.PeerIdentity{
@@ -114,6 +116,7 @@ func TestBeginInstall_ExistingConfirmedNetwork(t *testing.T) {
 			PublicKey:   "srv-pub",
 			Endpoint:    "1.2.3.4:51821",
 			ServerRoute: "10.43.0.1/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     8443,
 		},
 		Peer: protocol.PeerIdentity{
@@ -144,9 +147,11 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 		srvPort, _ := strconv.Atoi(srvPortStr)
 		wire.WriteData(w, http.StatusOK, protocol.Invitation{
 			Network: protocol.NetworkInfo{
+				Name:        "testnet",
 				PublicKey:   srvPubKey,
 				Endpoint:    "1.2.3.4:51820",
 				ServerRoute: srvHost + "/32",
+				NetworkCidr: "10.0.0.0/16",
 				APIPort:     uint16(srvPort),
 			},
 			Peer: protocol.PeerIdentity{
@@ -172,6 +177,7 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 			PublicKey:   srvPubKey,
 			Endpoint:    "5.6.7.8:51821",
 			ServerRoute: srvHost + "/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     uint16(srvPort),
 		},
 		Peer: protocol.PeerIdentity{
@@ -217,9 +223,11 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 		srvPort, _ := strconv.Atoi(srvPortStr)
 		wire.WriteData(w, http.StatusOK, protocol.Invitation{
 			Network: protocol.NetworkInfo{
+				Name:        "testnet",
 				PublicKey:   srvPubKey,
 				Endpoint:    "1.2.3.4:51820",
 				ServerRoute: srvHost + "/32",
+				NetworkCidr: "10.0.0.0/16",
 				APIPort:     uint16(srvPort),
 			},
 			Peer: protocol.PeerIdentity{
@@ -246,6 +254,7 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 			PublicKey:   srvPubKey,
 			Endpoint:    "5.6.7.8:51821",
 			ServerRoute: srvHost + "/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     uint16(srvPort),
 		},
 		Peer: protocol.PeerIdentity{
@@ -292,9 +301,11 @@ func TestBeginInstall_IdempotentRedeemed(t *testing.T) {
 		srvPort, _ := strconv.Atoi(srvPortStr)
 		wire.WriteData(w, http.StatusOK, protocol.Invitation{
 			Network: protocol.NetworkInfo{
+				Name:        "testnet",
 				PublicKey:   srvPubKey,
 				Endpoint:    "1.2.3.4:51820",
 				ServerRoute: srvHost + "/32",
+				NetworkCidr: "10.0.0.0/16",
 				APIPort:     uint16(srvPort),
 			},
 			Peer: protocol.PeerIdentity{
@@ -314,6 +325,7 @@ func TestBeginInstall_IdempotentRedeemed(t *testing.T) {
 			PublicKey:   srvPubKey,
 			Endpoint:    "5.6.7.8:51821",
 			ServerRoute: srvHost + "/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     uint16(srvPort),
 		},
 		Peer: protocol.PeerIdentity{
@@ -352,9 +364,11 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 		srvPort, _ := strconv.Atoi(srvPortStr)
 		wire.WriteData(w, http.StatusOK, protocol.Invitation{
 			Network: protocol.NetworkInfo{
+				Name:        "testnet",
 				PublicKey:   srvPubKey,
 				Endpoint:    "1.2.3.4:51820",
 				ServerRoute: srvHost + "/32",
+				NetworkCidr: "10.0.0.0/16",
 				APIPort:     uint16(srvPort),
 			},
 			Peer: protocol.PeerIdentity{
@@ -380,6 +394,7 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 			PublicKey:   srvPubKey,
 			Endpoint:    "5.6.7.8:51821",
 			ServerRoute: srvHost + "/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     uint16(srvPort),
 		},
 		Peer: protocol.PeerIdentity{
@@ -423,6 +438,7 @@ func TestEnableNetwork_RefusesUnconfirmed(t *testing.T) {
 			PublicKey:   "srv-pub",
 			Endpoint:    "1.2.3.4:51821",
 			ServerRoute: "10.43.0.1/32",
+			NetworkCidr: "10.0.0.0/16",
 			APIPort:     8443,
 		},
 		Peer: protocol.PeerIdentity{
