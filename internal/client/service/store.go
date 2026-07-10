@@ -23,6 +23,7 @@ type Store interface {
 	InsertNetwork(nc *NetworkConfig) error
 	DeleteNetwork(name string) error
 	SetNetworkEnabled(name string, enabled bool) error
+	SetNetworkListenPort(name string, listenPort uint16) error
 
 	// Peer cache within a network.
 
@@ -39,15 +40,15 @@ type Store interface {
 
 	// Endpoint catalog within a network.
 
-	// SetPeerEndpoints replaces the known endpoints for a peer
-	// identified by public key. Existing endpoints not in the list
-	// are deleted. Incoming endpoints are upserted;
+	// SetPeerEndpoints merges server-observed endpoints for a peer
+	// identified by public key. Locally observed endpoints are retained.
+	// Incoming endpoints are upserted;
 	// server_observed_at is updated only if the incoming value is
 	// newer.
 	SetPeerEndpoints(network, pubKey string, endpoints []PeerEndpoint) error
 
-	// UpdatePeerEndpointLocal sets local_observed_at on the
-	// matching endpoint row. No-op if the endpoint doesn't exist.
+	// UpdatePeerEndpointLocal upserts a locally observed endpoint and sets
+	// local_observed_at.
 	UpdatePeerEndpointLocal(network, pubKey, endpoint string, when int64) error
 
 	// MarkPeerEndpointAttempt sets last_attempted_at on the matching
@@ -61,6 +62,10 @@ type Store interface {
 	// ListLocalEndpointsSince returns endpoints across all peers of
 	// the named network with local_observed_at at or after since.
 	ListLocalEndpointsSince(network string, since int64) ([]EndpointSighting, error)
+
+	// DeletePeerEndpointsBefore removes endpoint candidates that have not been
+	// observed by either the server or this client since before.
+	DeletePeerEndpointsBefore(network string, before int64) error
 
 	// Close releases the database connection.
 	Close() error

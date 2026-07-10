@@ -356,6 +356,9 @@ func (n *Network) reconcile() {
 		n.log.Warn("reconcile: prune failed", "err", err)
 		return
 	}
+	if err := n.store.DeleteEndpointsBefore(netName, now.Add(-defaultEndpointTTL)); err != nil {
+		n.log.Warn("reconcile: prune endpoints failed", "err", err)
+	}
 
 	// reconcile main peers
 	peers, err := n.store.ListPeers(netName)

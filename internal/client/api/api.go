@@ -53,6 +53,7 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("POST /networks/{name}/enable", a.handleNetworkEnable)
 	mux.HandleFunc("POST /networks/{name}/disable", a.handleNetworkDisable)
 	mux.HandleFunc("POST /networks/{name}/sync", a.handleNetworkSync)
+	mux.HandleFunc("POST /networks/{name}/listen-port", a.handleNetworkListenPort)
 
 	return logging.Middleware(a.log, mux)
 }

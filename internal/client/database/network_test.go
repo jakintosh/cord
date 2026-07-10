@@ -26,6 +26,7 @@ func TestInsertAndGetNetwork(t *testing.T) {
 		PrivateKey:    "priv-key-123",
 		InterfaceName: "wg-homenet",
 		AssignedRoute: "10.42.0.5/32",
+		ListenPort:    51820,
 		Server: service.ServerInfo{
 			PublicKey: "server-pub-key",
 			Endpoint:  "1.2.3.4:51820",
@@ -65,6 +66,9 @@ func TestInsertAndGetNetwork(t *testing.T) {
 	}
 	if got.Server.APIPort != net.Server.APIPort {
 		t.Errorf("server_api_port = %d, want %d", got.Server.APIPort, net.Server.APIPort)
+	}
+	if got.ListenPort != net.ListenPort {
+		t.Errorf("listen_port = %d, want %d", got.ListenPort, net.ListenPort)
 	}
 	if got.Enabled != net.Enabled {
 		t.Errorf("enabled = %v, want %v", got.Enabled, net.Enabled)
@@ -313,5 +317,35 @@ func TestSetNetworkEnabled_NotFound(t *testing.T) {
 	err := db.SetNetworkEnabled("nonexistent", true)
 	if err == nil {
 		t.Fatal("expected error for nonexistent network")
+	}
+}
+
+func TestSetNetworkListenPort(t *testing.T) {
+	db := testutil.SetupDB(t)
+	net := &service.NetworkConfig{
+		Name:          "portnet",
+		PrivateKey:    "priv-port",
+		InterfaceName: "wg-portnet",
+		AssignedRoute: "10.42.0.7/32",
+		Server: service.ServerInfo{
+			PublicKey: "server-pub-key",
+			Endpoint:  "1.2.3.4:51820",
+			Route:     "10.42.0.1/32",
+			APIPort:   8443,
+		},
+		CreatedAt: time.Now(),
+	}
+	if err := db.InsertNetwork(net); err != nil {
+		t.Fatalf("insert network: %v", err)
+	}
+	if err := db.SetNetworkListenPort("portnet", 51821); err != nil {
+		t.Fatalf("set listen port: %v", err)
+	}
+	got, err := db.GetNetwork("portnet")
+	if err != nil {
+		t.Fatalf("get network: %v", err)
+	}
+	if got.ListenPort != 51821 {
+		t.Errorf("listen_port = %d, want 51821", got.ListenPort)
 	}
 }

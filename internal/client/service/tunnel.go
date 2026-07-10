@@ -23,6 +23,7 @@ func newTunnel(
 	privateKey string,
 	route string,
 	server ServerInfo,
+	listenPort uint16,
 ) (
 	*Tunnel,
 	error,
@@ -42,6 +43,7 @@ func newTunnel(
 		PrivateKey:  privateKey,
 		Route:       deviceRoute,
 		NetworkCIDR: *networkCIDR,
+		ListenPort:  listenPort,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create device %q: %w", ifaceName, err)

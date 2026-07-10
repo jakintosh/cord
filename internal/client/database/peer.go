@@ -66,7 +66,7 @@ func (db *DB) ListPeers(
 			COALESCE(
 				(SELECT e.endpoint FROM endpoint e
 				 WHERE e.peer_id = p.id
-				 ORDER BY e.server_observed_at DESC, e.local_observed_at DESC
+					 ORDER BY e.local_observed_at DESC, e.server_observed_at DESC
 				 LIMIT 1),
 				''
 			) AS endpoint

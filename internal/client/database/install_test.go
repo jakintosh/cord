@@ -20,6 +20,7 @@ func defaultInstall(t *testing.T) *service.Install {
 	return &service.Install{
 		Name:                "testnet",
 		Phase:               service.PhaseInvited,
+		ListenPort:          51820,
 		InviteIfaceName:     "testnet-i",
 		InvitePrivateKey:    "invite-priv-key",
 		InviteAssignedRoute: "10.42.1.5/32",
@@ -79,6 +80,9 @@ func TestInsertAndGetInstall(t *testing.T) {
 	}
 	if got.Phase != inst.Phase {
 		t.Errorf("phase = %q, want %q", got.Phase, inst.Phase)
+	}
+	if got.ListenPort != inst.ListenPort {
+		t.Errorf("listen_port = %d, want %d", got.ListenPort, inst.ListenPort)
 	}
 	if got.InviteIfaceName != inst.InviteIfaceName {
 		t.Errorf("invite_iface_name = %q, want %q", got.InviteIfaceName, inst.InviteIfaceName)

@@ -23,12 +23,16 @@ func mustGenKey(t *testing.T) string {
 	return k
 }
 
+func installRequest(invitation protocol.Invitation) service.InstallRequest {
+	return service.InstallRequest{Invitation: invitation}
+}
+
 // TestBeginInstall_PersistsPermanentKey verifies that BeginInstall
 // generates a permanent keypair and persists it in the network record.
 func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	inst, err := env.Service.BeginInstall(protocol.Invitation{
+	inst, err := env.Service.BeginInstall(installRequest(protocol.Invitation{
 		Network: protocol.NetworkInfo{
 			Name:        "keytest",
 			PublicKey:   "srv-pub",
@@ -41,7 +45,7 @@ func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
 			Route:      "10.43.0.2/24",
 			PrivateKey: "temp-key",
 		},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
@@ -84,12 +88,12 @@ func TestBeginInstall_Idempotent(t *testing.T) {
 		},
 	}
 
-	inst1, err := env.Service.BeginInstall(invite)
+	inst1, err := env.Service.BeginInstall(installRequest(invite))
 	if err != nil {
 		t.Fatalf("first begin: %v", err)
 	}
 
-	inst2, err := env.Service.BeginInstall(invite)
+	inst2, err := env.Service.BeginInstall(installRequest(invite))
 	if err != nil {
 		t.Fatalf("second begin: %v", err)
 	}
@@ -110,7 +114,7 @@ func TestBeginInstall_ExistingConfirmedNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "already-here")
 
-	_, err := env.Service.BeginInstall(protocol.Invitation{
+	_, err := env.Service.BeginInstall(installRequest(protocol.Invitation{
 		Network: protocol.NetworkInfo{
 			Name:        "already-here",
 			PublicKey:   "srv-pub",
@@ -123,7 +127,7 @@ func TestBeginInstall_ExistingConfirmedNetwork(t *testing.T) {
 			Route:      "10.43.0.2/24",
 			PrivateKey: "temp-key",
 		},
-	})
+	}))
 	if err == nil {
 		t.Fatal("expected error for existing network")
 	}
@@ -186,12 +190,12 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 		},
 	}
 
-	inst, err := env.Service.BeginInstall(invite)
+	inst, err := env.Service.BeginInstall(installRequest(invite))
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
 
-	nc, err := env.Service.InstallNetwork(invite)
+	nc, err := env.Service.InstallNetwork(installRequest(invite))
 	if err != nil {
 		t.Fatalf("install (resume): %v", err)
 	}
@@ -263,7 +267,7 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 		},
 	}
 
-	inst, err := env.Service.BeginInstall(invite)
+	inst, err := env.Service.BeginInstall(installRequest(invite))
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
@@ -272,7 +276,7 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 		t.Fatalf("manual redeem: %v", err)
 	}
 
-	nc, err := env.Service.InstallNetwork(invite)
+	nc, err := env.Service.InstallNetwork(installRequest(invite))
 	if err != nil {
 		t.Fatalf("install (resume from redeemed): %v", err)
 	}
@@ -334,7 +338,7 @@ func TestBeginInstall_IdempotentRedeemed(t *testing.T) {
 		},
 	}
 
-	inst, err := env.Service.BeginInstall(invite)
+	inst, err := env.Service.BeginInstall(installRequest(invite))
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
@@ -342,7 +346,7 @@ func TestBeginInstall_IdempotentRedeemed(t *testing.T) {
 		t.Fatalf("redeem: %v", err)
 	}
 
-	again, err := env.Service.BeginInstall(invite)
+	again, err := env.Service.BeginInstall(installRequest(invite))
 	if err != nil {
 		t.Fatalf("begin install on redeemed: %v", err)
 	}
@@ -403,7 +407,7 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 		},
 	}
 
-	nc, err := env.Service.InstallNetwork(invite)
+	nc, err := env.Service.InstallNetwork(installRequest(invite))
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -432,7 +436,7 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 func TestEnableNetwork_RefusesUnconfirmed(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.BeginInstall(protocol.Invitation{
+	_, err := env.Service.BeginInstall(installRequest(protocol.Invitation{
 		Network: protocol.NetworkInfo{
 			Name:        "not-confirmed",
 			PublicKey:   "srv-pub",
@@ -445,7 +449,7 @@ func TestEnableNetwork_RefusesUnconfirmed(t *testing.T) {
 			Route:      "10.43.0.2/24",
 			PrivateKey: "temp-key",
 		},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}

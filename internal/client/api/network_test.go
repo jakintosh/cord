@@ -8,6 +8,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
+	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
@@ -70,7 +71,7 @@ func TestAPIListNetworks_IncludesRedeemedInstall(
 	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
 	env.SeedNetwork(t, "net-a")
 
-	inst, err := env.Service.BeginInstall(installInvite(t, env, "mid-install"))
+	inst, err := env.Service.BeginInstall(service.InstallRequest{Invitation: installInvite(t, env, "mid-install")})
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
@@ -174,7 +175,7 @@ func TestAPIShowNetwork_MidInstall(
 	// setup env with a server that answers /redeem
 	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
 
-	inst, err := env.Service.BeginInstall(installInvite(t, env, "mid-install"))
+	inst, err := env.Service.BeginInstall(service.InstallRequest{Invitation: installInvite(t, env, "mid-install")})
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
@@ -222,18 +223,21 @@ func TestAPIInstallNetwork_Success(
 
 	url := "/networks"
 	body := `{
-		"network": {
-			"name": "mynet",
-			"public_key": "` + srvPub + `",
-			"endpoint": "1.2.3.4:51820",
-			"server_route": "` + apiHost + `/32",
-			"network_cidr": "10.42.0.0/16",
-			"api_port": ` + strconv.Itoa(apiPort) + `
+		"invitation": {
+			"network": {
+				"name": "mynet",
+				"public_key": "` + srvPub + `",
+				"endpoint": "1.2.3.4:51820",
+				"server_route": "` + apiHost + `/32",
+				"network_cidr": "10.42.0.0/16",
+				"api_port": ` + strconv.Itoa(apiPort) + `
+			},
+			"peer": {
+				"route": "10.42.0.5/16",
+				"private_key": "` + tempKey + `"
+			}
 		},
-		"peer": {
-			"route": "10.42.0.5/16",
-			"private_key": "` + tempKey + `"
-		}
+		"listen_port": 51820
 	}`
 	result := wire.TestPost[api.NetworkDTO](env.Router, url, body)
 
@@ -270,8 +274,27 @@ func TestAPIInstallNetwork_Success(
 	if nw.Server.APIPort != uint16(apiPort) {
 		t.Fatalf("server api_port = %d, want %d", nw.Server.APIPort, apiPort)
 	}
+	if nw.ListenPort != 51820 {
+		t.Fatalf("listen_port = %d, want 51820", nw.ListenPort)
+	}
 	if nw.PrivateKey == "" {
 		t.Fatal("private_key should not be empty")
+	}
+}
+
+func TestAPISetNetworkListenPort(t *testing.T) {
+	env := testutil.Setup(t)
+	env.SeedNetwork(t, "mynet")
+
+	result := wire.TestPost[any](env.Router, "/networks/mynet/listen-port", `{"listen_port":51820}`)
+	result.ExpectOK(t)
+
+	network, err := env.Service.GetNetwork("mynet")
+	if err != nil {
+		t.Fatalf("get network: %v", err)
+	}
+	if network.ListenPort != 51820 {
+		t.Errorf("listen_port = %d, want 51820", network.ListenPort)
 	}
 }
 
@@ -297,15 +320,17 @@ func TestAPIInstallNetwork_MissingName(
 
 	url := "/networks"
 	body := `{
-		"network": {
-			"public_key": "srv-pub",
-			"endpoint": "1.2.3.4:51820",
-			"server_route": "10.42.0.1/32",
-			"api_port": 8443
-		},
-		"peer": {
-			"route": "10.42.0.5/16",
-			"private_key": "test-temp-key"
+		"invitation": {
+			"network": {
+				"public_key": "srv-pub",
+				"endpoint": "1.2.3.4:51820",
+				"server_route": "10.42.0.1/32",
+				"api_port": 8443
+			},
+			"peer": {
+				"route": "10.42.0.5/16",
+				"private_key": "test-temp-key"
+			}
 		}
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
@@ -335,17 +360,19 @@ func TestAPIInstallNetwork_Duplicate(
 
 	url := "/networks"
 	body := `{
-		"network": {
-			"name": "dupnet",
-			"public_key": "srv-pub",
-			"endpoint": "1.2.3.4:51820",
-			"server_route": "10.42.0.1/32",
-			"network_cidr": "10.42.0.0/16",
-			"api_port": 8443
-		},
-		"peer": {
-			"route": "10.42.0.5/16",
-			"private_key": "test-temp-key"
+		"invitation": {
+			"network": {
+				"name": "dupnet",
+				"public_key": "srv-pub",
+				"endpoint": "1.2.3.4:51820",
+				"server_route": "10.42.0.1/32",
+				"network_cidr": "10.42.0.0/16",
+				"api_port": 8443
+			},
+			"peer": {
+				"route": "10.42.0.5/16",
+				"private_key": "test-temp-key"
+			}
 		}
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
@@ -363,7 +390,7 @@ func TestAPIRedeemNetwork_IncludesAssignedAddress(
 	// setup env with a server that answers /redeem
 	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
 
-	inst, err := env.Service.BeginInstall(installInvite(t, env, "mid-install"))
+	inst, err := env.Service.BeginInstall(service.InstallRequest{Invitation: installInvite(t, env, "mid-install")})
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
@@ -427,7 +454,7 @@ func TestAPIConfirmNetwork_Success(
 		},
 	}
 
-	inst, err := env.Service.BeginInstall(invite)
+	inst, err := env.Service.BeginInstall(service.InstallRequest{Invitation: invite})
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}

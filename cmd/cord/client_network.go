@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -8,6 +9,8 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
+	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 )
 
 var clientNetworkCmd = &args.Command{
@@ -23,6 +26,7 @@ var clientNetworkCmd = &args.Command{
 		clientNetworkEnable,
 		clientNetworkDisable,
 		clientNetworkSync,
+		clientNetworkListenPort,
 	},
 }
 
@@ -88,8 +92,16 @@ var clientNetworkInstall = &args.Command{
 			Help: "path to the invite file, or - to read from stdin",
 		},
 	},
+	Options: []args.Option{
+		{
+			Long: "listen-port",
+			Type: args.OptionTypeParameter,
+			Help: "local WireGuard UDP port (default: ephemeral)",
+		},
+	},
 	Handler: func(i *args.Input) error {
 		invitePath := i.GetOperand("invite")
+		listenPortStr := i.GetParameter("listen-port")
 
 		var (
 			invite []byte
@@ -109,7 +121,24 @@ var clientNetworkInstall = &args.Command{
 			return err
 		}
 
-		result, err := client.InstallNetwork(i.Context(), invite)
+		var port uint16 = 0
+		if listenPortStr != nil {
+			if parsed, err := strconv.ParseUint(*listenPortStr, 10, 16); err != nil {
+				return fmt.Errorf("invalid listen port %q", *listenPortStr)
+			} else {
+				port = uint16(parsed)
+			}
+		}
+
+		invitation, err := protocol.Parse(bytes.NewReader(invite))
+		if err != nil {
+			return fmt.Errorf("parse invite: %w", err)
+		}
+
+		result, err := client.InstallNetwork(i.Context(), service.InstallRequest{
+			Invitation: *invitation,
+			ListenPort: port,
+		})
 		if err != nil {
 			return err
 		}
@@ -122,6 +151,48 @@ var clientNetworkInstall = &args.Command{
 		} else {
 			fmt.Printf("network %q installed\n", result.Name)
 		}
+		return nil
+	},
+}
+
+var clientNetworkListenPort = &args.Command{
+	Name: "listen-port",
+	Help: "set a network's local WireGuard UDP port",
+	Operands: []args.Operand{
+		{
+			Name: "network",
+			Help: "network name",
+		},
+		{
+			Name: "port",
+			Help: "UDP port, or 0 for ephemeral",
+		},
+	},
+	Handler: func(i *args.Input) error {
+		network := i.GetOperand("network")
+		portStr := i.GetOperand("port")
+
+		var port uint16
+		if parsed, err := strconv.ParseUint(portStr, 10, 16); err != nil {
+			return fmt.Errorf("invalid listen port %q", portStr)
+		} else {
+			port = uint16(parsed)
+		}
+
+		client, err := clientClient(i)
+		if err != nil {
+			return err
+		}
+
+		if err := client.SetNetworkListenPort(
+			i.Context(),
+			network,
+			uint16(port),
+		); err != nil {
+			return err
+		}
+
+		fmt.Printf("network %q listen port set to %d\n", network, port)
 		return nil
 	},
 }
@@ -336,6 +407,9 @@ func printClientNetworkDetail(
 	}
 	if n.Interface != "" {
 		fmt.Printf("interface: %s\n", n.Interface)
+	}
+	if n.ListenPort != 0 {
+		fmt.Printf("listen_port: %d\n", n.ListenPort)
 	}
 	if n.ServerEndpoint != "" {
 		fmt.Printf("server_endpoint: %s\n", n.ServerEndpoint)

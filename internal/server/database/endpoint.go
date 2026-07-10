@@ -81,7 +81,11 @@ func (db *DB) InsertEndpointSightings(
 			WHERE p.network_name = ?1
 				AND w.network_name = ?1
 				AND p.public_key = ?2
-				AND w.public_key = ?3`,
+				AND w.public_key = ?3
+			ON CONFLICT (network_name, witness, peer) DO UPDATE SET
+				endpoint = excluded.endpoint,
+				time_unix = excluded.time_unix
+			WHERE excluded.time_unix >= endpoint.time_unix`,
 			network,
 			s.PeerKey,
 			s.WitnessKey,

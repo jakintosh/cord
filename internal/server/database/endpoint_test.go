@@ -140,6 +140,36 @@ func TestGetRecentEndpoints_SinceFilter(t *testing.T) {
 	}
 }
 
+func TestInsertEndpointSightings_KeepsLatestPerWitnessAndPeer(t *testing.T) {
+	db := testutil.SetupDB(t)
+	seedNetworkForEndpoint(t, db)
+
+	newer := time.Now()
+	older := newer.Add(-time.Minute)
+	if err := db.InsertEndpointSightings("epnet", []service.EndpointSighting{
+		{WitnessKey: "pub-a", PeerKey: "pub-b", Endpoint: "new.ep:1", Timestamp: newer},
+	}); err != nil {
+		t.Fatalf("insert newer sighting: %v", err)
+	}
+	if err := db.InsertEndpointSightings("epnet", []service.EndpointSighting{
+		{WitnessKey: "pub-a", PeerKey: "pub-b", Endpoint: "old.ep:1", Timestamp: older},
+	}); err != nil {
+		t.Fatalf("insert older sighting: %v", err)
+	}
+
+	endpoints, err := db.GetRecentEndpoints("epnet", older.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("get recent: %v", err)
+	}
+	witnesses := endpoints["pub-b"]
+	if len(witnesses) != 1 {
+		t.Fatalf("witnesses = %d, want 1", len(witnesses))
+	}
+	if witnesses[0].Endpoint != "new.ep:1" {
+		t.Errorf("endpoint = %q, want new.ep:1", witnesses[0].Endpoint)
+	}
+}
+
 func TestDeleteEndpointsBefore(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)

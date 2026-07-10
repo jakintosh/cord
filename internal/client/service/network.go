@@ -30,6 +30,11 @@ const (
 	// handshake is considered stale and eligible for endpoint
 	// rotation.
 	StaleThreshold = wireguard.ActiveHandshakeThreshold
+
+	// EndpointTTL bounds the local endpoint catalog. A candidate remains while
+	// it has been observed by either this client or the server within this
+	// window.
+	EndpointTTL = 24 * time.Hour
 )
 
 // NetworkConfig is the permanent membership record. Complete at insert,
@@ -39,6 +44,7 @@ type NetworkConfig struct {
 	PrivateKey    string
 	InterfaceName string
 	AssignedRoute string
+	ListenPort    uint16
 	Server        ServerInfo
 	Enabled       bool
 	CreatedAt     time.Time
@@ -131,6 +137,7 @@ func (s *Service) EnableNetwork(
 		cfg.PrivateKey,
 		cfg.AssignedRoute,
 		cfg.Server,
+		cfg.ListenPort,
 	)
 	if err != nil {
 		return err
@@ -188,6 +195,38 @@ func (s *Service) DisableNetwork(
 	}
 
 	return s.store.SetNetworkEnabled(name, false)
+}
+
+// SetNetworkListenPort persists the local WireGuard UDP port for a network.
+// When the network is running it is restarted so the new bind takes effect.
+func (s *Service) SetNetworkListenPort(
+	name string,
+	listenPort uint16,
+) error {
+	if _, err := s.store.GetNetwork(name); err != nil {
+		return err
+	}
+
+	running := s.IsNetworkRunning(name)
+	if running {
+		if err := s.DisableNetwork(name); err != nil {
+			return err
+		}
+	}
+
+	if err := s.store.SetNetworkListenPort(name, listenPort); err != nil {
+		if running {
+			_ = s.EnableNetwork(name)
+		}
+		return err
+	}
+
+	if running {
+		if err := s.EnableNetwork(name); err != nil {
+			return fmt.Errorf("restart network with listen port %d: %w", listenPort, err)
+		}
+	}
+	return nil
 }
 
 // SyncNetwork triggers an on-demand peer fetch and device reconciliation
@@ -309,6 +348,13 @@ func (n *Network) sync() error {
 		if err := n.store.SetPeerEndpoints(n.cfg.Name, vp.PublicKey, eps); err != nil {
 			n.log.Warn("sync: set endpoints failed", "peer", vp.PublicKey, "err", err)
 		}
+	}
+
+	if err := n.store.DeletePeerEndpointsBefore(
+		n.cfg.Name,
+		n.clock().Add(-EndpointTTL).Unix(),
+	); err != nil {
+		return fmt.Errorf("prune endpoints: %w", err)
 	}
 
 	return n.reconcile()

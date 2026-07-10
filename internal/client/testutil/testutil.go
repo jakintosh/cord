@@ -48,7 +48,7 @@ func SeedNetworkWithName(
 
 	invite := defaultInvite
 	invite.Network.Name = name
-	nc, err := svc.InstallNetwork(invite)
+	nc, err := svc.InstallNetwork(service.InstallRequest{Invitation: invite})
 	if err != nil {
 		t.Fatalf("seed network %q: %v", name, err)
 	}

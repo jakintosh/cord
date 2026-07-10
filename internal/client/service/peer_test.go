@@ -47,6 +47,25 @@ func TestEnableNetwork_AppliesCachedPeersSynchronously(t *testing.T) {
 	}
 }
 
+func TestEnableNetwork_UsesConfiguredListenPort(t *testing.T) {
+	env := testutil.SetupService(t)
+	network := testutil.SeedNetworkDirect(t, env.Service, "listen-port")
+	network.ListenPort = 51820
+	if err := env.Database.SetNetworkListenPort(network.Name, network.ListenPort); err != nil {
+		t.Fatalf("set listen port: %v", err)
+	}
+
+	if err := env.Service.EnableNetwork(network.Name); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if len(env.Backend.CreateCalls) != 1 {
+		t.Fatalf("device creates = %d, want 1", len(env.Backend.CreateCalls))
+	}
+	if got := env.Backend.CreateCalls[0].ListenPort; got != network.ListenPort {
+		t.Errorf("listen port = %d, want %d", got, network.ListenPort)
+	}
+}
+
 func TestBuildPeers_IncludesServer(t *testing.T) {
 	env := testutil.SetupService(t)
 

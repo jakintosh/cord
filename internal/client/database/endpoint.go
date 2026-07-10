@@ -47,29 +47,6 @@ func (db *DB) SetPeerEndpoints(
 		}
 	}
 
-	// Delete endpoints not in the incoming list.
-	if len(endpoints) > 0 {
-		eps := make([]any, 0, len(endpoints)+2)
-		eps = append(eps, network, peerID)
-		for _, ep := range endpoints {
-			eps = append(eps, ep.Endpoint)
-		}
-		query := `DELETE FROM endpoint
-			WHERE network_name = ?1 AND peer_id = ?2
-			AND endpoint NOT IN (` + placeholders(3, len(endpoints)) + `);`
-		if _, err := tx.Exec(query, eps...); err != nil {
-			return fmt.Errorf("prune stale endpoints for peer %q: %w", pubKey, err)
-		}
-	} else {
-		if _, err := tx.Exec(`
-			DELETE FROM endpoint
-			WHERE network_name = ?1 AND peer_id = ?2;`,
-			network, peerID,
-		); err != nil {
-			return fmt.Errorf("clear endpoints for peer %q: %w", pubKey, err)
-		}
-	}
-
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit set peer endpoints tx: %w", err)
 	}
@@ -83,11 +60,12 @@ func (db *DB) UpdatePeerEndpointLocal(
 	when int64,
 ) error {
 	_, err := db.Conn.Exec(`
-		UPDATE endpoint
-		SET local_observed_at = MAX(local_observed_at, ?4)
-		WHERE network_name = ?1
-			AND peer_id = (SELECT id FROM peer WHERE network_name = ?1 AND public_key = ?2)
-			AND endpoint = ?3`,
+		INSERT INTO endpoint (network_name, peer_id, endpoint, local_observed_at)
+		SELECT ?1, id, ?3, ?4
+		FROM peer
+		WHERE network_name = ?1 AND public_key = ?2
+		ON CONFLICT (network_name, peer_id, endpoint) DO UPDATE SET
+			local_observed_at = MAX(local_observed_at, ?4)`,
 		network,
 		pubKey,
 		endpoint,
@@ -134,7 +112,7 @@ func (db *DB) ListPeerEndpoints(
 		FROM endpoint e
 		JOIN peer p ON p.id = e.peer_id
 		WHERE p.network_name = ?1 AND p.public_key = ?2
-		ORDER BY e.server_observed_at DESC, e.local_observed_at DESC`,
+		ORDER BY e.local_observed_at DESC, e.server_observed_at DESC`,
 		network,
 		pubKey,
 	)
@@ -162,6 +140,24 @@ func (db *DB) ListPeerEndpoints(
 	}
 
 	return endpoints, nil
+}
+
+func (db *DB) DeletePeerEndpointsBefore(
+	network string,
+	before int64,
+) error {
+	_, err := db.Conn.Exec(`
+		DELETE FROM endpoint
+		WHERE network_name = ?1
+			AND server_observed_at < ?2
+			AND local_observed_at < ?2`,
+		network,
+		before,
+	)
+	if err != nil {
+		return fmt.Errorf("delete stale peer endpoints: %w", err)
+	}
+	return nil
 }
 
 func (db *DB) ListLocalEndpointsSince(

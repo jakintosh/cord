@@ -33,6 +33,7 @@ func (db *DB) GetInstall(
 			main_server_route,
 			main_server_network_cidr,
 			main_server_api_port,
+			listen_port,
 			created_at_unix
 		FROM install
 		WHERE name = ?1`,
@@ -70,6 +71,7 @@ func (db *DB) ListInstalls() (
 			main_server_route,
 			main_server_network_cidr,
 			main_server_api_port,
+			listen_port,
 			created_at_unix
 		FROM install
 		ORDER BY name ASC`,
@@ -118,9 +120,10 @@ func (db *DB) InsertInstall(
 			main_server_route,
 			main_server_network_cidr,
 			main_server_api_port,
+			listen_port,
 			created_at_unix
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)`,
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)`,
 		install.Name,
 		install.Phase,
 		install.InviteIfaceName,
@@ -139,6 +142,7 @@ func (db *DB) InsertInstall(
 		install.MainServer.Route,
 		install.MainServer.NetworkCidr,
 		install.MainServer.APIPort,
+		install.ListenPort,
 		install.CreatedAt.Unix(),
 	)
 	return CheckSqliteErr("insert install", err)
@@ -181,10 +185,11 @@ func (db *DB) ConfirmInstall(
 			server_route,
 			server_network_cidr,
 			server_api_port,
+			listen_port,
 			enabled,
 			created_at_unix
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
 		nc.Name,
 		nc.PrivateKey,
 		nc.InterfaceName,
@@ -194,6 +199,7 @@ func (db *DB) ConfirmInstall(
 		nc.Server.Route,
 		nc.Server.NetworkCidr,
 		nc.Server.APIPort,
+		nc.ListenPort,
 		boolToInt(nc.Enabled),
 		nc.CreatedAt.Unix(),
 	)
@@ -289,6 +295,7 @@ func scanInstallRow(
 		&inst.MainServer.Route,
 		&inst.MainServer.NetworkCidr,
 		&inst.MainServer.APIPort,
+		&inst.ListenPort,
 		&createdUnix,
 	); err != nil {
 		return err

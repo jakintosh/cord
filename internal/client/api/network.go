@@ -3,13 +3,15 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
-	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 )
+
+type SetListenPortRequest struct {
+	ListenPort uint16 `json:"listen_port"`
+}
 
 type NetworkDTO struct {
 	Name           string `json:"name"`
@@ -18,6 +20,7 @@ type NetworkDTO struct {
 	Connected      bool   `json:"connected"`
 	Address        string `json:"address,omitempty"`
 	Interface      string `json:"interface,omitempty"`
+	ListenPort     uint16 `json:"listen_port,omitempty"`
 	ServerEndpoint string `json:"server_endpoint,omitempty"`
 	PeerCount      int    `json:"peer_count,omitempty"`
 }
@@ -34,6 +37,7 @@ func networkDTOFromConfig(
 		Connected:      connected,
 		Address:        nc.AssignedRoute,
 		Interface:      nc.InterfaceName,
+		ListenPort:     nc.ListenPort,
 		ServerEndpoint: nc.Server.Endpoint,
 		PeerCount:      peerCount,
 	}
@@ -131,13 +135,13 @@ func (a *API) handleNetworkInstall(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	invitation, err := protocol.Parse(r.Body)
-	if err != nil {
+	var request service.InstallRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		wire.WriteError(w, http.StatusBadRequest, "malformed invitation")
 		return
 	}
 
-	network, err := a.service.InstallNetwork(*invitation)
+	network, err := a.service.InstallNetwork(request)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -145,6 +149,22 @@ func (a *API) handleNetworkInstall(
 
 	networkDTO := networkDTOFromConfig(*network, a.service.IsNetworkRunning(network.Name), a.peerCount(network.Name))
 	wire.WriteData(w, http.StatusCreated, networkDTO)
+}
+
+func (a *API) handleNetworkListenPort(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	var request SetListenPortRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		wire.WriteError(w, http.StatusBadRequest, "invalid listen port request")
+		return
+	}
+	if err := a.service.SetNetworkListenPort(r.PathValue("name"), request.ListenPort); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handleNetworkRedeem(
@@ -266,16 +286,31 @@ func (c *Client) GetNetwork(
 
 func (c *Client) InstallNetwork(
 	ctx context.Context,
-	payload []byte,
+	request service.InstallRequest,
 ) (
 	NetworkDTO,
 	error,
 ) {
-	if !json.Valid(payload) {
-		return NetworkDTO{}, errors.New("invalid invitation: not valid JSON")
+	body, err := json.Marshal(request)
+	if err != nil {
+		return NetworkDTO{}, err
 	}
 	var result NetworkDTO
-	return result, c.wire.Post(ctx, "/networks", payload, &result)
+	return result, c.wire.Post(ctx, "/networks", body, &result)
+}
+
+// SetNetworkListenPort persists a network's local WireGuard UDP port and
+// restarts the network if it is currently enabled.
+func (c *Client) SetNetworkListenPort(
+	ctx context.Context,
+	name string,
+	listenPort uint16,
+) error {
+	body, err := json.Marshal(SetListenPortRequest{ListenPort: listenPort})
+	if err != nil {
+		return err
+	}
+	return c.wire.Post(ctx, "/networks/"+name+"/listen-port", body, nil)
 }
 
 func (c *Client) RedeemNetwork(

@@ -280,7 +280,8 @@ func TestSetPeerEndpoints_Upsert(t *testing.T) {
 		t.Fatalf("first set endpoints: %v", err)
 	}
 
-	// Update with new data — keep 2.2.2.2, add 3.3.3.3, drop 1.1.1.1.
+	// Update with new data — keep 2.2.2.2, add 3.3.3.3, and retain the
+	// earlier endpoint as a candidate.
 	if err := db.SetPeerEndpoints("testnet", "alice-key", []service.PeerEndpoint{
 		{Endpoint: "2.2.2.2:51820", ServerObservedAt: 300},
 		{Endpoint: "3.3.3.3:51820", ServerObservedAt: 250},
@@ -292,8 +293,8 @@ func TestSetPeerEndpoints_Upsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list endpoints: %v", err)
 	}
-	if len(eps) != 2 {
-		t.Fatalf("expected 2 endpoints, got %d", len(eps))
+	if len(eps) != 3 {
+		t.Fatalf("expected 3 endpoints, got %d", len(eps))
 	}
 	if eps[0].Endpoint != "2.2.2.2:51820" {
 		t.Errorf("endpoint[0] = %q, want 2.2.2.2:51820", eps[0].Endpoint)
@@ -345,6 +346,60 @@ func TestUpdatePeerEndpointLocal(t *testing.T) {
 	}
 }
 
+func TestUpdatePeerEndpointLocal_InsertsUnknownServerCandidate(t *testing.T) {
+	db := testutil.SetupDB(t)
+	seedNetwork(t, db)
+
+	if err := db.SetPeers("testnet", []service.Peer{{
+		Name: "alice", PublicKey: "alice-key", Route: "10.42.1.5/32",
+	}}); err != nil {
+		t.Fatalf("set peers: %v", err)
+	}
+	if err := db.UpdatePeerEndpointLocal("testnet", "alice-key", "9.9.9.9:51820", 500); err != nil {
+		t.Fatalf("upsert local endpoint: %v", err)
+	}
+	if err := db.SetPeerEndpoints("testnet", "alice-key", []service.PeerEndpoint{
+		{Endpoint: "1.1.1.1:51820", ServerObservedAt: 600},
+	}); err != nil {
+		t.Fatalf("merge server endpoint: %v", err)
+	}
+
+	eps, err := db.ListPeerEndpoints("testnet", "alice-key")
+	if err != nil {
+		t.Fatalf("list endpoints: %v", err)
+	}
+	if len(eps) != 2 || eps[0].Endpoint != "9.9.9.9:51820" || eps[0].LocalObservedAt != 500 {
+		t.Errorf("endpoints = %+v, want locally observed 9.9.9.9:51820 retained", eps)
+	}
+}
+
+func TestListPeers_PrefersLocalEndpoint(t *testing.T) {
+	db := testutil.SetupDB(t)
+	seedNetwork(t, db)
+	if err := db.SetPeers("testnet", []service.Peer{{
+		Name: "alice", PublicKey: "alice-key", Route: "10.42.1.5/32",
+	}}); err != nil {
+		t.Fatalf("set peers: %v", err)
+	}
+	if err := db.SetPeerEndpoints("testnet", "alice-key", []service.PeerEndpoint{
+		{Endpoint: "1.1.1.1:51820", ServerObservedAt: 500},
+		{Endpoint: "2.2.2.2:51820", ServerObservedAt: 100},
+	}); err != nil {
+		t.Fatalf("set endpoints: %v", err)
+	}
+	if err := db.UpdatePeerEndpointLocal("testnet", "alice-key", "2.2.2.2:51820", 200); err != nil {
+		t.Fatalf("set local observation: %v", err)
+	}
+
+	peers, err := db.ListPeers("testnet")
+	if err != nil {
+		t.Fatalf("list peers: %v", err)
+	}
+	if peers[0].Endpoint != "2.2.2.2:51820" {
+		t.Errorf("endpoint = %q, want locally observed 2.2.2.2:51820", peers[0].Endpoint)
+	}
+}
+
 func TestUpdatePeerEndpointLocal_Nonexistent(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
@@ -375,7 +430,7 @@ func TestListPeerEndpoints_Empty(t *testing.T) {
 	}
 }
 
-func TestSetPeerEndpoints_ClearAll(t *testing.T) {
+func TestSetPeerEndpoints_EmptyMergeRetainsCandidates(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
@@ -391,17 +446,17 @@ func TestSetPeerEndpoints_ClearAll(t *testing.T) {
 		t.Fatalf("set endpoints: %v", err)
 	}
 
-	// Clear all endpoints.
+	// An empty server response must not erase the local catalog.
 	if err := db.SetPeerEndpoints("testnet", "alice-key", nil); err != nil {
-		t.Fatalf("clear endpoints: %v", err)
+		t.Fatalf("merge empty endpoints: %v", err)
 	}
 
 	eps, err := db.ListPeerEndpoints("testnet", "alice-key")
 	if err != nil {
 		t.Fatalf("list endpoints: %v", err)
 	}
-	if len(eps) != 0 {
-		t.Fatalf("expected 0 endpoints after clear, got %d", len(eps))
+	if len(eps) != 1 {
+		t.Fatalf("expected 1 endpoint after empty merge, got %d", len(eps))
 	}
 }
 

@@ -36,6 +36,10 @@ type Install struct {
 	Name  string
 	Phase string // PhaseInvited or PhaseRedeemed
 
+	// ListenPort is the locally selected WireGuard UDP port. Zero lets the
+	// operating system choose an ephemeral port.
+	ListenPort uint16
+
 	InviteIfaceName     string
 	InvitePrivateKey    string // invite-network identity
 	InviteAssignedRoute string
@@ -47,6 +51,14 @@ type Install struct {
 	MainServer        ServerInfo // filled at redeem
 
 	CreatedAt time.Time
+}
+
+// InstallRequest combines a server-issued invitation with local client
+// settings needed to install it. It is the payload of the client control API,
+// not the portable invitation artifact itself.
+type InstallRequest struct {
+	Invitation protocol.Invitation `json:"invitation"`
+	ListenPort uint16              `json:"listen_port"`
 }
 
 // GetInstall returns the persisted install record by name.
@@ -76,12 +88,12 @@ func (s *Service) ListInstalls() (
 // If the install already exists (from a previous partial run),
 // InstallNetwork resumes from whatever phase it is at.
 func (s *Service) InstallNetwork(
-	invitation protocol.Invitation,
+	request InstallRequest,
 ) (
 	*NetworkConfig,
 	error,
 ) {
-	inst, err := s.BeginInstall(invitation)
+	inst, err := s.BeginInstall(request)
 	if err != nil {
 		return nil, err
 	}
@@ -112,11 +124,13 @@ func (s *Service) InstallNetwork(
 // returns ErrNetworkExists; if an install with the same name already
 // exists at any phase, the existing record is returned unchanged.
 func (s *Service) BeginInstall(
-	invitation protocol.Invitation,
+	request InstallRequest,
 ) (
 	*Install,
 	error,
 ) {
+	invitation := request.Invitation
+
 	// A parseable-but-incomplete invitation is a bad request; the
 	// completeness check is a protocol concern, but the resulting error
 	// maps to invalid input at the service boundary.
@@ -152,6 +166,7 @@ func (s *Service) BeginInstall(
 	install := &Install{
 		Name:                networkName,
 		Phase:               PhaseInvited,
+		ListenPort:          request.ListenPort,
 		InviteIfaceName:     inviteIfaceName,
 		InvitePrivateKey:    invitation.Peer.PrivateKey,
 		InviteAssignedRoute: invitation.Peer.Route,
@@ -210,6 +225,7 @@ func (s *Service) Redeem(
 		install.InvitePrivateKey,
 		inviteHostRoute.String(),
 		install.InviteServer,
+		install.ListenPort,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create invite tunnel: %w", err)
@@ -276,6 +292,7 @@ func (s *Service) Confirm(
 		install.MainPrivateKey,
 		install.MainAssignedRoute,
 		install.MainServer,
+		install.ListenPort,
 	)
 	if err != nil {
 		return fmt.Errorf("create main tunnel: %w", err)
@@ -297,6 +314,7 @@ func (s *Service) Confirm(
 		PrivateKey:    install.MainPrivateKey,
 		InterfaceName: install.MainIfaceName,
 		AssignedRoute: install.MainAssignedRoute,
+		ListenPort:    install.ListenPort,
 		Server:        install.MainServer,
 		Enabled:       true,
 		CreatedAt:     s.clock(),

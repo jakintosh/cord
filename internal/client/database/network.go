@@ -24,6 +24,7 @@ func (db *DB) GetNetwork(
 			server_route,
 			server_network_cidr,
 			server_api_port,
+			listen_port,
 			enabled,
 			created_at_unix
 		FROM network
@@ -44,6 +45,7 @@ func (db *DB) GetNetwork(
 		&nc.Server.Route,
 		&nc.Server.NetworkCidr,
 		&nc.Server.APIPort,
+		&nc.ListenPort,
 		&enabledInt,
 		&createdUnix,
 	); err != nil {
@@ -98,10 +100,11 @@ func (db *DB) InsertNetwork(
 			server_route,
 			server_network_cidr,
 			server_api_port,
+			listen_port,
 			enabled,
 			created_at_unix
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
 		nc.Name,
 		nc.PrivateKey,
 		nc.InterfaceName,
@@ -111,6 +114,7 @@ func (db *DB) InsertNetwork(
 		nc.Server.Route,
 		nc.Server.NetworkCidr,
 		nc.Server.APIPort,
+		nc.ListenPort,
 		boolToInt(nc.Enabled),
 		nc.CreatedAt.Unix(),
 	)
@@ -134,6 +138,30 @@ func (db *DB) SetNetworkEnabled(
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("set network enabled: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("%w: network %q not found", service.ErrNotFound, name)
+	}
+	return nil
+}
+
+func (db *DB) SetNetworkListenPort(
+	name string,
+	listenPort uint16,
+) error {
+	result, err := db.Conn.Exec(`
+		UPDATE network
+		SET listen_port = ?1
+		WHERE name = ?2`,
+		listenPort,
+		name,
+	)
+	if err != nil {
+		return CheckSqliteErr("set network listen port", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set network listen port: %w", err)
 	}
 	if affected == 0 {
 		return fmt.Errorf("%w: network %q not found", service.ErrNotFound, name)

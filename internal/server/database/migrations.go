@@ -119,7 +119,8 @@ CREATE TABLE endpoint (
         ON DELETE CASCADE,
     FOREIGN KEY (witness)
         REFERENCES peer (id)
-        ON DELETE CASCADE
+        ON DELETE CASCADE,
+    UNIQUE (network_name, witness, peer)
 );
 `,
 	},

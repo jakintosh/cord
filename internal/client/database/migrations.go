@@ -32,6 +32,7 @@ CREATE TABLE install (
     main_server_route          TEXT NOT NULL DEFAULT '',
     main_server_network_cidr   TEXT NOT NULL DEFAULT '',
     main_server_api_port       INTEGER NOT NULL DEFAULT 0,
+    listen_port                INTEGER NOT NULL DEFAULT 0,
     created_at_unix            INTEGER NOT NULL
 );
 
@@ -45,6 +46,7 @@ CREATE TABLE network (
     server_route        TEXT NOT NULL,
     server_network_cidr TEXT NOT NULL DEFAULT '',
     server_api_port     INTEGER NOT NULL,
+    listen_port         INTEGER NOT NULL DEFAULT 0,
     enabled             INTEGER NOT NULL DEFAULT 0,
     created_at_unix     INTEGER NOT NULL
 );
