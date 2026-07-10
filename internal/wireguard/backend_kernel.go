@@ -27,7 +27,7 @@ func (b *KernelBackend) CreateDevice(
 		return nil, err
 	}
 
-	if err := kernelSyncRoute(link, cfg.Route); err != nil {
+	if err := kernelSyncAddress(link, cfg.Route); err != nil {
 		return nil, err
 	}
 
@@ -50,6 +50,14 @@ func (b *KernelBackend) CreateDevice(
 
 	if err := netlink.LinkSetUp(link); err != nil {
 		return nil, fmt.Errorf("wireguard: bring %s up: %w", cfg.Name, err)
+	}
+
+	// WireGuard's kernel AllowedIPs select a peer for packets already
+	// routed to this interface; they do not create routes in the host FIB.
+	// Install the overlay route so traffic to the server and other peers
+	// reaches this device, matching the userspace Linux backend.
+	if err := kernelSyncNetworkRoute(link, cfg.NetworkCIDR); err != nil {
+		return nil, err
 	}
 
 	return &kernelDeviceHandle{name: cfg.Name}, nil
@@ -175,16 +183,19 @@ func kernelEnsureLink(
 	return wg, nil
 }
 
-func kernelSyncRoute(
+// kernelSyncAddress replaces the addresses on link with route. The route is
+// deliberately normally a /32: it identifies this WireGuard device, while
+// kernelSyncNetworkRoute supplies the overlay network route.
+func kernelSyncAddress(
 	link netlink.Link,
-	route net.IPNet,
+	addr net.IPNet,
 ) error {
 	addrs, err := netlink.AddrList(link, netlink.FAMILY_ALL)
 	if err != nil {
 		return fmt.Errorf("wireguard: list addrs: %w", err)
 	}
 
-	desired := &netlink.Addr{IPNet: &route}
+	desired := &netlink.Addr{IPNet: &addr}
 	found := false
 	for _, existing := range addrs {
 		if existing.Equal(*desired) {
@@ -198,10 +209,27 @@ func kernelSyncRoute(
 
 	if !found {
 		if err := netlink.AddrAdd(link, desired); err != nil {
-			return fmt.Errorf("wireguard: add addr %s: %w", route.String(), err)
+			return fmt.Errorf("wireguard: add addr %s: %w", addr.String(), err)
 		}
 	}
 
+	return nil
+}
+
+// kernelSyncNetworkRoute sends the configured overlay CIDR through link.
+// Unlike wg-quick, the kernel WireGuard API does not add routes from a peer's
+// AllowedIPs, so this is required for inner traffic to reach the device.
+func kernelSyncNetworkRoute(
+	link netlink.Link,
+	networkCIDR net.IPNet,
+) error {
+	route := &netlink.Route{
+		LinkIndex: link.Attrs().Index,
+		Dst:       &networkCIDR,
+	}
+	if err := netlink.RouteReplace(route); err != nil {
+		return fmt.Errorf("wireguard: add route for %s: %w", networkCIDR.String(), err)
+	}
 	return nil
 }
 
