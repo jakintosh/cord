@@ -29,7 +29,7 @@ const (
 	// StaleThreshold is the duration after which a peer with no
 	// handshake is considered stale and eligible for endpoint
 	// rotation.
-	StaleThreshold = 90 * time.Second
+	StaleThreshold = wireguard.ActiveHandshakeThreshold
 )
 
 // NetworkConfig is the permanent membership record. Complete at insert,

@@ -4,9 +4,13 @@ import (
 	"errors"
 	"net"
 	"testing"
+	"time"
+
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 func TestCreateNetwork_Success(t *testing.T) {
@@ -319,5 +323,82 @@ func TestDeleteNetwork_CascadesResources(t *testing.T) {
 	}
 	if len(peers) != 0 {
 		t.Errorf("expected 0 peers after cascade, got %d", len(peers))
+	}
+}
+
+func TestReconcile_ObservesOnlyActiveMainPeerEndpoints(t *testing.T) {
+	tests := []struct {
+		name          string
+		lastHandshake time.Time
+		wantEndpoint  bool
+	}{
+		{
+			name:          "active handshake",
+			lastHandshake: testutil.FixedTime.Add(-wireguard.ActiveHandshakeThreshold + time.Second),
+			wantEndpoint:  true,
+		},
+		{
+			name:          "stale handshake",
+			lastHandshake: testutil.FixedTime.Add(-wireguard.ActiveHandshakeThreshold),
+			wantEndpoint:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := testutil.SetupService(t)
+			network := testutil.SeedNetwork(t, env.Service)
+			if err := env.Service.EnableNetwork("testnet"); err != nil {
+				t.Fatalf("enable network: %v", err)
+			}
+
+			peerKey := mustGenKey(t)
+			peerIP := net.ParseIP("10.0.0.5")
+			if _, err := env.Service.CreateRegistration("testnet", "alice", &peerIP, false, nil); err != nil {
+				t.Fatalf("create registration: %v", err)
+			}
+			tempKey := lastTempKey(t, env.Service, "testnet")
+			if _, err := env.Service.RedeemRegistration("testnet", tempKey, peerKey); err != nil {
+				t.Fatalf("redeem registration: %v", err)
+			}
+
+			key, err := wgtypes.ParseKey(peerKey)
+			if err != nil {
+				t.Fatalf("parse peer key: %v", err)
+			}
+			_, route, err := net.ParseCIDR("10.0.0.5/32")
+			if err != nil {
+				t.Fatalf("parse peer route: %v", err)
+			}
+			env.Backend.Device("testnet").SetPeers(wireguard.PeerStatus{
+				PublicKey:     key,
+				AllowedIPs:    []net.IPNet{*route},
+				Endpoint:      &net.UDPAddr{IP: net.ParseIP("203.0.113.5"), Port: 51820},
+				LastHandshake: tt.lastHandshake,
+			})
+
+			if err := env.Service.ConfirmPeer("testnet", "alice"); err != nil {
+				t.Fatalf("confirm peer: %v", err)
+			}
+
+			endpoints, err := env.Database.GetRecentEndpoints("testnet", testutil.FixedTime.Add(-time.Second))
+			if err != nil {
+				t.Fatalf("get recent endpoints: %v", err)
+			}
+			witnesses := endpoints[peerKey]
+			if tt.wantEndpoint {
+				if len(witnesses) != 1 {
+					t.Fatalf("endpoint witnesses = %d, want 1", len(witnesses))
+				}
+				if witnesses[0].Witness != network.PublicKey {
+					t.Errorf("witness = %q, want server key %q", witnesses[0].Witness, network.PublicKey)
+				}
+				if witnesses[0].Endpoint != "203.0.113.5:51820" {
+					t.Errorf("endpoint = %q, want 203.0.113.5:51820", witnesses[0].Endpoint)
+				}
+			} else if len(witnesses) != 0 {
+				t.Errorf("endpoint witnesses = %d, want 0", len(witnesses))
+			}
+		})
 	}
 }

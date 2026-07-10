@@ -7,11 +7,17 @@ package wireguard
 import (
 	"fmt"
 	"log/slog"
+	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
 )
 
 const maxInterfaceNameBytes = 15
+
+// ActiveHandshakeThreshold is the maximum age of a WireGuard handshake that
+// is considered current. Both clients and servers use it when deciding
+// whether a learned endpoint is safe to retain or advertise.
+const ActiveHandshakeThreshold = 90 * time.Second
 
 // Options configures a WireGuard manager.
 type Options struct {

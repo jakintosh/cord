@@ -370,6 +370,8 @@ func (n *Network) reconcile() {
 	}
 	if err := n.main.device.SetPeers(mainPeers...); err != nil {
 		n.log.Warn("reconcile: apply main peers failed", "err", err)
+	} else {
+		n.observeMainPeerEndpoints(peers, now)
 	}
 
 	// reconcile invite peers
@@ -399,5 +401,51 @@ func (n *Network) reconcile() {
 		n.timer = time.AfterFunc(delay, n.reconcile)
 	} else {
 		n.timer.Reset(delay)
+	}
+}
+
+// observeMainPeerEndpoints records recent endpoints learned by the server's
+// main WireGuard device. This provides the initial endpoint candidates clients
+// need before they can make direct peer-to-peer handshakes themselves.
+func (n *Network) observeMainPeerEndpoints(
+	peers []*Peer,
+	now time.Time,
+) {
+	livePeers, err := n.main.device.Peers()
+	if err != nil {
+		n.log.Warn("reconcile: observe main peer endpoints failed", "err", err)
+		return
+	}
+
+	known := make(map[string]struct{}, len(peers))
+	for _, peer := range peers {
+		if peer.PublicKey == n.config.PublicKey || !peer.Enabled || !peer.Confirmed {
+			continue
+		}
+		known[peer.PublicKey] = struct{}{}
+	}
+
+	sightings := make([]EndpointSighting, 0, len(livePeers))
+	for _, peer := range livePeers {
+		if _, ok := known[peer.PublicKey.String()]; !ok {
+			continue
+		}
+		if peer.Endpoint == nil || peer.LastHandshake.IsZero() ||
+			now.Sub(peer.LastHandshake) >= wireguard.ActiveHandshakeThreshold {
+			continue
+		}
+		sightings = append(sightings, EndpointSighting{
+			WitnessKey: n.config.PublicKey,
+			PeerKey:    peer.PublicKey.String(),
+			Endpoint:   peer.Endpoint.String(),
+			Timestamp:  now,
+		})
+	}
+
+	if len(sightings) == 0 {
+		return
+	}
+	if err := n.store.InsertEndpointSightings(n.config.Name, sightings); err != nil {
+		n.log.Warn("reconcile: store main peer endpoints failed", "err", err)
 	}
 }

@@ -157,7 +157,7 @@ type Store interface {
 	GetRecentEndpoints(network string, since time.Time) (map[string][]EndpointWitness, error)
 
 	// InsertEndpointSightings persists endpoint sightings reported
-	// by peers.
+	// by peers or observed by the server's WireGuard device.
 	InsertEndpointSightings(network string, sightings []EndpointSighting) error
 
 	// DeleteEndpointsBefore removes all endpoint records older than
