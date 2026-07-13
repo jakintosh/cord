@@ -63,26 +63,20 @@ func TestAPICreateRegistration_Success(
 	}
 }
 
-func TestAPICreateRegistration_AutoAssignIP(
+func TestAPICreateRegistration_MissingIP(
 	t *testing.T,
 ) {
-	// setup env and seed network
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
 
-	// add peer without explicit IP — should auto-assign
 	url := "/networks/testnet/registrations"
 	body := `{
 		"name": "bob",
 		"admin": false
 	}`
-	result := wire.TestPost[protocol.Invitation](env.Router, url, body)
+	result := wire.TestPost[any](env.Router, url, body)
 
-	// verify result
-	result.ExpectStatusOK(t, http.StatusCreated)
-	if result.Data.Peer.Route == "" {
-		t.Fatal("route should not be empty for auto-assigned IP")
-	}
+	result.ExpectStatusError(t, http.StatusBadRequest)
 }
 
 func TestAPICreateRegistration_InvalidJSON(

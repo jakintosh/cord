@@ -97,7 +97,7 @@ var clientStatusCmd = &args.Command{
 func printClientStatus(
 	s api.Status,
 ) {
-	fmt.Printf("client daemon ok (version %s)\n", s.Version)
+	fmt.Printf("client daemon ok (%s)\n\n", s.Version)
 
 	if len(s.Networks) > 0 {
 		rows := make([][]string, len(s.Networks))

@@ -12,9 +12,9 @@ import (
 )
 
 type CreateRegistrationRequest struct {
-	Name  string  `json:"name"`
-	IP    *string `json:"ip,omitempty"`
-	Admin bool    `json:"admin"`
+	Name  string `json:"name"`
+	IP    string `json:"ip"`
+	Admin bool   `json:"admin"`
 }
 
 type Registration struct {
@@ -77,18 +77,14 @@ func (a *API) handlePostRegistration(
 		return
 	}
 
-	var ip *net.IP
-	if req.IP != nil && *req.IP != "" {
-		parsed := net.ParseIP(*req.IP)
-		if parsed == nil {
-			wire.WriteError(w, http.StatusBadRequest, "invalid IP address")
-			return
-		}
-		ip = &parsed
+	parsed := net.ParseIP(req.IP)
+	if parsed == nil {
+		wire.WriteError(w, http.StatusBadRequest, "IP address is required")
+		return
 	}
 
 	opts := service.RegistrationOptions{
-		IP:    ip,
+		IP:    parsed,
 		Admin: req.Admin,
 	}
 	invitation, err := a.service.CreateRegistration(network, req.Name, opts)
@@ -130,7 +126,7 @@ func (c *Client) CreateInvite(
 	ctx context.Context,
 	network string,
 	name string,
-	ip *string,
+	ip string,
 	admin bool,
 ) (
 	*protocol.Invitation,

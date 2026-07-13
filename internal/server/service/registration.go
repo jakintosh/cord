@@ -25,10 +25,8 @@ type Registration struct {
 	ExpiresAt       time.Time // when the registration expires
 }
 
-// RegistrationOptions controls optional registration settings. Defaults are
-// resolved by the service so transports do not need to duplicate them.
 type RegistrationOptions struct {
-	IP        *net.IP
+	IP        net.IP
 	Admin     bool
 	ExpiresIn *time.Duration
 }
@@ -77,25 +75,20 @@ func (s *Service) CreateRegistration(
 		return nil, fmt.Errorf("%w: peer %q already exists", ErrConflict, name)
 	}
 
-	var peerMainAssignedIP net.IP
-	if options.IP != nil {
-		peerMainAssignedIP = netaddr.Normalize(*options.IP)
-		_, mainNet, err := net.ParseCIDR(network.Main.Cidr)
-		if err != nil {
-			return nil, fmt.Errorf("parse main CIDR: %w", err)
-		}
-		if !mainNet.Contains(peerMainAssignedIP) {
-			return nil, fmt.Errorf(
-				"%w: requested IP %s is not within main CIDR %s",
-				ErrInvalidInput, peerMainAssignedIP, network.Main.Cidr,
-			)
-		}
-	} else {
-		freeIP, err := s.nextFreePeerIP(networkName, network.Main.Cidr)
-		if err != nil {
-			return nil, fmt.Errorf("auto-assign permanent IP: %w", err)
-		}
-		peerMainAssignedIP = freeIP
+	if options.IP == nil {
+		return nil, fmt.Errorf("%w: peer IP is required", ErrInvalidInput)
+	}
+
+	peerMainAssignedIP := netaddr.Normalize(options.IP)
+	_, mainNet, err := net.ParseCIDR(network.Main.Cidr)
+	if err != nil {
+		return nil, fmt.Errorf("parse main CIDR: %w", err)
+	}
+	if !mainNet.Contains(peerMainAssignedIP) {
+		return nil, fmt.Errorf(
+			"%w: requested IP %s is not within main CIDR %s",
+			ErrInvalidInput, peerMainAssignedIP, network.Main.Cidr,
+		)
 	}
 
 	peerTempPrivKey, err := wireguard.GenerateKey()
@@ -306,61 +299,6 @@ func (s *Service) nextFreeRegistrationIP(
 	}
 
 	return nil, fmt.Errorf("%w: no free addresses in invite CIDR %s", ErrInvalidInput, inviteCidr)
-}
-
-// nextFreePeerIP finds the lowest free address in the root CIDR,
-// skipping the network address, the server address, and addresses
-// held by existing peers or active registrations.
-func (s *Service) nextFreePeerIP(
-	network string,
-	rootCidr string,
-) (
-	net.IP,
-	error,
-) {
-	_, ipNet, err := net.ParseCIDR(rootCidr)
-	if err != nil {
-		return nil, fmt.Errorf("parse root CIDR: %w", err)
-	}
-
-	peers, err := s.store.ListPeers(network)
-	if err != nil {
-		return nil, fmt.Errorf("list peers: %w", err)
-	}
-
-	regs, err := s.store.ListActiveRegistrations(network, s.clock())
-	if err != nil {
-		return nil, fmt.Errorf("list active registrations: %w", err)
-	}
-
-	used := map[string]bool{}
-	for _, p := range peers {
-		ip, _, _ := net.ParseCIDR(p.Route)
-		if ip != nil {
-			used[netaddr.Normalize(ip).String()] = true
-		}
-	}
-	for _, reg := range regs {
-		if reg.MainRoute != "" {
-			ip, _, _ := net.ParseCIDR(reg.MainRoute)
-			if ip != nil {
-				used[netaddr.Normalize(ip).String()] = true
-			}
-		}
-	}
-
-	first := netaddr.FirstAssignable(ipNet)
-	_, last := netaddr.Range(ipNet)
-
-	candidate := netaddr.Increment(first)
-	for ipNet.Contains(candidate) && !candidate.Equal(last) {
-		if !used[netaddr.Normalize(candidate).String()] {
-			return netaddr.Normalize(candidate), nil
-		}
-		candidate = netaddr.Increment(candidate)
-	}
-
-	return nil, fmt.Errorf("%w: no free addresses in %s", ErrInvalidInput, rootCidr)
 }
 
 func registrationsToWireGuardPeers(

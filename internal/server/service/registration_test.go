@@ -17,7 +17,7 @@ func TestCreateRegistration_Success(t *testing.T) {
 
 	ip := net.ParseIP("10.0.0.5")
 	expiresIn := time.Hour
-	inv, err := env.Service.CreateRegistration("testnet", "new-peer", service.RegistrationOptions{IP: &ip, ExpiresIn: &expiresIn})
+	inv, err := env.Service.CreateRegistration("testnet", "new-peer", service.RegistrationOptions{IP: ip, ExpiresIn: &expiresIn})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestCreateRegistration_DefaultExpiration(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.6")
-	_, err := env.Service.CreateRegistration("testnet", "default-exp", service.RegistrationOptions{IP: &ip})
+	_, err := env.Service.CreateRegistration("testnet", "default-exp", service.RegistrationOptions{IP: ip})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -63,17 +63,13 @@ func TestCreateRegistration_DefaultExpiration(t *testing.T) {
 	}
 }
 
-func TestCreateRegistration_AutoAssignsIP(t *testing.T) {
+func TestCreateRegistration_MissingIP(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	inv, err := env.Service.CreateRegistration("testnet", "auto-ip", service.RegistrationOptions{})
-	if err != nil {
-		t.Fatalf("create registration: %v", err)
-	}
-
-	if inv.Peer.Route != "10.1.0.2/32" {
-		t.Errorf("route = %q, want 10.1.0.2/32", inv.Peer.Route)
+	_, err := env.Service.CreateRegistration("testnet", "no-ip", service.RegistrationOptions{})
+	if !errors.Is(err, service.ErrInvalidInput) {
+		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
 }
 
@@ -86,7 +82,7 @@ func TestCreateRegistration_ReconcilesRunningInviteDeviceWithHostRoute(t *testin
 	}
 
 	ip := net.ParseIP("10.0.0.5")
-	inv, err := env.Service.CreateRegistration("testnet", "live-reg", service.RegistrationOptions{IP: &ip})
+	inv, err := env.Service.CreateRegistration("testnet", "live-reg", service.RegistrationOptions{IP: ip})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -116,7 +112,7 @@ func TestCreateRegistration_EmptyName(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.5")
-	_, err := env.Service.CreateRegistration("testnet", "", service.RegistrationOptions{IP: &ip})
+	_, err := env.Service.CreateRegistration("testnet", "", service.RegistrationOptions{IP: ip})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
@@ -126,7 +122,7 @@ func TestCreateRegistration_NonexistentNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	ip := net.ParseIP("10.0.0.5")
-	_, err := env.Service.CreateRegistration("nonexistent", "peer", service.RegistrationOptions{IP: &ip})
+	_, err := env.Service.CreateRegistration("nonexistent", "peer", service.RegistrationOptions{IP: ip})
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
@@ -137,7 +133,7 @@ func TestRedeemRegistration_Success(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.5")
-	_, err := env.Service.CreateRegistration("testnet", "redeemer", service.RegistrationOptions{IP: &ip})
+	_, err := env.Service.CreateRegistration("testnet", "redeemer", service.RegistrationOptions{IP: ip})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -175,7 +171,7 @@ func TestRedeemRegistration_Idempotent_SameKey(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.6")
-	_, err := env.Service.CreateRegistration("testnet", "idempotent", service.RegistrationOptions{IP: &ip})
+	_, err := env.Service.CreateRegistration("testnet", "idempotent", service.RegistrationOptions{IP: ip})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -201,7 +197,7 @@ func TestRedeemRegistration_UnknownKey(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.5")
-	_, err := env.Service.CreateRegistration("testnet", "peer", service.RegistrationOptions{IP: &ip})
+	_, err := env.Service.CreateRegistration("testnet", "peer", service.RegistrationOptions{IP: ip})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -217,14 +213,14 @@ func TestRedeemRegistration_MultipleRegistrations(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ipA := net.ParseIP("10.0.0.10")
-	_, err := env.Service.CreateRegistration("testnet", "peer-a", service.RegistrationOptions{IP: &ipA})
+	_, err := env.Service.CreateRegistration("testnet", "peer-a", service.RegistrationOptions{IP: ipA})
 	if err != nil {
 		t.Fatalf("create registration a: %v", err)
 	}
 	tempKey1 := lastTempKey(t, env.Service, "testnet")
 
 	ipB := net.ParseIP("10.0.0.11")
-	_, err = env.Service.CreateRegistration("testnet", "peer-b", service.RegistrationOptions{IP: &ipB})
+	_, err = env.Service.CreateRegistration("testnet", "peer-b", service.RegistrationOptions{IP: ipB})
 	if err != nil {
 		t.Fatalf("create registration b: %v", err)
 	}
@@ -259,7 +255,7 @@ func TestRedeemRegistration_ReconcilesRunningDevices(t *testing.T) {
 		t.Fatalf("enable network: %v", err)
 	}
 	ip := net.ParseIP("10.0.0.5")
-	_, err := env.Service.CreateRegistration("testnet", "live-redeem", service.RegistrationOptions{IP: &ip})
+	_, err := env.Service.CreateRegistration("testnet", "live-redeem", service.RegistrationOptions{IP: ip})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -300,13 +296,13 @@ func TestListRegistrations_Mixed(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ipActive := net.ParseIP("10.0.0.20")
-	_, err := env.Service.CreateRegistration("testnet", "active", service.RegistrationOptions{IP: &ipActive})
+	_, err := env.Service.CreateRegistration("testnet", "active", service.RegistrationOptions{IP: ipActive})
 	if err != nil {
 		t.Fatalf("create active: %v", err)
 	}
 
 	ipRedeem := net.ParseIP("10.0.0.21")
-	_, err = env.Service.CreateRegistration("testnet", "to-redeem", service.RegistrationOptions{IP: &ipRedeem})
+	_, err = env.Service.CreateRegistration("testnet", "to-redeem", service.RegistrationOptions{IP: ipRedeem})
 	if err != nil {
 		t.Fatalf("create to-redeem: %v", err)
 	}
@@ -354,7 +350,7 @@ func TestRevokeRegistration_Success(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.30")
-	_, err := env.Service.CreateRegistration("testnet", "revoke-me", service.RegistrationOptions{IP: &ip})
+	_, err := env.Service.CreateRegistration("testnet", "revoke-me", service.RegistrationOptions{IP: ip})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -388,7 +384,7 @@ func TestRegistration_Persistence(t *testing.T) {
 
 	ip := net.ParseIP("10.0.0.5")
 	expiresIn := 2 * time.Hour
-	_, err := env.Service.CreateRegistration("testnet", "persist-test", service.RegistrationOptions{IP: &ip, Admin: true, ExpiresIn: &expiresIn})
+	_, err := env.Service.CreateRegistration("testnet", "persist-test", service.RegistrationOptions{IP: ip, Admin: true, ExpiresIn: &expiresIn})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

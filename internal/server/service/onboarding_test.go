@@ -24,7 +24,7 @@ func TestOnboardingLifecycle(t *testing.T) {
 	alicePermKey := mustGenKey(t)
 	aliceIP := net.ParseIP("10.0.0.5")
 	expiresIn := time.Hour
-	_, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{IP: &aliceIP, ExpiresIn: &expiresIn})
+	_, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{IP: aliceIP, ExpiresIn: &expiresIn})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestConfirmPeer_PreservesDisabledState(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	bobIP := net.ParseIP("10.0.0.6")
-	_, err := env.Service.CreateRegistration("testnet", "bob", service.RegistrationOptions{IP: &bobIP})
+	_, err := env.Service.CreateRegistration("testnet", "bob", service.RegistrationOptions{IP: bobIP})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
 
 	shortIP := net.ParseIP("10.0.0.7")
 	shortExpiry := time.Hour
-	_, err := env.Service.CreateRegistration("testnet", "short-lived", service.RegistrationOptions{IP: &shortIP, ExpiresIn: &shortExpiry})
+	_, err := env.Service.CreateRegistration("testnet", "short-lived", service.RegistrationOptions{IP: shortIP, ExpiresIn: &shortExpiry})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -196,7 +196,8 @@ func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
 
 	clock.t = clock.t.Add(2 * time.Hour)
 
-	_, err = env.Service.CreateRegistration("testnet", "reconcile-trigger", service.RegistrationOptions{})
+	reconcileIP := net.ParseIP("10.0.0.250")
+	_, err = env.Service.CreateRegistration("testnet", "reconcile-trigger", service.RegistrationOptions{IP: reconcileIP})
 	if err != nil {
 		t.Fatalf("trigger reconcile: %v", err)
 	}
@@ -233,7 +234,7 @@ func TestPruneExpiredRegistrations_RetainsActiveProvisionalPeer(t *testing.T) {
 
 	stillIP := net.ParseIP("10.0.0.8")
 	stillExpiry := 24 * time.Hour
-	_, err := env.Service.CreateRegistration("testnet", "still-active", service.RegistrationOptions{IP: &stillIP, ExpiresIn: &stillExpiry})
+	_, err := env.Service.CreateRegistration("testnet", "still-active", service.RegistrationOptions{IP: stillIP, ExpiresIn: &stillExpiry})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -245,7 +246,8 @@ func TestPruneExpiredRegistrations_RetainsActiveProvisionalPeer(t *testing.T) {
 		t.Fatalf("redeem: %v", err)
 	}
 
-	_, err = env.Service.CreateRegistration("testnet", "reconcile-trigger", service.RegistrationOptions{})
+	reconcileIP := net.ParseIP("10.0.0.250")
+	_, err = env.Service.CreateRegistration("testnet", "reconcile-trigger", service.RegistrationOptions{IP: reconcileIP})
 	if err != nil {
 		t.Fatalf("trigger reconcile: %v", err)
 	}
@@ -270,7 +272,7 @@ func TestPruneExpiredRegistrations_RetainsConfirmedPeerWithoutInvite(t *testing.
 	}
 
 	confirmedIP := net.ParseIP("10.0.0.9")
-	_, err := env.Service.CreateRegistration("testnet", "confirmed", service.RegistrationOptions{IP: &confirmedIP})
+	_, err := env.Service.CreateRegistration("testnet", "confirmed", service.RegistrationOptions{IP: confirmedIP})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -290,7 +292,8 @@ func TestPruneExpiredRegistrations_RetainsConfirmedPeerWithoutInvite(t *testing.
 		t.Fatalf("revoke registration: %v", err)
 	}
 
-	_, err = env.Service.CreateRegistration("testnet", "reconcile-trigger", service.RegistrationOptions{})
+	reconcileIP := net.ParseIP("10.0.0.250")
+	_, err = env.Service.CreateRegistration("testnet", "reconcile-trigger", service.RegistrationOptions{IP: reconcileIP})
 	if err != nil {
 		t.Fatalf("trigger reconcile: %v", err)
 	}
@@ -315,7 +318,7 @@ func TestPruneExpiredRegistrations_RetainsConfirmedRegistrationAsAudit(t *testin
 
 	auditedIP := net.ParseIP("10.0.0.10")
 	auditedExpiry := time.Hour
-	_, err := env.Service.CreateRegistration("testnet", "audited", service.RegistrationOptions{IP: &auditedIP, ExpiresIn: &auditedExpiry})
+	_, err := env.Service.CreateRegistration("testnet", "audited", service.RegistrationOptions{IP: auditedIP, ExpiresIn: &auditedExpiry})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -333,7 +336,8 @@ func TestPruneExpiredRegistrations_RetainsConfirmedRegistrationAsAudit(t *testin
 
 	clock.t = clock.t.Add(2 * time.Hour)
 
-	_, err = env.Service.CreateRegistration("testnet", "reconcile-trigger", service.RegistrationOptions{})
+	reconcileIP := net.ParseIP("10.0.0.250")
+	_, err = env.Service.CreateRegistration("testnet", "reconcile-trigger", service.RegistrationOptions{IP: reconcileIP})
 	if err != nil {
 		t.Fatalf("trigger reconcile: %v", err)
 	}

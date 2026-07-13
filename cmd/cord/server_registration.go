@@ -31,13 +31,12 @@ var serverRegistrationCreate = &args.Command{
 			Name: "name",
 			Help: "peer name",
 		},
-	},
-	Options: []args.Option{
 		{
-			Long: "ip",
-			Type: args.OptionTypeParameter,
+			Name: "ip",
 			Help: "peer IP address",
 		},
+	},
+	Options: []args.Option{
 		{
 			Short: 'a',
 			Long:  "admin",
@@ -54,29 +53,23 @@ var serverRegistrationCreate = &args.Command{
 	Handler: func(i *args.Input) error {
 		network := i.GetOperand("network")
 		name := i.GetOperand("name")
+		ip := i.GetOperand("ip")
 
-		ip := i.GetParameter("ip")
-		adminFlag := i.GetFlag("admin")
-		outputPath := i.GetParameter("output")
+		admin := i.GetFlag("admin")
+		output := i.GetParameter("output")
 
 		client, err := serverClient(i)
 		if err != nil {
 			return err
 		}
 
-		invitation, err := client.CreateInvite(
-			i.Context(),
-			network,
-			name,
-			ip,
-			adminFlag,
-		)
+		invitation, err := client.CreateInvite(i.Context(), network, name, ip, admin)
 		if err != nil {
 			return err
 		}
 
-		if outputPath != nil {
-			f, err := os.Create(*outputPath)
+		if output != nil {
+			f, err := os.Create(*output)
 			if err != nil {
 				return fmt.Errorf("create invitation file: %w", err)
 			}
@@ -86,7 +79,7 @@ var serverRegistrationCreate = &args.Command{
 				return fmt.Errorf("write invitation file: %w", err)
 			}
 
-			fmt.Printf("registration %q created; invitation written to %s\n", name, *outputPath)
+			fmt.Printf("registration %q created; invitation written to %s\n", name, *output)
 			return nil
 		}
 
