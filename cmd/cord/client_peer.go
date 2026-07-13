@@ -1,9 +1,7 @@
 package main
 
 import (
-	"fmt"
 	"strconv"
-	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
@@ -67,31 +65,4 @@ func printClientPeers(
 		}
 	}
 	printTable([]string{"NAME", "ROUTE", "ENDPOINT", "LAST HANDSHAKE", "CONNECTED"}, rows)
-}
-
-// humanizeSince renders an RFC3339 timestamp (as returned by the API)
-// as a coarse "N unit ago" duration for human-mode output. An empty
-// string (never handshaked) renders as "never".
-func humanizeSince(
-	timestamp string,
-) string {
-	if timestamp == "" {
-		return "never"
-	}
-	t, err := time.Parse(time.RFC3339, timestamp)
-	if err != nil {
-		return timestamp
-	}
-
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds ago", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	}
 }

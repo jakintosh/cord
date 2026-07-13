@@ -1,11 +1,15 @@
 package service
 
-// NetworkStatus is the operator-facing status of an installed network:
-// its persisted enabled intent and its live runtime state.
-type NetworkStatus struct {
-	Name    string
-	Enabled bool
-	Running bool
+import (
+	"maps"
+	"time"
+)
+
+// Status is a snapshot of every installed network and in-progress
+// install known to the daemon.
+type Status struct {
+	Networks []NetworkStatus
+	Installs []InstallStatus
 }
 
 // InstallStatus is the operator-facing status of an in-progress
@@ -16,11 +20,21 @@ type InstallStatus struct {
 	State string
 }
 
-// Status is a snapshot of every installed network and in-progress
-// install known to the daemon.
-type Status struct {
-	Networks []NetworkStatus
-	Installs []InstallStatus
+// NetworkStatus is the operator-facing status of an installed network:
+// its persisted enabled intent and its live runtime state.
+type NetworkStatus struct {
+	Name    string
+	Enabled bool
+	Running bool
+	Sync    RefreshStatus
+	Scan    RefreshStatus
+	Report  RefreshStatus
+}
+
+// RefreshStatus describes one periodic runtime activity.
+type RefreshStatus struct {
+	Cadence   time.Duration
+	LastRunAt time.Time
 }
 
 // Status returns a snapshot of all installed networks and in-progress
@@ -42,19 +56,26 @@ func (s *Service) Status() (
 	}
 
 	s.mu.Lock()
-	running := make(map[string]struct{}, len(s.running))
-	for name := range s.running {
-		running[name] = struct{}{}
-	}
+	running := make(map[string]*Network, len(s.running))
+	maps.Copy(running, s.running)
 	s.mu.Unlock()
 
 	networkStatuses := make([]NetworkStatus, len(networks))
 	for i, nc := range networks {
-		_, isRunning := running[nc.Name]
+		network, isRunning := running[nc.Name]
+		syncStatus := RefreshStatus{Cadence: s.syncInterval}
+		scanStatus := RefreshStatus{Cadence: s.scanInterval}
+		reportStatus := RefreshStatus{Cadence: s.reportInterval}
+		if isRunning {
+			syncStatus.LastRunAt, scanStatus.LastRunAt, reportStatus.LastRunAt = network.lastRuns()
+		}
 		networkStatuses[i] = NetworkStatus{
 			Name:    nc.Name,
 			Enabled: nc.Enabled,
 			Running: isRunning,
+			Sync:    syncStatus,
+			Scan:    scanStatus,
+			Report:  reportStatus,
 		}
 	}
 

@@ -106,9 +106,15 @@ func printClientStatus(
 				n.Name,
 				strconv.FormatBool(n.Enabled),
 				strconv.FormatBool(n.Running),
+				humanizeOptionalTime(n.Sync.LastRunAt),
+				humanizeOptionalTime(n.Scan.LastRunAt),
+				humanizeOptionalTime(n.Report.LastRunAt),
 			}
 		}
-		printTable([]string{"NETWORK", "ENABLED", "RUNNING"}, rows)
+		printTable(
+			[]string{"NETWORK", "ENABLED", "RUNNING", "LAST SYNC", "LAST SCAN", "LAST REPORT"},
+			rows,
+		)
 	}
 
 	if len(s.Installs) > 0 {

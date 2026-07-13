@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/client"
@@ -75,4 +76,56 @@ func printTable(
 		fmt.Fprintln(w, strings.Join(row, "\t"))
 	}
 	w.Flush()
+}
+
+func humanizeOptionalTime(timestamp *string) string {
+	if timestamp == nil {
+		return "never"
+	}
+	return humanizeSince(*timestamp)
+}
+
+// humanizeSince renders an RFC3339 timestamp as a coarse relative time. An
+// empty string renders as "never" and malformed input is returned unchanged.
+func humanizeSince(
+	timestamp string,
+) string {
+	return humanizeRelativeAt(timestamp, time.Now())
+}
+
+func humanizeRelativeAt(
+	timestamp string,
+	now time.Time,
+) string {
+	if timestamp == "" {
+		return "never"
+	}
+	t, err := time.Parse(time.RFC3339, timestamp)
+	if err != nil {
+		return timestamp
+	}
+
+	d := now.Sub(t)
+	if d == 0 {
+		return "now"
+	}
+	if d < 0 {
+		return "in " + humanizeDuration(-d)
+	}
+	return humanizeDuration(d) + " ago"
+}
+
+func humanizeDuration(
+	d time.Duration,
+) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
 }

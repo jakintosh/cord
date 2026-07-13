@@ -109,7 +109,8 @@ func printServerStatus(
 			n.Name,
 			strconv.FormatBool(n.Enabled),
 			strconv.FormatBool(n.Running),
+			humanizeOptionalTime(n.Reconcile.LastRunAt),
 		}
 	}
-	printTable([]string{"NAME", "ENABLED", "RUNNING"}, rows)
+	printTable([]string{"NAME", "ENABLED", "RUNNING", "LAST RECONCILE"}, rows)
 }

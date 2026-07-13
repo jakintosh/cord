@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"testing"
+	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
@@ -53,5 +54,30 @@ func TestAPIStatus_IncludesNetworks(
 	}
 	if net.Running {
 		t.Fatal("expected freshly created network not to be running")
+	}
+	reconcile := net.Reconcile
+	if reconcile.MaxIntervalSeconds != 300 {
+		t.Fatalf("reconcile max interval = %d, want 300", reconcile.MaxIntervalSeconds)
+	}
+	if reconcile.LastRunAt != nil {
+		t.Fatalf("disabled last reconcile = %v, want nil", reconcile.LastRunAt)
+	}
+}
+
+func TestAPIStatus_IncludesRunningReconcileSchedule(
+	t *testing.T,
+) {
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable network: %v", err)
+	}
+
+	result := wire.TestGet[admin.Status](env.Router, "/status")
+	data := result.ExpectOK(t)
+	reconcile := data.Networks[0].Reconcile
+	wantLast := testutil.FixedTime.Format(time.RFC3339)
+	if reconcile.LastRunAt == nil || *reconcile.LastRunAt != wantLast {
+		t.Fatalf("last reconcile = %v, want %q", reconcile.LastRunAt, wantLast)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
@@ -109,15 +110,17 @@ func (n *NetworkConfig) Normalize() error {
 // Network is a running server network: two Planes (main + invite) plus
 // a self-rearming reconciliation timer.
 type Network struct {
-	config *NetworkConfig
-	main   *Plane
-	invite *Plane
-	timer  *time.Timer
-	store  Store
-	wg     *wireguard.Manager
-	api    func(network string) APIHandlers
-	clock  func() time.Time
-	log    *slog.Logger
+	config          *NetworkConfig
+	main            *Plane
+	invite          *Plane
+	timer           *time.Timer
+	statusMu        sync.Mutex
+	lastReconcileAt time.Time
+	store           Store
+	wg              *wireguard.Manager
+	api             func(network string) APIHandlers
+	clock           func() time.Time
+	log             *slog.Logger
 }
 
 // GetNetwork returns the persisted network config by name.
@@ -349,6 +352,8 @@ func (n *Network) stop() error {
 // It prunes expired registrations, builds peer sets for both planes,
 // applies them, and rearms the timer.
 func (n *Network) reconcile() {
+	defer n.recordReconcile()
+
 	netName := n.config.Name
 	now := n.clock()
 
@@ -405,6 +410,18 @@ func (n *Network) reconcile() {
 	} else {
 		n.timer.Reset(delay)
 	}
+}
+
+func (n *Network) recordReconcile() {
+	n.statusMu.Lock()
+	n.lastReconcileAt = n.clock()
+	n.statusMu.Unlock()
+}
+
+func (n *Network) lastReconcile() time.Time {
+	n.statusMu.Lock()
+	defer n.statusMu.Unlock()
+	return n.lastReconcileAt
 }
 
 // observeMainPeerEndpoints records recent endpoints learned by the server's

@@ -3,14 +3,17 @@ package api
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
+	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 )
 
-type NetworkStatus struct {
-	Name    string `json:"name"`
-	Enabled bool   `json:"enabled"`
-	Running bool   `json:"running"`
+type Status struct {
+	Status   string          `json:"status"`
+	Version  string          `json:"version"`
+	Installs []InstallStatus `json:"installs"`
+	Networks []NetworkStatus `json:"networks"`
 }
 
 type InstallStatus struct {
@@ -18,11 +21,31 @@ type InstallStatus struct {
 	State string `json:"state"`
 }
 
-type Status struct {
-	Status   string          `json:"status"`
-	Version  string          `json:"version"`
-	Networks []NetworkStatus `json:"networks"`
-	Installs []InstallStatus `json:"installs"`
+type NetworkStatus struct {
+	Name    string        `json:"name"`
+	Enabled bool          `json:"enabled"`
+	Running bool          `json:"running"`
+	Sync    RefreshStatus `json:"sync"`
+	Scan    RefreshStatus `json:"scan"`
+	Report  RefreshStatus `json:"report"`
+}
+
+type RefreshStatus struct {
+	CadenceSeconds int64   `json:"cadence_seconds"`
+	LastRunAt      *string `json:"last_run_at"`
+}
+
+func refreshStatusFromService(
+	status service.RefreshStatus,
+) RefreshStatus {
+	result := RefreshStatus{
+		CadenceSeconds: int64(status.Cadence / time.Second),
+	}
+	if !status.LastRunAt.IsZero() {
+		formatted := status.LastRunAt.Format(time.RFC3339)
+		result.LastRunAt = &formatted
+	}
+	return result
 }
 
 func (a *API) handleGetStatus(
@@ -41,6 +64,9 @@ func (a *API) handleGetStatus(
 			Name:    n.Name,
 			Enabled: n.Enabled,
 			Running: n.Running,
+			Sync:    refreshStatusFromService(n.Sync),
+			Scan:    refreshStatusFromService(n.Scan),
+			Report:  refreshStatusFromService(n.Report),
 		}
 	}
 

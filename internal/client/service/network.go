@@ -69,16 +69,20 @@ type Network struct {
 	clock  func() time.Time
 	log    *slog.Logger
 
-	syncInterval   time.Duration
-	scanInterval   time.Duration
+	syncInterval time.Duration
+	syncTimer    *time.Timer
+	lastSyncAt   time.Time
+
+	scanInterval time.Duration
+	scanTimer    *time.Timer
+	lastScanAt   time.Time
+
 	reportInterval time.Duration
+	reportTimer    *time.Timer
+	lastReportAt   time.Time
 
 	mu      sync.Mutex // one activity at a time
 	stopped bool
-
-	syncTimer   *time.Timer
-	scanTimer   *time.Timer
-	reportTimer *time.Timer
 }
 
 // IsNetworkRunning reports whether the named network is currently
@@ -334,7 +338,7 @@ func (n *Network) sync() error {
 	if n.stopped {
 		return ErrNetworkNotEnabled
 	}
-	defer n.syncTimer.Reset(n.syncInterval)
+	defer n.completeRefresh(n.syncTimer, n.syncInterval, &n.lastSyncAt)
 
 	visible, err := n.client.ListPeers()
 	if err != nil {
@@ -378,7 +382,7 @@ func (n *Network) scan() error {
 	if n.stopped {
 		return nil
 	}
-	defer n.scanTimer.Reset(n.scanInterval)
+	defer n.completeRefresh(n.scanTimer, n.scanInterval, &n.lastScanAt)
 
 	now := n.clock()
 
@@ -425,7 +429,7 @@ func (n *Network) report() error {
 	if n.stopped {
 		return nil
 	}
-	defer n.reportTimer.Reset(n.reportInterval)
+	defer n.completeRefresh(n.reportTimer, n.reportInterval, &n.lastReportAt)
 
 	since := n.clock().Add(-n.reportInterval).Unix()
 	sightings, err := n.store.ListLocalEndpointsSince(n.cfg.Name, since)
@@ -442,6 +446,28 @@ func (n *Network) report() error {
 	n.log.Debug("report", "sightings", len(sightings))
 	reports := sightingsToProtocol(sightings)
 	return n.client.ReportEndpoints(reports)
+}
+
+// completeRefresh records the completion of an activity attempt and rearms
+// its timer. It is called with n.mu held, including on error paths.
+func (n *Network) completeRefresh(
+	timer *time.Timer,
+	cadence time.Duration,
+	lastRunAt *time.Time,
+) {
+	*lastRunAt = n.clock()
+	timer.Reset(cadence)
+}
+
+// lastRuns returns a consistent snapshot of this network's activity times.
+func (n *Network) lastRuns() (
+	time.Time,
+	time.Time,
+	time.Time,
+) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.lastSyncAt, n.lastScanAt, n.lastReportAt
 }
 
 // reconcile applies the current peer cache to the WireGuard device.

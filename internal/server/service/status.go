@@ -1,16 +1,29 @@
 package service
 
-// NetworkStatus is the operator-facing state of a server network: its
-// persisted enabled intent and whether it is actually running in this process.
-type NetworkStatus struct {
-	Name    string
-	Enabled bool
-	Running bool
-}
+import (
+	"maps"
+	"time"
+)
 
 // Status is a snapshot of every network known to the server daemon.
 type Status struct {
 	Networks []NetworkStatus
+}
+
+// NetworkStatus is the operator-facing state of a server network: its
+// persisted enabled intent and whether it is actually running in this process.
+type NetworkStatus struct {
+	Name      string
+	Enabled   bool
+	Running   bool
+	Reconcile ReconcileStatus
+}
+
+// ReconcileStatus describes the latest server reconciliation and the maximum
+// interval used when no registration expiry schedules an earlier run.
+type ReconcileStatus struct {
+	MaxInterval time.Duration
+	LastRunAt   time.Time
 }
 
 // Status returns all server networks using one bulk store read, then folds in
@@ -25,19 +38,22 @@ func (s *Service) Status() (
 	}
 
 	s.mu.Lock()
-	running := make(map[string]struct{}, len(s.running))
-	for name := range s.running {
-		running[name] = struct{}{}
-	}
+	running := make(map[string]*Network, len(s.running))
+	maps.Copy(running, s.running)
 	s.mu.Unlock()
 
 	statuses := make([]NetworkStatus, len(networks))
 	for i, network := range networks {
-		_, isRunning := running[network.Name]
+		runtime, isRunning := running[network.Name]
+		reconcile := ReconcileStatus{MaxInterval: defaultReconcileCap}
+		if isRunning {
+			reconcile.LastRunAt = runtime.lastReconcile()
+		}
 		statuses[i] = NetworkStatus{
-			Name:    network.Name,
-			Enabled: network.Enabled,
-			Running: isRunning,
+			Name:      network.Name,
+			Enabled:   network.Enabled,
+			Running:   isRunning,
+			Reconcile: reconcile,
 		}
 	}
 

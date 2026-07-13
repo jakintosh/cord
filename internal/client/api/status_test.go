@@ -60,6 +60,14 @@ func TestAPIStatus_IncludesNetworks(
 	if network.Running {
 		t.Fatal("seeded network should not be running")
 	}
+	if network.Sync.CadenceSeconds != 30 ||
+		network.Scan.CadenceSeconds != 30 ||
+		network.Report.CadenceSeconds != 30 {
+		t.Fatalf("refresh cadences = sync %d, scan %d, report %d; want 30s each", network.Sync.CadenceSeconds, network.Scan.CadenceSeconds, network.Report.CadenceSeconds)
+	}
+	if network.Sync.LastRunAt != nil {
+		t.Fatalf("disabled last sync = %v, want nil", network.Sync.LastRunAt)
+	}
 }
 
 func TestAPIStatus_ReportsEnabledAndRunning(
@@ -81,6 +89,9 @@ func TestAPIStatus_ReportsEnabledAndRunning(
 	}
 	if !network.Running {
 		t.Fatal("enabled network should report running")
+	}
+	if network.Scan.LastRunAt != nil {
+		t.Fatalf("last scan = %v, want nil before first scan", *network.Scan.LastRunAt)
 	}
 }
 

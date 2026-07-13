@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"testing"
+	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
@@ -33,5 +34,12 @@ func TestStatusReportsEnabledAndRunningState(
 	}
 	if !status.Networks[0].Enabled || !status.Networks[0].Running {
 		t.Fatalf("enabled status = %+v, want enabled and running", status.Networks[0])
+	}
+	reconcile := status.Networks[0].Reconcile
+	if reconcile.MaxInterval != 5*time.Minute {
+		t.Fatalf("reconcile max interval = %v, want 5m", reconcile.MaxInterval)
+	}
+	if !reconcile.LastRunAt.Equal(testutil.FixedTime) {
+		t.Fatalf("last reconcile = %v, want %v", reconcile.LastRunAt, testutil.FixedTime)
 	}
 }
