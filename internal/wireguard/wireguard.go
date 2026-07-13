@@ -16,8 +16,10 @@ const maxInterfaceNameBytes = 15
 
 // ActiveHandshakeThreshold is the maximum age of a WireGuard handshake that
 // is considered current. Both clients and servers use it when deciding
-// whether a learned endpoint is safe to retain or advertise.
-const ActiveHandshakeThreshold = 90 * time.Second
+// whether a learned endpoint is safe to retain or advertise. It covers
+// WireGuard's normal rekey cycle while treating a key older than its rejection
+// window as stale.
+const ActiveHandshakeThreshold = 180 * time.Second
 
 // Options configures a WireGuard manager.
 type Options struct {

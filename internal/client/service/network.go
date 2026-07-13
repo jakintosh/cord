@@ -27,6 +27,11 @@ const (
 	// sent to the server. Reports are 1:N, so this stays coarse.
 	ReportInterval = 5 * time.Minute
 
+	// PersistentKeepaliveInterval keeps client-side peer endpoints reachable
+	// through NAT and gives WireGuard traffic with which to probe bootstrap and
+	// rotated endpoints.
+	PersistentKeepaliveInterval = 25 * time.Second
+
 	// StaleThreshold is the duration after which a peer with no
 	// handshake is considered stale and eligible for endpoint
 	// rotation.
@@ -147,6 +152,7 @@ func (s *Service) EnableNetwork(
 		cfg.AssignedRoute,
 		cfg.Server,
 		cfg.ListenPort,
+		PersistentKeepaliveInterval,
 	)
 	if err != nil {
 		return err
@@ -480,10 +486,11 @@ func (n *Network) reconcile() error {
 	wgPeers := make([]wireguard.PeerConfig, 0, len(peers)+1)
 
 	wgPeers = append(wgPeers, wireguard.PeerConfig{
-		PublicKey:      n.cfg.Server.PublicKey,
-		AllowedIPs:     []string{n.cfg.Server.Route},
-		Endpoint:       n.cfg.Server.Endpoint,
-		EndpointPolicy: wireguard.EndpointFixed,
+		PublicKey:           n.cfg.Server.PublicKey,
+		AllowedIPs:          []string{n.cfg.Server.Route},
+		Endpoint:            n.cfg.Server.Endpoint,
+		EndpointPolicy:      wireguard.EndpointFixed,
+		PersistentKeepalive: int(PersistentKeepaliveInterval / time.Second),
 	})
 
 	for _, peer := range peers {
@@ -492,10 +499,11 @@ func (n *Network) reconcile() error {
 			return fmt.Errorf("parse peer route %q: %w", peer.Route, err)
 		}
 		wgPeers = append(wgPeers, wireguard.PeerConfig{
-			PublicKey:      peer.PublicKey,
-			AllowedIPs:     []string{peerRoute.String()},
-			Endpoint:       peer.Endpoint,
-			EndpointPolicy: wireguard.EndpointBootstrap,
+			PublicKey:           peer.PublicKey,
+			AllowedIPs:          []string{peerRoute.String()},
+			Endpoint:            peer.Endpoint,
+			EndpointPolicy:      wireguard.EndpointBootstrap,
+			PersistentKeepalive: int(PersistentKeepaliveInterval / time.Second),
 		})
 	}
 

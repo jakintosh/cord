@@ -160,6 +160,13 @@ func TestInstall_Success(t *testing.T) {
 	if d.CloseCalls != 1 {
 		t.Fatalf("invite down calls = %d, want 1", d.CloseCalls)
 	}
+	inviteOps := d.AppliedOps()
+	if len(inviteOps) != 1 {
+		t.Fatalf("invite peer ops = %d, want 1", len(inviteOps))
+	}
+	if inviteOps[0].Target.PersistentKeepalive != 0 {
+		t.Errorf("invite keepalive = %v, want disabled", inviteOps[0].Target.PersistentKeepalive)
+	}
 
 	d2 := env.Backend.Device("install-me")
 	if d2 == nil {
@@ -176,6 +183,9 @@ func TestInstall_Success(t *testing.T) {
 	}
 	if len(addOps) != 1 {
 		t.Fatalf("main peer ops = %d, want 1", len(addOps))
+	}
+	if ops[0].Target.PersistentKeepalive != service.PersistentKeepaliveInterval {
+		t.Errorf("main server keepalive = %v, want %v", ops[0].Target.PersistentKeepalive, service.PersistentKeepaliveInterval)
 	}
 	if nc.Server.Endpoint != "1.2.3.4:51820" {
 		t.Fatalf("persisted ServerEndpoint = %q, want 1.2.3.4:51820", nc.Server.Endpoint)

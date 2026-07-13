@@ -223,6 +223,7 @@ func (s *Service) Redeem(
 		inviteHostRoute.String(),
 		install.InviteServer,
 		install.ListenPort,
+		0,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create invite tunnel: %w", err)
@@ -290,6 +291,7 @@ func (s *Service) Confirm(
 		install.MainAssignedRoute,
 		install.MainServer,
 		install.ListenPort,
+		PersistentKeepaliveInterval,
 	)
 	if err != nil {
 		return fmt.Errorf("create main tunnel: %w", err)

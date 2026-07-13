@@ -11,6 +11,12 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
+func TestActiveHandshakeThreshold_CoversRekeyCycle(t *testing.T) {
+	if ActiveHandshakeThreshold := wireguard.ActiveHandshakeThreshold; ActiveHandshakeThreshold != 180*time.Second {
+		t.Errorf("active handshake threshold = %v, want 3m", ActiveHandshakeThreshold)
+	}
+}
+
 func mustGenerateKey(t *testing.T) wgtypes.Key {
 	t.Helper()
 	key, err := wgtypes.GeneratePrivateKey()

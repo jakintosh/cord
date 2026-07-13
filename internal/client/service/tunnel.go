@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"net"
+	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
@@ -24,6 +25,7 @@ func newTunnel(
 	route string,
 	server ServerInfo,
 	listenPort uint16,
+	persistentKeepalive time.Duration,
 ) (
 	*Tunnel,
 	error,
@@ -50,10 +52,11 @@ func newTunnel(
 	}
 
 	if err := dev.SetPeers(wireguard.PeerConfig{
-		PublicKey:      server.PublicKey,
-		AllowedIPs:     []string{server.Route},
-		Endpoint:       server.Endpoint,
-		EndpointPolicy: wireguard.EndpointFixed,
+		PublicKey:           server.PublicKey,
+		AllowedIPs:          []string{server.Route},
+		Endpoint:            server.Endpoint,
+		EndpointPolicy:      wireguard.EndpointFixed,
+		PersistentKeepalive: int(persistentKeepalive / time.Second),
 	}); err != nil {
 		_ = dev.Close()
 		return nil, fmt.Errorf("set server peer on %q: %w", ifaceName, err)

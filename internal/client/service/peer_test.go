@@ -40,6 +40,9 @@ func TestEnableNetwork_AppliesCachedPeersSynchronously(t *testing.T) {
 	for _, op := range dev.AppliedOps() {
 		if op.Target.PublicKey.String() == peerKey {
 			found = true
+			if op.Target.PersistentKeepalive != service.PersistentKeepaliveInterval {
+				t.Errorf("keepalive = %v, want %v", op.Target.PersistentKeepalive, service.PersistentKeepaliveInterval)
+			}
 		}
 	}
 	if !found {
@@ -83,6 +86,9 @@ func TestBuildPeers_IncludesServer(t *testing.T) {
 	ops := env.Backend.AppliedOpsFor("peer-test")
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 peer op (server), got %d", len(ops))
+	}
+	if ops[0].Target.PersistentKeepalive != service.PersistentKeepaliveInterval {
+		t.Errorf("server keepalive = %v, want %v", ops[0].Target.PersistentKeepalive, service.PersistentKeepaliveInterval)
 	}
 }
 
