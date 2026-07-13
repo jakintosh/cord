@@ -7,35 +7,65 @@ import (
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 )
 
-type StatusDTO struct {
-	Status   string       `json:"status"`
-	Version  string       `json:"version"`
-	Networks []NetworkDTO `json:"networks"`
+type NetworkStatus struct {
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+	Running bool   `json:"running"`
 }
 
-func (a *API) handleStatus(
+type InstallStatus struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+type Status struct {
+	Status   string          `json:"status"`
+	Version  string          `json:"version"`
+	Networks []NetworkStatus `json:"networks"`
+	Installs []InstallStatus `json:"installs"`
+}
+
+func (a *API) handleGetStatus(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	dtos, err := a.listNetworkDTOs()
+	status, err := a.service.Status()
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, StatusDTO{
+	networks := make([]NetworkStatus, len(status.Networks))
+	for i, n := range status.Networks {
+		networks[i] = NetworkStatus{
+			Name:    n.Name,
+			Enabled: n.Enabled,
+			Running: n.Running,
+		}
+	}
+
+	installs := make([]InstallStatus, len(status.Installs))
+	for i, inst := range status.Installs {
+		installs[i] = InstallStatus{
+			Name:  inst.Name,
+			State: inst.State,
+		}
+	}
+
+	wire.WriteData(w, http.StatusOK, Status{
 		Status:   "ok",
 		Version:  a.version,
-		Networks: dtos,
+		Networks: networks,
+		Installs: installs,
 	})
 }
 
 func (c *Client) Status(
 	ctx context.Context,
 ) (
-	StatusDTO,
+	Status,
 	error,
 ) {
-	var result StatusDTO
+	var result Status
 	return result, c.wire.Get(ctx, "/status", &result)
 }

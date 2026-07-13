@@ -20,10 +20,11 @@ type Store interface {
 
 	GetNetwork(name string) (*NetworkConfig, error)
 	ListNetworkNames() ([]string, error)
+	ListNetworks() ([]*NetworkConfig, error)
 	InsertNetwork(nc *NetworkConfig) error
 	DeleteNetwork(name string) error
 	SetNetworkEnabled(name string, enabled bool) error
-	SetNetworkListenPort(name string, listenPort uint16) error
+	UpdateNetwork(name string, update NetworkOptions) error
 
 	// Peer cache within a network.
 

@@ -23,8 +23,8 @@ func mustGenKey(t *testing.T) string {
 	return k
 }
 
-func installRequest(invitation protocol.Invitation) service.InstallRequest {
-	return service.InstallRequest{Invitation: invitation}
+func installOptions() service.NetworkOptions {
+	return service.NetworkOptions{}
 }
 
 // TestBeginInstall_PersistsPermanentKey verifies that BeginInstall
@@ -32,7 +32,7 @@ func installRequest(invitation protocol.Invitation) service.InstallRequest {
 func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	inst, err := env.Service.BeginInstall(installRequest(protocol.Invitation{
+	inst, err := env.Service.BeginInstall(protocol.Invitation{
 		Network: protocol.NetworkInfo{
 			Name:        "keytest",
 			PublicKey:   "srv-pub",
@@ -45,7 +45,7 @@ func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
 			Route:      "10.43.0.2/24",
 			PrivateKey: "temp-key",
 		},
-	}))
+	}, installOptions())
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
@@ -64,6 +64,42 @@ func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
 	}
 	if inst.MainAssignedRoute != "" {
 		t.Errorf("assigned_cidr = %q, want empty before redeem", inst.MainAssignedRoute)
+	}
+}
+
+func TestBeginInstall_ListenPortOptions(t *testing.T) {
+	env := testutil.SetupService(t)
+	invitation := protocol.Invitation{
+		Network: protocol.NetworkInfo{
+			Name:        "listen-port",
+			PublicKey:   "srv-pub",
+			Endpoint:    "1.2.3.4:51821",
+			ServerRoute: "10.43.0.1/32",
+			NetworkCidr: "10.0.0.0/16",
+			APIPort:     8443,
+		},
+		Peer: protocol.PeerIdentity{
+			Route:      "10.43.0.2/24",
+			PrivateKey: "temp-key",
+		},
+	}
+
+	inst, err := env.Service.BeginInstall(invitation, service.NetworkOptions{})
+	if err != nil {
+		t.Fatalf("begin install with default options: %v", err)
+	}
+	if inst.ListenPort != 0 {
+		t.Errorf("default listen port = %d, want 0", inst.ListenPort)
+	}
+
+	port := uint16(51820)
+	invitation.Network.Name = "port-explicit"
+	inst, err = env.Service.BeginInstall(invitation, service.NetworkOptions{ListenPort: &port})
+	if err != nil {
+		t.Fatalf("begin install with explicit port: %v", err)
+	}
+	if inst.ListenPort != port {
+		t.Errorf("explicit listen port = %d, want %d", inst.ListenPort, port)
 	}
 }
 
@@ -88,12 +124,12 @@ func TestBeginInstall_Idempotent(t *testing.T) {
 		},
 	}
 
-	inst1, err := env.Service.BeginInstall(installRequest(invite))
+	inst1, err := env.Service.BeginInstall(invite, installOptions())
 	if err != nil {
 		t.Fatalf("first begin: %v", err)
 	}
 
-	inst2, err := env.Service.BeginInstall(installRequest(invite))
+	inst2, err := env.Service.BeginInstall(invite, installOptions())
 	if err != nil {
 		t.Fatalf("second begin: %v", err)
 	}
@@ -114,7 +150,7 @@ func TestBeginInstall_ExistingConfirmedNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Service, "already-here")
 
-	_, err := env.Service.BeginInstall(installRequest(protocol.Invitation{
+	_, err := env.Service.BeginInstall(protocol.Invitation{
 		Network: protocol.NetworkInfo{
 			Name:        "already-here",
 			PublicKey:   "srv-pub",
@@ -127,7 +163,7 @@ func TestBeginInstall_ExistingConfirmedNetwork(t *testing.T) {
 			Route:      "10.43.0.2/24",
 			PrivateKey: "temp-key",
 		},
-	}))
+	}, installOptions())
 	if err == nil {
 		t.Fatal("expected error for existing network")
 	}
@@ -190,12 +226,12 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 		},
 	}
 
-	inst, err := env.Service.BeginInstall(installRequest(invite))
+	inst, err := env.Service.BeginInstall(invite, installOptions())
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
 
-	nc, err := env.Service.InstallNetwork(installRequest(invite))
+	nc, err := env.Service.InstallNetwork(invite, installOptions())
 	if err != nil {
 		t.Fatalf("install (resume): %v", err)
 	}
@@ -267,7 +303,7 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 		},
 	}
 
-	inst, err := env.Service.BeginInstall(installRequest(invite))
+	inst, err := env.Service.BeginInstall(invite, installOptions())
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
@@ -276,7 +312,7 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 		t.Fatalf("manual redeem: %v", err)
 	}
 
-	nc, err := env.Service.InstallNetwork(installRequest(invite))
+	nc, err := env.Service.InstallNetwork(invite, installOptions())
 	if err != nil {
 		t.Fatalf("install (resume from redeemed): %v", err)
 	}
@@ -338,7 +374,7 @@ func TestBeginInstall_IdempotentRedeemed(t *testing.T) {
 		},
 	}
 
-	inst, err := env.Service.BeginInstall(installRequest(invite))
+	inst, err := env.Service.BeginInstall(invite, installOptions())
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
@@ -346,7 +382,7 @@ func TestBeginInstall_IdempotentRedeemed(t *testing.T) {
 		t.Fatalf("redeem: %v", err)
 	}
 
-	again, err := env.Service.BeginInstall(installRequest(invite))
+	again, err := env.Service.BeginInstall(invite, installOptions())
 	if err != nil {
 		t.Fatalf("begin install on redeemed: %v", err)
 	}
@@ -407,7 +443,7 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 		},
 	}
 
-	nc, err := env.Service.InstallNetwork(installRequest(invite))
+	nc, err := env.Service.InstallNetwork(invite, installOptions())
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -436,7 +472,7 @@ func TestConfirm_ClearsInstallFields(t *testing.T) {
 func TestEnableNetwork_RefusesUnconfirmed(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.BeginInstall(installRequest(protocol.Invitation{
+	_, err := env.Service.BeginInstall(protocol.Invitation{
 		Network: protocol.NetworkInfo{
 			Name:        "not-confirmed",
 			PublicKey:   "srv-pub",
@@ -449,7 +485,7 @@ func TestEnableNetwork_RefusesUnconfirmed(t *testing.T) {
 			Route:      "10.43.0.2/24",
 			PrivateKey: "temp-key",
 		},
-	}))
+	}, installOptions())
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}

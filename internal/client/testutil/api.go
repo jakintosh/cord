@@ -93,6 +93,13 @@ func (e *APIEnv) SeedNetwork(
 	return SeedNetworkDirect(t, e.Service, name)
 }
 
+func (e *APIEnv) SeedInstall(
+	t *testing.T,
+	name string,
+) *service.Install {
+	return SeedInstall(t, e.Service, name)
+}
+
 func (e *APIEnv) SeedEnabledNetwork(
 	t *testing.T,
 	name string,

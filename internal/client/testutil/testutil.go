@@ -48,11 +48,29 @@ func SeedNetworkWithName(
 
 	invite := defaultInvite
 	invite.Network.Name = name
-	nc, err := svc.InstallNetwork(service.InstallRequest{Invitation: invite})
+	nc, err := svc.InstallNetwork(invite, service.NetworkOptions{})
 	if err != nil {
 		t.Fatalf("seed network %q: %v", name, err)
 	}
 	return nc
+}
+
+// SeedInstall creates an in-progress install record at phase "invited"
+// without redeeming or confirming it.
+func SeedInstall(
+	t *testing.T,
+	svc *service.Service,
+	name string,
+) *service.Install {
+	t.Helper()
+
+	invite := defaultInvite
+	invite.Network.Name = name
+	inst, err := svc.BeginInstall(invite, service.NetworkOptions{})
+	if err != nil {
+		t.Fatalf("seed install %q: %v", name, err)
+	}
+	return inst
 }
 
 func SeedNetworkDirect(

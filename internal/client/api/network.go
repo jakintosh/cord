@@ -7,110 +7,71 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 )
 
-type SetListenPortRequest struct {
-	ListenPort uint16 `json:"listen_port"`
+// InstallRequest is the payload accepted by the client control API to install
+// a server-issued invitation with local network settings.
+type InstallRequest struct {
+	Invitation protocol.Invitation `json:"invitation"`
+	ListenPort *uint16             `json:"listen_port"`
 }
 
-type NetworkDTO struct {
+type UpdateNetworkRequest struct {
+	ListenPort *uint16 `json:"listen_port,omitempty"`
+}
+
+type Network struct {
 	Name           string `json:"name"`
 	State          string `json:"state"`
 	Enabled        bool   `json:"enabled"`
-	Connected      bool   `json:"connected"`
 	Address        string `json:"address,omitempty"`
 	Interface      string `json:"interface,omitempty"`
 	ListenPort     uint16 `json:"listen_port,omitempty"`
 	ServerEndpoint string `json:"server_endpoint,omitempty"`
-	PeerCount      int    `json:"peer_count,omitempty"`
 }
 
-func networkDTOFromConfig(
+func networkFromConfig(
 	nc service.NetworkConfig,
-	connected bool,
-	peerCount int,
-) NetworkDTO {
-	return NetworkDTO{
+) Network {
+	return Network{
 		Name:           nc.Name,
 		State:          "installed",
 		Enabled:        nc.Enabled,
-		Connected:      connected,
 		Address:        nc.AssignedRoute,
 		Interface:      nc.InterfaceName,
 		ListenPort:     nc.ListenPort,
 		ServerEndpoint: nc.Server.Endpoint,
-		PeerCount:      peerCount,
 	}
 }
 
-func networkDTOFromInstall(
+func networkFromInstall(
 	inst service.Install,
-) NetworkDTO {
-	return NetworkDTO{
+) Network {
+	return Network{
 		Name:    inst.Name,
 		State:   inst.Phase,
 		Address: inst.MainAssignedRoute,
 	}
 }
 
-// peerCount returns the number of cached peers for network, or 0 if the
-// count can't be determined.
-func (a *API) peerCount(
-	network string,
-) int {
-	peers, err := a.service.ListPeers(network)
-	if err != nil {
-		return 0
-	}
-	return len(peers)
-}
-
-// listNetworkDTOs composes the full network list: installed networks
-// enriched with live/cached state, plus networks still mid-install.
-// Shared by the network list handler and the status handler.
-func (a *API) listNetworkDTOs() (
-	[]NetworkDTO,
-	error,
-) {
-	names, err := a.service.ListNetworks()
-	if err != nil {
-		return nil, err
-	}
-
-	dtos := make([]NetworkDTO, 0)
-	for _, name := range names {
-		nc, err := a.service.GetNetwork(name)
-		if err != nil {
-			continue
-		}
-		dtos = append(dtos, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name), a.peerCount(name)))
-	}
-
-	installs, err := a.service.ListInstalls()
-	if err != nil {
-		return nil, err
-	}
-	for _, inst := range installs {
-		dtos = append(dtos, networkDTOFromInstall(*inst))
-	}
-
-	return dtos, nil
-}
-
-func (a *API) handleNetworkList(
+func (a *API) handleListNetworks(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	dtos, err := a.listNetworkDTOs()
+	names, err := a.service.ListNetworks()
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
+	if names == nil {
+		names = []string{}
+	}
 
-	wire.WriteData(w, http.StatusOK, dtos)
+	wire.WriteData(w, http.StatusOK, names)
 }
 
-func (a *API) handleNetworkShow(
+func (a *API) handleGetNetwork(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -118,7 +79,7 @@ func (a *API) handleNetworkShow(
 
 	nc, err := a.service.GetNetwork(name)
 	if err == nil {
-		wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name), a.peerCount(name)))
+		wire.WriteData(w, http.StatusOK, networkFromConfig(*nc))
 		return
 	}
 
@@ -128,46 +89,60 @@ func (a *API) handleNetworkShow(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, networkDTOFromInstall(*inst))
+	wire.WriteData(w, http.StatusOK, networkFromInstall(*inst))
 }
 
-func (a *API) handleNetworkInstall(
+func (a *API) handlePostNetwork(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	var request service.InstallRequest
+	var request InstallRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		wire.WriteError(w, http.StatusBadRequest, "malformed invitation")
 		return
 	}
 
-	network, err := a.service.InstallNetwork(request)
+	network, err := a.service.InstallNetwork(request.Invitation, service.NetworkOptions{
+		ListenPort: request.ListenPort,
+	})
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	networkDTO := networkDTOFromConfig(*network, a.service.IsNetworkRunning(network.Name), a.peerCount(network.Name))
+	networkDTO := networkFromConfig(*network)
 	wire.WriteData(w, http.StatusCreated, networkDTO)
 }
 
-func (a *API) handleNetworkListenPort(
+func (a *API) handlePatchNetwork(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	var request SetListenPortRequest
+	name := r.PathValue("name")
+
+	var request UpdateNetworkRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		wire.WriteError(w, http.StatusBadRequest, "invalid listen port request")
+		wire.WriteError(w, http.StatusBadRequest, "invalid network update request")
 		return
 	}
-	if err := a.service.SetNetworkListenPort(r.PathValue("name"), request.ListenPort); err != nil {
+
+	if err := a.service.UpdateNetwork(name, service.NetworkOptions{
+		ListenPort: request.ListenPort,
+	}); err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	wire.WriteData(w, http.StatusOK, nil)
+
+	network, err := a.service.GetNetwork(name)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	wire.WriteData(w, http.StatusOK, networkFromConfig(*network))
 }
 
-func (a *API) handleNetworkRedeem(
+func (a *API) handlePostNetworkRedeem(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -184,10 +159,10 @@ func (a *API) handleNetworkRedeem(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, networkDTOFromInstall(*inst))
+	wire.WriteData(w, http.StatusOK, networkFromInstall(*inst))
 }
 
-func (a *API) handleNetworkConfirm(
+func (a *API) handlePostNetworkConfirm(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -201,7 +176,7 @@ func (a *API) handleNetworkConfirm(
 	wire.WriteData(w, http.StatusOK, nil)
 }
 
-func (a *API) handleNetworkUninstall(
+func (a *API) handleDeleteNetwork(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -215,7 +190,7 @@ func (a *API) handleNetworkUninstall(
 	wire.WriteData(w, http.StatusOK, nil)
 }
 
-func (a *API) handleNetworkEnable(
+func (a *API) handlePostNetworkEnable(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -229,7 +204,7 @@ func (a *API) handleNetworkEnable(
 	wire.WriteData(w, http.StatusOK, nil)
 }
 
-func (a *API) handleNetworkDisable(
+func (a *API) handlePostNetworkDisable(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -243,7 +218,7 @@ func (a *API) handleNetworkDisable(
 	wire.WriteData(w, http.StatusOK, nil)
 }
 
-func (a *API) handleNetworkSync(
+func (a *API) handPostNetworkSync(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -260,16 +235,16 @@ func (a *API) handleNetworkSync(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, networkDTOFromConfig(*nc, a.service.IsNetworkRunning(name), a.peerCount(name)))
+	wire.WriteData(w, http.StatusOK, networkFromConfig(*nc))
 }
 
 func (c *Client) ListNetworks(
 	ctx context.Context,
 ) (
-	[]NetworkDTO,
+	[]string,
 	error,
 ) {
-	var result []NetworkDTO
+	var result []string
 	return result, c.wire.Get(ctx, "/networks", &result)
 }
 
@@ -277,50 +252,61 @@ func (c *Client) GetNetwork(
 	ctx context.Context,
 	name string,
 ) (
-	NetworkDTO,
+	Network,
 	error,
 ) {
-	var result NetworkDTO
+	var result Network
 	return result, c.wire.Get(ctx, "/networks/"+name, &result)
 }
 
 func (c *Client) InstallNetwork(
 	ctx context.Context,
-	request service.InstallRequest,
+	invitation protocol.Invitation,
+	listenPort *uint16,
 ) (
-	NetworkDTO,
+	Network,
 	error,
 ) {
-	body, err := json.Marshal(request)
-	if err != nil {
-		return NetworkDTO{}, err
+	req := InstallRequest{
+		Invitation: invitation,
+		ListenPort: listenPort,
 	}
-	var result NetworkDTO
+	body, err := json.Marshal(req)
+	if err != nil {
+		return Network{}, err
+	}
+	var result Network
 	return result, c.wire.Post(ctx, "/networks", body, &result)
 }
 
-// SetNetworkListenPort persists a network's local WireGuard UDP port and
-// restarts the network if it is currently enabled.
-func (c *Client) SetNetworkListenPort(
+// UpdateNetwork updates a network's local configuration.
+func (c *Client) UpdateNetwork(
 	ctx context.Context,
 	name string,
-	listenPort uint16,
-) error {
-	body, err := json.Marshal(SetListenPortRequest{ListenPort: listenPort})
-	if err != nil {
-		return err
+	listenPort *uint16,
+) (
+	Network,
+	error,
+) {
+	req := UpdateNetworkRequest{
+		ListenPort: listenPort,
 	}
-	return c.wire.Post(ctx, "/networks/"+name+"/listen-port", body, nil)
+	body, err := json.Marshal(req)
+	if err != nil {
+		return Network{}, err
+	}
+	var result Network
+	return result, c.wire.Patch(ctx, "/networks/"+name, body, &result)
 }
 
 func (c *Client) RedeemNetwork(
 	ctx context.Context,
 	name string,
 ) (
-	NetworkDTO,
+	Network,
 	error,
 ) {
-	var result NetworkDTO
+	var result Network
 	return result, c.wire.Post(ctx, "/networks/"+name+"/redeem", nil, &result)
 }
 
@@ -356,9 +342,9 @@ func (c *Client) SyncNetwork(
 	ctx context.Context,
 	name string,
 ) (
-	NetworkDTO,
+	Network,
 	error,
 ) {
-	var result NetworkDTO
+	var result Network
 	return result, c.wire.Post(ctx, "/networks/"+name+"/sync", nil, &result)
 }

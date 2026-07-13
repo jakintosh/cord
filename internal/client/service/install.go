@@ -53,14 +53,6 @@ type Install struct {
 	CreatedAt time.Time
 }
 
-// InstallRequest combines a server-issued invitation with local client
-// settings needed to install it. It is the payload of the client control API,
-// not the portable invitation artifact itself.
-type InstallRequest struct {
-	Invitation protocol.Invitation `json:"invitation"`
-	ListenPort uint16              `json:"listen_port"`
-}
-
 // GetInstall returns the persisted install record by name.
 func (s *Service) GetInstall(
 	name string,
@@ -88,12 +80,13 @@ func (s *Service) ListInstalls() (
 // If the install already exists (from a previous partial run),
 // InstallNetwork resumes from whatever phase it is at.
 func (s *Service) InstallNetwork(
-	request InstallRequest,
+	invitation protocol.Invitation,
+	options NetworkOptions,
 ) (
 	*NetworkConfig,
 	error,
 ) {
-	inst, err := s.BeginInstall(request)
+	inst, err := s.BeginInstall(invitation, options)
 	if err != nil {
 		return nil, err
 	}
@@ -124,13 +117,12 @@ func (s *Service) InstallNetwork(
 // returns ErrNetworkExists; if an install with the same name already
 // exists at any phase, the existing record is returned unchanged.
 func (s *Service) BeginInstall(
-	request InstallRequest,
+	invitation protocol.Invitation,
+	options NetworkOptions,
 ) (
 	*Install,
 	error,
 ) {
-	invitation := request.Invitation
-
 	// A parseable-but-incomplete invitation is a bad request; the
 	// completeness check is a protocol concern, but the resulting error
 	// maps to invalid input at the service boundary.
@@ -163,10 +155,15 @@ func (s *Service) BeginInstall(
 		return nil, err
 	}
 
+	listenPort := uint16(0)
+	if options.ListenPort != nil {
+		listenPort = *options.ListenPort
+	}
+
 	install := &Install{
 		Name:                networkName,
 		Phase:               PhaseInvited,
-		ListenPort:          request.ListenPort,
+		ListenPort:          listenPort,
 		InviteIfaceName:     inviteIfaceName,
 		InvitePrivateKey:    invitation.Peer.PrivateKey,
 		InviteAssignedRoute: invitation.Peer.Route,

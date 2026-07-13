@@ -9,7 +9,6 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
-	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 )
 
@@ -48,7 +47,9 @@ var clientNetworkList = &args.Command{
 			return printJSON(networks)
 		}
 
-		printClientNetworks(networks)
+		for _, n := range networks {
+			fmt.Println(n)
+		}
 		return nil
 	},
 }
@@ -121,12 +122,13 @@ var clientNetworkInstall = &args.Command{
 			return err
 		}
 
-		var port uint16 = 0
+		var port *uint16
 		if listenPortStr != nil {
 			if parsed, err := strconv.ParseUint(*listenPortStr, 10, 16); err != nil {
 				return fmt.Errorf("invalid listen port %q", *listenPortStr)
 			} else {
-				port = uint16(parsed)
+				listenPort := uint16(parsed)
+				port = &listenPort
 			}
 		}
 
@@ -135,10 +137,11 @@ var clientNetworkInstall = &args.Command{
 			return fmt.Errorf("parse invite: %w", err)
 		}
 
-		result, err := client.InstallNetwork(i.Context(), service.InstallRequest{
-			Invitation: *invitation,
-			ListenPort: port,
-		})
+		result, err := client.InstallNetwork(
+			i.Context(),
+			*invitation,
+			port,
+		)
 		if err != nil {
 			return err
 		}
@@ -184,10 +187,10 @@ var clientNetworkListenPort = &args.Command{
 			return err
 		}
 
-		if err := client.SetNetworkListenPort(
+		if _, err := client.UpdateNetwork(
 			i.Context(),
 			network,
-			uint16(port),
+			&port,
 		); err != nil {
 			return err
 		}
@@ -372,36 +375,19 @@ var clientNetworkSync = &args.Command{
 		if i.GetFlag("json") {
 			return printJSON(result)
 		}
-		fmt.Printf("network %q synced (%d peers)\n", network, result.PeerCount)
+		fmt.Printf("network %q synced\n", network)
 		return nil
 	},
-}
-
-// printClientNetworks prints a one-row-per-network summary table.
-func printClientNetworks(
-	networks []api.NetworkDTO,
-) {
-	rows := make([][]string, len(networks))
-	for idx, n := range networks {
-		rows[idx] = []string{
-			n.Name,
-			n.State,
-			strconv.FormatBool(n.Enabled),
-			strconv.FormatBool(n.Connected),
-		}
-	}
-	printTable([]string{"NAME", "STATE", "ENABLED", "CONNECTED"}, rows)
 }
 
 // printClientNetworkDetail prints the key: value detail view for a single
 // network, as shown by `client network show`.
 func printClientNetworkDetail(
-	n api.NetworkDTO,
+	n api.Network,
 ) {
 	fmt.Printf("name: %s\n", n.Name)
 	fmt.Printf("state: %s\n", n.State)
 	fmt.Printf("enabled: %t\n", n.Enabled)
-	fmt.Printf("connected: %t\n", n.Connected)
 	if n.Address != "" {
 		fmt.Printf("address: %s\n", n.Address)
 	}
@@ -414,5 +400,4 @@ func printClientNetworkDetail(
 	if n.ServerEndpoint != "" {
 		fmt.Printf("server_endpoint: %s\n", n.ServerEndpoint)
 	}
-	fmt.Printf("peer_count: %d\n", n.PeerCount)
 }

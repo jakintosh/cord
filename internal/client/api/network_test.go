@@ -21,14 +21,11 @@ import (
 func TestAPIListNetworks_Empty(
 	t *testing.T,
 ) {
-	// setup env
 	env := testutil.Setup(t)
 
-	// list networks
 	url := "/networks"
-	result := wire.TestGet[[]api.NetworkDTO](env.Router, url)
+	result := wire.TestGet[[]string](env.Router, url)
 
-	// verify result
 	data := result.ExpectOK(t)
 	if len(data) != 0 {
 		t.Fatalf("expected 0 networks, got %d", len(data))
@@ -38,62 +35,26 @@ func TestAPIListNetworks_Empty(
 func TestAPIListNetworks_WithData(
 	t *testing.T,
 ) {
-	// setup env
 	env := testutil.Setup(t)
 	env.SeedNetwork(t, "net-a")
 	env.SeedNetwork(t, "net-b")
 
-	// list networks
 	url := "/networks"
-	result := wire.TestGet[[]api.NetworkDTO](env.Router, url)
+	result := wire.TestGet[[]string](env.Router, url)
 
-	// verify result
 	data := result.ExpectOK(t)
 	if len(data) != 2 {
 		t.Fatalf("expected 2 networks, got %d", len(data))
 	}
 	names := make(map[string]bool, len(data))
 	for _, n := range data {
-		names[n.Name] = true
+		names[n] = true
 	}
 	if !names["net-a"] {
 		t.Fatal("net-a not found in list")
 	}
 	if !names["net-b"] {
 		t.Fatal("net-b not found in list")
-	}
-}
-
-func TestAPIListNetworks_IncludesRedeemedInstall(
-	t *testing.T,
-) {
-	// setup env with a server that answers /redeem
-	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
-	env.SeedNetwork(t, "net-a")
-
-	inst, err := env.Service.BeginInstall(service.InstallRequest{Invitation: installInvite(t, env, "mid-install")})
-	if err != nil {
-		t.Fatalf("begin install: %v", err)
-	}
-	if _, err := env.Service.Redeem(inst.Name); err != nil {
-		t.Fatalf("redeem: %v", err)
-	}
-
-	// list networks
-	url := "/networks"
-	result := wire.TestGet[[]api.NetworkDTO](env.Router, url)
-
-	// verify result
-	data := result.ExpectOK(t)
-	states := make(map[string]string, len(data))
-	for _, n := range data {
-		states[n.Name] = n.State
-	}
-	if states["net-a"] != "installed" {
-		t.Fatalf("net-a state = %q, want installed", states["net-a"])
-	}
-	if states["mid-install"] != "redeemed" {
-		t.Fatalf("mid-install state = %q, want redeemed", states["mid-install"])
 	}
 }
 
@@ -110,7 +71,7 @@ func TestAPIShowNetwork_Success(
 
 	// show network
 	url := "/networks/mynet"
-	result := wire.TestGet[api.NetworkDTO](env.Router, url)
+	result := wire.TestGet[api.Network](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)
@@ -123,9 +84,6 @@ func TestAPIShowNetwork_Success(
 	if data.Enabled {
 		t.Fatal("expected enabled=false for new network")
 	}
-	if data.Connected {
-		t.Fatal("expected connected=false for disabled network")
-	}
 }
 
 func TestAPIShowNetwork_IncludesEnrichedFields(
@@ -137,7 +95,7 @@ func TestAPIShowNetwork_IncludesEnrichedFields(
 
 	// show network
 	url := "/networks/mynet"
-	result := wire.TestGet[api.NetworkDTO](env.Router, url)
+	result := wire.TestGet[api.Network](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)
@@ -149,9 +107,6 @@ func TestAPIShowNetwork_IncludesEnrichedFields(
 	}
 	if data.ServerEndpoint != nc.Server.Endpoint {
 		t.Fatalf("server_endpoint = %q, want %q", data.ServerEndpoint, nc.Server.Endpoint)
-	}
-	if data.PeerCount != 0 {
-		t.Fatalf("peer_count = %d, want 0", data.PeerCount)
 	}
 }
 
@@ -175,7 +130,7 @@ func TestAPIShowNetwork_MidInstall(
 	// setup env with a server that answers /redeem
 	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
 
-	inst, err := env.Service.BeginInstall(service.InstallRequest{Invitation: installInvite(t, env, "mid-install")})
+	inst, err := env.Service.BeginInstall(installInvite(t, env, "mid-install"), service.NetworkOptions{})
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
@@ -185,7 +140,7 @@ func TestAPIShowNetwork_MidInstall(
 
 	// show mid-install network
 	url := "/networks/mid-install"
-	result := wire.TestGet[api.NetworkDTO](env.Router, url)
+	result := wire.TestGet[api.Network](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)
@@ -239,7 +194,7 @@ func TestAPIInstallNetwork_Success(
 		},
 		"listen_port": 51820
 	}`
-	result := wire.TestPost[api.NetworkDTO](env.Router, url, body)
+	result := wire.TestPost[api.Network](env.Router, url, body)
 
 	data := result.ExpectStatusOK(t, http.StatusCreated)
 	if data.Name != "mynet" {
@@ -250,9 +205,6 @@ func TestAPIInstallNetwork_Success(
 	}
 	if !data.Enabled {
 		t.Fatal("expected enabled=true for new network")
-	}
-	if !data.Connected {
-		t.Fatal("expected connected=true: install adopts the live tunnel")
 	}
 
 	nw, err := env.Service.GetNetwork("mynet")
@@ -282,12 +234,15 @@ func TestAPIInstallNetwork_Success(
 	}
 }
 
-func TestAPISetNetworkListenPort(t *testing.T) {
+func TestAPIUpdateNetwork(t *testing.T) {
 	env := testutil.Setup(t)
 	env.SeedNetwork(t, "mynet")
 
-	result := wire.TestPost[any](env.Router, "/networks/mynet/listen-port", `{"listen_port":51820}`)
+	result := wire.TestPatch[api.Network](env.Router, "/networks/mynet", `{"listen_port":51820}`)
 	result.ExpectOK(t)
+	if result.Data.ListenPort != 51820 {
+		t.Errorf("response listen_port = %d, want 51820", result.Data.ListenPort)
+	}
 
 	network, err := env.Service.GetNetwork("mynet")
 	if err != nil {
@@ -296,6 +251,14 @@ func TestAPISetNetworkListenPort(t *testing.T) {
 	if network.ListenPort != 51820 {
 		t.Errorf("listen_port = %d, want 51820", network.ListenPort)
 	}
+}
+
+func TestAPIUpdateNetwork_Empty(t *testing.T) {
+	env := testutil.Setup(t)
+	env.SeedNetwork(t, "mynet")
+
+	result := wire.TestPatch[api.Network](env.Router, "/networks/mynet", `{}`)
+	result.ExpectStatusError(t, http.StatusBadRequest)
 }
 
 func TestAPIInstallNetwork_InvalidJSON(
@@ -390,14 +353,14 @@ func TestAPIRedeemNetwork_IncludesAssignedAddress(
 	// setup env with a server that answers /redeem
 	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
 
-	inst, err := env.Service.BeginInstall(service.InstallRequest{Invitation: installInvite(t, env, "mid-install")})
+	inst, err := env.Service.BeginInstall(installInvite(t, env, "mid-install"), service.NetworkOptions{})
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
 
 	// redeem via the HTTP handler
 	url := "/networks/" + inst.Name + "/redeem"
-	result := wire.TestPost[api.NetworkDTO](env.Router, url, "")
+	result := wire.TestPost[api.Network](env.Router, url, "")
 
 	// verify result — the server-assigned address is real information the
 	// caller didn't already know, so redeem keeps a response body
@@ -454,7 +417,7 @@ func TestAPIConfirmNetwork_Success(
 		},
 	}
 
-	inst, err := env.Service.BeginInstall(service.InstallRequest{Invitation: invite})
+	inst, err := env.Service.BeginInstall(invite, service.NetworkOptions{})
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}

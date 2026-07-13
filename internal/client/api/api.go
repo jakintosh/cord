@@ -40,20 +40,20 @@ func New(
 func (a *API) Router() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /status", a.handleStatus)
+	mux.HandleFunc("GET /status", a.handleGetStatus)
 
-	mux.HandleFunc("GET /networks", a.handleNetworkList)
-	mux.HandleFunc("GET /networks/{name}", a.handleNetworkShow)
-	mux.HandleFunc("POST /networks", a.handleNetworkInstall)
-	mux.HandleFunc("DELETE /networks/{name}", a.handleNetworkUninstall)
-	mux.HandleFunc("GET /networks/{name}/peers", a.handlePeerList)
+	mux.HandleFunc("GET /networks", a.handleListNetworks)
+	mux.HandleFunc("GET /networks/{name}", a.handleGetNetwork)
+	mux.HandleFunc("POST /networks", a.handlePostNetwork)
+	mux.HandleFunc("PATCH /networks/{name}", a.handlePatchNetwork)
+	mux.HandleFunc("DELETE /networks/{name}", a.handleDeleteNetwork)
+	mux.HandleFunc("POST /networks/{name}/redeem", a.handlePostNetworkRedeem)
+	mux.HandleFunc("POST /networks/{name}/confirm", a.handlePostNetworkConfirm)
+	mux.HandleFunc("POST /networks/{name}/enable", a.handlePostNetworkEnable)
+	mux.HandleFunc("POST /networks/{name}/disable", a.handlePostNetworkDisable)
+	mux.HandleFunc("POST /networks/{name}/sync", a.handPostNetworkSync)
 
-	mux.HandleFunc("POST /networks/{name}/redeem", a.handleNetworkRedeem)
-	mux.HandleFunc("POST /networks/{name}/confirm", a.handleNetworkConfirm)
-	mux.HandleFunc("POST /networks/{name}/enable", a.handleNetworkEnable)
-	mux.HandleFunc("POST /networks/{name}/disable", a.handleNetworkDisable)
-	mux.HandleFunc("POST /networks/{name}/sync", a.handleNetworkSync)
-	mux.HandleFunc("POST /networks/{name}/listen-port", a.handleNetworkListenPort)
+	mux.HandleFunc("GET /networks/{name}/peers", a.handleListPeers)
 
 	return logging.Middleware(a.log, mux)
 }

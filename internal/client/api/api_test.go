@@ -16,7 +16,7 @@ func TestAPIRouter_ExposesNetworkRoutes(
 	env := testutil.Setup(t)
 
 	// list networks on empty router — should return 200 with empty data
-	result := wire.TestGet[[]api.NetworkDTO](env.Router, "/networks")
+	result := wire.TestGet[[]api.Network](env.Router, "/networks")
 	result.ExpectOK(t)
 
 	// get nonexistent network should return 404

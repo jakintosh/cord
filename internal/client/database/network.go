@@ -33,9 +33,61 @@ func (db *DB) GetNetwork(
 	)
 
 	var nc service.NetworkConfig
+	if err := scanNetworkRow(row, &nc); err != nil {
+		return nil, CheckSqliteErr("scan network", err)
+	}
+	return &nc, nil
+}
+
+func (db *DB) ListNetworks() (
+	[]*service.NetworkConfig,
+	error,
+) {
+	rows, err := db.Conn.Query(`
+		SELECT
+			name,
+			peer_private_key,
+			interface_name,
+			peer_route,
+			server_pubkey,
+			server_endpoint,
+			server_route,
+			server_network_cidr,
+			server_api_port,
+			listen_port,
+			enabled,
+			created_at_unix
+		FROM network
+		ORDER BY name ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list networks: %w", err)
+	}
+	defer rows.Close()
+
+	var networks []*service.NetworkConfig
+	for rows.Next() {
+		var nc service.NetworkConfig
+		if err := scanNetworkRow(rows, &nc); err != nil {
+			return nil, fmt.Errorf("scan network: %w", err)
+		}
+		networks = append(networks, &nc)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate networks: %w", err)
+	}
+
+	return networks, nil
+}
+
+func scanNetworkRow(
+	scanner Scanner,
+	nc *service.NetworkConfig,
+) error {
 	var enabledInt int64
 	var createdUnix int64
-	if err := Scanner(row).Scan(
+	if err := scanner.Scan(
 		&nc.Name,
 		&nc.PrivateKey,
 		&nc.InterfaceName,
@@ -49,11 +101,11 @@ func (db *DB) GetNetwork(
 		&enabledInt,
 		&createdUnix,
 	); err != nil {
-		return nil, CheckSqliteErr("scan network", err)
+		return err
 	}
 	nc.Enabled = enabledInt != 0
 	nc.CreatedAt = time.Unix(createdUnix, 0)
-	return &nc, nil
+	return nil
 }
 
 func (db *DB) ListNetworkNames() (
@@ -145,23 +197,26 @@ func (db *DB) SetNetworkEnabled(
 	return nil
 }
 
-func (db *DB) SetNetworkListenPort(
+func (db *DB) UpdateNetwork(
 	name string,
-	listenPort uint16,
+	update service.NetworkOptions,
 ) error {
+	if update.ListenPort == nil {
+		return service.ErrInvalidInput
+	}
 	result, err := db.Conn.Exec(`
 		UPDATE network
 		SET listen_port = ?1
 		WHERE name = ?2`,
-		listenPort,
+		*update.ListenPort,
 		name,
 	)
 	if err != nil {
-		return CheckSqliteErr("set network listen port", err)
+		return CheckSqliteErr("update network", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("set network listen port: %w", err)
+		return fmt.Errorf("update network: %w", err)
 	}
 	if affected == 0 {
 		return fmt.Errorf("%w: network %q not found", service.ErrNotFound, name)

@@ -142,7 +142,7 @@ func TestInstall_Success(t *testing.T) {
 		},
 	}
 
-	nc, err := env.Service.InstallNetwork(installRequest(invite))
+	nc, err := env.Service.InstallNetwork(invite, installOptions())
 	if err != nil {
 		t.Fatalf("install network: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestInstall_Duplicate(t *testing.T) {
 func TestBeginInstall_MissingNetworkName(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.BeginInstall(installRequest(protocol.Invitation{
+	_, err := env.Service.BeginInstall(protocol.Invitation{
 		Network: protocol.NetworkInfo{
 			PublicKey:   "srv",
 			Endpoint:    "1.2.3.4:51820",
@@ -201,7 +201,7 @@ func TestBeginInstall_MissingNetworkName(t *testing.T) {
 			Route:      "10.42.0.5/16",
 			PrivateKey: "temp-key",
 		},
-	}))
+	}, installOptions())
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
@@ -210,7 +210,7 @@ func TestBeginInstall_MissingNetworkName(t *testing.T) {
 func TestBeginInstall_MissingTempPrivKey(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.BeginInstall(installRequest(protocol.Invitation{
+	_, err := env.Service.BeginInstall(protocol.Invitation{
 		Network: protocol.NetworkInfo{
 			Name:        "noname",
 			PublicKey:   "srv",
@@ -222,7 +222,7 @@ func TestBeginInstall_MissingTempPrivKey(t *testing.T) {
 		Peer: protocol.PeerIdentity{
 			Route: "10.42.0.5/16",
 		},
-	}))
+	}, installOptions())
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
@@ -231,7 +231,7 @@ func TestBeginInstall_MissingTempPrivKey(t *testing.T) {
 func TestBeginInstall_MissingTempCidr(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.BeginInstall(installRequest(protocol.Invitation{
+	_, err := env.Service.BeginInstall(protocol.Invitation{
 		Network: protocol.NetworkInfo{
 			Name:        "noname",
 			PublicKey:   "srv",
@@ -243,7 +243,7 @@ func TestBeginInstall_MissingTempCidr(t *testing.T) {
 		Peer: protocol.PeerIdentity{
 			PrivateKey: "temp-key",
 		},
-	}))
+	}, installOptions())
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
@@ -252,7 +252,7 @@ func TestBeginInstall_MissingTempCidr(t *testing.T) {
 func TestBeginInstall_MissingServerPubkey(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.BeginInstall(installRequest(protocol.Invitation{
+	_, err := env.Service.BeginInstall(protocol.Invitation{
 		Network: protocol.NetworkInfo{
 			Name:        "noname",
 			Endpoint:    "1.2.3.4:51820",
@@ -264,7 +264,7 @@ func TestBeginInstall_MissingServerPubkey(t *testing.T) {
 			Route:      "10.42.0.5/16",
 			PrivateKey: "temp-key",
 		},
-	}))
+	}, installOptions())
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
@@ -273,7 +273,7 @@ func TestBeginInstall_MissingServerPubkey(t *testing.T) {
 func TestBeginInstall_MissingServerEndpoint(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.BeginInstall(installRequest(protocol.Invitation{
+	_, err := env.Service.BeginInstall(protocol.Invitation{
 		Network: protocol.NetworkInfo{
 			Name:        "noname",
 			PublicKey:   "srv",
@@ -285,7 +285,7 @@ func TestBeginInstall_MissingServerEndpoint(t *testing.T) {
 			Route:      "10.42.0.5/16",
 			PrivateKey: "temp-key",
 		},
-	}))
+	}, installOptions())
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
@@ -294,7 +294,7 @@ func TestBeginInstall_MissingServerEndpoint(t *testing.T) {
 func TestBeginInstall_MissingTempApiAddr(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.BeginInstall(installRequest(protocol.Invitation{
+	_, err := env.Service.BeginInstall(protocol.Invitation{
 		Network: protocol.NetworkInfo{
 			Name:        "noname",
 			PublicKey:   "srv",
@@ -306,7 +306,7 @@ func TestBeginInstall_MissingTempApiAddr(t *testing.T) {
 			Route:      "10.42.0.5/16",
 			PrivateKey: "temp-key",
 		},
-	}))
+	}, installOptions())
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}

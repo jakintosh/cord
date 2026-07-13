@@ -20,7 +20,7 @@ func TestAPIListPeers_Empty(
 
 	// list peers
 	url := "/networks/mynet/peers"
-	result := wire.TestGet[[]api.PeerDTO](env.Router, url)
+	result := wire.TestGet[[]api.Peer](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)
@@ -50,7 +50,7 @@ func TestAPIListPeers_WithCachedData(
 
 	// list peers
 	url := "/networks/mynet/peers"
-	result := wire.TestGet[[]api.PeerDTO](env.Router, url)
+	result := wire.TestGet[[]api.Peer](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)

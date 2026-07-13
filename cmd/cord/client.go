@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
@@ -91,11 +92,30 @@ var clientStatusCmd = &args.Command{
 	},
 }
 
-// printClientStatus prints the ok/version line followed by the networks
-// table, reusing the same per-network rows as `client network list`.
+// printClientStatus prints the ok/version line followed by a table of
+// installed networks and, when present, a table of in-progress installs.
 func printClientStatus(
-	s api.StatusDTO,
+	s api.Status,
 ) {
 	fmt.Printf("client daemon ok (version %s)\n", s.Version)
-	printClientNetworks(s.Networks)
+
+	if len(s.Networks) > 0 {
+		rows := make([][]string, len(s.Networks))
+		for idx, n := range s.Networks {
+			rows[idx] = []string{
+				n.Name,
+				strconv.FormatBool(n.Enabled),
+				strconv.FormatBool(n.Running),
+			}
+		}
+		printTable([]string{"NETWORK", "ENABLED", "RUNNING"}, rows)
+	}
+
+	if len(s.Installs) > 0 {
+		rows := make([][]string, len(s.Installs))
+		for idx, inst := range s.Installs {
+			rows[idx] = []string{inst.Name, inst.State}
+		}
+		printTable([]string{"INSTALL", "STATE"}, rows)
+	}
 }

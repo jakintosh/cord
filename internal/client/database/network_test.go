@@ -136,6 +136,64 @@ func TestInsertNetwork_Duplicate(t *testing.T) {
 	}
 }
 
+func TestListNetworks_Empty(t *testing.T) {
+	db := testutil.SetupDB(t)
+
+	networks, err := db.ListNetworks()
+	if err != nil {
+		t.Fatalf("list empty: %v", err)
+	}
+	if len(networks) != 0 {
+		t.Fatalf("expected 0 networks, got %d", len(networks))
+	}
+}
+
+func TestListNetworks_OrderedWithFields(t *testing.T) {
+	db := testutil.SetupDB(t)
+
+	now := time.Now()
+	mustInsert := func(name string, enabled bool) {
+		t.Helper()
+		err := db.InsertNetwork(&service.NetworkConfig{
+			Name:          name,
+			PrivateKey:    "priv-" + name,
+			InterfaceName: "wg-" + name,
+			AssignedRoute: "10.42.0.0/16",
+			Server: service.ServerInfo{
+				PublicKey: "srv-key",
+				Endpoint:  "1.1.1.1:51820",
+				Route:     "10.42.0.1/32",
+				APIPort:   8443,
+			},
+			Enabled:   enabled,
+			CreatedAt: now,
+		})
+		if err != nil {
+			t.Fatalf("insert %s: %v", name, err)
+		}
+	}
+
+	mustInsert("beta", false)
+	mustInsert("alpha", true)
+
+	networks, err := db.ListNetworks()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(networks) != 2 {
+		t.Fatalf("expected 2 networks, got %d", len(networks))
+	}
+	if networks[0].Name != "alpha" || networks[1].Name != "beta" {
+		t.Fatalf("unexpected order: %q, %q", networks[0].Name, networks[1].Name)
+	}
+	if !networks[0].Enabled {
+		t.Error("alpha should be enabled")
+	}
+	if networks[1].Enabled {
+		t.Error("beta should be disabled")
+	}
+}
+
 func TestListNetworkNames_Empty(t *testing.T) {
 	db := testutil.SetupDB(t)
 
@@ -320,7 +378,7 @@ func TestSetNetworkEnabled_NotFound(t *testing.T) {
 	}
 }
 
-func TestSetNetworkListenPort(t *testing.T) {
+func TestUpdateNetwork(t *testing.T) {
 	db := testutil.SetupDB(t)
 	net := &service.NetworkConfig{
 		Name:          "portnet",
@@ -338,8 +396,9 @@ func TestSetNetworkListenPort(t *testing.T) {
 	if err := db.InsertNetwork(net); err != nil {
 		t.Fatalf("insert network: %v", err)
 	}
-	if err := db.SetNetworkListenPort("portnet", 51821); err != nil {
-		t.Fatalf("set listen port: %v", err)
+	listenPort := uint16(51821)
+	if err := db.UpdateNetwork("portnet", service.NetworkOptions{ListenPort: &listenPort}); err != nil {
+		t.Fatalf("update network: %v", err)
 	}
 	got, err := db.GetNetwork("portnet")
 	if err != nil {

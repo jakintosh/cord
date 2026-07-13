@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -37,8 +38,14 @@ const (
 	EndpointTTL = 24 * time.Hour
 )
 
+// NetworkOptions controls local settings for a network installation.
+type NetworkOptions struct {
+	// ListenPort is the local WireGuard UDP port. Nil uses the service default.
+	ListenPort *uint16
+}
+
 // NetworkConfig is the permanent membership record. Complete at insert,
-// immutable except Enabled.
+// with local settings and Enabled mutable after installation.
 type NetworkConfig struct {
 	Name          string
 	PrivateKey    string
@@ -49,8 +56,6 @@ type NetworkConfig struct {
 	Enabled       bool
 	CreatedAt     time.Time
 }
-
-// --- Runtime Network ---
 
 // Network is a running client network: one Tunnel plus three
 // self-rearming activity timers. All durable state lives in the store;
@@ -197,14 +202,17 @@ func (s *Service) DisableNetwork(
 	return s.store.SetNetworkEnabled(name, false)
 }
 
-// SetNetworkListenPort persists the local WireGuard UDP port for a network.
-// When the network is running it is restarted so the new bind takes effect.
-func (s *Service) SetNetworkListenPort(
+// UpdateNetwork persists local network configuration. When a running
+// network's listen port changes, the network is restarted so it takes effect.
+func (s *Service) UpdateNetwork(
 	name string,
-	listenPort uint16,
+	opts NetworkOptions,
 ) error {
 	if _, err := s.store.GetNetwork(name); err != nil {
 		return err
+	}
+	if opts.ListenPort == nil {
+		return ErrInvalidInput
 	}
 
 	running := s.IsNetworkRunning(name)
@@ -214,16 +222,18 @@ func (s *Service) SetNetworkListenPort(
 		}
 	}
 
-	if err := s.store.SetNetworkListenPort(name, listenPort); err != nil {
+	if err := s.store.UpdateNetwork(name, opts); err != nil {
 		if running {
-			_ = s.EnableNetwork(name)
+			if restartErr := s.EnableNetwork(name); restartErr != nil {
+				return errors.Join(err, fmt.Errorf("restore running network: %w", restartErr))
+			}
 		}
 		return err
 	}
 
 	if running {
 		if err := s.EnableNetwork(name); err != nil {
-			return fmt.Errorf("restart network with listen port %d: %w", listenPort, err)
+			return fmt.Errorf("restart network with updated configuration: %w", err)
 		}
 	}
 	return nil

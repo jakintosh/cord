@@ -50,7 +50,7 @@ var clientPeerList = &args.Command{
 
 // printClientPeers prints a one-row-per-peer summary table.
 func printClientPeers(
-	peers []api.PeerDTO,
+	peers []api.Peer,
 ) {
 	rows := make([][]string, len(peers))
 	for idx, p := range peers {

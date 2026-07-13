@@ -9,9 +9,9 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 )
 
-// PeerDTO is a cached peer joined with live WireGuard device state, for
+// Peer is a cached peer joined with live WireGuard device state, for
 // display by the CLI.
-type PeerDTO struct {
+type Peer struct {
 	Name          string  `json:"name"`
 	Route         string  `json:"route"`
 	Endpoint      string  `json:"endpoint,omitempty"`
@@ -19,10 +19,10 @@ type PeerDTO struct {
 	Connected     bool    `json:"connected"`
 }
 
-func peerDTOFromStatus(
+func peerFromStatus(
 	p service.PeerStatus,
-) PeerDTO {
-	dto := PeerDTO{
+) Peer {
+	dto := Peer{
 		Name:      p.Name,
 		Route:     p.Route,
 		Endpoint:  p.Endpoint,
@@ -35,17 +35,17 @@ func peerDTOFromStatus(
 	return dto
 }
 
-func peerDTOsFromStatuses(
+func peersFromStatuses(
 	statuses []service.PeerStatus,
-) []PeerDTO {
-	dtos := make([]PeerDTO, len(statuses))
+) []Peer {
+	dtos := make([]Peer, len(statuses))
 	for i, s := range statuses {
-		dtos[i] = peerDTOFromStatus(s)
+		dtos[i] = peerFromStatus(s)
 	}
 	return dtos
 }
 
-func (a *API) handlePeerList(
+func (a *API) handleListPeers(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -57,16 +57,16 @@ func (a *API) handlePeerList(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, peerDTOsFromStatuses(statuses))
+	wire.WriteData(w, http.StatusOK, peersFromStatuses(statuses))
 }
 
 func (c *Client) ListPeers(
 	ctx context.Context,
 	network string,
 ) (
-	[]PeerDTO,
+	[]Peer,
 	error,
 ) {
-	var result []PeerDTO
+	var result []Peer
 	return result, c.wire.Get(ctx, "/networks/"+network+"/peers", &result)
 }

@@ -51,7 +51,7 @@ func TestEnableNetwork_UsesConfiguredListenPort(t *testing.T) {
 	env := testutil.SetupService(t)
 	network := testutil.SeedNetworkDirect(t, env.Service, "listen-port")
 	network.ListenPort = 51820
-	if err := env.Database.SetNetworkListenPort(network.Name, network.ListenPort); err != nil {
+	if err := env.Database.UpdateNetwork(network.Name, service.NetworkOptions{ListenPort: &network.ListenPort}); err != nil {
 		t.Fatalf("set listen port: %v", err)
 	}
 
