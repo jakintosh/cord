@@ -20,6 +20,15 @@ type Peer struct {
 	Confirmed bool // whether the peer has proven reachability on the main network
 }
 
+// PeerUpdate describes a partial change to a persisted peer. Nil fields mean
+// no change; lifecycle methods construct updates for their own state changes.
+type PeerUpdate struct {
+	Name      *string
+	Admin     *bool
+	Enabled   *bool
+	Confirmed *bool
+}
+
 // VisiblePeer is a peer as it appears to other peers on the network.
 // It includes identity plus recently witnessed endpoints but omits
 // management flags (Admin, Enabled, Confirmed).
@@ -129,55 +138,24 @@ func (s *Service) ListVisiblePeers(
 func (s *Service) UpdatePeer(
 	network string,
 	name string,
-	newName *string,
-	admin *bool,
-	enabled *bool,
-	confirmed *bool,
+	update PeerUpdate,
 ) (
 	*Peer,
 	error,
 ) {
-	_, err := s.store.GetPeer(network, name)
-	if err != nil {
-		return nil, fmt.Errorf("get peer for update: %w", mapStoreError(err))
+	if update.Name == nil &&
+		update.Admin == nil &&
+		update.Enabled == nil &&
+		update.Confirmed == nil {
+		return nil, ErrInvalidInput
 	}
 
-	p, err := s.store.UpdatePeer(network, name, newName, admin, enabled, confirmed)
+	p, err := s.store.UpdatePeer(network, name, update)
 	if err != nil {
 		return nil, fmt.Errorf("update peer %q: %w", name, mapStoreError(err))
 	}
 	s.reconcile(network)
 	return p, nil
-}
-
-// EnablePeer allows a peer to connect. Its WireGuard configuration is
-// included at the next reconciliation.
-func (s *Service) EnablePeer(
-	network string,
-	name string,
-) error {
-	enabled := true
-	_, err := s.store.UpdatePeer(network, name, nil, nil, &enabled, nil)
-	if err != nil {
-		return fmt.Errorf("enable peer %q: %w", name, mapStoreError(err))
-	}
-	s.reconcile(network)
-	return nil
-}
-
-// DisablePeer prevents a peer from connecting. Its WireGuard
-// configuration is removed at the next reconciliation.
-func (s *Service) DisablePeer(
-	network string,
-	name string,
-) error {
-	disabled := false
-	_, err := s.store.UpdatePeer(network, name, nil, nil, &disabled, nil)
-	if err != nil {
-		return fmt.Errorf("disable peer %q: %w", name, mapStoreError(err))
-	}
-	s.reconcile(network)
-	return nil
 }
 
 // ConfirmPeer marks a peer as confirmed — it has proven WireGuard
@@ -196,7 +174,10 @@ func (s *Service) ConfirmPeer(
 	name string,
 ) error {
 	confirmed := true
-	_, err := s.store.UpdatePeer(network, name, nil, nil, nil, &confirmed)
+	update := PeerUpdate{
+		Confirmed: &confirmed,
+	}
+	_, err := s.store.UpdatePeer(network, name, update)
 	if err != nil {
 		return fmt.Errorf("confirm peer %q: %w", name, mapStoreError(err))
 	}

@@ -75,7 +75,7 @@ var serverNetworkAdd = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		req := admin.AddNetworkRequest{
+		req := admin.CreateNetworkRequest{
 			Name:          i.GetOperand("name"),
 			ExternalIP:    i.GetOperand("external-ip"),
 			MainName:      i.GetParameter("main-name"),
@@ -267,7 +267,7 @@ func toUint16Ptr(v *int) *uint16 {
 // printServerNetworkDetail prints the key: value detail view for a single
 // network, as shown by `server network show`.
 func printServerNetworkDetail(
-	n admin.NetworkDTO,
+	n admin.Network,
 ) {
 	fmt.Printf("name: %s\n", n.Name)
 	fmt.Printf("external_ip: %s\n", n.ExternalIP)

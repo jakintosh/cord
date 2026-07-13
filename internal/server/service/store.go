@@ -15,6 +15,10 @@ type Store interface {
 	// Returns ErrNotFound when no matching row exists.
 	GetNetwork(name string) (*NetworkConfig, error)
 
+	// ListNetworks returns all persisted server network configs,
+	// ordered by name ascending.
+	ListNetworks() ([]*NetworkConfig, error)
+
 	// ListNetworkNames returns the names of all server networks,
 	// ordered by name ascending.
 	ListNetworkNames() ([]string, error)
@@ -71,7 +75,7 @@ type Store interface {
 
 	// UpdatePeer applies a partial update to the named peer and
 	// returns the updated record. Nil pointers mean no change.
-	UpdatePeer(network, name string, newName *string, admin *bool, enabled *bool, confirmed *bool) (*Peer, error)
+	UpdatePeer(network, name string, update PeerUpdate) (*Peer, error)
 
 	// CIDR records within a network.
 

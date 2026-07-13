@@ -9,12 +9,12 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
-type AssociationDTO struct {
+type Association struct {
 	Cidr1 string `json:"cidr1"`
 	Cidr2 string `json:"cidr2"`
 }
 
-type AddAssociationRequest struct {
+type CreateAssociationRequest struct {
 	Cidr1 string `json:"cidr1"`
 	Cidr2 string `json:"cidr2"`
 }
@@ -24,29 +24,29 @@ type DeleteAssociationRequest struct {
 	Cidr2 string `json:"cidr2"`
 }
 
-func AssociationDTOFromService(
+func associationFromService(
 	a service.Association,
-) AssociationDTO {
-	return AssociationDTO{
+) Association {
+	return Association{
 		Cidr1: a.Cidr1,
 		Cidr2: a.Cidr2,
 	}
 }
 
-func AssociationDTOsFromService(
+func associationsFromService(
 	assocs []*service.Association,
-) []AssociationDTO {
+) []Association {
 	if assocs == nil {
-		return []AssociationDTO{}
+		return []Association{}
 	}
-	result := make([]AssociationDTO, len(assocs))
+	result := make([]Association, len(assocs))
 	for i, a := range assocs {
-		result[i] = AssociationDTOFromService(*a)
+		result[i] = associationFromService(*a)
 	}
 	return result
 }
 
-func (a *API) handleAssociationList(
+func (a *API) handleListAssociations(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -58,16 +58,16 @@ func (a *API) handleAssociationList(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, AssociationDTOsFromService(assocs))
+	wire.WriteData(w, http.StatusOK, associationsFromService(assocs))
 }
 
-func (a *API) handleAssociationAdd(
+func (a *API) handlePostAssociation(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
 	network := r.PathValue("name")
 
-	var req AddAssociationRequest
+	var req CreateAssociationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		wire.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -81,7 +81,7 @@ func (a *API) handleAssociationAdd(
 	wire.WriteData(w, http.StatusCreated, nil)
 }
 
-func (a *API) handleAssociationDelete(
+func (a *API) handlePostAssociationDelete(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -105,10 +105,10 @@ func (c *Client) ListAssociations(
 	ctx context.Context,
 	network string,
 ) (
-	[]AssociationDTO,
+	[]Association,
 	error,
 ) {
-	var result []AssociationDTO
+	var result []Association
 	return result, c.wire.Get(ctx, "/networks/"+network+"/associations", &result)
 }
 
@@ -118,7 +118,7 @@ func (c *Client) AddAssociation(
 	cidr1 string,
 	cidr2 string,
 ) error {
-	req := AddAssociationRequest{Cidr1: cidr1, Cidr2: cidr2}
+	req := CreateAssociationRequest{Cidr1: cidr1, Cidr2: cidr2}
 	body, err := marshalJSON(req)
 	if err != nil {
 		return err

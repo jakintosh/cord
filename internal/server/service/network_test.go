@@ -308,7 +308,7 @@ func TestDeleteNetwork_CascadesResources(t *testing.T) {
 
 	ip := "10.0.0.5"
 	parsedIP := net.ParseIP(ip)
-	_, err := env.Service.CreateRegistration("testnet", "alice", &parsedIP, false, nil)
+	_, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{IP: &parsedIP})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestReconcile_ObservesOnlyActiveMainPeerEndpoints(t *testing.T) {
 
 			peerKey := mustGenKey(t)
 			peerIP := net.ParseIP("10.0.0.5")
-			if _, err := env.Service.CreateRegistration("testnet", "alice", &peerIP, false, nil); err != nil {
+			if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{IP: &peerIP}); err != nil {
 				t.Fatalf("create registration: %v", err)
 			}
 			tempKey := lastTempKey(t, env.Service, "testnet")

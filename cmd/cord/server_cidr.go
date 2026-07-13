@@ -180,7 +180,7 @@ var serverCidrList = &args.Command{
 
 // printCidrs prints a one-row-per-CIDR summary table.
 func printCidrs(
-	cidrs []admin.CidrDTO,
+	cidrs []admin.Cidr,
 ) {
 	rows := make([][]string, len(cidrs))
 	for idx, c := range cidrs {

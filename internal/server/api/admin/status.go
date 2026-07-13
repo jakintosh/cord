@@ -5,90 +5,57 @@ import (
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
+	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
-type NetworkStatusDTO struct {
-	Name                     string `json:"name"`
-	Enabled                  bool   `json:"enabled"`
-	PeerCount                int    `json:"peer_count"`
-	PendingRegistrationCount int    `json:"pending_registration_count"`
+type NetworkStatus struct {
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+	Running bool   `json:"running"`
 }
 
-type StatusDTO struct {
-	Status   string             `json:"status"`
-	Version  string             `json:"version"`
-	Networks []NetworkStatusDTO `json:"networks"`
+type Status struct {
+	Status   string          `json:"status"`
+	Version  string          `json:"version"`
+	Networks []NetworkStatus `json:"networks"`
 }
 
-// listNetworkStatusDTOs composes per-network status from existing
-// service calls: peer and pending-registration counts alongside the
-// network's enabled flag.
-func (a *API) listNetworkStatusDTOs() (
-	[]NetworkStatusDTO,
-	error,
-) {
-	names, err := a.service.ListNetworks()
-	if err != nil {
-		return nil, err
+func networkStatusFromService(status service.NetworkStatus) NetworkStatus {
+	return NetworkStatus{
+		Name:    status.Name,
+		Enabled: status.Enabled,
+		Running: status.Running,
 	}
-
-	dtos := make([]NetworkStatusDTO, 0, len(names))
-	for _, name := range names {
-		network, err := a.service.GetNetwork(name)
-		if err != nil {
-			continue
-		}
-
-		peers, err := a.service.ListPeers(name)
-		if err != nil {
-			continue
-		}
-
-		regs, err := a.service.ListRegistrations(name)
-		if err != nil {
-			continue
-		}
-		pending := 0
-		for _, reg := range regs {
-			if !reg.Redeemed {
-				pending++
-			}
-		}
-
-		dtos = append(dtos, NetworkStatusDTO{
-			Name:                     network.Name,
-			Enabled:                  network.Enabled,
-			PeerCount:                len(peers),
-			PendingRegistrationCount: pending,
-		})
-	}
-
-	return dtos, nil
 }
 
-func (a *API) handleStatus(
+func (a *API) handleGetStatus(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	dtos, err := a.listNetworkStatusDTOs()
+	status, err := a.service.Status()
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, StatusDTO{
+	networks := make([]NetworkStatus, len(status.Networks))
+	for i, network := range status.Networks {
+		networks[i] = networkStatusFromService(network)
+	}
+
+	wire.WriteData(w, http.StatusOK, Status{
 		Status:   "ok",
 		Version:  a.version,
-		Networks: dtos,
+		Networks: networks,
 	})
 }
 
 func (c *Client) Status(
 	ctx context.Context,
 ) (
-	StatusDTO,
+	Status,
 	error,
 ) {
-	var result StatusDTO
+	var result Status
 	return result, c.wire.Get(ctx, "/status", &result)
 }

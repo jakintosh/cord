@@ -84,7 +84,7 @@ func TestAPIListAssociations_Empty(
 
 	// list associations
 	url := "/networks/testnet/associations"
-	result := wire.TestGet[[]admin.AssociationDTO](env.Router, url)
+	result := wire.TestGet[[]admin.Association](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)
@@ -107,7 +107,7 @@ func TestAPIListAssociations_WithData(
 
 	// list associations
 	url := "/networks/testnet/associations"
-	result := wire.TestGet[[]admin.AssociationDTO](env.Router, url)
+	result := wire.TestGet[[]admin.Association](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)

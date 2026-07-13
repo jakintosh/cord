@@ -36,8 +36,60 @@ func (db *DB) GetNetwork(
 	)
 
 	var nc service.NetworkConfig
+	if err := scanNetworkRow(row, &nc); err != nil {
+		return nil, CheckSqliteErr("get network", err)
+	}
+	return &nc, nil
+}
+
+func (db *DB) ListNetworks() (
+	[]*service.NetworkConfig,
+	error,
+) {
+	rows, err := db.Conn.Query(`
+		SELECT
+			name,
+			private_key,
+			public_key,
+			external_ip,
+			main_name,
+			main_cidr,
+			main_wg_port,
+			main_api_port,
+			invite_name,
+			invite_cidr,
+			invite_wg_port,
+			invite_api_port,
+			enabled,
+			created_at_unix
+		FROM network
+		ORDER BY name ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list networks: %w", err)
+	}
+	defer rows.Close()
+
+	var networks []*service.NetworkConfig
+	for rows.Next() {
+		var nc service.NetworkConfig
+		if err := scanNetworkRow(rows, &nc); err != nil {
+			return nil, fmt.Errorf("scan network: %w", err)
+		}
+		networks = append(networks, &nc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate networks: %w", err)
+	}
+	return networks, nil
+}
+
+func scanNetworkRow(
+	scanner Scanner,
+	nc *service.NetworkConfig,
+) error {
 	var createdUnix int64
-	if err := row.Scan(
+	if err := scanner.Scan(
 		&nc.Name,
 		&nc.PrivateKey,
 		&nc.PublicKey,
@@ -53,11 +105,11 @@ func (db *DB) GetNetwork(
 		&nc.Enabled,
 		&createdUnix,
 	); err != nil {
-		return nil, CheckSqliteErr("get network", err)
+		return err
 	}
 
 	nc.CreatedAt = time.Unix(createdUnix, 0)
-	return &nc, nil
+	return nil
 }
 
 func (db *DB) ListNetworkNames() (

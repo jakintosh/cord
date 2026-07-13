@@ -235,6 +235,17 @@ func TestListNetworkNames(t *testing.T) {
 	if names[0] != "alpha" || names[1] != "beta" || names[2] != "gamma" {
 		t.Fatalf("unexpected order: %v", names)
 	}
+
+	networks, err := db.ListNetworks()
+	if err != nil {
+		t.Fatalf("list networks: %v", err)
+	}
+	if len(networks) != 3 {
+		t.Fatalf("expected 3 networks, got %d", len(networks))
+	}
+	if networks[0].Name != "alpha" || networks[1].Name != "beta" || networks[2].Name != "gamma" {
+		t.Fatalf("unexpected network order: %v, %v, %v", networks[0].Name, networks[1].Name, networks[2].Name)
+	}
 }
 
 func TestDeleteNetwork(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
-type NetworkDTO struct {
+type Network struct {
 	Name          string `json:"name"`
 	ExternalIP    string `json:"external_ip"`
 	MainName      string `json:"main_name"`
@@ -23,7 +23,7 @@ type NetworkDTO struct {
 	Enabled       bool   `json:"enabled"`
 }
 
-type AddNetworkRequest struct {
+type CreateNetworkRequest struct {
 	Name          string  `json:"name"`
 	ExternalIP    string  `json:"external_ip"`
 	MainName      *string `json:"main_name,omitempty"`
@@ -36,10 +36,10 @@ type AddNetworkRequest struct {
 	InviteApiPort *uint16 `json:"invite_api_port,omitempty"`
 }
 
-func NetworkDTOFromService(
+func networkFromService(
 	n service.NetworkConfig,
-) NetworkDTO {
-	return NetworkDTO{
+) Network {
+	return Network{
 		Name:          n.Name,
 		ExternalIP:    n.ExternalIP,
 		MainName:      n.Main.Name,
@@ -54,7 +54,7 @@ func NetworkDTOFromService(
 	}
 }
 
-func (a *API) handleNetworkList(
+func (a *API) handleListNetworks(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -70,7 +70,7 @@ func (a *API) handleNetworkList(
 	wire.WriteData(w, http.StatusOK, names)
 }
 
-func (a *API) handleNetworkShow(
+func (a *API) handleGetNetwork(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -82,14 +82,14 @@ func (a *API) handleNetworkShow(
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, NetworkDTOFromService(*network))
+	wire.WriteData(w, http.StatusOK, networkFromService(*network))
 }
 
-func (a *API) handleNetworkAdd(
+func (a *API) handlePostNetwork(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	var req AddNetworkRequest
+	var req CreateNetworkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		wire.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -126,7 +126,7 @@ func (a *API) handleNetworkAdd(
 		return
 	}
 
-	wire.WriteData(w, http.StatusCreated, NetworkDTOFromService(*network))
+	wire.WriteData(w, http.StatusCreated, networkFromService(*network))
 }
 
 func ptrVal(p *uint16, def uint16) uint16 {
@@ -136,7 +136,7 @@ func ptrVal(p *uint16, def uint16) uint16 {
 	return *p
 }
 
-func (a *API) handleNetworkDelete(
+func (a *API) handleDeleteNetwork(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -150,7 +150,7 @@ func (a *API) handleNetworkDelete(
 	wire.WriteData(w, http.StatusOK, nil)
 }
 
-func (a *API) handleNetworkEnable(
+func (a *API) handlePostNetworkEnable(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -164,7 +164,7 @@ func (a *API) handleNetworkEnable(
 	wire.WriteData(w, http.StatusOK, nil)
 }
 
-func (a *API) handleNetworkDisable(
+func (a *API) handlePostNetworkDisable(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -192,25 +192,25 @@ func (c *Client) ShowNetwork(
 	ctx context.Context,
 	name string,
 ) (
-	NetworkDTO,
+	Network,
 	error,
 ) {
-	var result NetworkDTO
+	var result Network
 	return result, c.wire.Get(ctx, "/networks/"+name, &result)
 }
 
 func (c *Client) AddNetwork(
 	ctx context.Context,
-	req AddNetworkRequest,
+	req CreateNetworkRequest,
 ) (
-	NetworkDTO,
+	Network,
 	error,
 ) {
 	body, err := marshalJSON(req)
 	if err != nil {
-		return NetworkDTO{}, err
+		return Network{}, err
 	}
-	var result NetworkDTO
+	var result Network
 	return result, c.wire.Post(ctx, "/networks", body, &result)
 }
 

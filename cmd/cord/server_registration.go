@@ -169,7 +169,7 @@ var serverRegistrationRevoke = &args.Command{
 
 // printRegistrations prints a one-row-per-registration summary table.
 func printRegistrations(
-	registrations []admin.RegistrationDTO,
+	registrations []admin.Registration,
 ) {
 	rows := make([][]string, len(registrations))
 	for idx, reg := range registrations {

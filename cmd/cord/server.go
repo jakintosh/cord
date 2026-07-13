@@ -99,7 +99,7 @@ var serverStatusCmd = &args.Command{
 // printServerStatus prints the ok/version line followed by a per-network
 // status table.
 func printServerStatus(
-	s admin.StatusDTO,
+	s admin.Status,
 ) {
 	fmt.Printf("server daemon ok (version %s)\n", s.Version)
 
@@ -108,9 +108,8 @@ func printServerStatus(
 		rows[idx] = []string{
 			n.Name,
 			strconv.FormatBool(n.Enabled),
-			strconv.Itoa(n.PeerCount),
-			strconv.Itoa(n.PendingRegistrationCount),
+			strconv.FormatBool(n.Running),
 		}
 	}
-	printTable([]string{"NAME", "ENABLED", "PEERS", "PENDING REGISTRATIONS"}, rows)
+	printTable([]string{"NAME", "ENABLED", "RUNNING"}, rows)
 }

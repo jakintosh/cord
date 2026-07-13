@@ -387,7 +387,7 @@ func TestUpdatePeer_Rename(t *testing.T) {
 	}
 
 	newName := "new-name"
-	peer, err := db.UpdatePeer("testnet", "old-name", &newName, nil, nil, nil)
+	peer, err := db.UpdatePeer("testnet", "old-name", service.PeerUpdate{Name: &newName})
 	if err != nil {
 		t.Fatalf("update peer: %v", err)
 	}
@@ -418,7 +418,7 @@ func TestUpdatePeer_ToggleAdmin(t *testing.T) {
 	}
 
 	adminTrue := true
-	peer, err := db.UpdatePeer("testnet", "toggle-peer", nil, &adminTrue, nil, nil)
+	peer, err := db.UpdatePeer("testnet", "toggle-peer", service.PeerUpdate{Admin: &adminTrue})
 	if err != nil {
 		t.Fatalf("update peer admin: %v", err)
 	}

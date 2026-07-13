@@ -23,7 +23,7 @@ func TestAPICreateNetwork_Success(
 		"main_cidr": "10.0.0.0/16",
 		"main_wg_port": 51820
 	}`
-	result := wire.TestPost[admin.NetworkDTO](env.Router, url, body)
+	result := wire.TestPost[admin.Network](env.Router, url, body)
 
 	// verify result
 	data := result.ExpectStatusOK(t, http.StatusCreated)
@@ -80,7 +80,7 @@ func TestAPICreateNetwork_WithAllFields(
 		"main_api_port": 8080,
 		"invite_api_port": 8080
 	}`
-	result := wire.TestPost[admin.NetworkDTO](env.Router, url, body)
+	result := wire.TestPost[admin.Network](env.Router, url, body)
 
 	// verify result
 	data := result.ExpectStatusOK(t, http.StatusCreated)
@@ -258,7 +258,7 @@ func TestAPIShowNetwork_Success(
 
 	// get network
 	url := "/networks/testnet"
-	result := wire.TestGet[admin.NetworkDTO](env.Router, url)
+	result := wire.TestGet[admin.Network](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)

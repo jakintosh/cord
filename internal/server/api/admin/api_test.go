@@ -32,7 +32,7 @@ func TestAPIRouter_ExposesPeerRoutes(
 	env.SeedNetwork(t)
 
 	// list peers on empty network should return 200
-	result := wire.TestGet[[]admin.PeerDTO](env.Router, "/networks/testnet/peers")
+	result := wire.TestGet[[]admin.Peer](env.Router, "/networks/testnet/peers")
 	result.ExpectOK(t)
 }
 
@@ -44,7 +44,7 @@ func TestAPIRouter_ExposesCidrRoutes(
 	env.SeedNetwork(t)
 
 	// list cidrs on empty network should return 200
-	result := wire.TestGet[[]admin.CidrDTO](env.Router, "/networks/testnet/cidrs")
+	result := wire.TestGet[[]admin.Cidr](env.Router, "/networks/testnet/cidrs")
 	result.ExpectOK(t)
 }
 
@@ -56,7 +56,7 @@ func TestAPIRouter_ExposesAssociationRoutes(
 	env.SeedNetwork(t)
 
 	// list associations on empty network should return 200
-	result := wire.TestGet[[]admin.AssociationDTO](env.Router, "/networks/testnet/associations")
+	result := wire.TestGet[[]admin.Association](env.Router, "/networks/testnet/associations")
 	result.ExpectOK(t)
 }
 
@@ -68,6 +68,6 @@ func TestAPIRouter_ExposesRegistrationRoutes(
 	env.SeedNetwork(t)
 
 	// list registrations on empty network should return 200
-	result := wire.TestGet[[]admin.RegistrationDTO](env.Router, "/networks/testnet/registrations")
+	result := wire.TestGet[[]admin.Registration](env.Router, "/networks/testnet/registrations")
 	result.ExpectOK(t)
 }

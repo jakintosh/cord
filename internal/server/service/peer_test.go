@@ -14,7 +14,7 @@ func TestGetPeer_ViaRedeem(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.50")
-	_, err := env.Service.CreateRegistration("testnet", "carol", &ip, false, nil)
+	_, err := env.Service.CreateRegistration("testnet", "carol", service.RegistrationOptions{IP: &ip})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -71,14 +71,14 @@ func TestListPeers_AfterRedeem(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip1 := net.ParseIP("10.0.0.10")
-	_, err := env.Service.CreateRegistration("testnet", "peer1", &ip1, false, nil)
+	_, err := env.Service.CreateRegistration("testnet", "peer1", service.RegistrationOptions{IP: &ip1})
 	if err != nil {
 		t.Fatalf("create peer1: %v", err)
 	}
 	tempKey1 := lastTempKey(t, env.Service, "testnet")
 
 	ip2 := net.ParseIP("10.0.0.11")
-	_, err = env.Service.CreateRegistration("testnet", "peer2", &ip2, false, nil)
+	_, err = env.Service.CreateRegistration("testnet", "peer2", service.RegistrationOptions{IP: &ip2})
 	if err != nil {
 		t.Fatalf("create peer2: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestRemovePeer_Success(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.20")
-	_, err := env.Service.CreateRegistration("testnet", "removeme", &ip, false, nil)
+	_, err := env.Service.CreateRegistration("testnet", "removeme", service.RegistrationOptions{IP: &ip})
 	if err != nil {
 		t.Fatalf("create reg: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestUpdatePeer_Rename(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.30")
-	_, err := env.Service.CreateRegistration("testnet", "old-name", &ip, false, nil)
+	_, err := env.Service.CreateRegistration("testnet", "old-name", service.RegistrationOptions{IP: &ip})
 	if err != nil {
 		t.Fatalf("create reg: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestUpdatePeer_Rename(t *testing.T) {
 	}
 
 	newName := "new-name"
-	peer, err := env.Service.UpdatePeer("testnet", "old-name", &newName, nil, nil, nil)
+	peer, err := env.Service.UpdatePeer("testnet", "old-name", service.PeerUpdate{Name: &newName})
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestUpdatePeer_ToggleAdmin(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.31")
-	_, err := env.Service.CreateRegistration("testnet", "toggle", &ip, false, nil)
+	_, err := env.Service.CreateRegistration("testnet", "toggle", service.RegistrationOptions{IP: &ip})
 	if err != nil {
 		t.Fatalf("create reg: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestUpdatePeer_ToggleAdmin(t *testing.T) {
 	}
 
 	adminTrue := true
-	peer, err := env.Service.UpdatePeer("testnet", "toggle", nil, &adminTrue, nil, nil)
+	peer, err := env.Service.UpdatePeer("testnet", "toggle", service.PeerUpdate{Admin: &adminTrue})
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestUpdatePeer_NotFound(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	newName := "x"
-	_, err := env.Service.UpdatePeer("testnet", "nonexistent", &newName, nil, nil, nil)
+	_, err := env.Service.UpdatePeer("testnet", "nonexistent", service.PeerUpdate{Name: &newName})
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
@@ -208,7 +208,7 @@ func TestEnablePeer_Success(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.40")
-	_, err := env.Service.CreateRegistration("testnet", "enableme", &ip, false, nil)
+	_, err := env.Service.CreateRegistration("testnet", "enableme", service.RegistrationOptions{IP: &ip})
 	if err != nil {
 		t.Fatalf("create reg: %v", err)
 	}
@@ -219,12 +219,13 @@ func TestEnablePeer_Success(t *testing.T) {
 	}
 
 	disabled := false
-	_, err = env.Service.UpdatePeer("testnet", "enableme", nil, nil, &disabled, nil)
+	_, err = env.Service.UpdatePeer("testnet", "enableme", service.PeerUpdate{Enabled: &disabled})
 	if err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 
-	if err := env.Service.EnablePeer("testnet", "enableme"); err != nil {
+	enabled := true
+	if _, err := env.Service.UpdatePeer("testnet", "enableme", service.PeerUpdate{Enabled: &enabled}); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
@@ -242,7 +243,7 @@ func TestDisablePeer_Success(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.41")
-	_, err := env.Service.CreateRegistration("testnet", "disableme", &ip, false, nil)
+	_, err := env.Service.CreateRegistration("testnet", "disableme", service.RegistrationOptions{IP: &ip})
 	if err != nil {
 		t.Fatalf("create reg: %v", err)
 	}
@@ -252,7 +253,8 @@ func TestDisablePeer_Success(t *testing.T) {
 		t.Fatalf("redeem: %v", err)
 	}
 
-	if err := env.Service.DisablePeer("testnet", "disableme"); err != nil {
+	disabled := false
+	if _, err := env.Service.UpdatePeer("testnet", "disableme", service.PeerUpdate{Enabled: &disabled}); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 
@@ -270,7 +272,7 @@ func TestConfirmPeer_Success(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.50")
-	_, err := env.Service.CreateRegistration("testnet", "confirmme", &ip, false, nil)
+	_, err := env.Service.CreateRegistration("testnet", "confirmme", service.RegistrationOptions{IP: &ip})
 	if err != nil {
 		t.Fatalf("create reg: %v", err)
 	}
@@ -318,7 +320,7 @@ func TestListVisiblePeers_ExcludesSelf(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip1 := net.ParseIP("10.0.0.10")
-	_, err := env.Service.CreateRegistration("testnet", "self", &ip1, false, nil)
+	_, err := env.Service.CreateRegistration("testnet", "self", service.RegistrationOptions{IP: &ip1})
 	if err != nil {
 		t.Fatalf("create self: %v", err)
 	}
@@ -329,7 +331,7 @@ func TestListVisiblePeers_ExcludesSelf(t *testing.T) {
 	}
 
 	ip2 := net.ParseIP("10.0.0.11")
-	_, err = env.Service.CreateRegistration("testnet", "other", &ip2, false, nil)
+	_, err = env.Service.CreateRegistration("testnet", "other", service.RegistrationOptions{IP: &ip2})
 	if err != nil {
 		t.Fatalf("create other: %v", err)
 	}

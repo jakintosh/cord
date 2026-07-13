@@ -121,7 +121,7 @@ func TestAPIListCidrs_Empty(
 
 	// list cidrs
 	url := "/networks/testnet/cidrs"
-	result := wire.TestGet[[]admin.CidrDTO](env.Router, url)
+	result := wire.TestGet[[]admin.Cidr](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)
@@ -140,7 +140,7 @@ func TestAPIListCidrs_WithData(
 
 	// list cidrs
 	url := "/networks/testnet/cidrs"
-	result := wire.TestGet[[]admin.CidrDTO](env.Router, url)
+	result := wire.TestGet[[]admin.Cidr](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)

@@ -143,7 +143,7 @@ var serverAssociationList = &args.Command{
 
 // printAssociations prints a one-row-per-association summary table.
 func printAssociations(
-	associations []admin.AssociationDTO,
+	associations []admin.Association,
 ) {
 	rows := make([][]string, len(associations))
 	for idx, a := range associations {

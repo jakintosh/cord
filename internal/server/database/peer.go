@@ -213,10 +213,7 @@ func (db *DB) InsertPeer(
 func (db *DB) UpdatePeer(
 	network string,
 	name string,
-	newName *string,
-	admin *bool,
-	enabled *bool,
-	confirmed *bool,
+	update service.PeerUpdate,
 ) (
 	*service.Peer,
 	error,
@@ -251,10 +248,10 @@ func (db *DB) UpdatePeer(
 			confirmed`,
 		network,
 		name,
-		newName,
-		validOptBool(admin),
-		validOptBool(enabled),
-		validOptBool(confirmed),
+		update.Name,
+		validOptBool(update.Admin),
+		validOptBool(update.Enabled),
+		validOptBool(update.Confirmed),
 	)
 
 	peer, err := scanPeer(row)

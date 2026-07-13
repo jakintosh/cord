@@ -208,9 +208,6 @@ func (s *Service) UpdateNetwork(
 	name string,
 	opts NetworkOptions,
 ) error {
-	if _, err := s.store.GetNetwork(name); err != nil {
-		return err
-	}
 	if opts.ListenPort == nil {
 		return ErrInvalidInput
 	}

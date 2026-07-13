@@ -25,6 +25,14 @@ type Registration struct {
 	ExpiresAt       time.Time // when the registration expires
 }
 
+// RegistrationOptions controls optional registration settings. Defaults are
+// resolved by the service so transports do not need to duplicate them.
+type RegistrationOptions struct {
+	IP        *net.IP
+	Admin     bool
+	ExpiresIn *time.Duration
+}
+
 // ListRegistrations returns all registrations for the given network
 // (active, expired, and redeemed).
 func (s *Service) ListRegistrations(
@@ -47,9 +55,7 @@ func (s *Service) ListRegistrations(
 func (s *Service) CreateRegistration(
 	networkName string,
 	name string,
-	ip *net.IP,
-	admin bool,
-	expiresIn *time.Duration,
+	options RegistrationOptions,
 ) (
 	*protocol.Invitation,
 	error,
@@ -72,8 +78,8 @@ func (s *Service) CreateRegistration(
 	}
 
 	var peerMainAssignedIP net.IP
-	if ip != nil {
-		peerMainAssignedIP = netaddr.Normalize(*ip)
+	if options.IP != nil {
+		peerMainAssignedIP = netaddr.Normalize(*options.IP)
 		_, mainNet, err := net.ParseCIDR(network.Main.Cidr)
 		if err != nil {
 			return nil, fmt.Errorf("parse main CIDR: %w", err)
@@ -108,8 +114,8 @@ func (s *Service) CreateRegistration(
 	}
 
 	expiry := 24 * time.Hour
-	if expiresIn != nil && *expiresIn != 0 {
-		expiry = *expiresIn
+	if options.ExpiresIn != nil && *options.ExpiresIn != 0 {
+		expiry = *options.ExpiresIn
 	}
 
 	now := s.clock()
@@ -120,7 +126,7 @@ func (s *Service) CreateRegistration(
 		InvitePublicKey: peerTempPubKey,
 		InviteRoute:     tempRoute.String(),
 		MainRoute:       mainRoute.String(),
-		Admin:           admin,
+		Admin:           options.Admin,
 		ExpiresAt:       now.Add(expiry),
 		CreatedAt:       now,
 	}

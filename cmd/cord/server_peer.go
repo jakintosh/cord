@@ -47,17 +47,19 @@ var serverPeerRename = &args.Command{
 			return err
 		}
 
-		if err := client.RenamePeer(
+		updated, err := client.UpdatePeer(
 			i.Context(),
 			network,
 			peer,
-			newName,
-		); err != nil {
+			&newName,
+			nil,
+		)
+		if err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return nil
+			return printJSON(updated)
 		}
 
 		fmt.Printf("peer %q renamed to %q\n", peer, newName)
@@ -87,10 +89,13 @@ var serverPeerEnable = &args.Command{
 			return err
 		}
 
-		if err := client.EnablePeer(
+		enabled := true
+		if _, err := client.UpdatePeer(
 			i.Context(),
 			network,
 			peer,
+			nil,
+			&enabled,
 		); err != nil {
 			return err
 		}
@@ -126,10 +131,13 @@ var serverPeerDisable = &args.Command{
 			return err
 		}
 
-		if err := client.DisablePeer(
+		disabled := false
+		if _, err := client.UpdatePeer(
 			i.Context(),
 			network,
 			peer,
+			nil,
+			&disabled,
 		); err != nil {
 			return err
 		}
@@ -215,7 +223,7 @@ var serverPeerList = &args.Command{
 
 // printServerPeers prints a one-row-per-peer summary table.
 func printServerPeers(
-	peers []admin.PeerDTO,
+	peers []admin.Peer,
 ) {
 	rows := make([][]string, len(peers))
 	for idx, p := range peers {

@@ -5,143 +5,10 @@ import (
 	"testing"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
-
-func TestAPIInviteCreate_Success(
-	t *testing.T,
-) {
-	// setup env and seed network
-	env := testutil.Setup(t)
-	env.SeedNetwork(t)
-
-	// add peer
-	url := "/networks/testnet/registrations"
-	body := `{
-		"name": "alice",
-		"ip": "10.0.0.5",
-		"admin": false
-	}`
-	result := wire.TestPost[protocol.Invitation](env.Router, url, body)
-
-	// verify result — handler returns an Invitation payload
-	result.ExpectStatusOK(t, http.StatusCreated)
-	if result.Data.Network.Name != "testnet" {
-		t.Fatalf("network_name = %q, want testnet", result.Data.Network.Name)
-	}
-	if result.Data.Peer.PrivateKey == "" {
-		t.Fatal("private_key should not be empty")
-	}
-	if result.Data.Peer.Route == "" {
-		t.Fatal("route should not be empty")
-	}
-	if result.Data.Network.PublicKey == "" {
-		t.Fatal("server public_key should not be empty")
-	}
-	if result.Data.Network.Endpoint == "" {
-		t.Fatal("endpoint should not be empty")
-	}
-	if result.Data.Network.ServerRoute == "" {
-		t.Fatal("server_route should not be empty")
-	}
-	if result.Data.Network.APIPort == 0 {
-		t.Fatal("api_port should not be zero")
-	}
-
-	// verify registration was created
-	regs, err := env.Service.ListRegistrations("testnet")
-	if err != nil {
-		t.Fatalf("list registrations: %v", err)
-	}
-	if len(regs) != 1 {
-		t.Fatalf("expected 1 registration, got %d", len(regs))
-	}
-	if regs[0].Name != "alice" {
-		t.Fatalf("registration name = %q, want alice", regs[0].Name)
-	}
-}
-
-func TestAPIInviteCreate_AutoAssignIP(
-	t *testing.T,
-) {
-	// setup env and seed network
-	env := testutil.Setup(t)
-	env.SeedNetwork(t)
-
-	// add peer without explicit IP — should auto-assign
-	url := "/networks/testnet/registrations"
-	body := `{
-		"name": "bob",
-		"admin": false
-	}`
-	result := wire.TestPost[protocol.Invitation](env.Router, url, body)
-
-	// verify result
-	result.ExpectStatusOK(t, http.StatusCreated)
-	if result.Data.Peer.Route == "" {
-		t.Fatal("route should not be empty for auto-assigned IP")
-	}
-}
-
-func TestAPIInviteCreate_InvalidJSON(
-	t *testing.T,
-) {
-	// setup env and seed network
-	env := testutil.Setup(t)
-	env.SeedNetwork(t)
-
-	// post garbage
-	url := "/networks/testnet/registrations"
-	body := `{`
-	result := wire.TestPost[any](env.Router, url, body)
-
-	// verify result
-	result.ExpectStatusError(t, http.StatusBadRequest)
-}
-
-func TestAPIInviteCreate_NetworkNotFound(
-	t *testing.T,
-) {
-	// setup env
-	env := testutil.Setup(t)
-
-	// add peer to nonexistent network
-	url := "/networks/ghost/registrations"
-	body := `{
-		"name": "alice",
-		"ip": "10.0.0.5"
-	}`
-	result := wire.TestPost[any](env.Router, url, body)
-
-	// verify result
-	result.ExpectStatusError(t, http.StatusNotFound)
-}
-
-func TestAPIInviteCreate_DuplicateName(
-	t *testing.T,
-) {
-	// setup env and seed network
-	env := testutil.Setup(t)
-	env.SeedNetwork(t)
-
-	// add first peer
-	url := "/networks/testnet/registrations"
-	body := `{
-		"name": "alice",
-		"ip": "10.0.0.5"
-	}`
-	result := wire.TestPost[protocol.Invitation](env.Router, url, body)
-	result.ExpectStatusOK(t, http.StatusCreated)
-
-	// add duplicate
-	result2 := wire.TestPost[any](env.Router, url, body)
-
-	// verify result — should get conflict
-	result2.ExpectStatusError(t, http.StatusConflict)
-}
 
 func TestAPIListPeers_Empty(
 	t *testing.T,
@@ -152,7 +19,7 @@ func TestAPIListPeers_Empty(
 
 	// list peers — should include the server peer
 	url := "/networks/testnet/peers"
-	result := wire.TestGet[[]admin.PeerDTO](env.Router, url)
+	result := wire.TestGet[[]admin.Peer](env.Router, url)
 
 	// verify result
 	data := result.ExpectOK(t)
@@ -185,7 +52,7 @@ func TestAPIListPeers_WithData(
 
 	// list peers
 	url := "/networks/testnet/peers"
-	result := wire.TestGet[[]admin.PeerDTO](env.Router, url)
+	result := wire.TestGet[[]admin.Peer](env.Router, url)
 
 	// verify result — cord-server + alice
 	data := result.ExpectOK(t)
@@ -232,10 +99,13 @@ func TestAPIRenamePeer_Success(
 	// rename peer
 	url := "/networks/testnet/peers/alice"
 	body := `{"name": "alicia"}`
-	result := wire.TestPatch[any](env.Router, url, body)
+	result := wire.TestPatch[admin.Peer](env.Router, url, body)
 
-	// verify result — status-only mutation, no response body
-	result.ExpectOK(t)
+	// verify result
+	data := result.ExpectOK(t)
+	if data.Name != "alicia" {
+		t.Fatalf("name = %q, want alicia", data.Name)
+	}
 
 	// verify peer was renamed in store
 	_, err := env.Service.GetPeer("testnet", "alicia")
@@ -258,6 +128,90 @@ func TestAPIRenamePeer_NotFound(
 
 	// verify result
 	result.ExpectStatusError(t, http.StatusNotFound)
+}
+
+func TestAPIUpdatePeer_Empty(
+	t *testing.T,
+) {
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+
+	url := "/networks/testnet/peers/cord-server"
+	result := wire.TestPatch[any](env.Router, url, `{}`)
+
+	result.ExpectStatusError(t, http.StatusBadRequest)
+}
+
+func TestAPIEnablePeer_Success(
+	t *testing.T,
+) {
+	// setup env and seed network
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+
+	// seed a disabled peer
+	if err := env.Database.InsertPeer("testnet", &service.Peer{
+		Name:      "alice",
+		PublicKey: "alice-pub-key",
+		Route:     "10.0.0.5/32",
+		Admin:     false,
+		Enabled:   false,
+		Confirmed: false,
+	}); err != nil {
+		t.Fatalf("seed peer: %v", err)
+	}
+
+	// enable peer
+	url := "/networks/testnet/peers/alice"
+	result := wire.TestPatch[admin.Peer](env.Router, url, `{"enabled":true}`)
+
+	// verify result
+	result.ExpectOK(t)
+
+	// verify peer is enabled in store
+	peer, err := env.Service.GetPeer("testnet", "alice")
+	if err != nil {
+		t.Fatalf("get peer: %v", err)
+	}
+	if !peer.Enabled {
+		t.Fatal("expected peer to be enabled in store")
+	}
+}
+
+func TestAPIDisablePeer_Success(
+	t *testing.T,
+) {
+	// setup env and seed network
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+
+	// seed an enabled peer
+	if err := env.Database.InsertPeer("testnet", &service.Peer{
+		Name:      "alice",
+		PublicKey: "alice-pub-key",
+		Route:     "10.0.0.5/32",
+		Admin:     false,
+		Enabled:   true,
+		Confirmed: true,
+	}); err != nil {
+		t.Fatalf("seed peer: %v", err)
+	}
+
+	// disable peer
+	url := "/networks/testnet/peers/alice"
+	result := wire.TestPatch[admin.Peer](env.Router, url, `{"enabled":false}`)
+
+	// verify result
+	result.ExpectOK(t)
+
+	// verify peer is disabled in store
+	peer, err := env.Service.GetPeer("testnet", "alice")
+	if err != nil {
+		t.Fatalf("get peer: %v", err)
+	}
+	if peer.Enabled {
+		t.Fatal("expected peer to be disabled in store")
+	}
 }
 
 func TestAPIDeletePeer_Success(
@@ -306,76 +260,4 @@ func TestAPIDeletePeer_NotFound(
 
 	// verify result
 	result.ExpectStatusError(t, http.StatusNotFound)
-}
-
-func TestAPIEnablePeer_Success(
-	t *testing.T,
-) {
-	// setup env and seed network
-	env := testutil.Setup(t)
-	env.SeedNetwork(t)
-
-	// seed a disabled peer
-	if err := env.Database.InsertPeer("testnet", &service.Peer{
-		Name:      "alice",
-		PublicKey: "alice-pub-key",
-		Route:     "10.0.0.5/32",
-		Admin:     false,
-		Enabled:   false,
-		Confirmed: false,
-	}); err != nil {
-		t.Fatalf("seed peer: %v", err)
-	}
-
-	// enable peer
-	url := "/networks/testnet/peers/alice/enable"
-	result := wire.TestPost[any](env.Router, url, "")
-
-	// verify result — status-only mutation, no response body
-	result.ExpectOK(t)
-
-	// verify peer is enabled in store
-	peer, err := env.Service.GetPeer("testnet", "alice")
-	if err != nil {
-		t.Fatalf("get peer: %v", err)
-	}
-	if !peer.Enabled {
-		t.Fatal("expected peer to be enabled in store")
-	}
-}
-
-func TestAPIDisablePeer_Success(
-	t *testing.T,
-) {
-	// setup env and seed network
-	env := testutil.Setup(t)
-	env.SeedNetwork(t)
-
-	// seed an enabled peer
-	if err := env.Database.InsertPeer("testnet", &service.Peer{
-		Name:      "alice",
-		PublicKey: "alice-pub-key",
-		Route:     "10.0.0.5/32",
-		Admin:     false,
-		Enabled:   true,
-		Confirmed: true,
-	}); err != nil {
-		t.Fatalf("seed peer: %v", err)
-	}
-
-	// disable peer
-	url := "/networks/testnet/peers/alice/disable"
-	result := wire.TestPost[any](env.Router, url, "")
-
-	// verify result — status-only mutation, no response body
-	result.ExpectOK(t)
-
-	// verify peer is disabled in store
-	peer, err := env.Service.GetPeer("testnet", "alice")
-	if err != nil {
-		t.Fatalf("get peer: %v", err)
-	}
-	if peer.Enabled {
-		t.Fatal("expected peer to be disabled in store")
-	}
 }
