@@ -39,6 +39,13 @@ func seedNetworkForCidr(t *testing.T, db *database.DB) {
 			Prefix: 16,
 			Bits:   32,
 		},
+		&service.Cidr{
+			Name:     "cord-server-cidr",
+			Cidr:     "10.0.0.1/32",
+			Prefix:   32,
+			Bits:     32,
+			Terminal: true,
+		},
 		&service.Peer{
 			Name:      "cord-server",
 			Route:     "10.0.0.1/32",
@@ -46,6 +53,7 @@ func seedNetworkForCidr(t *testing.T, db *database.DB) {
 			Admin:     true,
 			Enabled:   true,
 			Confirmed: true,
+			CidrName:  "cord-server-cidr",
 		},
 	); err != nil {
 		t.Fatalf("seed network: %v", err)
@@ -115,8 +123,8 @@ func TestListCidrs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list cidrs: %v", err)
 	}
-	if len(cidrs) != 3 {
-		t.Fatalf("expected 3 cidrs, got %d", len(cidrs))
+	if len(cidrs) != 4 {
+		t.Fatalf("expected 4 cidrs, got %d", len(cidrs))
 	}
 	if cidrs[0].Name != "aaa" || cidrs[1].Name != "ccc" {
 		t.Errorf("unexpected order: %v, %v", cidrs[0].Name, cidrs[1].Name)

@@ -8,12 +8,14 @@ import (
 )
 
 // Cidr is a named CIDR range within a server network. CIDRs partition
-// the address space for routing and association rules.
+// the address space for routing and assignment rules. Terminal CIDRs
+// represent individual peer addresses and are immutable after creation.
 type Cidr struct {
-	Name   string
-	Cidr   string // e.g. "10.42.1.0/24"
-	Prefix int    // prefix length (e.g. 24)
-	Bits   int    // total address bits (32 for IPv4, 128 for IPv6)
+	Name     string
+	Cidr     string // e.g. "10.42.1.0/24"
+	Prefix   int    // prefix length (e.g. 24)
+	Bits     int    // total address bits (32 for IPv4, 128 for IPv6)
+	Terminal bool   // whether this is a terminal (single-peer) CIDR
 }
 
 // GetCidr returns a CIDR by name within the given network.

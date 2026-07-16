@@ -145,6 +145,7 @@ func (db *DB) ListNetworkNames() (
 func (db *DB) BootstrapNetwork(
 	network *service.NetworkConfig,
 	rootCidr *service.Cidr,
+	serverCidr *service.Cidr,
 	serverPeer *service.Peer,
 ) error {
 	_, rootIPNet, err := net.ParseCIDR(rootCidr.Cidr)
@@ -153,6 +154,13 @@ func (db *DB) BootstrapNetwork(
 	}
 	rootOnes, rootBits := rootIPNet.Mask.Size()
 	rootFirst, rootLast := cidrFirstAndLast(rootIPNet)
+
+	_, serverIPNet, err := net.ParseCIDR(serverCidr.Cidr)
+	if err != nil {
+		return fmt.Errorf("parse server cidr: %w", err)
+	}
+	serverOnes, serverBits := serverIPNet.Mask.Size()
+	serverFirst, serverLast := cidrFirstAndLast(serverIPNet)
 
 	tx, err := db.Conn.Begin()
 	if err != nil {
@@ -198,8 +206,8 @@ func (db *DB) BootstrapNetwork(
 	}
 
 	_, err = tx.Exec(`
-		INSERT INTO cidr (network_name, name, cidr, length, prefix, base, last)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+		INSERT INTO cidr (network_name, name, cidr, length, prefix, base, last, terminal)
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)`,
 		network.Name,
 		rootCidr.Name,
 		rootCidr.Cidr,
@@ -212,12 +220,32 @@ func (db *DB) BootstrapNetwork(
 		return CheckSqliteErr("insert root cidr", err)
 	}
 
+	result, err := tx.Exec(`
+		INSERT INTO cidr (network_name, name, cidr, length, prefix, base, last, terminal)
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)`,
+		network.Name,
+		serverCidr.Name,
+		serverCidr.Cidr,
+		serverBits,
+		serverOnes,
+		serverFirst,
+		serverLast,
+	)
+	if err != nil {
+		return CheckSqliteErr("insert server cidr", err)
+	}
+
+	serverCidrID, err := result.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("get server cidr id: %w", err)
+	}
+
 	_, err = tx.Exec(`
 		INSERT INTO peer (
 			network_name,
 			name,
+			cidr_id,
 			public_key,
-			route,
 			admin,
 			enabled,
 			confirmed
@@ -225,8 +253,8 @@ func (db *DB) BootstrapNetwork(
 		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
 		network.Name,
 		serverPeer.Name,
+		serverCidrID,
 		serverPeer.PublicKey,
-		serverPeer.Route,
 		boolToInt(serverPeer.Admin),
 		boolToInt(serverPeer.Enabled),
 		boolToInt(serverPeer.Confirmed),

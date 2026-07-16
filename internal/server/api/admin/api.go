@@ -59,6 +59,14 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("PATCH /networks/{name}/cidrs/{cidr}", a.handlePatchCidr)
 	mux.HandleFunc("DELETE /networks/{name}/cidrs/{cidr}", a.handleDeleteCidr)
 
+	mux.HandleFunc("GET /networks/{name}/groups", a.handleListGroups)
+	mux.HandleFunc("POST /networks/{name}/groups", a.handlePostGroup)
+	mux.HandleFunc("DELETE /networks/{name}/groups/{group}", a.handleDeleteGroup)
+
+	mux.HandleFunc("GET /networks/{name}/assignments", a.handleListAssignments)
+	mux.HandleFunc("POST /networks/{name}/assignments", a.handlePostAssignment)
+	mux.HandleFunc("POST /networks/{name}/assignments/delete", a.handlePostAssignmentDelete)
+
 	mux.HandleFunc("GET /networks/{name}/associations", a.handleListAssociations)
 	mux.HandleFunc("POST /networks/{name}/associations", a.handlePostAssociation)
 	mux.HandleFunc("POST /networks/{name}/associations/delete", a.handlePostAssociationDelete)

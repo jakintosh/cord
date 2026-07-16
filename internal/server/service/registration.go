@@ -11,12 +11,14 @@ import (
 )
 
 // Registration is the server-side stored representation of a pending peer
-// registration. It tracks the temporary key, assigned routes, and redemption state.
+// registration. It tracks the temporary key, assigned routes, CIDR allocation,
+// and redemption state.
 type Registration struct {
 	Name            string
 	InvitePublicKey string    // the temporary public key the peer uses to redeem
 	InviteRoute     string    // the temporary host route on the invite overlay
 	MainRoute       string    // the permanent host route on the main overlay
+	CidrName        string    // the name of the terminal CIDR allocated for this peer
 	Admin           bool      // whether the registration grants admin privileges
 	Redeemed        bool      // whether the registration has been redeemed
 	RedeemedKey     string    // the permanent public key after redemption
@@ -119,6 +121,7 @@ func (s *Service) CreateRegistration(
 		InvitePublicKey: peerTempPubKey,
 		InviteRoute:     tempRoute.String(),
 		MainRoute:       mainRoute.String(),
+		CidrName:        name,
 		Admin:           options.Admin,
 		ExpiresAt:       now.Add(expiry),
 		CreatedAt:       now,

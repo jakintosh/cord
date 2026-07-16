@@ -125,8 +125,8 @@ func TestAPIListCidrs_Empty(
 
 	// verify result
 	data := result.ExpectOK(t)
-	if len(data) != 1 {
-		t.Fatalf("expected 1 cidr (root), got %d", len(data))
+	if len(data) != 2 {
+		t.Fatalf("expected 2 cidrs (root + server), got %d", len(data))
 	}
 }
 
@@ -144,8 +144,8 @@ func TestAPIListCidrs_WithData(
 
 	// verify result
 	data := result.ExpectOK(t)
-	if len(data) != 2 {
-		t.Fatalf("expected 2 cidrs (root + engineering), got %d", len(data))
+	if len(data) != 3 {
+		t.Fatalf("expected 3 cidrs (root + server + engineering), got %d", len(data))
 	}
 	foundEng := false
 	for _, c := range data {
@@ -156,9 +156,6 @@ func TestAPIListCidrs_WithData(
 	}
 	if !foundEng {
 		t.Fatal("engineering cidr not found in list")
-	}
-	if data[0].Cidr != "10.0.1.0/24" {
-		t.Fatalf("cidr = %q, want 10.0.1.0/24", data[0].Cidr)
 	}
 }
 

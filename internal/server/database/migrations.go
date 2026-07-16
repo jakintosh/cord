@@ -41,6 +41,7 @@ CREATE TABLE cidr (
     prefix          INTEGER NOT NULL,
     base            BLOB NOT NULL,
     last            BLOB NOT NULL,
+    terminal        INTEGER DEFAULT 0 NOT NULL,
     FOREIGN KEY (network_name)
         REFERENCES network (name)
         ON DELETE CASCADE,
@@ -49,11 +50,51 @@ CREATE TABLE cidr (
     UNIQUE (network_name, base, prefix)
 );
 
+CREATE TABLE "group" (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    network_name    TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    FOREIGN KEY (network_name)
+        REFERENCES network (name)
+        ON DELETE CASCADE,
+    UNIQUE (network_name, name)
+);
+
+CREATE TABLE assignment (
+    cidr_id         INTEGER NOT NULL,
+    group_id        INTEGER NOT NULL,
+    FOREIGN KEY (cidr_id)
+        REFERENCES cidr (id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (group_id)
+        REFERENCES "group" (id)
+        ON DELETE CASCADE,
+    PRIMARY KEY (cidr_id, group_id)
+);
+
+CREATE TABLE association (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    network_name    TEXT NOT NULL,
+    group1_id       INTEGER NOT NULL,
+    group2_id       INTEGER NOT NULL,
+    CHECK (group1_id <= group2_id),
+    FOREIGN KEY (network_name)
+        REFERENCES network (name)
+        ON DELETE CASCADE,
+    FOREIGN KEY (group1_id)
+        REFERENCES "group" (id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (group2_id)
+        REFERENCES "group" (id)
+        ON DELETE CASCADE,
+    UNIQUE (group1_id, group2_id)
+);
+
 CREATE TABLE peer (
     id              INTEGER PRIMARY KEY,
     network_name    TEXT NOT NULL,
     name            TEXT NOT NULL,
-    route           TEXT NOT NULL,
+    cidr_id         INTEGER NOT NULL,
     public_key      TEXT NOT NULL,
     admin           INTEGER DEFAULT 0 NOT NULL,
     enabled         INTEGER DEFAULT 0 NOT NULL,
@@ -61,25 +102,11 @@ CREATE TABLE peer (
     FOREIGN KEY (network_name)
         REFERENCES network (name)
         ON DELETE CASCADE,
+    FOREIGN KEY (cidr_id)
+        REFERENCES cidr (id),
     UNIQUE (network_name, name),
-    UNIQUE (network_name, route),
+    UNIQUE (network_name, cidr_id),
     UNIQUE (network_name, public_key)
-);
-
-CREATE TABLE association (
-    id              INTEGER PRIMARY KEY,
-    network_name    TEXT NOT NULL,
-    cidr1           INTEGER NOT NULL,
-    cidr2           INTEGER NOT NULL,
-    CHECK (cidr1 < cidr2),
-    FOREIGN KEY (network_name)
-        REFERENCES network (name)
-        ON DELETE CASCADE,
-    FOREIGN KEY (cidr1)
-        REFERENCES cidr (id),
-    FOREIGN KEY (cidr2)
-        REFERENCES cidr (id),
-    UNIQUE (cidr1, cidr2)
 );
 
 CREATE TABLE registration (
@@ -89,6 +116,7 @@ CREATE TABLE registration (
     temp_public_key TEXT NOT NULL,
     temp_route      TEXT NOT NULL,
     final_route     TEXT NOT NULL,
+    cidr_id         INTEGER,
     admin           INTEGER DEFAULT 0 NOT NULL,
     redeemed        INTEGER DEFAULT 0 NOT NULL,
     redeemed_key    TEXT DEFAULT '' NOT NULL,
@@ -98,6 +126,8 @@ CREATE TABLE registration (
     FOREIGN KEY (network_name)
         REFERENCES network (name)
         ON DELETE CASCADE,
+    FOREIGN KEY (cidr_id)
+        REFERENCES cidr (id),
     UNIQUE (network_name, name),
     UNIQUE (network_name, temp_public_key),
     UNIQUE (network_name, temp_route),

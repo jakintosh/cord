@@ -107,8 +107,8 @@ func TestListCidrs_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(cidrs) != 1 {
-		t.Fatalf("expected 1 cidr (root), got %d", len(cidrs))
+	if len(cidrs) != 2 {
+		t.Fatalf("expected 2 cidrs (root + server), got %d", len(cidrs))
 	}
 }
 
@@ -127,11 +127,11 @@ func TestListCidrs_Multiple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(cidrs) != 3 {
-		t.Fatalf("expected 3 cidrs, got %d", len(cidrs))
+	if len(cidrs) != 4 {
+		t.Fatalf("expected 4 cidrs, got %d", len(cidrs))
 	}
-	if cidrs[0].Name != "alpha" || cidrs[1].Name != "beta" || cidrs[2].Name != "testnet" {
-		t.Errorf("unexpected order: %s, %s, %s", cidrs[0].Name, cidrs[1].Name, cidrs[2].Name)
+	if cidrs[0].Name != "alpha" || cidrs[1].Name != "beta" || cidrs[2].Name != "cord-server" || cidrs[3].Name != "testnet" {
+		t.Errorf("unexpected order: %s, %s, %s, %s", cidrs[0].Name, cidrs[1].Name, cidrs[2].Name, cidrs[3].Name)
 	}
 }
 

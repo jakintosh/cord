@@ -9,27 +9,30 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
+func seedGroup(t *testing.T, env *testutil.APIEnv, name string) {
+	t.Helper()
+	if _, err := env.Service.CreateGroup("testnet", name); err != nil {
+		t.Fatalf("seed group %s: %v", name, err)
+	}
+}
+
 func TestAPIAddAssociation_Success(
 	t *testing.T,
 ) {
-	// setup env and seed network + cidrs
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
-	env.SeedCIDR(t, "testnet", "engineering", "10.0.1.0/24")
-	env.SeedCIDR(t, "testnet", "marketing", "10.0.2.0/24")
+	seedGroup(t, env, "engineering")
+	seedGroup(t, env, "marketing")
 
-	// add association
 	url := "/networks/testnet/associations"
 	body := `{
-		"cidr1": "engineering",
-		"cidr2": "marketing"
+		"group1": "engineering",
+		"group2": "marketing"
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 
-	// verify result — status-only mutation, no response body
 	result.ExpectStatusOK(t, http.StatusCreated)
 
-	// verify association exists
 	assocs, err := env.Service.ListAssociations("testnet")
 	if err != nil {
 		t.Fatalf("list associations: %v", err)
@@ -42,51 +45,42 @@ func TestAPIAddAssociation_Success(
 func TestAPIAddAssociation_InvalidJSON(
 	t *testing.T,
 ) {
-	// setup env and seed network
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
 
-	// post garbage
 	url := "/networks/testnet/associations"
 	body := `{`
 	result := wire.TestPost[any](env.Router, url, body)
 
-	// verify result
 	result.ExpectStatusError(t, http.StatusBadRequest)
 }
 
 func TestAPIAddAssociation_SelfAssociate(
 	t *testing.T,
 ) {
-	// setup env and seed network + cidrs
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
-	env.SeedCIDR(t, "testnet", "engineering", "10.0.1.0/24")
+	seedGroup(t, env, "engineering")
 
-	// associate with itself
 	url := "/networks/testnet/associations"
 	body := `{
-		"cidr1": "engineering",
-		"cidr2": "engineering"
+		"group1": "engineering",
+		"group2": "engineering"
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 
-	// verify result
-	result.ExpectStatusError(t, http.StatusBadRequest)
+	result.ExpectStatusOK(t, http.StatusCreated)
 }
 
 func TestAPIListAssociations_Empty(
 	t *testing.T,
 ) {
-	// setup env and seed network
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
 
-	// list associations
 	url := "/networks/testnet/associations"
 	result := wire.TestGet[[]admin.Association](env.Router, url)
 
-	// verify result
 	data := result.ExpectOK(t)
 	if len(data) != 0 {
 		t.Fatalf("expected 0 associations, got %d", len(data))
@@ -96,54 +90,46 @@ func TestAPIListAssociations_Empty(
 func TestAPIListAssociations_WithData(
 	t *testing.T,
 ) {
-	// setup env and seed network + cidrs + association
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
-	env.SeedCIDR(t, "testnet", "engineering", "10.0.1.0/24")
-	env.SeedCIDR(t, "testnet", "marketing", "10.0.2.0/24")
+	seedGroup(t, env, "engineering")
+	seedGroup(t, env, "marketing")
 	if err := env.Service.CreateAssociation("testnet", "engineering", "marketing"); err != nil {
 		t.Fatalf("seed association: %v", err)
 	}
 
-	// list associations
 	url := "/networks/testnet/associations"
 	result := wire.TestGet[[]admin.Association](env.Router, url)
 
-	// verify result
 	data := result.ExpectOK(t)
 	if len(data) != 1 {
 		t.Fatalf("expected 1 association, got %d", len(data))
 	}
-	// stored normalized so cidr1 < cidr2
-	if data[0].Cidr1 != "engineering" || data[0].Cidr2 != "marketing" {
-		t.Fatalf("association = %q/%q, want engineering/marketing", data[0].Cidr1, data[0].Cidr2)
+	if data[0].Group1 != "engineering" || data[0].Group2 != "marketing" {
+		t.Fatalf("association = %q/%q, want engineering/marketing", data[0].Group1, data[0].Group2)
 	}
 }
 
 func TestAPIDeleteAssociation_Success(
 	t *testing.T,
 ) {
-	// setup env and seed network + cidrs + association
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
-	env.SeedCIDR(t, "testnet", "engineering", "10.0.1.0/24")
-	env.SeedCIDR(t, "testnet", "marketing", "10.0.2.0/24")
+	seedGroup(t, env, "engineering")
+	seedGroup(t, env, "marketing")
 	if err := env.Service.CreateAssociation("testnet", "engineering", "marketing"); err != nil {
 		t.Fatalf("seed association: %v", err)
 	}
 
-	// delete association
 	url := "/networks/testnet/associations/delete"
 	body := `{
-		"cidr1": "engineering",
-		"cidr2": "marketing"
+		"group1": "engineering",
+		"group2": "marketing"
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 
-	// verify result — status-only mutation, no response body
 	result.ExpectOK(t)
 
-	// verify association is gone
 	assocs, err := env.Service.ListAssociations("testnet")
 	if err != nil {
 		t.Fatalf("list associations: %v", err)

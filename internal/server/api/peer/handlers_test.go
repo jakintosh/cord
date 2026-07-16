@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
@@ -87,16 +86,7 @@ func TestHandleConfirmPeer_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Database.InsertPeer("testnet", &service.Peer{
-		Name:      "alice",
-		PublicKey: "alice-pub-key",
-		Route:     "10.0.0.5/32",
-		Admin:     false,
-		Enabled:   true,
-		Confirmed: false,
-	}); err != nil {
-		t.Fatalf("seed provisional peer: %v", err)
-	}
+	testutil.SeedPeerDB(t, env.Database, "testnet", "alice", "10.0.0.5/32", "alice-pub-key", false, true, false)
 
 	api := New(env.Service, "testnet", nil)
 
@@ -125,24 +115,13 @@ func TestHandleConfirmPeer_IdentityFails(t *testing.T) {
 	}
 }
 
-// --- Test helpers ---
-
 func setupPeerTest(t *testing.T) (*testutil.ServiceEnv, *API) {
 	t.Helper()
 
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Database.InsertPeer("testnet", &service.Peer{
-		Name:      "alice",
-		PublicKey: "alice-pub-key",
-		Route:     "10.0.0.5/32",
-		Admin:     false,
-		Enabled:   true,
-		Confirmed: true,
-	}); err != nil {
-		t.Fatalf("seed peer: %v", err)
-	}
+	testutil.SeedPeerDB(t, env.Database, "testnet", "alice", "10.0.0.5/32", "alice-pub-key", false, true, true)
 
 	api := New(env.Service, "testnet", nil)
 

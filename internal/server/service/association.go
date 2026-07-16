@@ -2,15 +2,16 @@ package service
 
 import "fmt"
 
-// Association declares peer visibility between two CIDRs. Peers within
-// cidr1 can see peers within cidr2 and vice versa. Associations are
-// symmetric and stored normalized (cidr1 < cidr2).
+// Association declares peer visibility between two groups. Peers whose
+// effective groups include Group1 can see peers whose effective groups
+// include Group2 and vice versa. Associations are symmetric and stored
+// normalized (group1 < group2).
 type Association struct {
-	Cidr1 string
-	Cidr2 string
+	Group1 string
+	Group2 string
 }
 
-// ListAssociations returns all associations in the given network.
+// ListAssociations returns all group associations in the given network.
 func (s *Service) ListAssociations(
 	network string,
 ) (
@@ -24,29 +25,25 @@ func (s *Service) ListAssociations(
 	return assocs, nil
 }
 
-// CreateAssociation creates an association between two CIDRs. After the
-// next reconciliation, peers in each CIDR become visible to peers in
-// the other.
+// CreateAssociation creates a group-level association. After the next
+// reconciliation, peers in each associated group become visible to
+// peers in the other.
 func (s *Service) CreateAssociation(
 	network string,
-	cidr1 string,
-	cidr2 string,
+	group1 string,
+	group2 string,
 ) error {
 	if network == "" {
 		return fmt.Errorf("%w: network name required", ErrInvalidInput)
 	}
 
-	if cidr1 == "" || cidr2 == "" {
-		return fmt.Errorf("%w: CIDR names required", ErrInvalidInput)
-	}
-
-	if cidr1 == cidr2 {
-		return fmt.Errorf("%w: cannot associate a CIDR with itself", ErrInvalidInput)
+	if group1 == "" || group2 == "" {
+		return fmt.Errorf("%w: group names required", ErrInvalidInput)
 	}
 
 	a := &Association{
-		Cidr1: cidr1,
-		Cidr2: cidr2,
+		Group1: group1,
+		Group2: group2,
 	}
 
 	if err := s.store.InsertAssociation(network, a); err != nil {
@@ -56,15 +53,15 @@ func (s *Service) CreateAssociation(
 	return nil
 }
 
-// DeleteAssociation deletes the association between two CIDRs. After
-// the next reconciliation, peers in each CIDR will no longer see
+// DeleteAssociation deletes the association between two groups. After
+// the next reconciliation, peers in each group will no longer see
 // peers in the other (unless another association connects them).
 func (s *Service) DeleteAssociation(
 	network string,
-	cidr1 string,
-	cidr2 string,
+	group1 string,
+	group2 string,
 ) error {
-	if err := s.store.DeleteAssociation(network, cidr1, cidr2); err != nil {
+	if err := s.store.DeleteAssociation(network, group1, group2); err != nil {
 		return fmt.Errorf("delete association: %w", mapStoreError(err))
 	}
 	return nil

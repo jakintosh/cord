@@ -39,9 +39,16 @@ func seedNetworkForAssoc(t *testing.T, db *database.DB) {
 			Prefix: 16,
 			Bits:   32,
 		},
+		&service.Cidr{
+			Name:     "cord-server-cidr",
+			Cidr:     "10.0.0.1/32",
+			Prefix:   32,
+			Bits:     32,
+			Terminal: true,
+		},
 		&service.Peer{
 			Name:      "cord-server",
-			Route:     "10.0.0.1/32",
+			CidrName:  "cord-server-cidr",
 			PublicKey: "pub",
 			Admin:     true,
 			Enabled:   true,
@@ -59,6 +66,11 @@ func seedNetworkForAssoc(t *testing.T, db *database.DB) {
 			t.Fatalf("seed cidr %s: %v", c.Name, err)
 		}
 	}
+	for _, g := range []string{"group-a", "group-b", "group-c"} {
+		if _, err := db.InsertGroup("assocnet", g); err != nil {
+			t.Fatalf("seed group %s: %v", g, err)
+		}
+	}
 }
 
 func TestInsertAndListAssociation(t *testing.T) {
@@ -66,8 +78,8 @@ func TestInsertAndListAssociation(t *testing.T) {
 	seedNetworkForAssoc(t, db)
 
 	if err := db.InsertAssociation("assocnet", &service.Association{
-		Cidr1: "subnet-a",
-		Cidr2: "subnet-b",
+		Group1: "group-a",
+		Group2: "group-b",
 	}); err != nil {
 		t.Fatalf("insert association: %v", err)
 	}
@@ -79,7 +91,7 @@ func TestInsertAndListAssociation(t *testing.T) {
 	if len(assocs) != 1 {
 		t.Fatalf("expected 1 association, got %d", len(assocs))
 	}
-	if assocs[0].Cidr1 != "subnet-a" || assocs[0].Cidr2 != "subnet-b" {
+	if assocs[0].Group1 != "group-a" || assocs[0].Group2 != "group-b" {
 		t.Errorf("unexpected association: %+v", assocs[0])
 	}
 }
@@ -89,8 +101,8 @@ func TestInsertAssociation_ReversedOrderNormalized(t *testing.T) {
 	seedNetworkForAssoc(t, db)
 
 	if err := db.InsertAssociation("assocnet", &service.Association{
-		Cidr1: "subnet-b",
-		Cidr2: "subnet-a",
+		Group1: "group-b",
+		Group2: "group-a",
 	}); err != nil {
 		t.Fatalf("insert association: %v", err)
 	}
@@ -102,8 +114,8 @@ func TestInsertAssociation_ReversedOrderNormalized(t *testing.T) {
 	if len(assocs) != 1 {
 		t.Fatalf("expected 1 association, got %d", len(assocs))
 	}
-	if assocs[0].Cidr1 != "subnet-a" || assocs[0].Cidr2 != "subnet-b" {
-		t.Errorf("expected (subnet-a, subnet-b), got (%s, %s)", assocs[0].Cidr1, assocs[0].Cidr2)
+	if assocs[0].Group1 != "group-a" || assocs[0].Group2 != "group-b" {
+		t.Errorf("expected (group-a, group-b), got (%s, %s)", assocs[0].Group1, assocs[0].Group2)
 	}
 }
 
@@ -111,30 +123,30 @@ func TestInsertAssociation_Duplicate(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
-	a := &service.Association{Cidr1: "subnet-a", Cidr2: "subnet-b"}
+	a := &service.Association{Group1: "group-a", Group2: "group-b"}
 	if err := db.InsertAssociation("assocnet", a); err != nil {
 		t.Fatalf("first insert: %v", err)
 	}
 
 	err := db.InsertAssociation("assocnet", &service.Association{
-		Cidr1: "subnet-b",
-		Cidr2: "subnet-a",
+		Group1: "group-b",
+		Group2: "group-a",
 	})
 	if err == nil {
 		t.Fatal("expected error for duplicate association")
 	}
 }
 
-func TestInsertAssociation_UnknownCidr(t *testing.T) {
+func TestInsertAssociation_UnknownGroup(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
 	err := db.InsertAssociation("assocnet", &service.Association{
-		Cidr1: "subnet-a",
-		Cidr2: "ghost",
+		Group1: "group-a",
+		Group2: "ghost",
 	})
 	if err == nil {
-		t.Fatal("expected error for unknown cidr")
+		t.Fatal("expected error for unknown group")
 	}
 }
 
@@ -143,13 +155,13 @@ func TestDeleteAssociation(t *testing.T) {
 	seedNetworkForAssoc(t, db)
 
 	if err := db.InsertAssociation("assocnet", &service.Association{
-		Cidr1: "subnet-a",
-		Cidr2: "subnet-b",
+		Group1: "group-a",
+		Group2: "group-b",
 	}); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 
-	if err := db.DeleteAssociation("assocnet", "subnet-a", "subnet-b"); err != nil {
+	if err := db.DeleteAssociation("assocnet", "group-a", "group-b"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
@@ -167,13 +179,13 @@ func TestDeleteAssociation_ReversedOrder(t *testing.T) {
 	seedNetworkForAssoc(t, db)
 
 	if err := db.InsertAssociation("assocnet", &service.Association{
-		Cidr1: "subnet-a",
-		Cidr2: "subnet-b",
+		Group1: "group-a",
+		Group2: "group-b",
 	}); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 
-	if err := db.DeleteAssociation("assocnet", "subnet-b", "subnet-a"); err != nil {
+	if err := db.DeleteAssociation("assocnet", "group-b", "group-a"); err != nil {
 		t.Fatalf("delete reversed: %v", err)
 	}
 
@@ -191,13 +203,13 @@ func TestListMultipleAssociations(t *testing.T) {
 	seedNetworkForAssoc(t, db)
 
 	for _, pair := range [][2]string{
-		{"subnet-a", "subnet-b"},
-		{"subnet-a", "subnet-c"},
-		{"subnet-b", "subnet-c"},
+		{"group-a", "group-b"},
+		{"group-a", "group-c"},
+		{"group-b", "group-c"},
 	} {
 		if err := db.InsertAssociation("assocnet", &service.Association{
-			Cidr1: pair[0],
-			Cidr2: pair[1],
+			Group1: pair[0],
+			Group2: pair[1],
 		}); err != nil {
 			t.Fatalf("insert %v-%v: %v", pair[0], pair[1], err)
 		}
@@ -216,25 +228,25 @@ func TestDeleteAssociation_NotFound(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
-	err := db.DeleteAssociation("assocnet", "subnet-a", "subnet-b")
+	err := db.DeleteAssociation("assocnet", "group-a", "group-b")
 	if err != nil {
 		t.Fatalf("delete nonexistent should not error: %v", err)
 	}
 }
 
-func TestAssociation_CascadeOnCidrDelete(t *testing.T) {
+func TestAssociation_CascadeOnGroupDelete(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
 	if err := db.InsertAssociation("assocnet", &service.Association{
-		Cidr1: "subnet-a",
-		Cidr2: "subnet-b",
+		Group1: "group-a",
+		Group2: "group-b",
 	}); err != nil {
 		t.Fatalf("insert association: %v", err)
 	}
 
-	if err := db.DeleteCidr("assocnet", "subnet-a"); err != nil {
-		t.Fatalf("delete cidr: %v", err)
+	if err := db.DeleteGroup("assocnet", "group-a"); err != nil {
+		t.Fatalf("delete group: %v", err)
 	}
 
 	assocs, err := db.ListAssociations("assocnet")

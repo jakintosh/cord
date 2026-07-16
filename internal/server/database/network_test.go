@@ -9,6 +9,27 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
+func serverCidr() *service.Cidr {
+	return &service.Cidr{
+		Name:     "cord-server-cidr",
+		Cidr:     "10.0.0.1/32",
+		Prefix:   32,
+		Bits:     32,
+		Terminal: true,
+	}
+}
+
+func serverPeer(pubKey string) *service.Peer {
+	return &service.Peer{
+		Name:      "cord-server",
+		CidrName:  "cord-server-cidr",
+		PublicKey: pubKey,
+		Admin:     true,
+		Enabled:   true,
+		Confirmed: true,
+	}
+}
+
 func TestGetNetwork_NotFound(t *testing.T) {
 	db := testutil.SetupDB(t)
 
@@ -50,14 +71,8 @@ func TestInsertAndGetNetwork(t *testing.T) {
 			Prefix: 16,
 			Bits:   32,
 		},
-		&service.Peer{
-			Name:      "cord-server",
-			Route:     "10.0.0.1/32",
-			PublicKey: "pub-key-123",
-			Admin:     true,
-			Enabled:   true,
-			Confirmed: true,
-		},
+		serverCidr(),
+		serverPeer("pub-key-123"),
 	); err != nil {
 		t.Fatalf("insert network: %v", err)
 	}
@@ -133,14 +148,8 @@ func TestInsertNetwork_Duplicate(t *testing.T) {
 			Prefix: 16,
 			Bits:   32,
 		},
-		&service.Peer{
-			Name:      "cord-server",
-			Route:     "10.0.0.1/32",
-			PublicKey: "pub-a",
-			Admin:     true,
-			Enabled:   true,
-			Confirmed: true,
-		},
+		serverCidr(),
+		serverPeer("pub-a"),
 	); err != nil {
 		t.Fatalf("first insert: %v", err)
 	}
@@ -153,14 +162,8 @@ func TestInsertNetwork_Duplicate(t *testing.T) {
 			Prefix: 16,
 			Bits:   32,
 		},
-		&service.Peer{
-			Name:      "cord-server",
-			Route:     "10.0.0.1/32",
-			PublicKey: "pub-a",
-			Admin:     true,
-			Enabled:   true,
-			Confirmed: true,
-		},
+		serverCidr(),
+		serverPeer("pub-a"),
 	)
 	if err == nil {
 		t.Fatal("expected error for duplicate network")
@@ -207,14 +210,8 @@ func TestListNetworkNames(t *testing.T) {
 				Prefix: 16,
 				Bits:   32,
 			},
-			&service.Peer{
-				Name:      "cord-server",
-				Route:     "10.0.0.1/32",
-				PublicKey: "pub-" + name,
-				Admin:     true,
-				Enabled:   true,
-				Confirmed: true,
-			},
+			serverCidr(),
+			serverPeer("pub-"+name),
 		)
 		if err != nil {
 			t.Fatalf("insert %s: %v", name, err)
@@ -278,14 +275,8 @@ func TestDeleteNetwork(t *testing.T) {
 			Prefix: 16,
 			Bits:   32,
 		},
-		&service.Peer{
-			Name:      "cord-server",
-			Route:     "10.0.0.1/32",
-			PublicKey: "pub",
-			Admin:     true,
-			Enabled:   true,
-			Confirmed: true,
-		},
+		serverCidr(),
+		serverPeer("pub"),
 	); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
@@ -339,37 +330,13 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 			Prefix: 16,
 			Bits:   32,
 		},
-		&service.Peer{
-			Name:      "cord-server",
-			Route:     "10.0.0.1/32",
-			PublicKey: "pub",
-			Admin:     true,
-			Enabled:   true,
-			Confirmed: true,
-		},
+		serverCidr(),
+		serverPeer("pub"),
 	); err != nil {
 		t.Fatalf("insert network: %v", err)
 	}
 
-	if err := db.InsertCidr("cascadenet", &service.Cidr{
-		Name:   "subnet-1",
-		Cidr:   "10.0.1.0/24",
-		Prefix: 24,
-		Bits:   32,
-	}); err != nil {
-		t.Fatalf("insert cidr: %v", err)
-	}
-
-	if err := db.InsertPeer("cascadenet", &service.Peer{
-		Name:      "peer-1",
-		PublicKey: "peer-key-1",
-		Route:     "10.0.1.5/32",
-		Admin:     false,
-		Enabled:   true,
-		Confirmed: true,
-	}); err != nil {
-		t.Fatalf("insert peer: %v", err)
-	}
+	testutil.SeedPeerDB(t, db, "cascadenet", "peer-1", "10.0.1.5/32", "peer-key-1", false, true, true)
 
 	if err := db.DeleteNetwork("cascadenet"); err != nil {
 		t.Fatalf("delete network: %v", err)
@@ -424,6 +391,8 @@ func TestOpenDatabase_TablesExist(t *testing.T) {
 		"network",
 		"cidr",
 		"peer",
+		"group",
+		"assignment",
 		"association",
 		"registration",
 		"endpoint",

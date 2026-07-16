@@ -341,22 +341,29 @@ func TestListVisiblePeers_ExcludesSelf(t *testing.T) {
 		t.Fatalf("redeem other: %v", err)
 	}
 
+	_, err = env.Service.CreateGroup("testnet", "test-group")
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if err := env.Service.AssignGroup("testnet", "self", "test-group"); err != nil {
+		t.Fatalf("assign self: %v", err)
+	}
+	if err := env.Service.AssignGroup("testnet", "other", "test-group"); err != nil {
+		t.Fatalf("assign other: %v", err)
+	}
+	if err := env.Service.CreateAssociation("testnet", "test-group", "test-group"); err != nil {
+		t.Fatalf("create association: %v", err)
+	}
+
 	visible, err := env.Service.ListVisiblePeers("testnet", "self")
 	if err != nil {
 		t.Fatalf("list visible: %v", err)
 	}
-	if len(visible) != 2 {
-		t.Fatalf("expected 2 visible peers (cord-server + other), got %d", len(visible))
+	if len(visible) != 1 {
+		t.Fatalf("expected 1 visible peer (other), got %d", len(visible))
 	}
-	foundOther := false
-	for _, p := range visible {
-		if p.Name == "other" {
-			foundOther = true
-			break
-		}
-	}
-	if !foundOther {
-		t.Errorf("expected 'other' in visible peers, got %+v", visible)
+	if visible[0].Name != "other" {
+		t.Errorf("expected 'other', got %s", visible[0].Name)
 	}
 }
 

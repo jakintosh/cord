@@ -201,8 +201,16 @@ func (s *Service) CreateNetwork(
 
 	serverIP := netaddr.FirstAssignable(mainNet)
 	serverRoute := netaddr.HostRoute(serverIP)
+	serverCidr := &Cidr{
+		Name:     "cord-server",
+		Cidr:     serverRoute.String(),
+		Prefix:   netaddr.TerminalPrefix(serverIP),
+		Bits:     bits,
+		Terminal: true,
+	}
 	serverPeer := &Peer{
 		Name:      "cord-server",
+		CidrName:  serverCidr.Name,
 		Route:     serverRoute.String(),
 		PublicKey: pubKey,
 		Admin:     true,
@@ -210,7 +218,7 @@ func (s *Service) CreateNetwork(
 		Confirmed: true,
 	}
 
-	if err := s.store.BootstrapNetwork(nc, rootCidr, serverPeer); err != nil {
+	if err := s.store.BootstrapNetwork(nc, rootCidr, serverCidr, serverPeer); err != nil {
 		return nil, fmt.Errorf("bootstrap network: %w", mapStoreError(err))
 	}
 

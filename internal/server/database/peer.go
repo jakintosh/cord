@@ -18,24 +18,22 @@ func (db *DB) GetPeer(
 ) {
 	row := db.Conn.QueryRow(`
 		SELECT
-			name,
-			public_key,
-			route,
-			admin,
-			enabled,
-			confirmed
-		FROM peer
-		WHERE network_name = ?1
-			AND name = ?2`,
+			p.name,
+			p.public_key,
+			c.name,
+			c.cidr,
+			p.admin,
+			p.enabled,
+			p.confirmed
+		FROM peer p
+		JOIN cidr c ON c.id = p.cidr_id
+		WHERE p.network_name = ?1
+			AND p.name = ?2`,
 		network,
 		name,
 	)
 
-	peer, err := scanPeer(row)
-	if err != nil {
-		return nil, err
-	}
-	return peer, nil
+	return scanPeer(row)
 }
 
 func (db *DB) GetPeerByIP(
@@ -48,26 +46,24 @@ func (db *DB) GetPeerByIP(
 	route := netaddr.HostRoute(netaddr.Normalize(ip))
 	row := db.Conn.QueryRow(`
 		SELECT
-			name,
-			public_key,
-			route,
-			admin,
-			enabled,
-			confirmed
-		FROM peer
-		WHERE network_name = ?1
-			AND route = ?2
-			AND confirmed = 1
-			AND enabled = 1`,
+			p.name,
+			p.public_key,
+			c.name,
+			c.cidr,
+			p.admin,
+			p.enabled,
+			p.confirmed
+		FROM peer p
+		JOIN cidr c ON c.id = p.cidr_id
+		WHERE p.network_name = ?1
+			AND c.cidr = ?2
+			AND p.confirmed = 1
+			AND p.enabled = 1`,
 		network,
 		route.String(),
 	)
 
-	peer, err := scanPeer(row)
-	if err != nil {
-		return nil, err
-	}
-	return peer, nil
+	return scanPeer(row)
 }
 
 func (db *DB) GetProvisionalPeerByIP(
@@ -80,26 +76,24 @@ func (db *DB) GetProvisionalPeerByIP(
 	route := netaddr.HostRoute(netaddr.Normalize(ip))
 	row := db.Conn.QueryRow(`
 		SELECT
-			name,
-			public_key,
-			route,
-			admin,
-			enabled,
-			confirmed
-		FROM peer
-		WHERE network_name = ?1
-			AND route = ?2
-			AND confirmed = 0
-			AND enabled = 1`,
+			p.name,
+			p.public_key,
+			c.name,
+			c.cidr,
+			p.admin,
+			p.enabled,
+			p.confirmed
+		FROM peer p
+		JOIN cidr c ON c.id = p.cidr_id
+		WHERE p.network_name = ?1
+			AND c.cidr = ?2
+			AND p.confirmed = 0
+			AND p.enabled = 1`,
 		network,
 		route.String(),
 	)
 
-	peer, err := scanPeer(row)
-	if err != nil {
-		return nil, err
-	}
-	return peer, nil
+	return scanPeer(row)
 }
 
 func (db *DB) GetPeerByKey(
@@ -111,24 +105,22 @@ func (db *DB) GetPeerByKey(
 ) {
 	row := db.Conn.QueryRow(`
 		SELECT
-			name,
-			public_key,
-			route,
-			admin,
-			enabled,
-			confirmed
-		FROM peer
-		WHERE network_name = ?1
-			AND public_key = ?2`,
+			p.name,
+			p.public_key,
+			c.name,
+			c.cidr,
+			p.admin,
+			p.enabled,
+			p.confirmed
+		FROM peer p
+		JOIN cidr c ON c.id = p.cidr_id
+		WHERE p.network_name = ?1
+			AND p.public_key = ?2`,
 		network,
 		pubKey,
 	)
 
-	peer, err := scanPeer(row)
-	if err != nil {
-		return nil, err
-	}
-	return peer, nil
+	return scanPeer(row)
 }
 
 func (db *DB) ListPeers(
@@ -139,15 +131,17 @@ func (db *DB) ListPeers(
 ) {
 	rows, err := db.Conn.Query(`
 		SELECT
-			name,
-			public_key,
-			route,
-			admin,
-			enabled,
-			confirmed
-		FROM peer
-		WHERE network_name = ?1
-		ORDER BY name ASC`,
+			p.name,
+			p.public_key,
+			c.name,
+			c.cidr,
+			p.admin,
+			p.enabled,
+			p.confirmed
+		FROM peer p
+		JOIN cidr c ON c.id = p.cidr_id
+		WHERE p.network_name = ?1
+		ORDER BY p.name ASC`,
 		network,
 	)
 	if err != nil {
@@ -175,25 +169,23 @@ func (db *DB) InsertPeer(
 	network string,
 	peer *service.Peer,
 ) error {
-	_, cidr, err := net.ParseCIDR(peer.Route)
+	var cidrID int64
+	err := db.Conn.QueryRow(`
+		SELECT id FROM cidr
+		WHERE network_name = ?1 AND name = ?2`,
+		network,
+		peer.CidrName,
+	).Scan(&cidrID)
 	if err != nil {
-		return fmt.Errorf("insert peer %q: parse route: %w", peer.Name, err)
-	}
-
-	ones, bits := cidr.Mask.Size()
-	if ones != bits {
-		return fmt.Errorf(
-			"%w: peer route %q must be a terminal prefix (/%d)",
-			service.ErrInvalidInput, peer.Route, bits,
-		)
+		return CheckSqliteErr("lookup cidr for peer", err)
 	}
 
 	_, err = db.Conn.Exec(`
 		INSERT INTO peer (
 			network_name,
 			name,
+			cidr_id,
 			public_key,
-			route,
 			admin,
 			enabled,
 			confirmed
@@ -201,8 +193,8 @@ func (db *DB) InsertPeer(
 		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
 		network,
 		peer.Name,
+		cidrID,
 		peer.PublicKey,
-		peer.Route,
 		boolToInt(peer.Admin),
 		boolToInt(peer.Enabled),
 		boolToInt(peer.Confirmed),
@@ -242,7 +234,7 @@ func (db *DB) UpdatePeer(
 		RETURNING
 			name,
 			public_key,
-			route,
+			cidr_id,
 			admin,
 			enabled,
 			confirmed`,
@@ -254,11 +246,36 @@ func (db *DB) UpdatePeer(
 		validOptBool(update.Confirmed),
 	)
 
-	peer, err := scanPeer(row)
-	if err != nil {
-		return nil, err
+	var peerName string
+	var pubKey string
+	var cidrID int64
+	var admin int64
+	var enabled int64
+	var confirmed int64
+
+	if err := row.Scan(&peerName, &pubKey, &cidrID, &admin, &enabled, &confirmed); err != nil {
+		return nil, CheckSqliteErr("update peer", err)
 	}
-	return peer, nil
+
+	var cidrName string
+	var cidrStr string
+	err := db.Conn.QueryRow(`
+		SELECT name, cidr FROM cidr WHERE id = ?1`,
+		cidrID,
+	).Scan(&cidrName, &cidrStr)
+	if err != nil {
+		return nil, fmt.Errorf("lookup cidr after update: %w", err)
+	}
+
+	return &service.Peer{
+		Name:      peerName,
+		PublicKey: pubKey,
+		CidrName:  cidrName,
+		Route:     cidrStr,
+		Admin:     admin != 0,
+		Enabled:   enabled != 0,
+		Confirmed: confirmed != 0,
+	}, nil
 }
 
 func (db *DB) DeletePeer(
@@ -273,8 +290,8 @@ func (db *DB) DeletePeer(
 
 	if _, err := tx.Exec(`
 		DELETE FROM registration
-		WHERE final_route IN (
-			SELECT route FROM peer
+		WHERE cidr_id IN (
+			SELECT cidr_id FROM peer
 			WHERE network_name = ?1 AND name = ?2
 		)`,
 		network,
@@ -339,16 +356,18 @@ func scanPeer(
 	error,
 ) {
 	var name string
-	var publicKey string
-	var route string
+	var pubKey string
+	var cidrName string
+	var cidrStr string
 	var admin int64
 	var enabled int64
 	var confirmed int64
 
 	if err := s.Scan(
 		&name,
-		&publicKey,
-		&route,
+		&pubKey,
+		&cidrName,
+		&cidrStr,
 		&admin,
 		&enabled,
 		&confirmed,
@@ -361,8 +380,9 @@ func scanPeer(
 
 	return &service.Peer{
 		Name:      name,
-		PublicKey: publicKey,
-		Route:     route,
+		PublicKey: pubKey,
+		CidrName:  cidrName,
+		Route:     cidrStr,
 		Admin:     admin != 0,
 		Enabled:   enabled != 0,
 		Confirmed: confirmed != 0,

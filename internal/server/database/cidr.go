@@ -15,7 +15,7 @@ func (db *DB) GetCidr(
 	error,
 ) {
 	row := db.Conn.QueryRow(`
-		SELECT name, cidr, length, prefix
+		SELECT name, cidr, length, prefix, terminal
 		FROM cidr
 		WHERE network_name = ?1
 			AND name = ?2`,
@@ -33,7 +33,7 @@ func (db *DB) ListCidrs(
 	error,
 ) {
 	rows, err := db.Conn.Query(`
-		SELECT name, cidr, length, prefix
+		SELECT name, cidr, length, prefix, terminal
 		FROM cidr
 		WHERE network_name = ?1
 		ORDER BY name ASC`,
@@ -73,8 +73,8 @@ func (db *DB) InsertCidr(
 	first, last := cidrFirstAndLast(ipNet)
 
 	_, err = db.Conn.Exec(`
-		INSERT INTO cidr (network_name, name, cidr, length, prefix, base, last)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+		INSERT INTO cidr (network_name, name, cidr, length, prefix, base, last, terminal)
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
 		network,
 		cidr.Name,
 		cidr.Cidr,
@@ -82,6 +82,7 @@ func (db *DB) InsertCidr(
 		ones,
 		first,
 		last,
+		boolToInt(cidr.Terminal),
 	)
 	return CheckSqliteErr("insert cidr", err)
 }
@@ -99,7 +100,7 @@ func (db *DB) UpdateCidr(
 		SET name = ?3
 		WHERE network_name = ?1
 			AND name = ?2
-		RETURNING name, cidr, length, prefix`,
+		RETURNING name, cidr, length, prefix, terminal`,
 		network,
 		name,
 		newName,
@@ -112,29 +113,7 @@ func (db *DB) DeleteCidr(
 	network string,
 	name string,
 ) error {
-	tx, err := db.Conn.Begin()
-	if err != nil {
-		return fmt.Errorf("begin delete cidr tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(`
-		DELETE FROM association
-		WHERE cidr1 IN (
-			SELECT id FROM cidr
-			WHERE network_name = ?1 AND name = ?2
-		)
-		OR cidr2 IN (
-			SELECT id FROM cidr
-			WHERE network_name = ?1 AND name = ?2
-		)`,
-		network,
-		name,
-	); err != nil {
-		return CheckSqliteErr("delete cidr associations", err)
-	}
-
-	result, err := tx.Exec(`
+	result, err := db.Conn.Exec(`
 		DELETE FROM cidr
 		WHERE network_name = ?1
 			AND name = ?2`,
@@ -152,10 +131,6 @@ func (db *DB) DeleteCidr(
 		return fmt.Errorf("%w: cidr %q not found", service.ErrNotFound, name)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit delete cidr tx: %w", err)
-	}
-
 	return nil
 }
 
@@ -169,18 +144,21 @@ func scanCidr(
 	var cidrStr string
 	var length int
 	var prefix int
+	var terminal int64
 
-	if err := s.Scan(&name, &cidrStr, &length, &prefix); err != nil {
+	if err := s.Scan(&name, &cidrStr, &length, &prefix, &terminal); err != nil {
 		return nil, CheckSqliteErr("scan cidr", err)
 	}
 
 	return &service.Cidr{
-		Name:   name,
-		Cidr:   cidrStr,
-		Prefix: prefix,
-		Bits:   length,
+		Name:     name,
+		Cidr:     cidrStr,
+		Prefix:   prefix,
+		Bits:     length,
+		Terminal: terminal != 0,
 	}, nil
 }
+
 func cidrFirstAndLast(
 	cidr *net.IPNet,
 ) (

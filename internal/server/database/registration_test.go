@@ -40,9 +40,16 @@ func seedNetworkForRegistration(t *testing.T, db *database.DB) {
 			Prefix: 16,
 			Bits:   32,
 		},
+		&service.Cidr{
+			Name:     "cord-server-cidr",
+			Cidr:     "10.0.0.1/32",
+			Prefix:   32,
+			Bits:     32,
+			Terminal: true,
+		},
 		&service.Peer{
 			Name:      "cord-server",
-			Route:     "10.0.0.1/32",
+			CidrName:  "cord-server-cidr",
 			PublicKey: "pub",
 			Admin:     true,
 			Enabled:   true,
@@ -61,6 +68,7 @@ func TestInsertAndGetRegistration(t *testing.T) {
 	expires := now.Add(24 * time.Hour)
 	reg := &service.Registration{
 		Name:            "reg-1",
+		CidrName:        "reg-1",
 		InvitePublicKey: "temp-key-1",
 		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
@@ -124,6 +132,7 @@ func TestGetRegistrationByIP(t *testing.T) {
 	expires := now.Add(24 * time.Hour)
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "ip-reg",
+		CidrName:        "ip-reg",
 		InvitePublicKey: "ip-key",
 		InviteRoute:     "10.1.0.10/32",
 		MainRoute:       "10.0.5.10/32",
@@ -162,6 +171,7 @@ func TestListRegistrations(t *testing.T) {
 	expires := now.Add(24 * time.Hour)
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "zzz",
+		CidrName:        "zzz",
 		InvitePublicKey: "z-key",
 		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
@@ -172,6 +182,7 @@ func TestListRegistrations(t *testing.T) {
 	}
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "aaa",
+		CidrName:        "aaa",
 		InvitePublicKey: "a-key",
 		InviteRoute:     "10.1.0.2/32",
 		MainRoute:       "10.0.5.2/32",
@@ -201,6 +212,7 @@ func TestListActiveRegistrations(t *testing.T) {
 	now := time.Now()
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "active",
+		CidrName:        "active",
 		InvitePublicKey: "act-key",
 		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
@@ -211,6 +223,7 @@ func TestListActiveRegistrations(t *testing.T) {
 	}
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "expired",
+		CidrName:        "expired",
 		InvitePublicKey: "exp-key",
 		InviteRoute:     "10.1.0.2/32",
 		MainRoute:       "10.0.5.2/32",
@@ -239,6 +252,7 @@ func TestListActiveRegistrations_IncludesRedeemed(t *testing.T) {
 	now := time.Now()
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "redeemed-one",
+		CidrName:        "redeemed-one",
 		InvitePublicKey: "red-key",
 		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
@@ -269,6 +283,7 @@ func TestDeleteRegistration(t *testing.T) {
 	now := time.Now()
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "delme",
+		CidrName:        "delme",
 		InvitePublicKey: "del-key",
 		InviteRoute:     "10.1.0.99/32",
 		MainRoute:       "10.0.5.99/32",
@@ -305,6 +320,7 @@ func TestDeleteExpiredRegistrations(t *testing.T) {
 	now := time.Now()
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "old",
+		CidrName:        "old",
 		InvitePublicKey: "old-key",
 		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
@@ -315,6 +331,7 @@ func TestDeleteExpiredRegistrations(t *testing.T) {
 	}
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "new",
+		CidrName:        "new",
 		InvitePublicKey: "new-key",
 		InviteRoute:     "10.1.0.2/32",
 		MainRoute:       "10.0.5.2/32",
@@ -347,6 +364,7 @@ func TestUpdateRegistrationRedemption(t *testing.T) {
 	now := time.Now()
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "redeem-me",
+		CidrName:        "redeem-me",
 		InvitePublicKey: "temp-reg-key",
 		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
@@ -408,6 +426,7 @@ func TestUpdateRegistrationRedemption_DoubleRedeem(t *testing.T) {
 	now := time.Now()
 	if err := db.InsertRegistration("regnet", &service.Registration{
 		Name:            "redeem-twice",
+		CidrName:        "redeem-twice",
 		InvitePublicKey: "twice-key",
 		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
@@ -434,6 +453,7 @@ func TestInsertRegistration_DuplicateName(t *testing.T) {
 	now := time.Now()
 	reg := &service.Registration{
 		Name:            "dup",
+		CidrName:        "dup",
 		InvitePublicKey: "key-a",
 		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",

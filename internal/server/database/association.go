@@ -13,12 +13,12 @@ func (db *DB) ListAssociations(
 	error,
 ) {
 	rows, err := db.Conn.Query(`
-		SELECT c1.name, c2.name
+		SELECT g1.name, g2.name
 		FROM association a
-		JOIN cidr c1 ON c1.id = a.cidr1
-		JOIN cidr c2 ON c2.id = a.cidr2
+		JOIN "group" g1 ON g1.id = a.group1_id
+		JOIN "group" g2 ON g2.id = a.group2_id
 		WHERE a.network_name = ?1
-		ORDER BY c1.name, c2.name`,
+		ORDER BY g1.name, g2.name`,
 		network,
 	)
 	if err != nil {
@@ -28,13 +28,13 @@ func (db *DB) ListAssociations(
 
 	var associations []*service.Association
 	for rows.Next() {
-		var cidr1, cidr2 string
-		if err := rows.Scan(&cidr1, &cidr2); err != nil {
+		var group1, group2 string
+		if err := rows.Scan(&group1, &group2); err != nil {
 			return nil, CheckSqliteErr("scan association", err)
 		}
 		associations = append(associations, &service.Association{
-			Cidr1: cidr1,
-			Cidr2: cidr2,
+			Group1: group1,
+			Group2: group2,
 		})
 	}
 
@@ -50,19 +50,19 @@ func (db *DB) InsertAssociation(
 	a *service.Association,
 ) error {
 	result, err := db.Conn.Exec(`
-		INSERT INTO association (network_name, cidr1, cidr2)
+		INSERT INTO association (network_name, group1_id, group2_id)
 		SELECT
 			?1,
-			MIN(c1.id, c2.id),
-			MAX(c1.id, c2.id)
-		FROM cidr c1, cidr c2
-		WHERE c1.network_name = ?1
-			AND c2.network_name = ?1
-			AND c1.name = ?2
-			AND c2.name = ?3`,
+			MIN(g1.id, g2.id),
+			MAX(g1.id, g2.id)
+		FROM "group" g1, "group" g2
+		WHERE g1.network_name = ?1
+			AND g2.network_name = ?1
+			AND g1.name = ?2
+			AND g2.name = ?3`,
 		network,
-		a.Cidr1,
-		a.Cidr2,
+		a.Group1,
+		a.Group2,
 	)
 
 	if err != nil {
@@ -74,7 +74,7 @@ func (db *DB) InsertAssociation(
 		return fmt.Errorf("insert association rows affected: %w", err)
 	}
 	if affected == 0 {
-		return fmt.Errorf("%w: unknown cidr names or association already exists", service.ErrConflict)
+		return fmt.Errorf("%w: unknown group names or association already exists", service.ErrConflict)
 	}
 
 	return nil
@@ -82,8 +82,8 @@ func (db *DB) InsertAssociation(
 
 func (db *DB) DeleteAssociation(
 	network string,
-	cidr1 string,
-	cidr2 string,
+	group1 string,
+	group2 string,
 ) error {
 	_, err := db.Conn.Exec(`
 		DELETE FROM association
@@ -91,14 +91,14 @@ func (db *DB) DeleteAssociation(
 			AND id IN (
 				SELECT a.id
 				FROM association a
-				JOIN cidr c1 ON c1.id = a.cidr1
-				JOIN cidr c2 ON c2.id = a.cidr2
-				WHERE (c1.name = ?2 AND c2.name = ?3)
-					OR (c1.name = ?3 AND c2.name = ?2)
+				JOIN "group" g1 ON g1.id = a.group1_id
+				JOIN "group" g2 ON g2.id = a.group2_id
+				WHERE (g1.name = ?2 AND g2.name = ?3)
+					OR (g1.name = ?3 AND g2.name = ?2)
 			)`,
 		network,
-		cidr1,
-		cidr2,
+		group1,
+		group2,
 	)
 	return CheckSqliteErr("delete association", err)
 }

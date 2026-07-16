@@ -18,19 +18,19 @@ func (db *DB) GetRegistration(
 ) {
 	row := db.Conn.QueryRow(`
 		SELECT
-			name,
-			temp_public_key,
-			temp_route,
-			final_route,
-			admin,
-			redeemed,
-			redeemed_key,
-			confirmed,
-			expires_at_unix,
-			created_at_unix
-		FROM registration
-		WHERE network_name = ?1
-			AND name = ?2`,
+			r.name,
+			r.temp_public_key,
+			r.temp_route,
+			r.final_route,
+			r.admin,
+			r.redeemed,
+			r.redeemed_key,
+			r.confirmed,
+			r.expires_at_unix,
+			r.created_at_unix
+		FROM registration r
+		WHERE r.network_name = ?1
+			AND r.name = ?2`,
 		network,
 		name,
 	)
@@ -49,21 +49,21 @@ func (db *DB) GetRegistrationByIP(
 	route := netaddr.HostRoute(netaddr.Normalize(ip))
 	row := db.Conn.QueryRow(`
 		SELECT
-			name,
-			temp_public_key,
-			temp_route,
-			final_route,
-			admin,
-			redeemed,
-			redeemed_key,
-			confirmed,
-			expires_at_unix,
-			created_at_unix
-		FROM registration
-		WHERE network_name = ?1
-			AND temp_route = ?2
-			AND confirmed = 0
-			AND expires_at_unix > ?3`,
+			r.name,
+			r.temp_public_key,
+			r.temp_route,
+			r.final_route,
+			r.admin,
+			r.redeemed,
+			r.redeemed_key,
+			r.confirmed,
+			r.expires_at_unix,
+			r.created_at_unix
+		FROM registration r
+		WHERE r.network_name = ?1
+			AND r.temp_route = ?2
+			AND r.confirmed = 0
+			AND r.expires_at_unix > ?3`,
 		network,
 		route.String(),
 		now.Unix(),
@@ -80,19 +80,19 @@ func (db *DB) ListRegistrations(
 ) {
 	rows, err := db.Conn.Query(`
 		SELECT
-			name,
-			temp_public_key,
-			temp_route,
-			final_route,
-			admin,
-			redeemed,
-			redeemed_key,
-			confirmed,
-			expires_at_unix,
-			created_at_unix
-		FROM registration
-		WHERE network_name = ?1
-		ORDER BY created_at_unix DESC`,
+			r.name,
+			r.temp_public_key,
+			r.temp_route,
+			r.final_route,
+			r.admin,
+			r.redeemed,
+			r.redeemed_key,
+			r.confirmed,
+			r.expires_at_unix,
+			r.created_at_unix
+		FROM registration r
+		WHERE r.network_name = ?1
+		ORDER BY r.created_at_unix DESC`,
 		network,
 	)
 	if err != nil {
@@ -125,21 +125,21 @@ func (db *DB) ListActiveRegistrations(
 ) {
 	rows, err := db.Conn.Query(`
 		SELECT
-			name,
-			temp_public_key,
-			temp_route,
-			final_route,
-			admin,
-			redeemed,
-			redeemed_key,
-			confirmed,
-			expires_at_unix,
-			created_at_unix
-		FROM registration
-		WHERE network_name = ?1
-			AND confirmed = 0
-			AND expires_at_unix > ?2
-		ORDER BY created_at_unix DESC`,
+			r.name,
+			r.temp_public_key,
+			r.temp_route,
+			r.final_route,
+			r.admin,
+			r.redeemed,
+			r.redeemed_key,
+			r.confirmed,
+			r.expires_at_unix,
+			r.created_at_unix
+		FROM registration r
+		WHERE r.network_name = ?1
+			AND r.confirmed = 0
+			AND r.expires_at_unix > ?2
+		ORDER BY r.created_at_unix DESC`,
 		network,
 		now.Unix(),
 	)
@@ -168,13 +168,48 @@ func (db *DB) InsertRegistration(
 	network string,
 	reg *service.Registration,
 ) error {
-	_, err := db.Conn.Exec(`
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		return fmt.Errorf("begin insert registration tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, cidrNet, err := net.ParseCIDR(reg.MainRoute)
+	if err != nil {
+		return fmt.Errorf("parse main route %q: %w", reg.MainRoute, err)
+	}
+
+	ones, bits := cidrNet.Mask.Size()
+	first, last := cidrFirstAndLast(cidrNet)
+
+	result, err := tx.Exec(`
+		INSERT INTO cidr (network_name, name, cidr, length, prefix, base, last, terminal)
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)`,
+		network,
+		reg.CidrName,
+		reg.MainRoute,
+		bits,
+		ones,
+		first,
+		last,
+	)
+	if err != nil {
+		return CheckSqliteErr("insert registration cidr", err)
+	}
+
+	cidrID, err := result.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("get cidr id: %w", err)
+	}
+
+	_, err = tx.Exec(`
 		INSERT INTO registration (
 			network_name,
 			name,
 			temp_public_key,
 			temp_route,
 			final_route,
+			cidr_id,
 			admin,
 			redeemed,
 			redeemed_key,
@@ -182,12 +217,13 @@ func (db *DB) InsertRegistration(
 			expires_at_unix,
 			created_at_unix
 		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
 		network,
 		reg.Name,
 		reg.InvitePublicKey,
 		reg.InviteRoute,
 		reg.MainRoute,
+		cidrID,
 		boolToInt(reg.Admin),
 		boolToInt(reg.Redeemed),
 		reg.RedeemedKey,
@@ -195,7 +231,14 @@ func (db *DB) InsertRegistration(
 		reg.ExpiresAt.Unix(),
 		reg.CreatedAt.Unix(),
 	)
-	return CheckSqliteErr("insert registration", err)
+	if err != nil {
+		return CheckSqliteErr("insert registration", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit insert registration tx: %w", err)
+	}
+	return nil
 }
 
 func (db *DB) RedeemRegistration(
@@ -214,7 +257,7 @@ func (db *DB) RedeemRegistration(
 		INSERT INTO peer (
 			network_name,
 			name,
-			route,
+			cidr_id,
 			public_key,
 			admin,
 			enabled,
@@ -223,7 +266,7 @@ func (db *DB) RedeemRegistration(
 		SELECT
 			r.network_name,
 			r.name,
-			r.final_route,
+			r.cidr_id,
 			?3,
 			r.admin,
 			1,
@@ -424,6 +467,7 @@ func scanRegistration(
 		InvitePublicKey: tempPubKey,
 		InviteRoute:     tempRoute,
 		MainRoute:       finalRoute,
+		CidrName:        name,
 		Admin:           admin != 0,
 		Redeemed:        redeemed != 0,
 		RedeemedKey:     redeemedKey,

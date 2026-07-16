@@ -34,6 +34,8 @@ var serverCmd = &args.Command{
 		serverNetworkCmd,
 		serverPeerCmd,
 		serverCidrCmd,
+		serverGroupCmd,
+		serverAssignmentCmd,
 		serverAssociationCmd,
 		serverRegistrationCmd,
 	},

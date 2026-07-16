@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
+	"git.studiopollinator.com/pollinator/cord/internal/topology"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -13,7 +14,8 @@ import (
 // It includes the identity, assigned address, and management flags.
 type Peer struct {
 	Name      string
-	Route     string // terminal host route, e.g. "10.42.0.5/32" or "fd00::5/128"
+	CidrName  string // the name of the terminal CIDR the peer is assigned to
+	Route     string // terminal host route, e.g. "10.42.0.5/32" or "fd00::5/128", derived from CIDR
 	PublicKey string
 	Admin     bool // whether the peer has administrative privileges
 	Enabled   bool // whether the peer's WireGuard config is applied
@@ -86,7 +88,9 @@ func (s *Service) ListPeers(
 }
 
 // ListVisiblePeers returns the peers visible to the named peer, each
-// with recently witnessed endpoints. Used for endpoint gossip — peers
+// with recently witnessed endpoints. Visibility is determined by the
+// group-based topology model: effective groups (direct + inherited)
+// combined with group associations. Used for endpoint gossip — peers
 // discover each other's endpoints through this list.
 func (s *Service) ListVisiblePeers(
 	network string,
@@ -95,9 +99,19 @@ func (s *Service) ListVisiblePeers(
 	[]*VisiblePeer,
 	error,
 ) {
-	peers, err := s.store.ListPeers(network)
+	snapshot, err := s.store.LoadTopologySnapshot(network)
 	if err != nil {
-		return nil, fmt.Errorf("list peers for visibility: %w", err)
+		return nil, fmt.Errorf("load topology snapshot: %w", err)
+	}
+
+	resolver, err := topology.NewResolver(snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("create topology resolver: %w", err)
+	}
+
+	visible, err := resolver.VisiblePeers(peerName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve visible peers for %q: %w", peerName, err)
 	}
 
 	since := s.clock().Add(-defaultEndpointTTL)
@@ -106,9 +120,12 @@ func (s *Service) ListVisiblePeers(
 		return nil, fmt.Errorf("get recent endpoints: %w", err)
 	}
 
-	var visible []*VisiblePeer
-	for _, p := range peers {
-		if p.Name == peerName {
+	result := make([]*VisiblePeer, 0, len(visible))
+	for _, p := range visible {
+		// The server peer is not returned in the visible peer set.
+		// Clients pin the server configuration from redemption data.
+		// TODO: make sure that cord-server *cant* show up here
+		if p.Name == "cord-server" {
 			continue
 		}
 
@@ -122,7 +139,7 @@ func (s *Service) ListVisiblePeers(
 			}
 		}
 
-		visible = append(visible, &VisiblePeer{
+		result = append(result, &VisiblePeer{
 			Name:      p.Name,
 			Route:     p.Route,
 			PublicKey: p.PublicKey,
@@ -130,7 +147,7 @@ func (s *Service) ListVisiblePeers(
 		})
 	}
 
-	return visible, nil
+	return result, nil
 }
 
 // UpdatePeer applies a partial update to a peer and returns the

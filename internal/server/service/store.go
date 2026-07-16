@@ -3,6 +3,8 @@ package service
 import (
 	"net"
 	"time"
+
+	"git.studiopollinator.com/pollinator/cord/internal/topology"
 )
 
 // Store is the persistence contract required by the server service. It
@@ -24,10 +26,10 @@ type Store interface {
 	ListNetworkNames() ([]string, error)
 
 	// BootstrapNetwork atomically creates a new network together
-	// with its root CIDR record and initial server peer. All three
-	// are persisted in a single transaction. Returns ErrConflict
-	// when a network with this name already exists.
-	BootstrapNetwork(network *NetworkConfig, rootCidr *Cidr, serverPeer *Peer) error
+	// with its root CIDR record, server CIDR, and initial server
+	// peer. All are persisted in a single transaction. Returns
+	// ErrConflict when a network with this name already exists.
+	BootstrapNetwork(network *NetworkConfig, rootCidr *Cidr, serverCidr *Cidr, serverPeer *Peer) error
 
 	// SetNetworkEnabled updates the enabled flag for a network.
 	// When enabled, the daemon starts the network's WireGuard devices
@@ -66,7 +68,7 @@ type Store interface {
 	ListPeers(network string) ([]*Peer, error)
 
 	// InsertPeer persists a new peer in the network. Returns
-	// ErrConflict when a peer with the same name, IP, or public key
+	// ErrConflict when a peer with the same name, CIDR, or public key
 	// already exists in this network.
 	InsertPeer(network string, peer *Peer) error
 
@@ -89,24 +91,53 @@ type Store interface {
 	// ErrConflict when the range overlaps an existing CIDR.
 	InsertCidr(network string, cidr *Cidr) error
 
-	// DeleteCidr removes a CIDR by name. Associated associations
+	// DeleteCidr removes a CIDR by name. Associated assignments
 	// are also removed via foreign-key cascades.
 	DeleteCidr(network, name string) error
 
 	// UpdateCidr renames a CIDR and returns the updated record.
 	UpdateCidr(network, name string, newName string) (*Cidr, error)
 
-	// Association records within a network.
+	// Group records within a network.
 
-	// ListAssociations returns all associations in the network.
+	// ListGroups returns all groups in the network.
+	ListGroups(network string) ([]*Group, error)
+
+	// InsertGroup creates a new group with the given name.
+	// Returns ErrConflict when a group with this name already exists.
+	InsertGroup(network, name string) (*Group, error)
+
+	// DeleteGroup removes a group by name from the network.
+	DeleteGroup(network, name string) error
+
+	// Assignment records within a network (CIDR <-> Group).
+
+	// ListAssignments returns all group assignments in the network.
+	ListAssignments(network string) ([]*Assignment, error)
+
+	// AssignGroup assigns a group to a CIDR.
+	AssignGroup(network, cidrName, groupName string) error
+
+	// RemoveGroup removes a group assignment from a CIDR.
+	RemoveGroup(network, cidrName, groupName string) error
+
+	// Association records within a network (Group <-> Group).
+
+	// ListAssociations returns all group associations in the network.
 	ListAssociations(network string) ([]*Association, error)
 
-	// InsertAssociation creates an association between two CIDRs.
-	// Associations are stored normalized (cidr1 < cidr2).
+	// InsertAssociation creates an association between two groups.
+	// Associations are stored normalized (group1 < group2).
 	InsertAssociation(network string, a *Association) error
 
-	// DeleteAssociation removes the association between two CIDRs.
-	DeleteAssociation(network, cidr1, cidr2 string) error
+	// DeleteAssociation removes the association between two groups.
+	DeleteAssociation(network, group1, group2 string) error
+
+	// Topology snapshot for visibility resolution.
+
+	// LoadTopologySnapshot loads a complete topology snapshot for
+	// the given network, suitable for resolving peer visibility.
+	LoadTopologySnapshot(network string) (*topology.Snapshot, error)
 
 	// Registration records within a network.
 
