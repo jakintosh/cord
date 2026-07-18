@@ -1,7 +1,6 @@
 package service
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -181,29 +180,22 @@ func (s *Service) UpdatePeer(
 // who disabled the peer before confirm gets a peer that is
 // confirmed but not live until re-enabled.
 //
-// The corresponding registration is marked confirmed, which removes
-// the temp peer from the invite device and releases the invite IPs.
-// If the registration is already gone (revoked or already confirmed)
-// the registration update is treated as a no-op rather than an error,
-// so confirm remains idempotent.
+// The corresponding registration is marked confirmed in the same
+// transaction, and its group assignments are transferred to the peer's
+// terminal CIDR. Confirmation is idempotent.
 func (s *Service) ConfirmPeer(
 	network string,
 	name string,
 ) error {
-	confirmed := true
-	update := PeerUpdate{
-		Confirmed: &confirmed,
+	if err := s.store.PruneExpiredRegistrations(network, s.clock()); err != nil {
+		return fmt.Errorf("prune expired registrations: %w", mapStoreError(err))
 	}
-	_, err := s.store.UpdatePeer(network, name, update)
-	if err != nil {
+
+	if err := s.store.ConfirmPeer(network, name); err != nil {
+		s.reconcile(network)
 		return fmt.Errorf("confirm peer %q: %w", name, mapStoreError(err))
 	}
 
-	if err := s.store.ConfirmRegistration(network, name); err != nil {
-		if !errors.Is(err, ErrNotFound) {
-			return fmt.Errorf("confirm registration %q: %w", name, mapStoreError(err))
-		}
-	}
 	s.reconcile(network)
 	s.log.Info("peer confirmed", "network", network, "peer", name)
 

@@ -15,6 +15,7 @@ var serverCidrCmd = &args.Command{
 		serverCidrRename,
 		serverCidrDelete,
 		serverCidrList,
+		serverCidrGroup,
 	},
 }
 
@@ -174,6 +175,135 @@ var serverCidrList = &args.Command{
 		}
 
 		printCidrs(cidrs)
+		return nil
+	},
+}
+
+var serverCidrGroup = &args.Command{
+	Name: "group",
+	Help: "manage groups assigned to a CIDR",
+	Subcommands: []*args.Command{
+		serverCidrGroupAdd,
+		serverCidrGroupRemove,
+		serverCidrGroupList,
+	},
+}
+
+var serverCidrGroupAdd = &args.Command{
+	Name: "add",
+	Help: "assign a group to a CIDR",
+	Operands: []args.Operand{
+		{
+			Name: "network",
+			Help: "network name",
+		},
+		{
+			Name: "cidr",
+			Help: "CIDR name",
+		},
+		{
+			Name: "group",
+			Help: "group name",
+		},
+	},
+	Handler: func(i *args.Input) error {
+		network := i.GetOperand("network")
+		cidr := i.GetOperand("cidr")
+		group := i.GetOperand("group")
+
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+		if err := client.AssignCidrGroup(
+			i.Context(),
+			network,
+			cidr,
+			group,
+		); err != nil {
+			return err
+		}
+		if !i.GetFlag("json") {
+			fmt.Printf("group %q assigned to CIDR %q\n", group, cidr)
+		}
+		return nil
+	},
+}
+
+var serverCidrGroupRemove = &args.Command{
+	Name: "remove",
+	Help: "remove a group from a CIDR",
+	Operands: []args.Operand{
+		{
+			Name: "network",
+			Help: "network name",
+		},
+		{
+			Name: "cidr",
+			Help: "CIDR name",
+		},
+		{
+			Name: "group",
+			Help: "group name",
+		},
+	},
+	Handler: func(i *args.Input) error {
+		network := i.GetOperand("network")
+		cidr := i.GetOperand("cidr")
+		group := i.GetOperand("group")
+
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+		if err := client.RemoveCidrGroup(
+			i.Context(),
+			network,
+			cidr,
+			group,
+		); err != nil {
+			return err
+		}
+		if !i.GetFlag("json") {
+			fmt.Printf("group %q removed from CIDR %q\n", group, cidr)
+		}
+		return nil
+	},
+}
+
+var serverCidrGroupList = &args.Command{
+	Name: "list",
+	Help: "list groups assigned to a CIDR",
+	Operands: []args.Operand{
+		{
+			Name: "network",
+			Help: "network name",
+		},
+		{
+			Name: "cidr",
+			Help: "CIDR name",
+		},
+	},
+	Handler: func(i *args.Input) error {
+		network := i.GetOperand("network")
+		cidr := i.GetOperand("cidr")
+
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+		groups, err := client.ListCidrGroups(
+			i.Context(),
+			network,
+			cidr,
+		)
+		if err != nil {
+			return err
+		}
+		if i.GetFlag("json") {
+			return printJSON(groups)
+		}
+		printGroups(groups)
 		return nil
 	},
 }

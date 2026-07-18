@@ -19,11 +19,6 @@ type CreateAssociationRequest struct {
 	Group2 string `json:"group2"`
 }
 
-type DeleteAssociationRequest struct {
-	Group1 string `json:"group1"`
-	Group2 string `json:"group2"`
-}
-
 func associationFromService(
 	a service.Association,
 ) Association {
@@ -85,22 +80,18 @@ func (a *API) handlePostAssociation(
 	wire.WriteData(w, http.StatusCreated, nil)
 }
 
-func (a *API) handlePostAssociationDelete(
+func (a *API) handleDeleteAssociation(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
 	network := r.PathValue("name")
-
-	var req DeleteAssociationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		wire.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
+	group1 := r.PathValue("group1")
+	group2 := r.PathValue("group2")
 
 	if err := a.service.DeleteAssociation(
 		network,
-		req.Group1,
-		req.Group2,
+		group1,
+		group2,
 	); err != nil {
 		writeServiceError(w, err)
 		return
@@ -143,13 +134,6 @@ func (c *Client) DeleteAssociation(
 	group1 string,
 	group2 string,
 ) error {
-	req := DeleteAssociationRequest{
-		Group1: group1,
-		Group2: group2,
-	}
-	body, err := marshalJSON(req)
-	if err != nil {
-		return err
-	}
-	return c.wire.Post(ctx, "/networks/"+network+"/associations/delete", body, nil)
+	path := "/networks/" + network + "/associations/" + group1 + "/" + group2
+	return c.wire.Delete(ctx, path, nil)
 }

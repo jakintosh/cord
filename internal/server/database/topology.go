@@ -113,7 +113,7 @@ func (db *DB) sqlLoadAssignmentsTx(
 	assignments := make(map[string][]string)
 	rows, err := tx.Query(`
 		SELECT c.name, g.name
-		FROM assignment a
+		FROM cidr_assignment a
 		JOIN cidr c ON c.id = a.cidr_id
 		JOIN "group" g ON g.id = a.group_id
 		WHERE c.network_name = ?1`,
@@ -192,7 +192,9 @@ func (db *DB) sqlLoadPeersTx(
 		SELECT p.name, p.public_key, c.name, c.cidr
 		FROM peer p
 		JOIN cidr c ON c.id = p.cidr_id
-		WHERE p.network_name = ?1`,
+		WHERE p.network_name = ?1
+			AND p.confirmed = 1
+			AND p.enabled = 1`,
 		network,
 	)
 	if err != nil {

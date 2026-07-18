@@ -134,3 +134,56 @@ func (s *Service) DeleteCidr(
 	}
 	return nil
 }
+
+// ListCidrGroups returns the groups directly assigned to a CIDR.
+func (s *Service) ListCidrGroups(
+	network string,
+	cidrName string,
+) (
+	[]*Group,
+	error,
+) {
+	if _, err := s.store.GetCidr(network, cidrName); err != nil {
+		return nil, fmt.Errorf("get CIDR %q: %w", cidrName, mapStoreError(err))
+	}
+	groups, err := s.store.ListCidrGroups(network, cidrName)
+	if err != nil {
+		return nil, fmt.Errorf("list CIDR groups: %w", mapStoreError(err))
+	}
+	return groups, nil
+}
+
+// AssignCidrGroup assigns a group to a CIDR. This gives the CIDR (and any
+// peers belonging to it) the named group.
+func (s *Service) AssignCidrGroup(
+	network string,
+	cidrName string,
+	groupName string,
+) error {
+	if network == "" {
+		return fmt.Errorf("%w: network name required", ErrInvalidInput)
+	}
+	if cidrName == "" || groupName == "" {
+		return fmt.Errorf("%w: CIDR name and group name required", ErrInvalidInput)
+	}
+
+	if err := s.store.AssignCidrGroup(network, cidrName, groupName); err != nil {
+		return fmt.Errorf("assign group: %w", mapStoreError(err))
+	}
+	return nil
+}
+
+// RemoveCidrGroup removes a group assignment from a CIDR.
+func (s *Service) RemoveCidrGroup(
+	network string,
+	cidrName string,
+	groupName string,
+) error {
+	if _, err := s.store.GetCidr(network, cidrName); err != nil {
+		return fmt.Errorf("get CIDR %q: %w", cidrName, mapStoreError(err))
+	}
+	if err := s.store.RemoveCidrGroup(network, cidrName, groupName); err != nil {
+		return fmt.Errorf("remove group: %w", mapStoreError(err))
+	}
+	return nil
+}

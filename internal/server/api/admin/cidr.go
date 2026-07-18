@@ -23,6 +23,10 @@ type UpdateCidrRequest struct {
 	Name string `json:"name"`
 }
 
+type CidrGroupRequest struct {
+	Group string `json:"group"`
+}
+
 func cidrFromService(
 	c service.Cidr,
 ) Cidr {
@@ -116,6 +120,55 @@ func (a *API) handleDeleteCidr(
 	wire.WriteData(w, http.StatusOK, nil)
 }
 
+func (a *API) handleListCidrGroups(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	network := r.PathValue("name")
+	cidr := r.PathValue("cidr")
+
+	groups, err := a.service.ListCidrGroups(network, cidr)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	wire.WriteData(w, http.StatusOK, groupsFromService(groups))
+}
+
+func (a *API) handlePostCidrGroup(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	network := r.PathValue("name")
+	cidr := r.PathValue("cidr")
+
+	var req CidrGroupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		wire.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := a.service.AssignCidrGroup(network, cidr, req.Group); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	wire.WriteData(w, http.StatusCreated, nil)
+}
+
+func (a *API) handleDeleteCidrGroup(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	network := r.PathValue("name")
+	cidr := r.PathValue("cidr")
+	group := r.PathValue("group")
+
+	if err := a.service.RemoveCidrGroup(network, cidr, group); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	wire.WriteData(w, http.StatusOK, nil)
+}
+
 func (c *Client) ListCidrs(
 	ctx context.Context,
 	network string,
@@ -163,4 +216,41 @@ func (c *Client) DeleteCidr(
 	cidr string,
 ) error {
 	return c.wire.Delete(ctx, "/networks/"+network+"/cidrs/"+cidr, nil)
+}
+
+func (c *Client) ListCidrGroups(
+	ctx context.Context,
+	network string,
+	cidr string,
+) (
+	[]Group,
+	error,
+) {
+	var result []Group
+	path := "/networks/" + network + "/cidrs/" + cidr + "/groups"
+	return result, c.wire.Get(ctx, path, &result)
+}
+
+func (c *Client) AssignCidrGroup(
+	ctx context.Context,
+	network string,
+	cidr string,
+	group string,
+) error {
+	body, err := marshalJSON(CidrGroupRequest{Group: group})
+	if err != nil {
+		return err
+	}
+	path := "/networks/" + network + "/cidrs/" + cidr + "/groups"
+	return c.wire.Post(ctx, path, body, nil)
+}
+
+func (c *Client) RemoveCidrGroup(
+	ctx context.Context,
+	network string,
+	cidr string,
+	group string,
+) error {
+	path := "/networks/" + network + "/cidrs/" + cidr + "/groups/" + group
+	return c.wire.Delete(ctx, path, nil)
 }

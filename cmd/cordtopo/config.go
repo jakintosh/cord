@@ -219,7 +219,7 @@ func seedDB(
 			key := cidr.Name + "/" + group
 			if !seenAssignments[key] {
 				seenAssignments[key] = true
-				if err := db.AssignGroup(
+				if err := db.AssignCidrGroup(
 					cfg.Network,
 					cidr.Name,
 					group,
@@ -231,7 +231,7 @@ func seedDB(
 	}
 
 	for _, assignment := range cfg.Assignments {
-		if err := db.AssignGroup(
+		if err := db.AssignCidrGroup(
 			cfg.Network,
 			assignment.Cidr,
 			assignment.Group,

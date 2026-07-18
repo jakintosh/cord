@@ -288,34 +288,39 @@ func (db *DB) DeletePeer(
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`
-		DELETE FROM registration
-		WHERE cidr_id IN (
-			SELECT cidr_id FROM peer
-			WHERE network_name = ?1 AND name = ?2
-		)`,
+	row := tx.QueryRow(`
+		SELECT id, cidr_id, public_key
+		FROM peer
+		WHERE network_name = ?1 AND name = ?2`,
 		network,
 		name,
+	)
+
+	var peerID int64
+	var cidrID int64
+	var publicKey string
+	if err := row.Scan(
+		&peerID,
+		&cidrID,
+		&publicKey,
+	); err != nil {
+		return CheckSqliteErr("find peer to delete", err)
+	}
+
+	if _, err := tx.Exec(`
+		DELETE FROM registration
+		WHERE network_name = ?1 AND redeemed_key = ?2`,
+		network,
+		publicKey,
 	); err != nil {
 		return CheckSqliteErr("delete peer registration", err)
 	}
 
-	result, err := tx.Exec(`
-		DELETE FROM peer
-		WHERE network_name = ?1
-			AND name = ?2`,
-		network,
-		name,
-	)
-	if err != nil {
+	if _, err := tx.Exec(`DELETE FROM peer WHERE id = ?1`, peerID); err != nil {
 		return CheckSqliteErr("delete peer", err)
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete peer rows affected: %w", err)
-	}
-	if affected == 0 {
-		return fmt.Errorf("%w: peer %q not found", service.ErrNotFound, name)
+	if _, err := tx.Exec(`DELETE FROM cidr WHERE id = ?1`, cidrID); err != nil {
+		return CheckSqliteErr("delete peer CIDR", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -362,7 +367,6 @@ func scanPeer(
 	var admin int64
 	var enabled int64
 	var confirmed int64
-
 	if err := s.Scan(
 		&name,
 		&pubKey,

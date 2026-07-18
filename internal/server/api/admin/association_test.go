@@ -121,12 +121,8 @@ func TestAPIDeleteAssociation_Success(
 		t.Fatalf("seed association: %v", err)
 	}
 
-	url := "/networks/testnet/associations/delete"
-	body := `{
-		"group1": "engineering",
-		"group2": "marketing"
-	}`
-	result := wire.TestPost[any](env.Router, url, body)
+	url := "/networks/testnet/associations/engineering/marketing"
+	result := wire.TestDelete[any](env.Router, url)
 
 	result.ExpectOK(t)
 

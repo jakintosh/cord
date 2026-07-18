@@ -17,6 +17,10 @@ type CreateRegistrationRequest struct {
 	Admin bool   `json:"admin"`
 }
 
+type RegistrationGroupRequest struct {
+	Group string `json:"group"`
+}
+
 type Registration struct {
 	Name      string `json:"name"`
 	Route     string `json:"route"`
@@ -111,6 +115,55 @@ func (a *API) handleDeleteRegistration(
 	wire.WriteData(w, http.StatusOK, nil)
 }
 
+func (a *API) handleListRegistrationGroups(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	network := r.PathValue("name")
+	registration := r.PathValue("registration")
+
+	groups, err := a.service.ListRegistrationGroups(network, registration)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	wire.WriteData(w, http.StatusOK, groupsFromService(groups))
+}
+
+func (a *API) handlePostRegistrationGroup(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	network := r.PathValue("name")
+	registration := r.PathValue("registration")
+
+	var req RegistrationGroupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		wire.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := a.service.AssignRegistrationGroup(network, registration, req.Group); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	wire.WriteData(w, http.StatusCreated, nil)
+}
+
+func (a *API) handleDeleteRegistrationGroup(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	network := r.PathValue("name")
+	registration := r.PathValue("registration")
+	group := r.PathValue("group")
+
+	if err := a.service.RemoveRegistrationGroup(network, registration, group); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	wire.WriteData(w, http.StatusOK, nil)
+}
+
 func (c *Client) ListRegistrations(
 	ctx context.Context,
 	network string,
@@ -151,4 +204,41 @@ func (c *Client) RevokeRegistration(
 	registration string,
 ) error {
 	return c.wire.Delete(ctx, "/networks/"+network+"/registrations/"+registration, nil)
+}
+
+func (c *Client) ListRegistrationGroups(
+	ctx context.Context,
+	network string,
+	registration string,
+) (
+	[]Group,
+	error,
+) {
+	var result []Group
+	path := "/networks/" + network + "/registrations/" + registration + "/groups"
+	return result, c.wire.Get(ctx, path, &result)
+}
+
+func (c *Client) AssignRegistrationGroup(
+	ctx context.Context,
+	network string,
+	registration string,
+	group string,
+) error {
+	body, err := marshalJSON(RegistrationGroupRequest{Group: group})
+	if err != nil {
+		return err
+	}
+	path := "/networks/" + network + "/registrations/" + registration + "/groups"
+	return c.wire.Post(ctx, path, body, nil)
+}
+
+func (c *Client) RemoveRegistrationGroup(
+	ctx context.Context,
+	network string,
+	registration string,
+	group string,
+) error {
+	path := "/networks/" + network + "/registrations/" + registration + "/groups/" + group
+	return c.wire.Delete(ctx, path, nil)
 }

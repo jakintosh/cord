@@ -60,7 +60,7 @@ CREATE TABLE "group" (
     UNIQUE (network_name, name)
 );
 
-CREATE TABLE assignment (
+CREATE TABLE cidr_assignment (
     cidr_id         INTEGER NOT NULL,
     group_id        INTEGER NOT NULL,
     FOREIGN KEY (cidr_id)
@@ -116,7 +116,6 @@ CREATE TABLE registration (
     temp_public_key TEXT NOT NULL,
     temp_route      TEXT NOT NULL,
     final_route     TEXT NOT NULL,
-    cidr_id         INTEGER,
     admin           INTEGER DEFAULT 0 NOT NULL,
     redeemed        INTEGER DEFAULT 0 NOT NULL,
     redeemed_key    TEXT DEFAULT '' NOT NULL,
@@ -126,12 +125,25 @@ CREATE TABLE registration (
     FOREIGN KEY (network_name)
         REFERENCES network (name)
         ON DELETE CASCADE,
-    FOREIGN KEY (cidr_id)
-        REFERENCES cidr (id),
     UNIQUE (network_name, name),
     UNIQUE (network_name, temp_public_key),
-    UNIQUE (network_name, temp_route),
     UNIQUE (network_name, final_route)
+);
+
+CREATE UNIQUE INDEX registration_active_temp_route
+    ON registration (network_name, temp_route)
+    WHERE confirmed = 0;
+
+CREATE TABLE registration_assignment (
+    registration_id INTEGER NOT NULL,
+    group_id        INTEGER NOT NULL,
+    FOREIGN KEY (registration_id)
+        REFERENCES registration (id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (group_id)
+        REFERENCES "group" (id)
+        ON DELETE CASCADE,
+    PRIMARY KEY (registration_id, group_id)
 );
 
 CREATE TABLE endpoint (

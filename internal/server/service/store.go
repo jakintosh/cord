@@ -98,6 +98,16 @@ type Store interface {
 	// UpdateCidr renames a CIDR and returns the updated record.
 	UpdateCidr(network, name string, newName string) (*Cidr, error)
 
+	// ListCidrGroups returns the groups directly assigned to a CIDR,
+	// ordered by group name.
+	ListCidrGroups(network, cidrName string) ([]*Group, error)
+
+	// AssignCidrGroup assigns a group to a CIDR.
+	AssignCidrGroup(network, cidrName, groupName string) error
+
+	// RemoveCidrGroup removes a group assignment from a CIDR.
+	RemoveCidrGroup(network, cidrName, groupName string) error
+
 	// Group records within a network.
 
 	// ListGroups returns all groups in the network.
@@ -109,17 +119,6 @@ type Store interface {
 
 	// DeleteGroup removes a group by name from the network.
 	DeleteGroup(network, name string) error
-
-	// Assignment records within a network (CIDR <-> Group).
-
-	// ListAssignments returns all group assignments in the network.
-	ListAssignments(network string) ([]*Assignment, error)
-
-	// AssignGroup assigns a group to a CIDR.
-	AssignGroup(network, cidrName, groupName string) error
-
-	// RemoveGroup removes a group assignment from a CIDR.
-	RemoveGroup(network, cidrName, groupName string) error
 
 	// Association records within a network (Group <-> Group).
 
@@ -166,16 +165,25 @@ type Store interface {
 	// expired.
 	RedeemRegistration(network string, tempPubKey, permPubKey string, now time.Time) error
 
-	// ConfirmRegistration marks a registration as confirmed.
-	ConfirmRegistration(network, name string) error
+	// ListRegistrationGroups returns the groups assigned to a pending
+	// registration, ordered by group name.
+	ListRegistrationGroups(network, registration string) ([]*Group, error)
 
-	// DeleteRegistration removes a registration by name from the
-	// network.
+	// AssignRegistrationGroup assigns a group to an unconfirmed registration.
+	AssignRegistrationGroup(network, registration, group string) error
+
+	// RemoveRegistrationGroup removes a group assignment from an unconfirmed
+	// registration.
+	RemoveRegistrationGroup(network, registration, group string) error
+
+	// ConfirmPeer atomically marks a peer and its registration confirmed and
+	// transfers registration group assignments to the peer's terminal CIDR.
+	ConfirmPeer(network, name string) error
+
+	// DeleteRegistration revokes an unconfirmed registration by name and
+	// removes any provisional peer reality. Confirmed registrations are
+	// immutable and return ErrConflict.
 	DeleteRegistration(network, name string) error
-
-	// DeleteExpiredRegistrations removes all registrations whose
-	// expiration time is before the given timestamp.
-	DeleteExpiredRegistrations(network string, before time.Time) error
 
 	// PruneExpiredRegistrations removes expired unconfirmed
 	// registrations and any provisional peer rows whose registration

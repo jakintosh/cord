@@ -389,12 +389,13 @@ func TestOpenDatabase_TablesExist(t *testing.T) {
 
 	for _, table := range []string{
 		"network",
-		"cidr",
-		"peer",
 		"group",
-		"assignment",
 		"association",
+		"peer",
+		"cidr",
+		"cidr_assignment",
 		"registration",
+		"registration_assignment",
 		"endpoint",
 	} {
 		var name string

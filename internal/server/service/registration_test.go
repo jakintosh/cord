@@ -37,6 +37,12 @@ func TestCreateRegistration_Success(t *testing.T) {
 	if inv.Network.Endpoint != "192.168.1.1:51821" {
 		t.Errorf("endpoint = %q, want 192.168.1.1:51821", inv.Network.Endpoint)
 	}
+	if _, err := env.Database.GetCidr("testnet", "new-peer"); !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("registration CIDR: err = %v, want ErrNotFound", err)
+	}
+	if _, err := env.Service.GetPeer("testnet", "new-peer"); !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("registration peer: err = %v, want ErrNotFound", err)
+	}
 }
 
 func TestCreateRegistration_DefaultExpiration(t *testing.T) {
@@ -128,6 +134,19 @@ func TestCreateRegistration_NonexistentNetwork(t *testing.T) {
 	}
 }
 
+func TestCreateRegistration_DuplicateIP(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	ip := net.ParseIP("10.0.0.5")
+	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{IP: ip}); err != nil {
+		t.Fatalf("create first registration: %v", err)
+	}
+	if _, err := env.Service.CreateRegistration("testnet", "bob", service.RegistrationOptions{IP: ip}); !errors.Is(err, service.ErrConflict) {
+		t.Errorf("duplicate IP: err = %v, want ErrConflict", err)
+	}
+}
+
 func TestRedeemRegistration_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
@@ -163,6 +182,13 @@ func TestRedeemRegistration_Success(t *testing.T) {
 	}
 	if peer.Route != "10.0.0.5/32" {
 		t.Errorf("route = %q, want 10.0.0.5/32", peer.Route)
+	}
+	cidr, err := env.Database.GetCidr("testnet", "redeemer")
+	if err != nil {
+		t.Fatalf("get redeemed CIDR: %v", err)
+	}
+	if !cidr.Terminal || cidr.Cidr != "10.0.0.5/32" {
+		t.Errorf("redeemed CIDR = %+v, want terminal 10.0.0.5/32", cidr)
 	}
 }
 
@@ -366,6 +392,61 @@ func TestRevokeRegistration_Success(t *testing.T) {
 	if len(regs) != 0 {
 		t.Errorf("expected 0 registrations after revoke, got %d", len(regs))
 	}
+	if _, err := env.Service.CreateRegistration("testnet", "revoke-me", service.RegistrationOptions{IP: ip}); err != nil {
+		t.Fatalf("reuse revoked registration name and IP: %v", err)
+	}
+}
+
+func TestRevokeRegistration_RemovesProvisionalPeer(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	ip := net.ParseIP("10.0.0.31")
+	if _, err := env.Service.CreateRegistration("testnet", "revoke-me", service.RegistrationOptions{IP: ip}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	if _, err := env.Service.RedeemRegistration("testnet", tempKey, mustGenKey(t)); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	if err := env.Service.RevokeRegistration("testnet", "revoke-me"); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if _, err := env.Service.GetPeer("testnet", "revoke-me"); !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("peer after revoke: err = %v, want ErrNotFound", err)
+	}
+	if _, err := env.Database.GetCidr("testnet", "revoke-me"); !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("CIDR after revoke: err = %v, want ErrNotFound", err)
+	}
+	if _, err := env.Service.CreateRegistration("testnet", "revoke-me", service.RegistrationOptions{IP: ip}); err != nil {
+		t.Fatalf("reuse revoked provisional peer name and IP: %v", err)
+	}
+}
+
+func TestRevokeRegistration_RejectsConfirmed(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.CreateRegistration("testnet", "confirmed", service.RegistrationOptions{IP: net.ParseIP("10.0.0.32")}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if _, err := env.Service.RedeemRegistration("testnet", lastTempKey(t, env.Service, "testnet"), mustGenKey(t)); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	if err := env.Service.ConfirmPeer("testnet", "confirmed"); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	if err := env.Service.RevokeRegistration("testnet", "confirmed"); !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("revoke confirmed registration: err = %v, want ErrConflict", err)
+	}
+	reg, err := env.Database.GetRegistration("testnet", "confirmed")
+	if err != nil {
+		t.Fatalf("confirmed registration should remain: %v", err)
+	}
+	if !reg.Confirmed {
+		t.Fatal("registration should remain confirmed")
+	}
 }
 
 func TestRevokeRegistration_NotFound(t *testing.T) {
@@ -424,5 +505,233 @@ func TestRegistration_Persistence(t *testing.T) {
 	}
 	if reg.ExpiresAt.IsZero() {
 		t.Error("expires_at should not be zero")
+	}
+}
+
+func TestRegistrationGroups_TransferOnConfirmation(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	for _, name := range []string{"engineering", "operations"} {
+		if _, err := env.Service.CreateGroup("testnet", name); err != nil {
+			t.Fatalf("create group %q: %v", name, err)
+		}
+	}
+	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{IP: net.ParseIP("10.0.0.5")}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if err := env.Service.AssignRegistrationGroup("testnet", "alice", "engineering"); err != nil {
+		t.Fatalf("assign registration group: %v", err)
+	}
+	assertRegistrationGroups(t, env.Service, "alice", []string{"engineering"})
+	if _, err := env.Service.GetCidr("testnet", "alice"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("CIDR before redemption: err = %v, want ErrNotFound", err)
+	}
+
+	if _, err := env.Service.RedeemRegistration("testnet", lastTempKey(t, env.Service, "testnet"), mustGenKey(t)); err != nil {
+		t.Fatalf("redeem registration: %v", err)
+	}
+	if err := env.Service.AssignRegistrationGroup("testnet", "alice", "operations"); err != nil {
+		t.Fatalf("assign registration group after redemption: %v", err)
+	}
+	if err := env.Service.AssignCidrGroup("testnet", "alice", "operations"); !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("assign group directly to provisional CIDR: err = %v, want ErrConflict", err)
+	}
+	assertRegistrationGroups(t, env.Service, "alice", []string{"engineering", "operations"})
+	assertTransferredCidrGroups(t, env.Service, "alice", nil)
+
+	if err := env.Service.ConfirmPeer("testnet", "alice"); err != nil {
+		t.Fatalf("confirm peer: %v", err)
+	}
+	assertRegistrationGroups(t, env.Service, "alice", nil)
+	assertTransferredCidrGroups(t, env.Service, "alice", []string{"engineering", "operations"})
+	if err := env.Service.AssignRegistrationGroup("testnet", "alice", "engineering"); !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("modify confirmed registration: err = %v, want ErrConflict", err)
+	}
+}
+
+func TestRegistrationGroups_Remove(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.CreateGroup("testnet", "engineering"); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{IP: net.ParseIP("10.0.0.5")}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if err := env.Service.AssignRegistrationGroup("testnet", "alice", "engineering"); err != nil {
+		t.Fatalf("assign registration group: %v", err)
+	}
+	if err := env.Service.RemoveRegistrationGroup("testnet", "alice", "engineering"); err != nil {
+		t.Fatalf("remove registration group: %v", err)
+	}
+	assertRegistrationGroups(t, env.Service, "alice", nil)
+}
+
+func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
+	clock := &mutableClock{t: testutil.FixedTime}
+	env := testutil.SetupServiceWithClock(t, clock.now)
+	testutil.SeedNetwork(t, env.Service)
+	if err := env.Service.EnableNetwork("testnet"); err != nil {
+		t.Fatalf("enable network: %v", err)
+	}
+
+	shortIP := net.ParseIP("10.0.0.7")
+	shortExpiry := time.Hour
+	if _, err := env.Service.CreateRegistration(
+		"testnet",
+		"short-lived",
+		service.RegistrationOptions{IP: shortIP, ExpiresIn: &shortExpiry},
+	); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	shortKey := mustGenKey(t)
+	if _, err := env.Service.RedeemRegistration(
+		"testnet",
+		lastTempKey(t, env.Service, "testnet"),
+		shortKey,
+	); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	clock.t = clock.t.Add(2 * time.Hour)
+	if _, err := env.Service.CreateRegistration(
+		"testnet",
+		"reconcile-trigger",
+		service.RegistrationOptions{IP: net.ParseIP("10.0.0.250")},
+	); err != nil {
+		t.Fatalf("trigger reconcile: %v", err)
+	}
+
+	if _, err := env.Service.GetPeer("testnet", "short-lived"); !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("peer after expiry: err = %v, want ErrNotFound", err)
+	}
+	if _, err := env.Database.GetRegistration("testnet", "short-lived"); !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("registration after expiry: err = %v, want ErrNotFound", err)
+	}
+	if _, err := env.Database.GetCidr("testnet", "short-lived"); !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("CIDR after expiry: err = %v, want ErrNotFound", err)
+	}
+	if hasPeerOp(env.Backend.LastAppliedOpsFor("testnet"), shortKey) {
+		t.Error("main device should not have expired provisional peer")
+	}
+	if _, err := env.Service.CreateRegistration("testnet", "short-lived", service.RegistrationOptions{IP: shortIP}); err != nil {
+		t.Fatalf("reuse expired registration name and IP: %v", err)
+	}
+}
+
+func TestPruneExpiredRegistrations_RetainsActiveProvisionalPeer(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	stillExpiry := 24 * time.Hour
+	if _, err := env.Service.CreateRegistration(
+		"testnet",
+		"still-active",
+		service.RegistrationOptions{IP: net.ParseIP("10.0.0.8"), ExpiresIn: &stillExpiry},
+	); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if _, err := env.Service.RedeemRegistration(
+		"testnet",
+		lastTempKey(t, env.Service, "testnet"),
+		mustGenKey(t),
+	); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	if _, err := env.Service.CreateRegistration(
+		"testnet",
+		"reconcile-trigger",
+		service.RegistrationOptions{IP: net.ParseIP("10.0.0.250")},
+	); err != nil {
+		t.Fatalf("trigger reconcile: %v", err)
+	}
+
+	peer, err := env.Service.GetPeer("testnet", "still-active")
+	if err != nil {
+		t.Fatalf("get peer after reconcile: %v", err)
+	}
+	if peer.Confirmed {
+		t.Error("peer should still be provisional")
+	}
+}
+
+func TestPruneExpiredRegistrations_RetainsConfirmedRegistrationAsAudit(t *testing.T) {
+	clock := &mutableClock{t: testutil.FixedTime}
+	env := testutil.SetupServiceWithClock(t, clock.now)
+	testutil.SeedNetwork(t, env.Service)
+
+	auditedExpiry := time.Hour
+	if _, err := env.Service.CreateRegistration(
+		"testnet",
+		"audited",
+		service.RegistrationOptions{IP: net.ParseIP("10.0.0.10"), ExpiresIn: &auditedExpiry},
+	); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if _, err := env.Service.RedeemRegistration(
+		"testnet",
+		lastTempKey(t, env.Service, "testnet"),
+		mustGenKey(t),
+	); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	if err := env.Service.ConfirmPeer("testnet", "audited"); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+
+	clock.t = clock.t.Add(2 * time.Hour)
+	if _, err := env.Service.CreateRegistration(
+		"testnet",
+		"reconcile-trigger",
+		service.RegistrationOptions{IP: net.ParseIP("10.0.0.250")},
+	); err != nil {
+		t.Fatalf("trigger reconcile: %v", err)
+	}
+	reg, err := env.Database.GetRegistration("testnet", "audited")
+	if err != nil {
+		t.Fatalf("get registration after expiry: %v", err)
+	}
+	if !reg.Confirmed {
+		t.Error("registration should remain confirmed")
+	}
+}
+
+type mutableClock struct {
+	t time.Time
+}
+
+func (m *mutableClock) now() time.Time { return m.t }
+
+func assertRegistrationGroups(t *testing.T, svc *service.Service, registration string, want []string) {
+	t.Helper()
+	groups, err := svc.ListRegistrationGroups("testnet", registration)
+	if err != nil {
+		t.Fatalf("list registration groups: %v", err)
+	}
+	if len(groups) != len(want) {
+		t.Fatalf("registration groups = %+v, want %v", groups, want)
+	}
+	for i, group := range groups {
+		if group.Name != want[i] {
+			t.Fatalf("registration group %d = %q, want %q", i, group.Name, want[i])
+		}
+	}
+}
+
+func assertTransferredCidrGroups(t *testing.T, svc *service.Service, cidr string, want []string) {
+	t.Helper()
+	groups, err := svc.ListCidrGroups("testnet", cidr)
+	if err != nil {
+		t.Fatalf("list CIDR groups: %v", err)
+	}
+	if len(groups) != len(want) {
+		t.Fatalf("CIDR %q groups = %+v, want %v", cidr, groups, want)
+	}
+	for i, group := range groups {
+		if group.Name != want[i] {
+			t.Fatalf("CIDR %q group %d = %q, want %q", cidr, i, group.Name, want[i])
+		}
 	}
 }

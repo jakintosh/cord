@@ -102,7 +102,7 @@ func seedTopologyNetwork(t *testing.T, db *database.DB) {
 		{"subnet-a", "devops"},
 		{"alice-host", "platform"},
 	} {
-		if err := db.AssignGroup("toponet", pair[0], pair[1]); err != nil {
+		if err := db.AssignCidrGroup("toponet", pair[0], pair[1]); err != nil {
 			t.Fatalf("assign %s -> %s: %v", pair[0], pair[1], err)
 		}
 	}
@@ -273,6 +273,33 @@ func TestLoadTopologySnapshot_Peers(t *testing.T) {
 	}
 	if info.Route != "10.50.1.5/32" {
 		t.Errorf("route = %q, want 10.50.1.5/32", info.Route)
+	}
+}
+
+func TestLoadTopologySnapshot_ExcludesProvisionalPeers(t *testing.T) {
+	db := testutil.SetupDB(t)
+	seedTopologyNetwork(t, db)
+	testutil.SeedPeerDB(
+		t,
+		db,
+		"toponet",
+		"pending",
+		"10.50.1.7/32",
+		"pub-pending",
+		false,
+		true,
+		false,
+	)
+
+	snap, err := db.LoadTopologySnapshot("toponet")
+	if err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	if _, ok := snap.PeerCidr["pending"]; ok {
+		t.Error("provisional peer should not have a topology CIDR entry")
+	}
+	if _, ok := snap.PeerInfo["pending"]; ok {
+		t.Error("provisional peer should not have a topology info entry")
 	}
 }
 

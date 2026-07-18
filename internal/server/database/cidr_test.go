@@ -1,6 +1,7 @@
 package database_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -174,6 +175,12 @@ func TestDeleteCidr(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("insert cidr: %v", err)
 	}
+	if _, err := db.InsertGroup("cidrnet", "engineering"); err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+	if err := db.AssignCidrGroup("cidrnet", "delme", "engineering"); err != nil {
+		t.Fatalf("assign group: %v", err)
+	}
 
 	if err := db.DeleteCidr("cidrnet", "delme"); err != nil {
 		t.Fatalf("delete cidr: %v", err)
@@ -182,6 +189,13 @@ func TestDeleteCidr(t *testing.T) {
 	_, err := db.GetCidr("cidrnet", "delme")
 	if err == nil {
 		t.Fatal("expected error after delete")
+	}
+	var assignmentCount int
+	if err := db.Conn.QueryRow(`SELECT COUNT(*) FROM cidr_assignment`).Scan(&assignmentCount); err != nil {
+		t.Fatalf("count assignments after delete: %v", err)
+	}
+	if assignmentCount != 0 {
+		t.Fatalf("assignments after CIDR delete = %d, want 0", assignmentCount)
 	}
 }
 
@@ -239,5 +253,72 @@ func TestIPv6Cidr(t *testing.T) {
 	}
 	if got.Cidr != "fd00:1::/64" {
 		t.Errorf("cidr = %q, want fd00:1::/64", got.Cidr)
+	}
+}
+
+func TestCidrGroups_AssignListRemove(t *testing.T) {
+	db := testutil.SetupDB(t)
+	seedNetworkForCidr(t, db)
+
+	if err := db.InsertCidr("cidrnet", &service.Cidr{
+		Name: "servers", Cidr: "10.0.20.0/24", Prefix: 24, Bits: 32,
+	}); err != nil {
+		t.Fatalf("insert CIDR: %v", err)
+	}
+	for _, name := range []string{"engineering", "operations"} {
+		if _, err := db.InsertGroup("cidrnet", name); err != nil {
+			t.Fatalf("insert group %q: %v", name, err)
+		}
+	}
+	if err := db.AssignCidrGroup("cidrnet", "servers", "operations"); err != nil {
+		t.Fatalf("assign operations: %v", err)
+	}
+	if err := db.AssignCidrGroup("cidrnet", "servers", "engineering"); err != nil {
+		t.Fatalf("assign engineering: %v", err)
+	}
+	if err := db.AssignCidrGroup("cidrnet", "servers", "engineering"); err == nil {
+		t.Fatal("expected duplicate assignment to fail")
+	}
+
+	groups, err := db.ListCidrGroups("cidrnet", "servers")
+	if err != nil {
+		t.Fatalf("list groups: %v", err)
+	}
+	if len(groups) != 2 || groups[0].Name != "engineering" || groups[1].Name != "operations" {
+		t.Fatalf("groups = %+v, want engineering, operations", groups)
+	}
+
+	if err := db.RemoveCidrGroup("cidrnet", "servers", "engineering"); err != nil {
+		t.Fatalf("remove engineering: %v", err)
+	}
+	groups, err = db.ListCidrGroups("cidrnet", "servers")
+	if err != nil {
+		t.Fatalf("list groups after removal: %v", err)
+	}
+	if len(groups) != 1 || groups[0].Name != "operations" {
+		t.Fatalf("groups after removal = %+v, want operations", groups)
+	}
+}
+
+func TestCidrGroups_RejectsProvisionalPeer(t *testing.T) {
+	db := testutil.SetupDB(t)
+	seedNetworkForCidr(t, db)
+	testutil.SeedPeerDB(
+		t,
+		db,
+		"cidrnet",
+		"pending",
+		"10.0.30.5/32",
+		"pending-key",
+		false,
+		true,
+		false,
+	)
+	if _, err := db.InsertGroup("cidrnet", "engineering"); err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+
+	if err := db.AssignCidrGroup("cidrnet", "pending", "engineering"); !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("assign provisional peer group: err = %v, want ErrConflict", err)
 	}
 }

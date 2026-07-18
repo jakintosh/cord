@@ -38,8 +38,9 @@ func SeedPeerDB(
 	t.Helper()
 
 	if err := db.InsertCidr(network, &service.Cidr{
-		Name: name,
-		Cidr: cidr,
+		Name:     name,
+		Cidr:     cidr,
+		Terminal: true,
 	}); err != nil {
 		t.Fatalf("seed peer cidr %s: %v", name, err)
 	}

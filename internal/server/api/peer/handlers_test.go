@@ -1,11 +1,13 @@
 package peer
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
@@ -86,7 +88,21 @@ func TestHandleConfirmPeer_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	testutil.SeedPeerDB(t, env.Database, "testnet", "alice", "10.0.0.5/32", "alice-pub-key", false, true, false)
+	_, err := env.Service.CreateRegistration(
+		"testnet",
+		"alice",
+		service.RegistrationOptions{IP: net.ParseIP("10.0.0.5")},
+	)
+	if err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	regs, err := env.Service.ListRegistrations("testnet")
+	if err != nil {
+		t.Fatalf("list registrations: %v", err)
+	}
+	if _, err := env.Service.RedeemRegistration("testnet", regs[0].InvitePublicKey, "alice-pub-key"); err != nil {
+		t.Fatalf("redeem registration: %v", err)
+	}
 
 	api := New(env.Service, "testnet", nil)
 

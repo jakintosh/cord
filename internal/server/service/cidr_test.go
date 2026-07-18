@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"errors"
+	"net"
 	"testing"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
@@ -77,6 +78,27 @@ func TestAddCidr_Overlap(t *testing.T) {
 	err := env.Service.CreateCidr("testnet", "second", "10.0.1.0/24")
 	if !errors.Is(err, service.ErrConflict) {
 		t.Errorf("err = %v, want ErrConflict", err)
+	}
+}
+
+func TestAddCidr_RegistrationReservationConflict(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{IP: net.ParseIP("10.0.0.50")}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if err := env.Service.CreateCidr("testnet", "reserved", "10.0.0.50/32"); !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("CIDR steals registration route: err = %v, want ErrConflict", err)
+	}
+	if err := env.Service.CreateCidr("testnet", "alice", "10.0.0.51/32"); !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("CIDR steals registration name: err = %v, want ErrConflict", err)
+	}
+	if err := env.Service.RevokeRegistration("testnet", "alice"); err != nil {
+		t.Fatalf("revoke registration: %v", err)
+	}
+	if err := env.Service.CreateCidr("testnet", "reserved", "10.0.0.50/32"); err != nil {
+		t.Fatalf("reuse released route for CIDR: %v", err)
 	}
 }
 
@@ -196,5 +218,56 @@ func TestUpdateCidr_EmptyName(t *testing.T) {
 	err := env.Service.UpdateCidr("testnet", "cidr1", "")
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestCidrGroups_AddListRemove(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if err := env.Service.CreateCidr("testnet", "servers", "10.0.1.0/24"); err != nil {
+		t.Fatalf("create CIDR: %v", err)
+	}
+	for _, name := range []string{"engineering", "operations"} {
+		if _, err := env.Service.CreateGroup("testnet", name); err != nil {
+			t.Fatalf("create group %q: %v", name, err)
+		}
+	}
+	if err := env.Service.AssignCidrGroup("testnet", "servers", "operations"); err != nil {
+		t.Fatalf("assign operations: %v", err)
+	}
+	if err := env.Service.AssignCidrGroup("testnet", "servers", "engineering"); err != nil {
+		t.Fatalf("assign engineering: %v", err)
+	}
+
+	groups, err := env.Service.ListCidrGroups("testnet", "servers")
+	if err != nil {
+		t.Fatalf("list CIDR groups: %v", err)
+	}
+	if len(groups) != 2 || groups[0].Name != "engineering" || groups[1].Name != "operations" {
+		t.Fatalf("CIDR groups = %+v, want engineering, operations", groups)
+	}
+
+	if err := env.Service.RemoveCidrGroup("testnet", "servers", "engineering"); err != nil {
+		t.Fatalf("remove engineering: %v", err)
+	}
+	groups, err = env.Service.ListCidrGroups("testnet", "servers")
+	if err != nil {
+		t.Fatalf("list CIDR groups after removal: %v", err)
+	}
+	if len(groups) != 1 || groups[0].Name != "operations" {
+		t.Fatalf("CIDR groups after removal = %+v, want operations", groups)
+	}
+}
+
+func TestCidrGroups_MissingCidr(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.ListCidrGroups("testnet", "missing"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("list missing CIDR groups: err = %v, want ErrNotFound", err)
+	}
+	if err := env.Service.RemoveCidrGroup("testnet", "missing", "engineering"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("remove group from missing CIDR: err = %v, want ErrNotFound", err)
 	}
 }

@@ -10,15 +10,16 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-// Registration is the server-side stored representation of a pending peer
-// registration. It tracks the temporary key, assigned routes, CIDR allocation,
-// and redemption state.
+// Registration is the server-side stored representation of peer onboarding.
+// It reserves its main route but does not own a CIDR. Before redemption there
+// is no peer or terminal CIDR. Redemption creates both while group intent stays
+// on the registration. Confirmation atomically moves that intent to the CIDR
+// and makes the registration an immutable audit record.
 type Registration struct {
 	Name            string
 	InvitePublicKey string    // the temporary public key the peer uses to redeem
 	InviteRoute     string    // the temporary host route on the invite overlay
 	MainRoute       string    // the permanent host route on the main overlay
-	CidrName        string    // the name of the terminal CIDR allocated for this peer
 	Admin           bool      // whether the registration grants admin privileges
 	Redeemed        bool      // whether the registration has been redeemed
 	RedeemedKey     string    // the permanent public key after redemption
@@ -48,6 +49,94 @@ func (s *Service) ListRegistrations(
 	return registrations, nil
 }
 
+// ListRegistrationGroups returns the groups held by a registration before
+// confirmation. Confirmed registrations have no registration-held groups.
+func (s *Service) ListRegistrationGroups(
+	network string,
+	registration string,
+) (
+	[]*Group,
+	error,
+) {
+	if _, err := s.store.GetRegistration(network, registration); err != nil {
+		return nil, fmt.Errorf("get registration %q: %w", registration, mapStoreError(err))
+	}
+	groups, err := s.store.ListRegistrationGroups(network, registration)
+	if err != nil {
+		return nil, fmt.Errorf("list registration groups: %w", mapStoreError(err))
+	}
+	return groups, nil
+}
+
+// AssignRegistrationGroup records a group assignment as registration intent.
+// The assignment is transferred to the peer's terminal CIDR at confirmation.
+func (s *Service) AssignRegistrationGroup(
+	network string,
+	registration string,
+	group string,
+) error {
+	if network == "" || registration == "" || group == "" {
+		return fmt.Errorf(
+			"%w: network, registration, and group names are required",
+			ErrInvalidInput,
+		)
+	}
+	if err := s.requireMutableRegistration(network, registration); err != nil {
+		return err
+	}
+	if err := s.store.AssignRegistrationGroup(network, registration, group); err != nil {
+		return fmt.Errorf("assign registration group: %w", mapStoreError(err))
+	}
+	return nil
+}
+
+// RemoveRegistrationGroup removes group intent from an unconfirmed
+// registration. Removing an assignment that is not present is idempotent.
+func (s *Service) RemoveRegistrationGroup(
+	network string,
+	registration string,
+	group string,
+) error {
+	if network == "" || registration == "" || group == "" {
+		return fmt.Errorf(
+			"%w: network, registration, and group names are required",
+			ErrInvalidInput,
+		)
+	}
+	if err := s.requireMutableRegistration(network, registration); err != nil {
+		return err
+	}
+	if err := s.store.RemoveRegistrationGroup(network, registration, group); err != nil {
+		return fmt.Errorf("remove registration group: %w", mapStoreError(err))
+	}
+	return nil
+}
+
+func (s *Service) requireMutableRegistration(
+	network string,
+	registration string,
+) error {
+	reg, err := s.store.GetRegistration(network, registration)
+	if err != nil {
+		return fmt.Errorf("get registration %q: %w", registration, mapStoreError(err))
+	}
+	if reg.Confirmed {
+		return fmt.Errorf(
+			"%w: confirmed registration %q cannot be modified",
+			ErrConflict,
+			registration,
+		)
+	}
+	if !reg.ExpiresAt.After(s.clock()) {
+		return fmt.Errorf(
+			"%w: registration %q has expired",
+			ErrConflict,
+			registration,
+		)
+	}
+	return nil
+}
+
 // CreateRegistration reserves an IP on the main network, allocates a
 // temporary IP on the invite network, generates a temporary keypair,
 // persists the registration record, and returns the Invitation payload
@@ -60,6 +149,8 @@ func (s *Service) CreateRegistration(
 	*protocol.Invitation,
 	error,
 ) {
+	now := s.clock()
+
 	network, err := s.store.GetNetwork(networkName)
 	if err != nil {
 		return nil, fmt.Errorf("get network: %w", mapStoreError(err))
@@ -93,6 +184,10 @@ func (s *Service) CreateRegistration(
 		)
 	}
 
+	if err := s.store.PruneExpiredRegistrations(networkName, s.clock()); err != nil {
+		return nil, fmt.Errorf("prune expired registrations: %w", mapStoreError(err))
+	}
+
 	peerTempPrivKey, err := wireguard.GenerateKey()
 	if err != nil {
 		return nil, fmt.Errorf("generate temp key: %w", err)
@@ -113,7 +208,6 @@ func (s *Service) CreateRegistration(
 		expiry = *options.ExpiresIn
 	}
 
-	now := s.clock()
 	tempRoute := netaddr.HostRoute(peerTempAssignedIP)
 	mainRoute := netaddr.HostRoute(peerMainAssignedIP)
 	reg := &Registration{
@@ -121,7 +215,6 @@ func (s *Service) CreateRegistration(
 		InvitePublicKey: peerTempPubKey,
 		InviteRoute:     tempRoute.String(),
 		MainRoute:       mainRoute.String(),
-		CidrName:        name,
 		Admin:           options.Admin,
 		ExpiresAt:       now.Add(expiry),
 		CreatedAt:       now,
@@ -130,13 +223,13 @@ func (s *Service) CreateRegistration(
 	if err := s.store.InsertRegistration(networkName, reg); err != nil {
 		return nil, fmt.Errorf("insert registration: %w", mapStoreError(err))
 	}
-	s.reconcile(networkName)
 	s.log.Info("registration created",
 		"network", networkName,
 		"peer", name,
 		"route", mainRoute.String(),
 		"expires_at", reg.ExpiresAt,
 	)
+	s.reconcile(networkName)
 
 	_, inviteNet, err := net.ParseCIDR(network.Invite.Cidr)
 	if err != nil {
@@ -209,9 +302,9 @@ func (s *Service) RedeemRegistration(
 	return s.buildInvitation(network, peer)
 }
 
-// RevokeRegistration deletes a registration by name, preventing it from
-// being redeemed. Any associated temporary key and IP are released.
-// After redemption, use ConfirmPeer to confirm the peer instead.
+// RevokeRegistration deletes an unconfirmed registration by name, preventing
+// redemption or confirmation. Any provisional peer and its routes are also
+// removed. Confirmed registrations are immutable audit records.
 func (s *Service) RevokeRegistration(
 	network string,
 	name string,
@@ -275,7 +368,7 @@ func (s *Service) nextFreeRegistrationIP(
 		return nil, fmt.Errorf("parse invite CIDR: %w", err)
 	}
 
-	regs, err := s.store.ListRegistrations(network)
+	regs, err := s.store.ListActiveRegistrations(network, s.clock())
 	if err != nil {
 		return nil, fmt.Errorf("list registrations: %w", err)
 	}
