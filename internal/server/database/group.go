@@ -1,6 +1,7 @@
 package database
 
 import (
+	"database/sql"
 	"fmt"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
@@ -88,4 +89,25 @@ func (db *DB) DeleteGroup(
 		return fmt.Errorf("%w: group %q not found", service.ErrNotFound, name)
 	}
 	return nil
+}
+
+func sqlGetGroupIDTx(
+	tx *sql.Tx,
+	network string,
+	name string,
+	context string,
+) (
+	int64,
+	error,
+) {
+	var groupID int64
+	if err := tx.QueryRow(`
+		SELECT id FROM "group"
+		WHERE network_name = ?1 AND name = ?2`,
+		network,
+		name,
+	).Scan(&groupID); err != nil {
+		return 0, CheckSqliteErr(context, err)
+	}
+	return groupID, nil
 }

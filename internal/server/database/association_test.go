@@ -62,7 +62,7 @@ func seedNetworkForAssoc(t *testing.T, db *database.DB) {
 		{Name: "subnet-b", Cidr: "10.0.2.0/24", Prefix: 24, Bits: 32},
 		{Name: "subnet-c", Cidr: "10.0.3.0/24", Prefix: 24, Bits: 32},
 	} {
-		if err := db.InsertCidr("assocnet", &c); err != nil {
+		if err := db.CreateCidr("assocnet", &c); err != nil {
 			t.Fatalf("seed cidr %s: %v", c.Name, err)
 		}
 	}

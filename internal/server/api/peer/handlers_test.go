@@ -40,7 +40,18 @@ func TestHandleVisiblePeers_IdentityFails(t *testing.T) {
 }
 
 func TestHandleReportEndpoints_Success(t *testing.T) {
-	_, api := setupPeerTest(t)
+	env, api := setupPeerTest(t)
+	testutil.SeedPeerDB(
+		t,
+		env.Database,
+		"testnet",
+		"observed",
+		"10.0.0.6/32",
+		"peer-key-1",
+		false,
+		true,
+		true,
+	)
 
 	body := `[
 		{"peer_key": "peer-key-1", "endpoint": "1.2.3.4:51820"}
@@ -91,7 +102,7 @@ func TestHandleConfirmPeer_Success(t *testing.T) {
 	_, err := env.Service.CreateRegistration(
 		"testnet",
 		"alice",
-		service.RegistrationOptions{IP: net.ParseIP("10.0.0.5")},
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")},
 	)
 	if err != nil {
 		t.Fatalf("create registration: %v", err)

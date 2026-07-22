@@ -1,6 +1,7 @@
 package database_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -211,23 +212,46 @@ func TestDeleteEndpointsBefore(t *testing.T) {
 	}
 }
 
-func TestInsertEndpointSightings_UnknownPeerSkipped(t *testing.T) {
+func TestInsertEndpointSightings_MissingNetwork(t *testing.T) {
+	db := testutil.SetupDB(t)
+
+	err := db.InsertEndpointSightings("missing", nil)
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestInsertEndpointSightings_UnknownPeerRejectsBatch(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)
 
+	now := time.Now()
 	err := db.InsertEndpointSightings("epnet", []service.EndpointSighting{
-		{WitnessKey: "pub-a", PeerKey: "ghost", Endpoint: "ep:1", Timestamp: time.Now()},
+		{WitnessKey: "pub-a", PeerKey: "pub-b", Endpoint: "valid:1", Timestamp: now},
+		{WitnessKey: "pub-a", PeerKey: "ghost", Endpoint: "invalid:1", Timestamp: now},
 	})
-	if err != nil {
-		t.Fatalf("unknown peer should be silently skipped: %v", err)
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 
-	endpoints, err := db.GetRecentEndpoints("epnet", time.Now().Add(-time.Hour))
+	endpoints, err := db.GetRecentEndpoints("epnet", now.Add(-time.Hour))
 	if err != nil {
 		t.Fatalf("get recent: %v", err)
 	}
 	if len(endpoints) != 0 {
-		t.Fatalf("expected 0 endpoints after skipped insert, got %d", len(endpoints))
+		t.Fatalf("expected atomic rollback, got %d endpoint keys", len(endpoints))
+	}
+}
+
+func TestInsertEndpointSightings_UnknownWitnessRejectsBatch(t *testing.T) {
+	db := testutil.SetupDB(t)
+	seedNetworkForEndpoint(t, db)
+
+	err := db.InsertEndpointSightings("epnet", []service.EndpointSighting{
+		{WitnessKey: "ghost", PeerKey: "pub-b", Endpoint: "ep:1", Timestamp: time.Now()},
+	})
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
 

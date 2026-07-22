@@ -3,8 +3,6 @@ package service
 import (
 	"fmt"
 	"net"
-
-	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 )
 
 // Cidr is a named CIDR range within a server network. CIDRs partition
@@ -30,6 +28,7 @@ func (s *Service) GetCidr(
 	if err != nil {
 		return nil, fmt.Errorf("get cidr %q: %w", name, mapStoreError(err))
 	}
+
 	return c, nil
 }
 
@@ -47,13 +46,13 @@ func (s *Service) ListCidrs(
 	return cidrs, nil
 }
 
-// CreateCidr adds a named CIDR to the network. The CIDR string must parse
-// as a valid net.IPNet and must be contained within the root CIDR.
-// Returns ErrCIDROverlap if the range conflicts with an existing CIDR.
+// CreateCidr adds a named CIDR to the network. The CIDR string must parse as a
+// valid net.IPNet. The store atomically verifies containment within the
+// persisted main CIDR and rejects persisted name or route conflicts.
 func (s *Service) CreateCidr(
 	networkName string,
 	name string,
-	cidr string,
+	cidrStr string,
 ) error {
 	if networkName == "" {
 		return fmt.Errorf("%w: network name required", ErrInvalidInput)
@@ -63,38 +62,21 @@ func (s *Service) CreateCidr(
 		return fmt.Errorf("%w: CIDR name required", ErrInvalidInput)
 	}
 
-	_, cidrNet, err := net.ParseCIDR(cidr)
+	_, cidrNet, err := net.ParseCIDR(cidrStr)
 	if err != nil {
-		return fmt.Errorf("%w: invalid CIDR %q: %v", ErrInvalidInput, cidr, err)
-	}
-
-	network, err := s.store.GetNetwork(networkName)
-	if err != nil {
-		return fmt.Errorf("get network for cidr check: %w", mapStoreError(err))
-	}
-
-	_, rootNet, err := net.ParseCIDR(network.Main.Cidr)
-	if err != nil {
-		return fmt.Errorf("%w: parse main CIDR %q: %v", ErrInvalidInput, network.Main.Cidr, err)
-	}
-
-	if !netaddr.Contains(rootNet, cidrNet) {
-		return fmt.Errorf(
-			"%w: CIDR %q is not contained within main CIDR %q",
-			ErrInvalidInput, cidr, network.Main.Cidr,
-		)
+		return fmt.Errorf("%w: invalid CIDR %q: %v", ErrInvalidInput, cidrStr, err)
 	}
 
 	ones, bits := cidrNet.Mask.Size()
-	c := &Cidr{
+	cidr := &Cidr{
 		Name:   name,
-		Cidr:   cidr,
+		Cidr:   cidrStr,
 		Prefix: ones,
 		Bits:   bits,
 	}
 
-	if err := s.store.InsertCidr(networkName, c); err != nil {
-		return fmt.Errorf("insert cidr: %w", mapStoreError(err))
+	if err := s.store.CreateCidr(networkName, cidr); err != nil {
+		return fmt.Errorf("create cidr: %w", mapStoreError(err))
 	}
 
 	return nil
@@ -103,17 +85,21 @@ func (s *Service) CreateCidr(
 // UpdateCidr renames a CIDR and returns the updated record.
 func (s *Service) UpdateCidr(
 	networkName string,
-	name string,
-	newName string,
+	cidrName string,
+	newCidrName string,
 ) error {
-	if newName == "" {
+	if newCidrName == "" {
 		return fmt.Errorf("%w: CIDR name required", ErrInvalidInput)
 	}
 
-	_, err := s.store.UpdateCidr(networkName, name, newName)
-	if err != nil {
-		return fmt.Errorf("update cidr %q: %w", name, mapStoreError(err))
+	if _, err := s.store.UpdateCidr(
+		networkName,
+		cidrName,
+		newCidrName,
+	); err != nil {
+		return fmt.Errorf("update cidr %q: %w", cidrName, mapStoreError(err))
 	}
+
 	return nil
 }
 
@@ -123,33 +109,32 @@ func (s *Service) UpdateCidr(
 // it is removed automatically when the network is deleted.
 func (s *Service) DeleteCidr(
 	networkName string,
-	name string,
+	cidrName string,
 ) error {
-	if name == networkName {
+	if cidrName == networkName {
 		return fmt.Errorf("%w: cannot delete the root CIDR", ErrInvalidInput)
 	}
 
-	if err := s.store.DeleteCidr(networkName, name); err != nil {
-		return fmt.Errorf("delete cidr %q: %w", name, mapStoreError(err))
+	if err := s.store.DeleteCidr(networkName, cidrName); err != nil {
+		return fmt.Errorf("delete cidr %q: %w", cidrName, mapStoreError(err))
 	}
+
 	return nil
 }
 
 // ListCidrGroups returns the groups directly assigned to a CIDR.
 func (s *Service) ListCidrGroups(
-	network string,
+	networkName string,
 	cidrName string,
 ) (
 	[]*Group,
 	error,
 ) {
-	if _, err := s.store.GetCidr(network, cidrName); err != nil {
-		return nil, fmt.Errorf("get CIDR %q: %w", cidrName, mapStoreError(err))
-	}
-	groups, err := s.store.ListCidrGroups(network, cidrName)
+	groups, err := s.store.ListCidrGroups(networkName, cidrName)
 	if err != nil {
 		return nil, fmt.Errorf("list CIDR groups: %w", mapStoreError(err))
 	}
+
 	return groups, nil
 }
 
@@ -167,9 +152,14 @@ func (s *Service) AssignCidrGroup(
 		return fmt.Errorf("%w: CIDR name and group name required", ErrInvalidInput)
 	}
 
-	if err := s.store.AssignCidrGroup(network, cidrName, groupName); err != nil {
+	if err := s.store.AssignCidrGroup(
+		network,
+		cidrName,
+		groupName,
+	); err != nil {
 		return fmt.Errorf("assign group: %w", mapStoreError(err))
 	}
+
 	return nil
 }
 
@@ -179,10 +169,18 @@ func (s *Service) RemoveCidrGroup(
 	cidrName string,
 	groupName string,
 ) error {
-	if _, err := s.store.GetCidr(network, cidrName); err != nil {
-		return fmt.Errorf("get CIDR %q: %w", cidrName, mapStoreError(err))
+	if network == "" {
+		return fmt.Errorf("%w: network name required", ErrInvalidInput)
 	}
-	if err := s.store.RemoveCidrGroup(network, cidrName, groupName); err != nil {
+	if cidrName == "" || groupName == "" {
+		return fmt.Errorf("%w: CIDR name and group name required", ErrInvalidInput)
+	}
+
+	if err := s.store.RemoveCidrGroup(
+		network,
+		cidrName,
+		groupName,
+	); err != nil {
 		return fmt.Errorf("remove group: %w", mapStoreError(err))
 	}
 	return nil

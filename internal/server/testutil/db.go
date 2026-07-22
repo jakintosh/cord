@@ -37,7 +37,7 @@ func SeedPeerDB(
 ) {
 	t.Helper()
 
-	if err := db.InsertCidr(network, &service.Cidr{
+	if err := db.CreateCidr(network, &service.Cidr{
 		Name:     name,
 		Cidr:     cidr,
 		Terminal: true,

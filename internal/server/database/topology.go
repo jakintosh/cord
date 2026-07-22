@@ -69,6 +69,8 @@ func (db *DB) sqlLoadCidrsTx(
 	if err != nil {
 		return nil, fmt.Errorf("load cidrs: %w", err)
 	}
+	defer rows.Close()
+
 	for rows.Next() {
 		var name, cidr string
 		var base, last []byte
@@ -99,7 +101,7 @@ func (db *DB) sqlLoadCidrsTx(
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate cidrs: %w", err)
 	}
-	rows.Close()
+
 	return cidrs, nil
 }
 
@@ -122,6 +124,7 @@ func (db *DB) sqlLoadAssignmentsTx(
 	if err != nil {
 		return nil, fmt.Errorf("load assignments: %w", err)
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var cidrName, groupName string
 		if err := rows.Scan(&cidrName, &groupName); err != nil {
@@ -133,7 +136,7 @@ func (db *DB) sqlLoadAssignmentsTx(
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate assignments: %w", err)
 	}
-	rows.Close()
+
 	return assignments, nil
 }
 
@@ -156,6 +159,8 @@ func (db *DB) sqlLoadAssociationsTx(
 	if err != nil {
 		return nil, fmt.Errorf("load associations: %w", err)
 	}
+	defer rows.Close()
+
 	for rows.Next() {
 		var g1, g2 string
 		if err := rows.Scan(&g1, &g2); err != nil {
@@ -174,7 +179,7 @@ func (db *DB) sqlLoadAssociationsTx(
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate associations: %w", err)
 	}
-	rows.Close()
+
 	return associations, nil
 }
 
@@ -200,6 +205,8 @@ func (db *DB) sqlLoadPeersTx(
 	if err != nil {
 		return nil, nil, fmt.Errorf("load peers: %w", err)
 	}
+	defer rows.Close()
+
 	for rows.Next() {
 		var peerName, pubKey, cidrName, cidrVal string
 		if err := rows.Scan(
@@ -221,6 +228,6 @@ func (db *DB) sqlLoadPeersTx(
 	if err := rows.Err(); err != nil {
 		return nil, nil, fmt.Errorf("iterate peers: %w", err)
 	}
-	rows.Close()
+
 	return peerCidr, peerInfo, nil
 }

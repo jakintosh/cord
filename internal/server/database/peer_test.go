@@ -1,6 +1,7 @@
 package database_test
 
 import (
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -131,31 +132,6 @@ func TestGetPeerByIP_NotConfirmed(t *testing.T) {
 	}
 }
 
-func TestGetPeerByKey(t *testing.T) {
-	db := testutil.SetupDB(t)
-	seedNetwork(t, db)
-
-	testutil.SeedPeerDB(t, db, "testnet", "charlie", "10.0.5.4/32", "charlie-key", false, false, false)
-
-	got, err := db.GetPeerByKey("testnet", "charlie-key")
-	if err != nil {
-		t.Fatalf("get peer by key: %v", err)
-	}
-	if got.Name != "charlie" {
-		t.Errorf("name = %q, want charlie", got.Name)
-	}
-}
-
-func TestGetPeerByKey_NotFound(t *testing.T) {
-	db := testutil.SetupDB(t)
-	seedNetwork(t, db)
-
-	_, err := db.GetPeerByKey("testnet", "unknown-key")
-	if err == nil {
-		t.Fatal("expected error for unknown key")
-	}
-}
-
 func TestListPeers(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
@@ -192,7 +168,7 @@ func TestInsertPeer_DuplicateName(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
-	if err := db.InsertCidr("testnet", &service.Cidr{
+	if err := db.CreateCidr("testnet", &service.Cidr{
 		Name: "dup", Cidr: "10.0.5.20/32",
 	}); err != nil {
 		t.Fatalf("first insert cidr: %v", err)
@@ -206,7 +182,7 @@ func TestInsertPeer_DuplicateName(t *testing.T) {
 		t.Fatalf("first insert: %v", err)
 	}
 
-	if err := db.InsertCidr("testnet", &service.Cidr{
+	if err := db.CreateCidr("testnet", &service.Cidr{
 		Name: "dup2", Cidr: "10.0.5.21/32",
 	}); err != nil {
 		t.Fatalf("second insert cidr: %v", err)
@@ -225,7 +201,7 @@ func TestInsertPeer_DuplicateCidr(t *testing.T) {
 
 	testutil.SeedPeerDB(t, db, "testnet", "peer1", "10.0.5.30/32", "key1", false, true, true)
 
-	err := db.InsertCidr("testnet", &service.Cidr{
+	err := db.CreateCidr("testnet", &service.Cidr{
 		Name: "peer2",
 		Cidr: "10.0.5.30/32",
 	})
@@ -330,7 +306,7 @@ func TestUpdatePeer_Rename(t *testing.T) {
 	testutil.SeedPeerDB(t, db, "testnet", "old-name", "10.0.5.60/32", "ren-key", false, false, false)
 
 	newName := "new-name"
-	peer, err := db.UpdatePeer("testnet", "old-name", service.PeerUpdate{Name: &newName})
+	peer, err := db.UpdatePeer("testnet", "old-name", service.PeerDiff{Name: &newName})
 	if err != nil {
 		t.Fatalf("update peer: %v", err)
 	}
@@ -338,12 +314,12 @@ func TestUpdatePeer_Rename(t *testing.T) {
 		t.Errorf("name = %q, want new-name", peer.Name)
 	}
 
-	exists, err := db.PeerExists("testnet", "new-name")
+	renamed, err := db.GetPeer("testnet", "new-name")
 	if err != nil {
-		t.Fatalf("peer exists: %v", err)
+		t.Fatalf("get renamed peer: %v", err)
 	}
-	if !exists {
-		t.Fatal("peer should exist under new name")
+	if renamed.Name != "new-name" {
+		t.Fatalf("renamed peer = %q, want new-name", renamed.Name)
 	}
 }
 
@@ -354,7 +330,7 @@ func TestUpdatePeer_ToggleAdmin(t *testing.T) {
 	testutil.SeedPeerDB(t, db, "testnet", "toggle-peer", "10.0.5.70/32", "tog-key", false, false, false)
 
 	adminTrue := true
-	peer, err := db.UpdatePeer("testnet", "toggle-peer", service.PeerUpdate{Admin: &adminTrue})
+	peer, err := db.UpdatePeer("testnet", "toggle-peer", service.PeerDiff{Admin: &adminTrue})
 	if err != nil {
 		t.Fatalf("update peer admin: %v", err)
 	}
@@ -363,48 +339,16 @@ func TestUpdatePeer_ToggleAdmin(t *testing.T) {
 	}
 }
 
-func TestPeerExists(t *testing.T) {
+func TestCreatePeerCIDR_RejectsDifferentAddressFamily(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetwork(t, db)
 
-	testutil.SeedPeerDB(t, db, "testnet", "exists", "10.0.5.80/32", "exists-key", false, false, false)
-
-	exists, err := db.PeerExists("testnet", "exists")
-	if err != nil {
-		t.Fatalf("peer exists: %v", err)
-	}
-	if !exists {
-		t.Fatal("peer should exist")
-	}
-
-	exists, err = db.PeerExists("testnet", "nope")
-	if err != nil {
-		t.Fatalf("peer exists: %v", err)
-	}
-	if exists {
-		t.Fatal("peer should not exist")
-	}
-}
-
-func TestIPv6Peer(t *testing.T) {
-	db := testutil.SetupDB(t)
-	seedNetwork(t, db)
-
-	testutil.SeedPeerDB(t, db, "testnet", "ipv6-peer", "fd00::1/128", "v6-key", false, true, true)
-
-	got, err := db.GetPeer("testnet", "ipv6-peer")
-	if err != nil {
-		t.Fatalf("get ipv6 peer: %v", err)
-	}
-	if got.Route != "fd00::1/128" {
-		t.Errorf("cidr = %q, want fd00::1/128", got.Route)
-	}
-
-	gotByIP, err := db.GetPeerByIP("testnet", net.ParseIP("fd00::1"))
-	if err != nil {
-		t.Fatalf("get ipv6 peer by IP: %v", err)
-	}
-	if gotByIP.Name != "ipv6-peer" {
-		t.Errorf("name = %q, want ipv6-peer", gotByIP.Name)
+	err := db.CreateCidr("testnet", &service.Cidr{
+		Name:     "ipv6-peer",
+		Cidr:     "fd00::1/128",
+		Terminal: true,
+	})
+	if !errors.Is(err, service.ErrInvalidInput) {
+		t.Fatalf("create IPv6 CIDR in IPv4 network: err = %v, want ErrInvalidInput", err)
 	}
 }

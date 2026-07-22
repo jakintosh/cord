@@ -87,7 +87,7 @@ func seedTopologyNetwork(t *testing.T, db *database.DB) {
 			Terminal: true,
 		},
 	} {
-		if err := db.InsertCidr("toponet", &c); err != nil {
+		if err := db.CreateCidr("toponet", &c); err != nil {
 			t.Fatalf("seed cidr %s: %v", c.Name, err)
 		}
 	}

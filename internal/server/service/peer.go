@@ -21,13 +21,12 @@ type Peer struct {
 	Confirmed bool // whether the peer has proven reachability on the main network
 }
 
-// PeerUpdate describes a partial change to a persisted peer. Nil fields mean
+// PeerDiff describes a partial change to a persisted peer. Nil fields mean
 // no change; lifecycle methods construct updates for their own state changes.
-type PeerUpdate struct {
-	Name      *string
-	Admin     *bool
-	Enabled   *bool
-	Confirmed *bool
+type PeerDiff struct {
+	Name    *string
+	Admin   *bool
+	Enabled *bool
 }
 
 // VisiblePeer is a peer as it appears to other peers on the network.
@@ -154,23 +153,23 @@ func (s *Service) ListVisiblePeers(
 func (s *Service) UpdatePeer(
 	network string,
 	name string,
-	update PeerUpdate,
+	diff PeerDiff,
 ) (
 	*Peer,
 	error,
 ) {
-	if update.Name == nil &&
-		update.Admin == nil &&
-		update.Enabled == nil &&
-		update.Confirmed == nil {
+	if diff.Name == nil &&
+		diff.Admin == nil &&
+		diff.Enabled == nil {
 		return nil, ErrInvalidInput
 	}
 
-	p, err := s.store.UpdatePeer(network, name, update)
+	p, err := s.store.UpdatePeer(network, name, diff)
 	if err != nil {
 		return nil, fmt.Errorf("update peer %q: %w", name, mapStoreError(err))
 	}
 	s.reconcile(network)
+
 	return p, nil
 }
 
@@ -187,17 +186,23 @@ func (s *Service) ConfirmPeer(
 	network string,
 	name string,
 ) error {
-	if err := s.store.PruneExpiredRegistrations(network, s.clock()); err != nil {
-		return fmt.Errorf("prune expired registrations: %w", mapStoreError(err))
-	}
+	defer s.reconcile(network)
 
-	if err := s.store.ConfirmPeer(network, name); err != nil {
-		s.reconcile(network)
+	if err := s.store.ConfirmPeer(
+		network,
+		name,
+		s.clock(),
+	); err != nil {
 		return fmt.Errorf("confirm peer %q: %w", name, mapStoreError(err))
 	}
 
-	s.reconcile(network)
-	s.log.Info("peer confirmed", "network", network, "peer", name)
+	s.log.Info(
+		"peer confirmed",
+		"network",
+		network,
+		"peer",
+		name,
+	)
 
 	return nil
 }
@@ -209,10 +214,14 @@ func (s *Service) RemovePeer(
 	network string,
 	name string,
 ) error {
-	if err := s.store.DeletePeer(network, name); err != nil {
+	if err := s.store.DeletePeer(
+		network,
+		name,
+	); err != nil {
 		return fmt.Errorf("delete peer %q: %w", name, mapStoreError(err))
 	}
 	s.reconcile(network)
+
 	return nil
 }
 
@@ -223,14 +232,13 @@ func (s *Service) ReportEndpoints(
 	network string,
 	sightings []EndpointSighting,
 ) error {
-	_, err := s.store.GetNetwork(network)
-	if err != nil {
-		return fmt.Errorf("get network: %w", mapStoreError(err))
+	if err := s.store.InsertEndpointSightings(
+		network,
+		sightings,
+	); err != nil {
+		return fmt.Errorf("insert endpoint sightings: %w", mapStoreError(err))
 	}
 
-	if err := s.store.InsertEndpointSightings(network, sightings); err != nil {
-		return fmt.Errorf("insert endpoint sightings: %w", err)
-	}
 	return nil
 }
 

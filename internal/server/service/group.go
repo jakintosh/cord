@@ -22,6 +22,7 @@ func (s *Service) ListGroups(
 	if err != nil {
 		return nil, fmt.Errorf("list groups: %w", err)
 	}
+
 	return groups, nil
 }
 
@@ -44,6 +45,7 @@ func (s *Service) CreateGroup(
 	if err != nil {
 		return nil, fmt.Errorf("insert group: %w", mapStoreError(err))
 	}
+
 	return g, nil
 }
 
@@ -55,5 +57,6 @@ func (s *Service) DeleteGroup(
 	if err := s.store.DeleteGroup(network, name); err != nil {
 		return fmt.Errorf("delete group: %w", mapStoreError(err))
 	}
+
 	return nil
 }

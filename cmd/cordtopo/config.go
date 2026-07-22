@@ -192,7 +192,7 @@ func seedDB(
 			}
 
 			prefix, bits := n.Mask.Size()
-			if err := db.InsertCidr(
+			if err := db.CreateCidr(
 				cfg.Network,
 				&service.Cidr{
 					Name:     cidr.Name,

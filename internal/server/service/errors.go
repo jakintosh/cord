@@ -6,24 +6,27 @@ import (
 )
 
 var (
-	ErrNotFound             = errors.New("resource not found")
-	ErrConflict             = errors.New("resource already exists")
-	ErrNetworkExists        = errors.New("network already exists")
-	ErrInvalidInput         = errors.New("invalid input")
-	ErrCIDROverlap          = errors.New("CIDR overlap with existing range")
-	ErrRegistrationExpired  = errors.New("registration has expired")
-	ErrRegistrationRedeemed = errors.New("registration already redeemed")
-	ErrPeerNotConfirmed     = errors.New("peer not yet confirmed")
-	ErrNetworkRunning       = errors.New("network is already running")
-	ErrNetworkNotRunning    = errors.New("network is not running")
-	ErrNotImplemented       = errors.New("not implemented")
-	ErrWireGuardUnavailable = errors.New("wireguard backend not configured")
+	ErrNotFound                     = errors.New("resource not found")
+	ErrConflict                     = errors.New("resource already exists")
+	ErrNetworkExists                = errors.New("network already exists")
+	ErrInvalidInput                 = errors.New("invalid input")
+	ErrCIDROverlap                  = errors.New("CIDR overlap with existing range")
+	ErrRegistrationAddressExhausted = errors.New("no invite addresses available for registration")
+	ErrRegistrationExpired          = errors.New("registration has expired")
+	ErrRegistrationRedeemed         = errors.New("registration already redeemed")
+	ErrPeerNotConfirmed             = errors.New("peer not yet confirmed")
+	ErrNetworkRunning               = errors.New("network is already running")
+	ErrNetworkNotRunning            = errors.New("network is not running")
+	ErrNotImplemented               = errors.New("not implemented")
+	ErrWireGuardUnavailable         = errors.New("wireguard backend not configured")
 )
 
 // mapStoreError translates store-level sentinel errors into
 // service-level sentinel errors. It also normalizes conflict errors
 // into ErrNetworkExists when the context mentions "network".
-func mapStoreError(err error) error {
+func mapStoreError(
+	err error,
+) error {
 	if err == nil {
 		return nil
 	}

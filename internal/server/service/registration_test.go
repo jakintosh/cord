@@ -17,7 +17,7 @@ func TestCreateRegistration_Success(t *testing.T) {
 
 	ip := net.ParseIP("10.0.0.5")
 	expiresIn := time.Hour
-	inv, err := env.Service.CreateRegistration("testnet", "new-peer", service.RegistrationOptions{IP: ip, ExpiresIn: &expiresIn})
+	inv, err := env.Service.CreateRegistration("testnet", "new-peer", service.RegistrationOptions{PeerIP: ip, ExpiresIn: &expiresIn})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestCreateRegistration_DefaultExpiration(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.6")
-	_, err := env.Service.CreateRegistration("testnet", "default-exp", service.RegistrationOptions{IP: ip})
+	_, err := env.Service.CreateRegistration("testnet", "default-exp", service.RegistrationOptions{PeerIP: ip})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestCreateRegistration_ReconcilesRunningInviteDeviceWithHostRoute(t *testin
 	}
 
 	ip := net.ParseIP("10.0.0.5")
-	inv, err := env.Service.CreateRegistration("testnet", "live-reg", service.RegistrationOptions{IP: ip})
+	inv, err := env.Service.CreateRegistration("testnet", "live-reg", service.RegistrationOptions{PeerIP: ip})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestCreateRegistration_EmptyName(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.5")
-	_, err := env.Service.CreateRegistration("testnet", "", service.RegistrationOptions{IP: ip})
+	_, err := env.Service.CreateRegistration("testnet", "", service.RegistrationOptions{PeerIP: ip})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
@@ -128,7 +128,7 @@ func TestCreateRegistration_NonexistentNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
 
 	ip := net.ParseIP("10.0.0.5")
-	_, err := env.Service.CreateRegistration("nonexistent", "peer", service.RegistrationOptions{IP: ip})
+	_, err := env.Service.CreateRegistration("nonexistent", "peer", service.RegistrationOptions{PeerIP: ip})
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
@@ -139,11 +139,47 @@ func TestCreateRegistration_DuplicateIP(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.5")
-	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{IP: ip}); err != nil {
+	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{PeerIP: ip}); err != nil {
 		t.Fatalf("create first registration: %v", err)
 	}
-	if _, err := env.Service.CreateRegistration("testnet", "bob", service.RegistrationOptions{IP: ip}); !errors.Is(err, service.ErrConflict) {
+	if _, err := env.Service.CreateRegistration("testnet", "bob", service.RegistrationOptions{PeerIP: ip}); !errors.Is(err, service.ErrConflict) {
 		t.Errorf("duplicate IP: err = %v, want ErrConflict", err)
+	}
+}
+
+func TestCreateRegistration_AddressExhausted(t *testing.T) {
+	env := testutil.SetupService(t)
+	if _, err := env.Service.CreateNetwork(
+		"small",
+		"192.168.1.1",
+		service.PlaneConfig{
+			Cidr:          "10.0.0.0/24",
+			WireguardPort: 51820,
+			ApiPort:       8080,
+		},
+		service.PlaneConfig{
+			Cidr:          "10.1.0.0/30",
+			WireguardPort: 51821,
+			ApiPort:       8080,
+		},
+	); err != nil {
+		t.Fatalf("create network: %v", err)
+	}
+
+	if _, err := env.Service.CreateRegistration(
+		"small",
+		"first",
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")},
+	); err != nil {
+		t.Fatalf("create first registration: %v", err)
+	}
+	_, err := env.Service.CreateRegistration(
+		"small",
+		"second",
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.6")},
+	)
+	if !errors.Is(err, service.ErrRegistrationAddressExhausted) {
+		t.Fatalf("create second registration: err = %v, want ErrRegistrationAddressExhausted", err)
 	}
 }
 
@@ -152,7 +188,7 @@ func TestRedeemRegistration_Success(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.5")
-	_, err := env.Service.CreateRegistration("testnet", "redeemer", service.RegistrationOptions{IP: ip})
+	_, err := env.Service.CreateRegistration("testnet", "redeemer", service.RegistrationOptions{PeerIP: ip})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -197,7 +233,7 @@ func TestRedeemRegistration_Idempotent_SameKey(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.6")
-	_, err := env.Service.CreateRegistration("testnet", "idempotent", service.RegistrationOptions{IP: ip})
+	_, err := env.Service.CreateRegistration("testnet", "idempotent", service.RegistrationOptions{PeerIP: ip})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -218,12 +254,59 @@ func TestRedeemRegistration_Idempotent_SameKey(t *testing.T) {
 	}
 }
 
+func TestRedeemRegistration_RejectsDifferentKey(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.CreateRegistration(
+		"testnet",
+		"redeemed",
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.6")},
+	); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	if _, err := env.Service.RedeemRegistration("testnet", tempKey, "perm-key-1"); err != nil {
+		t.Fatalf("first redeem: %v", err)
+	}
+
+	_, err := env.Service.RedeemRegistration("testnet", tempKey, "perm-key-2")
+	if !errors.Is(err, service.ErrRegistrationRedeemed) {
+		t.Fatalf("redeem with another key: err = %v, want ErrRegistrationRedeemed", err)
+	}
+}
+
+func TestRedeemRegistration_Expired(t *testing.T) {
+	clock := &mutableClock{t: testutil.FixedTime}
+	env := testutil.SetupServiceWithClock(t, clock.now)
+	testutil.SeedNetwork(t, env.Service)
+	expiresIn := time.Hour
+
+	if _, err := env.Service.CreateRegistration(
+		"testnet",
+		"expired",
+		service.RegistrationOptions{
+			PeerIP:        net.ParseIP("10.0.0.6"),
+			ExpiresIn: &expiresIn,
+		},
+	); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	clock.t = clock.t.Add(expiresIn)
+
+	_, err := env.Service.RedeemRegistration("testnet", tempKey, "perm-key")
+	if !errors.Is(err, service.ErrRegistrationExpired) {
+		t.Fatalf("redeem expired registration: err = %v, want ErrRegistrationExpired", err)
+	}
+}
+
 func TestRedeemRegistration_UnknownKey(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.5")
-	_, err := env.Service.CreateRegistration("testnet", "peer", service.RegistrationOptions{IP: ip})
+	_, err := env.Service.CreateRegistration("testnet", "peer", service.RegistrationOptions{PeerIP: ip})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -234,19 +317,48 @@ func TestRedeemRegistration_UnknownKey(t *testing.T) {
 	}
 }
 
+func TestRedeemRegistration_UnknownKeyDoesNotMatchUnrelatedPeer(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.CreateRegistration(
+		"testnet",
+		"existing",
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")},
+	); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if _, err := env.Service.RedeemRegistration(
+		"testnet",
+		lastTempKey(t, env.Service, "testnet"),
+		"existing-perm-key",
+	); err != nil {
+		t.Fatalf("redeem existing registration: %v", err)
+	}
+
+	_, err := env.Service.RedeemRegistration(
+		"testnet",
+		"unknown-temp-key",
+		"existing-perm-key",
+	)
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("redeem unknown key: err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestRedeemRegistration_MultipleRegistrations(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
 	ipA := net.ParseIP("10.0.0.10")
-	_, err := env.Service.CreateRegistration("testnet", "peer-a", service.RegistrationOptions{IP: ipA})
+	_, err := env.Service.CreateRegistration("testnet", "peer-a", service.RegistrationOptions{PeerIP: ipA})
 	if err != nil {
 		t.Fatalf("create registration a: %v", err)
 	}
 	tempKey1 := lastTempKey(t, env.Service, "testnet")
 
 	ipB := net.ParseIP("10.0.0.11")
-	_, err = env.Service.CreateRegistration("testnet", "peer-b", service.RegistrationOptions{IP: ipB})
+	_, err = env.Service.CreateRegistration("testnet", "peer-b", service.RegistrationOptions{PeerIP: ipB})
 	if err != nil {
 		t.Fatalf("create registration b: %v", err)
 	}
@@ -281,7 +393,7 @@ func TestRedeemRegistration_ReconcilesRunningDevices(t *testing.T) {
 		t.Fatalf("enable network: %v", err)
 	}
 	ip := net.ParseIP("10.0.0.5")
-	_, err := env.Service.CreateRegistration("testnet", "live-redeem", service.RegistrationOptions{IP: ip})
+	_, err := env.Service.CreateRegistration("testnet", "live-redeem", service.RegistrationOptions{PeerIP: ip})
 	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -322,13 +434,13 @@ func TestListRegistrations_Mixed(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ipActive := net.ParseIP("10.0.0.20")
-	_, err := env.Service.CreateRegistration("testnet", "active", service.RegistrationOptions{IP: ipActive})
+	_, err := env.Service.CreateRegistration("testnet", "active", service.RegistrationOptions{PeerIP: ipActive})
 	if err != nil {
 		t.Fatalf("create active: %v", err)
 	}
 
 	ipRedeem := net.ParseIP("10.0.0.21")
-	_, err = env.Service.CreateRegistration("testnet", "to-redeem", service.RegistrationOptions{IP: ipRedeem})
+	_, err = env.Service.CreateRegistration("testnet", "to-redeem", service.RegistrationOptions{PeerIP: ipRedeem})
 	if err != nil {
 		t.Fatalf("create to-redeem: %v", err)
 	}
@@ -376,7 +488,7 @@ func TestRevokeRegistration_Success(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.30")
-	_, err := env.Service.CreateRegistration("testnet", "revoke-me", service.RegistrationOptions{IP: ip})
+	_, err := env.Service.CreateRegistration("testnet", "revoke-me", service.RegistrationOptions{PeerIP: ip})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -392,7 +504,7 @@ func TestRevokeRegistration_Success(t *testing.T) {
 	if len(regs) != 0 {
 		t.Errorf("expected 0 registrations after revoke, got %d", len(regs))
 	}
-	if _, err := env.Service.CreateRegistration("testnet", "revoke-me", service.RegistrationOptions{IP: ip}); err != nil {
+	if _, err := env.Service.CreateRegistration("testnet", "revoke-me", service.RegistrationOptions{PeerIP: ip}); err != nil {
 		t.Fatalf("reuse revoked registration name and IP: %v", err)
 	}
 }
@@ -402,7 +514,7 @@ func TestRevokeRegistration_RemovesProvisionalPeer(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.31")
-	if _, err := env.Service.CreateRegistration("testnet", "revoke-me", service.RegistrationOptions{IP: ip}); err != nil {
+	if _, err := env.Service.CreateRegistration("testnet", "revoke-me", service.RegistrationOptions{PeerIP: ip}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	tempKey := lastTempKey(t, env.Service, "testnet")
@@ -419,7 +531,7 @@ func TestRevokeRegistration_RemovesProvisionalPeer(t *testing.T) {
 	if _, err := env.Database.GetCidr("testnet", "revoke-me"); !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("CIDR after revoke: err = %v, want ErrNotFound", err)
 	}
-	if _, err := env.Service.CreateRegistration("testnet", "revoke-me", service.RegistrationOptions{IP: ip}); err != nil {
+	if _, err := env.Service.CreateRegistration("testnet", "revoke-me", service.RegistrationOptions{PeerIP: ip}); err != nil {
 		t.Fatalf("reuse revoked provisional peer name and IP: %v", err)
 	}
 }
@@ -428,7 +540,7 @@ func TestRevokeRegistration_RejectsConfirmed(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if _, err := env.Service.CreateRegistration("testnet", "confirmed", service.RegistrationOptions{IP: net.ParseIP("10.0.0.32")}); err != nil {
+	if _, err := env.Service.CreateRegistration("testnet", "confirmed", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.32")}); err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
 	if _, err := env.Service.RedeemRegistration("testnet", lastTempKey(t, env.Service, "testnet"), mustGenKey(t)); err != nil {
@@ -465,7 +577,7 @@ func TestRegistration_Persistence(t *testing.T) {
 
 	ip := net.ParseIP("10.0.0.5")
 	expiresIn := 2 * time.Hour
-	_, err := env.Service.CreateRegistration("testnet", "persist-test", service.RegistrationOptions{IP: ip, Admin: true, ExpiresIn: &expiresIn})
+	_, err := env.Service.CreateRegistration("testnet", "persist-test", service.RegistrationOptions{PeerIP: ip, Admin: true, ExpiresIn: &expiresIn})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -517,7 +629,7 @@ func TestRegistrationGroups_TransferOnConfirmation(t *testing.T) {
 			t.Fatalf("create group %q: %v", name, err)
 		}
 	}
-	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{IP: net.ParseIP("10.0.0.5")}); err != nil {
+	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")}); err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
 	if err := env.Service.AssignRegistrationGroup("testnet", "alice", "engineering"); err != nil {
@@ -548,6 +660,9 @@ func TestRegistrationGroups_TransferOnConfirmation(t *testing.T) {
 	if err := env.Service.AssignRegistrationGroup("testnet", "alice", "engineering"); !errors.Is(err, service.ErrConflict) {
 		t.Fatalf("modify confirmed registration: err = %v, want ErrConflict", err)
 	}
+	if err := env.Service.RemoveRegistrationGroup("testnet", "alice", "engineering"); !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("remove from confirmed registration: err = %v, want ErrConflict", err)
+	}
 }
 
 func TestRegistrationGroups_Remove(t *testing.T) {
@@ -557,7 +672,7 @@ func TestRegistrationGroups_Remove(t *testing.T) {
 	if _, err := env.Service.CreateGroup("testnet", "engineering"); err != nil {
 		t.Fatalf("create group: %v", err)
 	}
-	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{IP: net.ParseIP("10.0.0.5")}); err != nil {
+	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")}); err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
 	if err := env.Service.AssignRegistrationGroup("testnet", "alice", "engineering"); err != nil {
@@ -567,6 +682,51 @@ func TestRegistrationGroups_Remove(t *testing.T) {
 		t.Fatalf("remove registration group: %v", err)
 	}
 	assertRegistrationGroups(t, env.Service, "alice", nil)
+}
+
+func TestRegistrationGroups_ListMissingRegistration(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	_, err := env.Service.ListRegistrationGroups("testnet", "missing")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("list missing registration groups: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRegistrationGroups_RejectExpiredRegistration(t *testing.T) {
+	clock := &mutableClock{t: testutil.FixedTime}
+	env := testutil.SetupServiceWithClock(t, clock.now)
+	testutil.SeedNetwork(t, env.Service)
+
+	for _, name := range []string{"engineering", "operations"} {
+		if _, err := env.Service.CreateGroup("testnet", name); err != nil {
+			t.Fatalf("create group %q: %v", name, err)
+		}
+	}
+	expiresIn := time.Hour
+	if _, err := env.Service.CreateRegistration(
+		"testnet",
+		"alice",
+		service.RegistrationOptions{
+			PeerIP:        net.ParseIP("10.0.0.5"),
+			ExpiresIn: &expiresIn,
+		},
+	); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if err := env.Service.AssignRegistrationGroup("testnet", "alice", "engineering"); err != nil {
+		t.Fatalf("assign registration group: %v", err)
+	}
+
+	clock.t = clock.t.Add(expiresIn)
+	if err := env.Service.AssignRegistrationGroup("testnet", "alice", "operations"); !errors.Is(err, service.ErrRegistrationExpired) {
+		t.Fatalf("assign to expired registration: err = %v, want ErrRegistrationExpired", err)
+	}
+	if err := env.Service.RemoveRegistrationGroup("testnet", "alice", "engineering"); !errors.Is(err, service.ErrRegistrationExpired) {
+		t.Fatalf("remove from expired registration: err = %v, want ErrRegistrationExpired", err)
+	}
+	assertRegistrationGroups(t, env.Service, "alice", []string{"engineering"})
 }
 
 func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
@@ -582,7 +742,7 @@ func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
 	if _, err := env.Service.CreateRegistration(
 		"testnet",
 		"short-lived",
-		service.RegistrationOptions{IP: shortIP, ExpiresIn: &shortExpiry},
+		service.RegistrationOptions{PeerIP: shortIP, ExpiresIn: &shortExpiry},
 	); err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -599,7 +759,7 @@ func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
 	if _, err := env.Service.CreateRegistration(
 		"testnet",
 		"reconcile-trigger",
-		service.RegistrationOptions{IP: net.ParseIP("10.0.0.250")},
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.250")},
 	); err != nil {
 		t.Fatalf("trigger reconcile: %v", err)
 	}
@@ -616,7 +776,7 @@ func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
 	if hasPeerOp(env.Backend.LastAppliedOpsFor("testnet"), shortKey) {
 		t.Error("main device should not have expired provisional peer")
 	}
-	if _, err := env.Service.CreateRegistration("testnet", "short-lived", service.RegistrationOptions{IP: shortIP}); err != nil {
+	if _, err := env.Service.CreateRegistration("testnet", "short-lived", service.RegistrationOptions{PeerIP: shortIP}); err != nil {
 		t.Fatalf("reuse expired registration name and IP: %v", err)
 	}
 }
@@ -629,7 +789,7 @@ func TestPruneExpiredRegistrations_RetainsActiveProvisionalPeer(t *testing.T) {
 	if _, err := env.Service.CreateRegistration(
 		"testnet",
 		"still-active",
-		service.RegistrationOptions{IP: net.ParseIP("10.0.0.8"), ExpiresIn: &stillExpiry},
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.8"), ExpiresIn: &stillExpiry},
 	); err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -643,7 +803,7 @@ func TestPruneExpiredRegistrations_RetainsActiveProvisionalPeer(t *testing.T) {
 	if _, err := env.Service.CreateRegistration(
 		"testnet",
 		"reconcile-trigger",
-		service.RegistrationOptions{IP: net.ParseIP("10.0.0.250")},
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.250")},
 	); err != nil {
 		t.Fatalf("trigger reconcile: %v", err)
 	}
@@ -666,7 +826,7 @@ func TestPruneExpiredRegistrations_RetainsConfirmedRegistrationAsAudit(t *testin
 	if _, err := env.Service.CreateRegistration(
 		"testnet",
 		"audited",
-		service.RegistrationOptions{IP: net.ParseIP("10.0.0.10"), ExpiresIn: &auditedExpiry},
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.10"), ExpiresIn: &auditedExpiry},
 	); err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
@@ -685,7 +845,7 @@ func TestPruneExpiredRegistrations_RetainsConfirmedRegistrationAsAudit(t *testin
 	if _, err := env.Service.CreateRegistration(
 		"testnet",
 		"reconcile-trigger",
-		service.RegistrationOptions{IP: net.ParseIP("10.0.0.250")},
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.250")},
 	); err != nil {
 		t.Fatalf("trigger reconcile: %v", err)
 	}

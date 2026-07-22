@@ -65,6 +65,30 @@ func TestAPICreateRegistration_Success(
 	}
 }
 
+func TestAPICreateRegistration_AddressExhausted(t *testing.T) {
+	env := testutil.Setup(t)
+	if _, err := env.Service.CreateNetwork(
+		"small",
+		"192.168.1.1",
+		service.PlaneConfig{Cidr: "10.0.0.0/24", WireguardPort: 51820, ApiPort: 8080},
+		service.PlaneConfig{Cidr: "10.1.0.0/30", WireguardPort: 51821, ApiPort: 8080},
+	); err != nil {
+		t.Fatalf("create network: %v", err)
+	}
+
+	url := "/networks/small/registrations"
+	wire.TestPost[protocol.Invitation](
+		env.Router,
+		url,
+		`{"name":"first","ip":"10.0.0.5"}`,
+	).ExpectStatusOK(t, http.StatusCreated)
+	wire.TestPost[any](
+		env.Router,
+		url,
+		`{"name":"second","ip":"10.0.0.6"}`,
+	).ExpectStatusError(t, http.StatusConflict)
+}
+
 func TestAPICreateRegistration_MissingIP(
 	t *testing.T,
 ) {
@@ -317,7 +341,7 @@ func seedRegistrationGroupResources(t *testing.T, env *testutil.APIEnv) {
 	if _, err := env.Service.CreateRegistration(
 		"testnet",
 		"alice",
-		service.RegistrationOptions{IP: net.ParseIP("10.0.0.5")},
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")},
 	); err != nil {
 		t.Fatalf("create registration: %v", err)
 	}

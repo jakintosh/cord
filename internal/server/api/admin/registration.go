@@ -88,8 +88,8 @@ func (a *API) handlePostRegistration(
 	}
 
 	opts := service.RegistrationOptions{
-		IP:    parsed,
-		Admin: req.Admin,
+		PeerIP: parsed,
+		Admin:  req.Admin,
 	}
 	invitation, err := a.service.CreateRegistration(network, req.Name, opts)
 	if err != nil {

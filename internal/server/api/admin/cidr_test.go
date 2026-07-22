@@ -285,7 +285,7 @@ func TestAPICidrGroups_RejectsProvisionalPeerCidr(t *testing.T) {
 	if _, err := env.Service.CreateRegistration(
 		"testnet",
 		"alice",
-		service.RegistrationOptions{IP: net.ParseIP("10.0.0.5")},
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")},
 	); err != nil {
 		t.Fatalf("create registration: %v", err)
 	}

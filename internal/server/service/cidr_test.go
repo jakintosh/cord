@@ -7,7 +7,49 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
+
+type createCidrStoreSpy struct {
+	service.Store
+	getNetworkCalls int
+	createdNetwork  string
+	createdCidr     *service.Cidr
+}
+
+func (s *createCidrStoreSpy) GetNetwork(string) (*service.NetworkConfig, error) {
+	s.getNetworkCalls++
+	return nil, errors.New("unexpected GetNetwork call")
+}
+
+func (s *createCidrStoreSpy) CreateCidr(network string, cidr *service.Cidr) error {
+	s.createdNetwork = network
+	s.createdCidr = cidr
+	return nil
+}
+
+func TestCreateCidr_DelegatesPersistedContainmentToStore(t *testing.T) {
+	store := &createCidrStoreSpy{}
+	mgr := wireguard.NewManagerWithBackend(wireguardtest.NewMockBackend())
+	svc, err := service.New(service.Options{Store: store, WireGuard: mgr})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	if err := svc.CreateCidr("testnet", "lan", "10.0.1.0/24"); err != nil {
+		t.Fatalf("create CIDR: %v", err)
+	}
+	if store.getNetworkCalls != 0 {
+		t.Fatalf("GetNetwork calls = %d, want 0", store.getNetworkCalls)
+	}
+	if store.createdNetwork != "testnet" {
+		t.Fatalf("created network = %q, want testnet", store.createdNetwork)
+	}
+	if store.createdCidr == nil || store.createdCidr.Cidr != "10.0.1.0/24" {
+		t.Fatalf("created CIDR = %+v, want 10.0.1.0/24", store.createdCidr)
+	}
+}
 
 func TestAddCidr_Success(t *testing.T) {
 	env := testutil.SetupService(t)
@@ -85,7 +127,7 @@ func TestAddCidr_RegistrationReservationConflict(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{IP: net.ParseIP("10.0.0.50")}); err != nil {
+	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.50")}); err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
 	if err := env.Service.CreateCidr("testnet", "reserved", "10.0.0.50/32"); !errors.Is(err, service.ErrConflict) {

@@ -31,7 +31,7 @@ func TestResolvePeerIdentity_TransitionsOnConfirmation(t *testing.T) {
 	testutil.SeedNetwork(t, env.Service)
 	ip := net.ParseIP("10.0.0.5")
 
-	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{IP: ip}); err != nil {
+	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{PeerIP: ip}); err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
 	if _, err := env.Service.RedeemRegistration("testnet", lastTempKey(t, env.Service, "testnet"), mustGenKey(t)); err != nil {
