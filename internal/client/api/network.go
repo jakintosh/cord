@@ -148,12 +148,7 @@ func (a *API) handlePostNetworkRedeem(
 ) {
 	name := r.PathValue("name")
 
-	if _, err := a.service.Redeem(name); err != nil {
-		writeServiceError(w, err)
-		return
-	}
-
-	inst, err := a.service.GetInstall(name)
+	inst, err := a.service.RedeemInstall(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -168,7 +163,7 @@ func (a *API) handlePostNetworkConfirm(
 ) {
 	name := r.PathValue("name")
 
-	if err := a.service.Confirm(name); err != nil {
+	if err := a.service.ConfirmInstall(name); err != nil {
 		writeServiceError(w, err)
 		return
 	}

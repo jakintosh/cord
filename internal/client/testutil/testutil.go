@@ -3,6 +3,7 @@ package testutil
 import (
 	"testing"
 
+	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
@@ -75,7 +76,7 @@ func SeedInstall(
 
 func SeedNetworkDirect(
 	t *testing.T,
-	svc *service.Service,
+	db *database.DB,
 	name string,
 ) *service.NetworkConfig {
 	t.Helper()
@@ -85,10 +86,27 @@ func SeedNetworkDirect(
 		t.Fatalf("seed network %q: generate key: %v", name, err)
 	}
 
-	nc := &service.NetworkConfig{
-		Name:          name,
-		PrivateKey:    privKey,
-		InterfaceName: name,
+	_, err = db.BeginInstall(service.BeginInstallParams{
+		Name:                name,
+		InviteIfaceName:     name + "-i",
+		InvitePrivateKey:    mustGenerateKey(),
+		InviteAssignedRoute: "10.43.0.5/32",
+		InviteServer: service.ServerInfo{
+			PublicKey:   mustGenerateKey(),
+			Endpoint:    "1.2.3.4:51821",
+			Route:       "10.43.0.1/32",
+			NetworkCidr: "10.43.0.0/24",
+			APIPort:     8443,
+		},
+		MainIfaceName:  name,
+		MainPrivateKey: privKey,
+		CreatedAt:      FixedTime,
+	})
+	if err != nil {
+		t.Fatalf("seed network %q: begin install: %v", name, err)
+	}
+
+	_, err = db.RedeemInstall(name, service.NetworkAssignment{
 		AssignedRoute: "10.42.0.5/32",
 		Server: service.ServerInfo{
 			PublicKey:   mustGenerateKey(),
@@ -97,11 +115,38 @@ func SeedNetworkDirect(
 			NetworkCidr: "10.42.0.0/16",
 			APIPort:     8443,
 		},
-		Enabled:   false,
-		CreatedAt: FixedTime,
+	})
+	if err != nil {
+		t.Fatalf("seed network %q: redeem install: %v", name, err)
 	}
-	if err := svc.InsertNetworkDirect(nc); err != nil {
-		t.Fatalf("seed network %q: %v", name, err)
+
+	nc, err := db.ConfirmInstall(name, privKey, FixedTime)
+	if err != nil {
+		t.Fatalf("seed network %q: confirm install: %v", name, err)
 	}
+	if err := db.SetNetworkEnabled(name, false); err != nil {
+		t.Fatalf("seed network %q: disable: %v", name, err)
+	}
+	nc.Enabled = false
 	return nc
+}
+
+func SeedPeers(
+	t *testing.T,
+	db *database.DB,
+	network string,
+	peers ...service.Peer,
+) {
+	t.Helper()
+
+	observations := make([]service.PeerObservation, len(peers))
+	for i, peer := range peers {
+		observations[i] = service.PeerObservation{Peer: peer}
+	}
+	if err := db.ApplyPeerReconciliation(network, service.PeerReconciliation{
+		Peers:       observations,
+		PruneBefore: FixedTime.Add(-service.EndpointTTL),
+	}); err != nil {
+		t.Fatalf("seed peers: %v", err)
+	}
 }

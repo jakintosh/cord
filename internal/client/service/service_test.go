@@ -8,7 +8,7 @@ import (
 
 func TestClose_StopsRunningNetworks(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "close-me")
+	testutil.SeedNetworkDirect(t, env.Database, "close-me")
 
 	if err := env.Service.EnableNetwork("close-me"); err != nil {
 		t.Fatalf("enable: %v", err)

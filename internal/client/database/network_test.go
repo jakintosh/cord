@@ -1,8 +1,8 @@
 package database_test
 
 import (
+	"errors"
 	"testing"
-	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
@@ -12,127 +12,40 @@ func TestGetNetwork_NotFound(t *testing.T) {
 	db := testutil.SetupDB(t)
 
 	_, err := db.GetNetwork("nonexistent")
-	if err == nil {
-		t.Fatal("expected error for nonexistent network")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
 
-func TestInsertAndGetNetwork(t *testing.T) {
+func TestGetNetwork_RoundTripsConfirmedNetwork(t *testing.T) {
 	db := testutil.SetupDB(t)
-
-	createdAt := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
-	net := &service.NetworkConfig{
-		Name:          "homenet",
-		PrivateKey:    "priv-key-123",
-		InterfaceName: "wg-homenet",
-		AssignedRoute: "10.42.0.5/32",
-		ListenPort:    51820,
-		Server: service.ServerInfo{
-			PublicKey: "server-pub-key",
-			Endpoint:  "1.2.3.4:51820",
-			Route:     "10.42.0.1/32",
-			APIPort:   8443,
-		},
-		Enabled:   true,
-		CreatedAt: createdAt,
-	}
-
-	if err := db.InsertNetwork(net); err != nil {
-		t.Fatalf("insert network: %v", err)
-	}
+	want := testutil.SeedNetworkDirect(t, db, "homenet")
 
 	got, err := db.GetNetwork("homenet")
 	if err != nil {
 		t.Fatalf("get network: %v", err)
 	}
 
-	if got.Name != net.Name {
-		t.Errorf("name = %q, want %q", got.Name, net.Name)
+	if got.Name != want.Name {
+		t.Errorf("name = %q, want %q", got.Name, want.Name)
 	}
-	if got.PrivateKey != net.PrivateKey {
-		t.Errorf("private_key = %q, want %q", got.PrivateKey, net.PrivateKey)
+	if got.PrivateKey != want.PrivateKey {
+		t.Errorf("private key = %q, want %q", got.PrivateKey, want.PrivateKey)
 	}
-	if got.AssignedRoute != net.AssignedRoute {
-		t.Errorf("assigned_cidr = %q, want %q", got.AssignedRoute, net.AssignedRoute)
+	if got.AssignedRoute != want.AssignedRoute {
+		t.Errorf("assigned route = %q, want %q", got.AssignedRoute, want.AssignedRoute)
 	}
-	if got.Server.PublicKey != net.Server.PublicKey {
-		t.Errorf("server_pubkey = %q, want %q", got.Server.PublicKey, net.Server.PublicKey)
+	if got.Server != want.Server {
+		t.Errorf("server = %#v, want %#v", got.Server, want.Server)
 	}
-	if got.Server.Endpoint != net.Server.Endpoint {
-		t.Errorf("server_endpoint = %q, want %q", got.Server.Endpoint, net.Server.Endpoint)
-	}
-	if got.Server.Route != net.Server.Route {
-		t.Errorf("server_route = %q, want %q", got.Server.Route, net.Server.Route)
-	}
-	if got.Server.APIPort != net.Server.APIPort {
-		t.Errorf("server_api_port = %d, want %d", got.Server.APIPort, net.Server.APIPort)
-	}
-	if got.ListenPort != net.ListenPort {
-		t.Errorf("listen_port = %d, want %d", got.ListenPort, net.ListenPort)
-	}
-	if got.Enabled != net.Enabled {
-		t.Errorf("enabled = %v, want %v", got.Enabled, net.Enabled)
-	}
-	if !got.CreatedAt.Equal(createdAt) {
-		t.Errorf("created_at = %v, want %v", got.CreatedAt, createdAt)
-	}
-}
-
-func TestInsertAndGetNetwork_Disabled(t *testing.T) {
-	db := testutil.SetupDB(t)
-
-	net := &service.NetworkConfig{
-		Name:          "offnet",
-		PrivateKey:    "priv-off",
-		InterfaceName: "wg-offnet",
-		AssignedRoute: "10.42.0.6/16",
-		Server: service.ServerInfo{
-			PublicKey: "server-pub-key",
-			Endpoint:  "1.2.3.4:51820",
-			Route:     "10.42.0.1/32",
-			APIPort:   8443,
-		},
-		Enabled:   false,
-		CreatedAt: time.Now(),
-	}
-
-	if err := db.InsertNetwork(net); err != nil {
-		t.Fatalf("insert network: %v", err)
-	}
-
-	got, err := db.GetNetwork("offnet")
-	if err != nil {
-		t.Fatalf("get network: %v", err)
+	if got.ListenPort != want.ListenPort {
+		t.Errorf("listen port = %d, want %d", got.ListenPort, want.ListenPort)
 	}
 	if got.Enabled {
-		t.Error("expected enabled=false after insert with Enabled=false")
+		t.Error("seeded network should be disabled")
 	}
-}
-
-func TestInsertNetwork_Duplicate(t *testing.T) {
-	db := testutil.SetupDB(t)
-
-	net := &service.NetworkConfig{
-		Name:          "homenet",
-		PrivateKey:    "priv-a",
-		InterfaceName: "wg-homenet",
-		AssignedRoute: "10.0.0.5/16",
-		Server: service.ServerInfo{
-			PublicKey: "srv-key",
-			Endpoint:  "1.1.1.1:51820",
-			Route:     "10.0.0.1/32",
-			APIPort:   8443,
-		},
-		CreatedAt: time.Now(),
-	}
-
-	if err := db.InsertNetwork(net); err != nil {
-		t.Fatalf("first insert: %v", err)
-	}
-
-	err := db.InsertNetwork(net)
-	if err == nil {
-		t.Fatal("expected error for duplicate network")
+	if !got.CreatedAt.Equal(want.CreatedAt) {
+		t.Errorf("created at = %v, want %v", got.CreatedAt, want.CreatedAt)
 	}
 }
 
@@ -144,44 +57,24 @@ func TestListNetworks_Empty(t *testing.T) {
 		t.Fatalf("list empty: %v", err)
 	}
 	if len(networks) != 0 {
-		t.Fatalf("expected 0 networks, got %d", len(networks))
+		t.Fatalf("networks = %d, want 0", len(networks))
 	}
 }
 
 func TestListNetworks_OrderedWithFields(t *testing.T) {
 	db := testutil.SetupDB(t)
-
-	now := time.Now()
-	mustInsert := func(name string, enabled bool) {
-		t.Helper()
-		err := db.InsertNetwork(&service.NetworkConfig{
-			Name:          name,
-			PrivateKey:    "priv-" + name,
-			InterfaceName: "wg-" + name,
-			AssignedRoute: "10.42.0.0/16",
-			Server: service.ServerInfo{
-				PublicKey: "srv-key",
-				Endpoint:  "1.1.1.1:51820",
-				Route:     "10.42.0.1/32",
-				APIPort:   8443,
-			},
-			Enabled:   enabled,
-			CreatedAt: now,
-		})
-		if err != nil {
-			t.Fatalf("insert %s: %v", name, err)
-		}
+	testutil.SeedNetworkDirect(t, db, "beta")
+	testutil.SeedNetworkDirect(t, db, "alpha")
+	if err := db.SetNetworkEnabled("alpha", true); err != nil {
+		t.Fatalf("enable alpha: %v", err)
 	}
-
-	mustInsert("beta", false)
-	mustInsert("alpha", true)
 
 	networks, err := db.ListNetworks()
 	if err != nil {
-		t.Fatalf("list: %v", err)
+		t.Fatalf("list networks: %v", err)
 	}
 	if len(networks) != 2 {
-		t.Fatalf("expected 2 networks, got %d", len(networks))
+		t.Fatalf("networks = %d, want 2", len(networks))
 	}
 	if networks[0].Name != "alpha" || networks[1].Name != "beta" {
 		t.Fatalf("unexpected order: %q, %q", networks[0].Name, networks[1].Name)
@@ -202,149 +95,72 @@ func TestListNetworkNames_Empty(t *testing.T) {
 		t.Fatalf("list empty: %v", err)
 	}
 	if len(names) != 0 {
-		t.Fatalf("expected 0 names, got %d", len(names))
+		t.Fatalf("names = %d, want 0", len(names))
 	}
 }
 
 func TestListNetworkNames_Ordered(t *testing.T) {
 	db := testutil.SetupDB(t)
-
-	now := time.Now()
-	mustInsert := func(name string) {
-		t.Helper()
-		err := db.InsertNetwork(&service.NetworkConfig{
-			Name:          name,
-			PrivateKey:    "priv-" + name,
-			InterfaceName: "wg-" + name,
-			AssignedRoute: "10.42.0.0/16",
-			Server: service.ServerInfo{
-				PublicKey: "srv-key",
-				Endpoint:  "1.1.1.1:51820",
-				Route:     "10.42.0.1/32",
-				APIPort:   8443,
-			},
-			CreatedAt: now,
-		})
-		if err != nil {
-			t.Fatalf("insert %s: %v", name, err)
-		}
-	}
-
-	mustInsert("beta")
-	mustInsert("alpha")
-	mustInsert("gamma")
+	testutil.SeedNetworkDirect(t, db, "beta")
+	testutil.SeedNetworkDirect(t, db, "alpha")
+	testutil.SeedNetworkDirect(t, db, "gamma")
 
 	names, err := db.ListNetworkNames()
 	if err != nil {
-		t.Fatalf("list: %v", err)
+		t.Fatalf("list network names: %v", err)
 	}
 	if len(names) != 3 {
-		t.Fatalf("expected 3 names, got %d", len(names))
+		t.Fatalf("names = %d, want 3", len(names))
 	}
 	if names[0] != "alpha" || names[1] != "beta" || names[2] != "gamma" {
 		t.Fatalf("unexpected order: %v", names)
 	}
 }
 
-func TestDeleteNetwork(t *testing.T) {
+func TestDeleteNetworkState_CascadesPeersAndEndpoints(t *testing.T) {
 	db := testutil.SetupDB(t)
-
-	now := time.Now()
-	if err := db.InsertNetwork(&service.NetworkConfig{
-		Name:          "deleteme",
-		PrivateKey:    "priv",
-		InterfaceName: "wg-deleteme",
-		AssignedRoute: "10.42.0.5/16",
-		Server: service.ServerInfo{
-			PublicKey: "srv-key",
-			Endpoint:  "1.1.1.1:51820",
-			Route:     "10.42.0.1/32",
-			APIPort:   8443,
-		},
-		CreatedAt: now,
-	}); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
-
-	if err := db.DeleteNetwork("deleteme"); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-
-	_, err := db.GetNetwork("deleteme")
-	if err == nil {
-		t.Fatal("expected error after delete")
-	}
-}
-
-func TestDeleteNetwork_NotFound(t *testing.T) {
-	db := testutil.SetupDB(t)
-
-	err := db.DeleteNetwork("ghost")
-	if err == nil {
-		t.Fatal("expected error for nonexistent network")
-	}
-}
-
-func TestDeleteNetwork_Cascade(t *testing.T) {
-	db := testutil.SetupDB(t)
-
-	now := time.Now()
-	if err := db.InsertNetwork(&service.NetworkConfig{
-		Name:          "cascadenet",
-		PrivateKey:    "priv",
-		InterfaceName: "wg-cascadenet",
-		AssignedRoute: "10.42.0.5/16",
-		Server: service.ServerInfo{
-			PublicKey: "srv-key",
-			Endpoint:  "1.1.1.1:51820",
-			Route:     "10.42.0.1/32",
-			APIPort:   8443,
-		},
-		CreatedAt: now,
-	}); err != nil {
-		t.Fatalf("insert network: %v", err)
-	}
-
-	if err := db.SetPeers("cascadenet", []service.Peer{
-		{Name: "peer-1", PublicKey: "peer-key-1", Route: "10.42.1.5/32"},
-		{Name: "peer-2", PublicKey: "peer-key-2", Route: "10.42.1.6/32"},
-	}); err != nil {
-		t.Fatalf("reconcile peers: %v", err)
-	}
-
-	if err := db.DeleteNetwork("cascadenet"); err != nil {
-		t.Fatalf("delete network: %v", err)
-	}
-
-	peers, err := db.ListPeers("cascadenet")
+	testutil.SeedNetworkDirect(t, db, "cascadenet")
+	err := db.ApplyPeerReconciliation("cascadenet", service.PeerReconciliation{
+		Peers: []service.PeerObservation{{
+			Peer: service.Peer{
+				Name:      "peer-1",
+				PublicKey: "peer-key-1",
+				Route:     "10.42.1.5/32",
+			},
+			Endpoints: []service.PeerEndpoint{{
+				Endpoint:         "1.2.3.4:51820",
+				ServerObservedAt: testutil.FixedTime,
+			}},
+		}},
+		PruneBefore: testutil.FixedTime.Add(-service.EndpointTTL),
+	})
 	if err != nil {
-		t.Fatalf("list peers after cascade: %v", err)
+		t.Fatalf("apply peer reconciliation: %v", err)
 	}
-	if len(peers) != 0 {
-		t.Errorf("expected 0 peers after cascade delete, got %d", len(peers))
+
+	if err := db.DeleteNetworkState("cascadenet"); err != nil {
+		t.Fatalf("delete network state: %v", err)
+	}
+
+	var peers int
+	if err := db.Conn.QueryRow(`SELECT COUNT(*) FROM peer`).Scan(&peers); err != nil {
+		t.Fatalf("count peers: %v", err)
+	}
+	if peers != 0 {
+		t.Errorf("peers after delete = %d, want 0", peers)
+	}
+	var endpoints int
+	if err := db.Conn.QueryRow(`SELECT COUNT(*) FROM endpoint`).Scan(&endpoints); err != nil {
+		t.Fatalf("count endpoints: %v", err)
+	}
+	if endpoints != 0 {
+		t.Errorf("endpoints after delete = %d, want 0", endpoints)
 	}
 }
 
 func TestSetNetworkEnabled(t *testing.T) {
 	db := testutil.SetupDB(t)
-
-	net := &service.NetworkConfig{
-		Name:          "toggle",
-		PrivateKey:    "priv",
-		InterfaceName: "wg-toggle",
-		AssignedRoute: "10.42.0.5/16",
-		Server: service.ServerInfo{
-			PublicKey: "srv-key",
-			Endpoint:  "1.1.1.1:51820",
-			Route:     "10.42.0.1/32",
-			APIPort:   8443,
-		},
-		Enabled:   false,
-		CreatedAt: time.Now(),
-	}
-	if err := db.InsertNetwork(net); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
+	testutil.SeedNetworkDirect(t, db, "toggle")
 
 	if err := db.SetNetworkEnabled("toggle", true); err != nil {
 		t.Fatalf("enable: %v", err)
@@ -354,7 +170,7 @@ func TestSetNetworkEnabled(t *testing.T) {
 		t.Fatalf("get after enable: %v", err)
 	}
 	if !got.Enabled {
-		t.Error("expected enabled=true after SetNetworkEnabled(true)")
+		t.Error("network should be enabled")
 	}
 
 	if err := db.SetNetworkEnabled("toggle", false); err != nil {
@@ -365,7 +181,7 @@ func TestSetNetworkEnabled(t *testing.T) {
 		t.Fatalf("get after disable: %v", err)
 	}
 	if got.Enabled {
-		t.Error("expected enabled=false after SetNetworkEnabled(false)")
+		t.Error("network should be disabled")
 	}
 }
 
@@ -373,38 +189,28 @@ func TestSetNetworkEnabled_NotFound(t *testing.T) {
 	db := testutil.SetupDB(t)
 
 	err := db.SetNetworkEnabled("nonexistent", true)
-	if err == nil {
-		t.Fatal("expected error for nonexistent network")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestUpdateNetwork(t *testing.T) {
 	db := testutil.SetupDB(t)
-	net := &service.NetworkConfig{
-		Name:          "portnet",
-		PrivateKey:    "priv-port",
-		InterfaceName: "wg-portnet",
-		AssignedRoute: "10.42.0.7/32",
-		Server: service.ServerInfo{
-			PublicKey: "server-pub-key",
-			Endpoint:  "1.2.3.4:51820",
-			Route:     "10.42.0.1/32",
-			APIPort:   8443,
-		},
-		CreatedAt: time.Now(),
-	}
-	if err := db.InsertNetwork(net); err != nil {
-		t.Fatalf("insert network: %v", err)
-	}
+	testutil.SeedNetworkDirect(t, db, "portnet")
+
 	listenPort := uint16(51821)
-	if err := db.UpdateNetwork("portnet", service.NetworkOptions{ListenPort: &listenPort}); err != nil {
+	if err := db.UpdateNetwork(
+		"portnet",
+		service.NetworkOptions{ListenPort: &listenPort},
+	); err != nil {
 		t.Fatalf("update network: %v", err)
 	}
+
 	got, err := db.GetNetwork("portnet")
 	if err != nil {
 		t.Fatalf("get network: %v", err)
 	}
-	if got.ListenPort != 51821 {
-		t.Errorf("listen_port = %d, want 51821", got.ListenPort)
+	if got.ListenPort != listenPort {
+		t.Errorf("listen port = %d, want %d", got.ListenPort, listenPort)
 	}
 }

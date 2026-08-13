@@ -286,7 +286,7 @@ func TestRedeemRegistration_Expired(t *testing.T) {
 		"testnet",
 		"expired",
 		service.RegistrationOptions{
-			PeerIP:        net.ParseIP("10.0.0.6"),
+			PeerIP:    net.ParseIP("10.0.0.6"),
 			ExpiresIn: &expiresIn,
 		},
 	); err != nil {
@@ -709,7 +709,7 @@ func TestRegistrationGroups_RejectExpiredRegistration(t *testing.T) {
 		"testnet",
 		"alice",
 		service.RegistrationOptions{
-			PeerIP:        net.ParseIP("10.0.0.5"),
+			PeerIP:    net.ParseIP("10.0.0.5"),
 			ExpiresIn: &expiresIn,
 		},
 	); err != nil {

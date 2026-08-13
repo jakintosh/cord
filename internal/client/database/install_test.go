@@ -1,6 +1,7 @@
 package database_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -8,508 +9,429 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 )
 
-func seedInstall(t *testing.T, db interface{ InsertInstall(*service.Install) error }, inst *service.Install) {
-	t.Helper()
-	if err := db.InsertInstall(inst); err != nil {
-		t.Fatalf("seed install: %v", err)
+func defaultBeginInstall(
+	name string,
+) service.BeginInstallParams {
+	return service.BeginInstallParams{
+		Name:                name,
+		ListenPort:          51820,
+		InviteIfaceName:     name + "-i",
+		InvitePrivateKey:    "invite-priv-key",
+		InviteAssignedRoute: "10.43.0.5/32",
+		InviteServer: service.ServerInfo{
+			PublicKey:   "invite-server-pubkey",
+			Endpoint:    "1.2.3.4:51821",
+			Route:       "10.43.0.1/32",
+			NetworkCidr: "10.43.0.0/24",
+			APIPort:     8443,
+		},
+		MainIfaceName:  name,
+		MainPrivateKey: "main-priv-key",
+		CreatedAt:      testutil.FixedTime,
 	}
 }
 
-func defaultInstall(t *testing.T) *service.Install {
-	t.Helper()
-	return &service.Install{
-		Name:                "testnet",
-		Phase:               service.PhaseInvited,
-		ListenPort:          51820,
-		InviteIfaceName:     "testnet-i",
-		InvitePrivateKey:    "invite-priv-key",
-		InviteAssignedRoute: "10.42.1.5/32",
-		InviteServer: service.ServerInfo{
-			PublicKey: "invite-server-pubkey",
-			Endpoint:  "1.2.3.4:51820",
-			Route:     "10.42.0.1/32",
-			APIPort:   8443,
+func defaultNetworkAssignment() service.NetworkAssignment {
+	return service.NetworkAssignment{
+		AssignedRoute: "10.42.0.5/32",
+		Server: service.ServerInfo{
+			PublicKey:   "main-server-pubkey",
+			Endpoint:    "5.6.7.8:51820",
+			Route:       "10.42.0.1/32",
+			NetworkCidr: "10.42.0.0/16",
+			APIPort:     8443,
 		},
-		MainIfaceName:  "testnet",
-		MainPrivateKey: "main-priv-key",
-		CreatedAt:      time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC),
 	}
+}
+
+func beginInstall(
+	t *testing.T,
+	db interface {
+		BeginInstall(service.BeginInstallParams) (*service.Install, error)
+	},
+	name string,
+) *service.Install {
+	t.Helper()
+
+	install, err := db.BeginInstall(defaultBeginInstall(name))
+	if err != nil {
+		t.Fatalf("begin install %q: %v", name, err)
+	}
+	return install
+}
+
+func redeemInstall(
+	t *testing.T,
+	db interface {
+		RedeemInstall(string, service.NetworkAssignment) (*service.Install, error)
+	},
+	name string,
+) *service.Install {
+	t.Helper()
+
+	install, err := db.RedeemInstall(name, defaultNetworkAssignment())
+	if err != nil {
+		t.Fatalf("redeem install %q: %v", name, err)
+	}
+	return install
 }
 
 func TestGetInstall_NotFound(t *testing.T) {
 	db := testutil.SetupDB(t)
 
 	_, err := db.GetInstall("nonexistent")
-	if err == nil {
-		t.Fatal("expected error for nonexistent install")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
 
-func TestInsertAndGetInstall(t *testing.T) {
+func TestBeginInstall_CreatesInvitedInstall(t *testing.T) {
 	db := testutil.SetupDB(t)
+	params := defaultBeginInstall("testnet")
 
-	createdAt := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	inst := &service.Install{
-		Name:                "testnet",
-		Phase:               service.PhaseInvited,
-		InviteIfaceName:     "testnet-i",
-		InvitePrivateKey:    "invite-priv-key",
-		InviteAssignedRoute: "10.42.1.5/32",
-		InviteServer: service.ServerInfo{
-			PublicKey: "invite-server-pubkey",
-			Endpoint:  "1.2.3.4:51820",
-			Route:     "10.42.0.1/32",
-			APIPort:   8443,
-		},
-		MainIfaceName:  "testnet",
-		MainPrivateKey: "main-priv-key",
-		CreatedAt:      createdAt,
+	install, err := db.BeginInstall(params)
+	if err != nil {
+		t.Fatalf("begin install: %v", err)
 	}
 
-	if err := db.InsertInstall(inst); err != nil {
-		t.Fatalf("insert install: %v", err)
+	if install.Name != params.Name {
+		t.Errorf("name = %q, want %q", install.Name, params.Name)
+	}
+	if install.Phase != service.PhaseInvited {
+		t.Errorf("phase = %q, want %q", install.Phase, service.PhaseInvited)
+	}
+	if install.MainPrivateKey != params.MainPrivateKey {
+		t.Errorf("main private key = %q, want %q", install.MainPrivateKey, params.MainPrivateKey)
+	}
+	if !install.CreatedAt.Equal(params.CreatedAt) {
+		t.Errorf("created at = %v, want %v", install.CreatedAt, params.CreatedAt)
 	}
 
-	got, err := db.GetInstall("testnet")
+	persisted, err := db.GetInstall(params.Name)
 	if err != nil {
 		t.Fatalf("get install: %v", err)
 	}
-
-	if got.Name != inst.Name {
-		t.Errorf("name = %q, want %q", got.Name, inst.Name)
-	}
-	if got.Phase != inst.Phase {
-		t.Errorf("phase = %q, want %q", got.Phase, inst.Phase)
-	}
-	if got.ListenPort != inst.ListenPort {
-		t.Errorf("listen_port = %d, want %d", got.ListenPort, inst.ListenPort)
-	}
-	if got.InviteIfaceName != inst.InviteIfaceName {
-		t.Errorf("invite_iface_name = %q, want %q", got.InviteIfaceName, inst.InviteIfaceName)
-	}
-	if got.InvitePrivateKey != inst.InvitePrivateKey {
-		t.Errorf("invite_private_key = %q, want %q", got.InvitePrivateKey, inst.InvitePrivateKey)
-	}
-	if got.InviteAssignedRoute != inst.InviteAssignedRoute {
-		t.Errorf("invite_assigned_route = %q, want %q", got.InviteAssignedRoute, inst.InviteAssignedRoute)
-	}
-	if got.InviteServer.PublicKey != inst.InviteServer.PublicKey {
-		t.Errorf("invite_server_pubkey = %q, want %q", got.InviteServer.PublicKey, inst.InviteServer.PublicKey)
-	}
-	if got.InviteServer.Endpoint != inst.InviteServer.Endpoint {
-		t.Errorf("invite_server_endpoint = %q, want %q", got.InviteServer.Endpoint, inst.InviteServer.Endpoint)
-	}
-	if got.InviteServer.Route != inst.InviteServer.Route {
-		t.Errorf("invite_server_route = %q, want %q", got.InviteServer.Route, inst.InviteServer.Route)
-	}
-	if got.InviteServer.APIPort != inst.InviteServer.APIPort {
-		t.Errorf("invite_server_api_port = %d, want %d", got.InviteServer.APIPort, inst.InviteServer.APIPort)
-	}
-	if got.MainIfaceName != inst.MainIfaceName {
-		t.Errorf("main_iface_name = %q, want %q", got.MainIfaceName, inst.MainIfaceName)
-	}
-	if got.MainPrivateKey != inst.MainPrivateKey {
-		t.Errorf("main_private_key = %q, want %q", got.MainPrivateKey, inst.MainPrivateKey)
-	}
-	if !got.CreatedAt.Equal(createdAt) {
-		t.Errorf("created_at = %v, want %v", got.CreatedAt, createdAt)
+	if persisted.MainPrivateKey != params.MainPrivateKey {
+		t.Errorf("persisted main private key = %q, want %q", persisted.MainPrivateKey, params.MainPrivateKey)
 	}
 }
 
-func TestInsertInstall_Duplicate(t *testing.T) {
+func TestBeginInstall_CompatibleRetryReturnsExistingInstall(t *testing.T) {
 	db := testutil.SetupDB(t)
+	params := defaultBeginInstall("testnet")
 
-	inst := defaultInstall(t)
-	seedInstall(t, db, inst)
-
-	err := db.InsertInstall(inst)
-	if err == nil {
-		t.Fatal("expected error for duplicate install")
-	}
-}
-
-func TestListInstalls_Empty(t *testing.T) {
-	db := testutil.SetupDB(t)
-
-	installs, err := db.ListInstalls()
+	first, err := db.BeginInstall(params)
 	if err != nil {
-		t.Fatalf("list empty: %v", err)
+		t.Fatalf("first begin: %v", err)
 	}
-	if len(installs) != 0 {
-		t.Fatalf("expected 0 installs, got %d", len(installs))
+
+	retry := params
+	retry.MainPrivateKey = "replacement-key-that-must-not-win"
+	retry.CreatedAt = params.CreatedAt.Add(time.Hour)
+	second, err := db.BeginInstall(retry)
+	if err != nil {
+		t.Fatalf("retry begin: %v", err)
+	}
+
+	if second.MainPrivateKey != first.MainPrivateKey {
+		t.Errorf("retry private key = %q, want original %q", second.MainPrivateKey, first.MainPrivateKey)
+	}
+	if !second.CreatedAt.Equal(first.CreatedAt) {
+		t.Errorf("retry created at = %v, want original %v", second.CreatedAt, first.CreatedAt)
+	}
+}
+
+func TestBeginInstall_IncompatibleRetryLeavesExistingInstallUnchanged(t *testing.T) {
+	db := testutil.SetupDB(t)
+	params := defaultBeginInstall("testnet")
+	first, err := db.BeginInstall(params)
+	if err != nil {
+		t.Fatalf("first begin: %v", err)
+	}
+
+	retry := params
+	retry.InviteAssignedRoute = "10.43.0.6/32"
+	_, err = db.BeginInstall(retry)
+	if !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+
+	persisted, err := db.GetInstall(params.Name)
+	if err != nil {
+		t.Fatalf("get existing install: %v", err)
+	}
+	if persisted.InviteAssignedRoute != first.InviteAssignedRoute {
+		t.Errorf(
+			"invite route = %q, want unchanged %q",
+			persisted.InviteAssignedRoute,
+			first.InviteAssignedRoute,
+		)
+	}
+}
+
+func TestBeginInstall_CompletedNetworkReturnsNetworkExists(t *testing.T) {
+	db := testutil.SetupDB(t)
+	beginInstall(t, db, "testnet")
+	redeemInstall(t, db, "testnet")
+	if _, err := db.ConfirmInstall("testnet", "main-priv-key", testutil.FixedTime); err != nil {
+		t.Fatalf("confirm install: %v", err)
+	}
+
+	_, err := db.BeginInstall(defaultBeginInstall("testnet"))
+	if !errors.Is(err, service.ErrNetworkExists) {
+		t.Fatalf("err = %v, want ErrNetworkExists", err)
 	}
 }
 
 func TestListInstalls_Ordered(t *testing.T) {
 	db := testutil.SetupDB(t)
-
-	mustInsert := func(name string) {
-		t.Helper()
-		inst := defaultInstall(t)
-		inst.Name = name
-		seedInstall(t, db, inst)
-	}
-
-	mustInsert("beta")
-	mustInsert("alpha")
-	mustInsert("gamma")
+	beginInstall(t, db, "beta")
+	beginInstall(t, db, "alpha")
 
 	installs, err := db.ListInstalls()
 	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(installs) != 3 {
-		t.Fatalf("expected 3 installs, got %d", len(installs))
-	}
-	if installs[0].Name != "alpha" || installs[1].Name != "beta" || installs[2].Name != "gamma" {
-		t.Fatalf("unexpected order: %v, %v, %v",
-			installs[0].Name, installs[1].Name, installs[2].Name)
-	}
-}
-
-func TestListInstalls_Multiple(t *testing.T) {
-	db := testutil.SetupDB(t)
-
-	alpha := defaultInstall(t)
-	alpha.Name = "alpha"
-	alpha.Phase = service.PhaseInvited
-	seedInstall(t, db, alpha)
-
-	beta := defaultInstall(t)
-	beta.Name = "beta"
-	beta.Phase = service.PhaseRedeemed
-	seedInstall(t, db, beta)
-
-	installs, err := db.ListInstalls()
-	if err != nil {
-		t.Fatalf("list: %v", err)
+		t.Fatalf("list installs: %v", err)
 	}
 	if len(installs) != 2 {
-		t.Fatalf("expected 2 installs, got %d", len(installs))
+		t.Fatalf("installs = %d, want 2", len(installs))
 	}
-	if installs[0].Name != "alpha" || installs[0].Phase != service.PhaseInvited {
-		t.Errorf("alpha: name=%q phase=%q", installs[0].Name, installs[0].Phase)
-	}
-	if installs[1].Name != "beta" || installs[1].Phase != service.PhaseRedeemed {
-		t.Errorf("beta: name=%q phase=%q", installs[1].Name, installs[1].Phase)
+	if installs[0].Name != "alpha" || installs[1].Name != "beta" {
+		t.Fatalf("unexpected order: %q, %q", installs[0].Name, installs[1].Name)
 	}
 }
 
-func TestDeleteInstall(t *testing.T) {
+func TestRedeemInstall_TransitionsAndPreservesInviteIdentity(t *testing.T) {
 	db := testutil.SetupDB(t)
+	invited := beginInstall(t, db, "testnet")
+	assignment := defaultNetworkAssignment()
 
-	inst := defaultInstall(t)
-	seedInstall(t, db, inst)
-
-	if err := db.DeleteInstall(inst.Name); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-
-	_, err := db.GetInstall(inst.Name)
-	if err == nil {
-		t.Fatal("expected error after delete")
-	}
-}
-
-func TestDeleteInstall_NotFound(t *testing.T) {
-	db := testutil.SetupDB(t)
-
-	err := db.DeleteInstall("ghost")
-	if err == nil {
-		t.Fatal("expected error for nonexistent install")
-	}
-}
-
-func TestRedeemInstall_UpdatesPhaseAndMain(t *testing.T) {
-	db := testutil.SetupDB(t)
-
-	inst := defaultInstall(t)
-	seedInstall(t, db, inst)
-
-	mainServer := service.ServerInfo{
-		PublicKey: "main-server-pubkey",
-		Endpoint:  "5.6.7.8:51820",
-		Route:     "10.42.0.1/32",
-		APIPort:   8443,
-	}
-
-	if err := db.RedeemInstall(inst.Name, "10.42.1.10/32", mainServer); err != nil {
-		t.Fatalf("redeem: %v", err)
-	}
-
-	got, err := db.GetInstall(inst.Name)
+	redeemed, err := db.RedeemInstall("testnet", assignment)
 	if err != nil {
-		t.Fatalf("get after redeem: %v", err)
+		t.Fatalf("redeem install: %v", err)
 	}
 
-	if got.Phase != service.PhaseRedeemed {
-		t.Errorf("phase = %q, want %q", got.Phase, service.PhaseRedeemed)
+	if redeemed.Phase != service.PhaseRedeemed {
+		t.Errorf("phase = %q, want %q", redeemed.Phase, service.PhaseRedeemed)
 	}
-	if got.MainAssignedRoute != "10.42.1.10/32" {
-		t.Errorf("main_assigned_route = %q, want %q", got.MainAssignedRoute, "10.42.1.10/32")
+	if redeemed.MainAssignedRoute != assignment.AssignedRoute {
+		t.Errorf("main route = %q, want %q", redeemed.MainAssignedRoute, assignment.AssignedRoute)
 	}
-	if got.MainServer.PublicKey != mainServer.PublicKey {
-		t.Errorf("main_server_pubkey = %q, want %q", got.MainServer.PublicKey, mainServer.PublicKey)
+	if redeemed.MainServer != assignment.Server {
+		t.Errorf("main server = %#v, want %#v", redeemed.MainServer, assignment.Server)
 	}
-	if got.MainServer.Endpoint != mainServer.Endpoint {
-		t.Errorf("main_server_endpoint = %q, want %q", got.MainServer.Endpoint, mainServer.Endpoint)
+	if redeemed.InvitePrivateKey != invited.InvitePrivateKey {
+		t.Errorf("invite key = %q, want preserved %q", redeemed.InvitePrivateKey, invited.InvitePrivateKey)
 	}
-	if got.MainServer.Route != mainServer.Route {
-		t.Errorf("main_server_route = %q, want %q", got.MainServer.Route, mainServer.Route)
-	}
-	if got.MainServer.APIPort != mainServer.APIPort {
-		t.Errorf("main_server_api_port = %d, want %d", got.MainServer.APIPort, mainServer.APIPort)
+	if redeemed.MainPrivateKey != invited.MainPrivateKey {
+		t.Errorf("main key = %q, want preserved %q", redeemed.MainPrivateKey, invited.MainPrivateKey)
 	}
 }
 
-func TestRedeemInstall_InviteFieldsPreserved(t *testing.T) {
+func TestRedeemInstall_ExactRetrySucceedsUnchanged(t *testing.T) {
 	db := testutil.SetupDB(t)
+	beginInstall(t, db, "testnet")
+	first := redeemInstall(t, db, "testnet")
 
-	inst := defaultInstall(t)
-	seedInstall(t, db, inst)
-
-	mainServer := service.ServerInfo{
-		PublicKey: "main-server-pubkey",
-		Endpoint:  "5.6.7.8:51820",
-		Route:     "10.42.0.1/32",
-		APIPort:   8443,
-	}
-
-	if err := db.RedeemInstall(inst.Name, "10.42.1.10/32", mainServer); err != nil {
-		t.Fatalf("redeem: %v", err)
-	}
-
-	got, err := db.GetInstall(inst.Name)
+	second, err := db.RedeemInstall("testnet", defaultNetworkAssignment())
 	if err != nil {
-		t.Fatalf("get after redeem: %v", err)
+		t.Fatalf("retry redeem: %v", err)
+	}
+	if second.MainAssignedRoute != first.MainAssignedRoute || second.MainServer != first.MainServer {
+		t.Errorf("retry result = %#v, want unchanged %#v", second, first)
+	}
+}
+
+func TestRedeemInstall_IncompatibleRetryLeavesRedemptionUnchanged(t *testing.T) {
+	db := testutil.SetupDB(t)
+	beginInstall(t, db, "testnet")
+	first := redeemInstall(t, db, "testnet")
+
+	incompatible := defaultNetworkAssignment()
+	incompatible.AssignedRoute = "10.42.0.6/32"
+	_, err := db.RedeemInstall("testnet", incompatible)
+	if !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("err = %v, want ErrConflict", err)
 	}
 
-	if got.InviteIfaceName != inst.InviteIfaceName {
-		t.Errorf("invite_iface_name = %q, want %q", got.InviteIfaceName, inst.InviteIfaceName)
+	persisted, err := db.GetInstall("testnet")
+	if err != nil {
+		t.Fatalf("get redeemed install: %v", err)
 	}
-	if got.InvitePrivateKey != inst.InvitePrivateKey {
-		t.Errorf("invite_private_key = %q, want %q", got.InvitePrivateKey, inst.InvitePrivateKey)
-	}
-	if got.InviteAssignedRoute != inst.InviteAssignedRoute {
-		t.Errorf("invite_assigned_route = %q, want %q", got.InviteAssignedRoute, inst.InviteAssignedRoute)
-	}
-	if got.InviteServer.PublicKey != inst.InviteServer.PublicKey {
-		t.Errorf("invite_server_pubkey = %q, want %q", got.InviteServer.PublicKey, inst.InviteServer.PublicKey)
-	}
-	if got.InviteServer.Endpoint != inst.InviteServer.Endpoint {
-		t.Errorf("invite_server_endpoint = %q, want %q", got.InviteServer.Endpoint, inst.InviteServer.Endpoint)
-	}
-	if got.InviteServer.Route != inst.InviteServer.Route {
-		t.Errorf("invite_server_route = %q, want %q", got.InviteServer.Route, inst.InviteServer.Route)
-	}
-	if got.InviteServer.APIPort != inst.InviteServer.APIPort {
-		t.Errorf("invite_server_api_port = %d, want %d", got.InviteServer.APIPort, inst.InviteServer.APIPort)
-	}
-	if got.MainPrivateKey != inst.MainPrivateKey {
-		t.Errorf("main_private_key = %q, want %q", got.MainPrivateKey, inst.MainPrivateKey)
+	if persisted.MainAssignedRoute != first.MainAssignedRoute {
+		t.Errorf("main route = %q, want unchanged %q", persisted.MainAssignedRoute, first.MainAssignedRoute)
 	}
 }
 
 func TestRedeemInstall_NotFound(t *testing.T) {
 	db := testutil.SetupDB(t)
 
-	err := db.RedeemInstall("nonexistent", "10.42.1.10/32", service.ServerInfo{
-		PublicKey: "pk",
-		Endpoint:  "1.1.1.1:51820",
-		Route:     "10.42.0.1/32",
-		APIPort:   8443,
-	})
-	if err == nil {
-		t.Fatal("expected error for nonexistent install")
+	_, err := db.RedeemInstall("missing", defaultNetworkAssignment())
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
 
-func TestConfirmInstall_Success(t *testing.T) {
+func TestRedeemInstall_CompletedNetworkReturnsInstallState(t *testing.T) {
 	db := testutil.SetupDB(t)
-
-	inst := defaultInstall(t)
-	inst.Phase = service.PhaseRedeemed
-	inst.MainAssignedRoute = "10.42.1.10/32"
-	inst.MainServer = service.ServerInfo{
-		PublicKey: "main-server-pubkey",
-		Endpoint:  "5.6.7.8:51820",
-		Route:     "10.42.0.1/32",
-		APIPort:   8443,
-	}
-	seedInstall(t, db, inst)
-
-	createdAt := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
-	nc := &service.NetworkConfig{
-		Name:          inst.Name,
-		PrivateKey:    inst.MainPrivateKey,
-		InterfaceName: inst.MainIfaceName,
-		AssignedRoute: inst.MainAssignedRoute,
-		Server:        inst.MainServer,
-		Enabled:       true,
-		CreatedAt:     createdAt,
+	beginInstall(t, db, "testnet")
+	redeemInstall(t, db, "testnet")
+	if _, err := db.ConfirmInstall("testnet", "main-priv-key", testutil.FixedTime); err != nil {
+		t.Fatalf("confirm install: %v", err)
 	}
 
-	if err := db.ConfirmInstall(inst.Name, nc); err != nil {
-		t.Fatalf("confirm: %v", err)
-	}
-
-	_, err := db.GetInstall(inst.Name)
-	if err == nil {
-		t.Fatal("expected install to be deleted after confirm")
-	}
-
-	gotNet, err := db.GetNetwork(inst.Name)
-	if err != nil {
-		t.Fatalf("get network after confirm: %v", err)
-	}
-	if gotNet.Name != nc.Name {
-		t.Errorf("network name = %q, want %q", gotNet.Name, nc.Name)
-	}
-	if gotNet.PrivateKey != nc.PrivateKey {
-		t.Errorf("network private_key = %q, want %q", gotNet.PrivateKey, nc.PrivateKey)
-	}
-	if gotNet.Enabled != nc.Enabled {
-		t.Errorf("network enabled = %v, want %v", gotNet.Enabled, nc.Enabled)
+	_, err := db.RedeemInstall("testnet", defaultNetworkAssignment())
+	if !errors.Is(err, service.ErrInstallState) {
+		t.Fatalf("err = %v, want ErrInstallState", err)
 	}
 }
 
-func TestConfirmInstall_InstallNotFound(t *testing.T) {
+func TestConfirmInstall_PromotesAuthoritativeInstallState(t *testing.T) {
 	db := testutil.SetupDB(t)
+	invited := beginInstall(t, db, "testnet")
+	redeemed := redeemInstall(t, db, "testnet")
+	confirmedAt := testutil.FixedTime.Add(time.Hour)
 
-	nc := &service.NetworkConfig{
-		Name:          "nonexistent",
-		PrivateKey:    "priv",
-		InterfaceName: "wg-nonexistent",
-		AssignedRoute: "10.42.1.10/32",
-		Server: service.ServerInfo{
-			PublicKey: "pk",
-			Endpoint:  "1.1.1.1:51820",
-			Route:     "10.42.0.1/32",
-			APIPort:   8443,
-		},
-		CreatedAt: time.Now(),
+	network, err := db.ConfirmInstall("testnet", "main-priv-key", confirmedAt)
+	if err != nil {
+		t.Fatalf("confirm install: %v", err)
 	}
 
-	err := db.ConfirmInstall("nonexistent", nc)
-	if err == nil {
-		t.Fatal("expected error for nonexistent install")
+	if network.Name != redeemed.Name {
+		t.Errorf("name = %q, want %q", network.Name, redeemed.Name)
+	}
+	if network.PrivateKey != invited.MainPrivateKey {
+		t.Errorf("private key = %q, want %q", network.PrivateKey, invited.MainPrivateKey)
+	}
+	if network.AssignedRoute != redeemed.MainAssignedRoute {
+		t.Errorf("route = %q, want %q", network.AssignedRoute, redeemed.MainAssignedRoute)
+	}
+	if network.Server != redeemed.MainServer {
+		t.Errorf("server = %#v, want %#v", network.Server, redeemed.MainServer)
+	}
+	if !network.Enabled {
+		t.Error("confirmed network should be enabled")
+	}
+	if !network.CreatedAt.Equal(confirmedAt) {
+		t.Errorf("created at = %v, want %v", network.CreatedAt, confirmedAt)
+	}
+	if _, err := db.GetInstall("testnet"); !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("install after confirm: err = %v, want ErrNotFound", err)
 	}
 }
 
-func TestConfirmInstall_RollbackOnNetworkConflict(t *testing.T) {
+func TestConfirmInstall_InvitedRejectedWithoutChange(t *testing.T) {
 	db := testutil.SetupDB(t)
+	beginInstall(t, db, "testnet")
 
-	inst := defaultInstall(t)
-	inst.Phase = service.PhaseRedeemed
-	inst.MainAssignedRoute = "10.42.1.10/32"
-	inst.MainServer = service.ServerInfo{
-		PublicKey: "main-server-pubkey",
-		Endpoint:  "5.6.7.8:51820",
-		Route:     "10.42.0.1/32",
-		APIPort:   8443,
-	}
-	seedInstall(t, db, inst)
-
-	// Pre-insert a network with the same name so the confirm insert conflicts.
-	if err := db.InsertNetwork(&service.NetworkConfig{
-		Name:          inst.Name,
-		PrivateKey:    "existing-priv",
-		InterfaceName: "wg-existing",
-		AssignedRoute: "10.42.1.20/32",
-		Server: service.ServerInfo{
-			PublicKey: "existing-pk",
-			Endpoint:  "9.9.9.9:51820",
-			Route:     "10.42.0.1/32",
-			APIPort:   8443,
-		},
-		CreatedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("insert existing network: %v", err)
+	_, err := db.ConfirmInstall("testnet", "main-priv-key", testutil.FixedTime)
+	if !errors.Is(err, service.ErrInstallState) {
+		t.Fatalf("err = %v, want ErrInstallState", err)
 	}
 
-	nc := &service.NetworkConfig{
-		Name:          inst.Name,
-		PrivateKey:    inst.MainPrivateKey,
-		InterfaceName: inst.MainIfaceName,
-		AssignedRoute: inst.MainAssignedRoute,
-		Server:        inst.MainServer,
-		Enabled:       true,
-		CreatedAt:     time.Now(),
-	}
-
-	err := db.ConfirmInstall(inst.Name, nc)
-	if err == nil {
-		t.Fatal("expected error when network already exists")
-	}
-
-	// Install should survive the rollback.
-	got, err := db.GetInstall(inst.Name)
+	install, err := db.GetInstall("testnet")
 	if err != nil {
-		t.Fatalf("install should survive rolled-back confirm: %v", err)
+		t.Fatalf("get install after rejection: %v", err)
 	}
-	if got.Phase != service.PhaseRedeemed {
-		t.Errorf("phase = %q, want %q", got.Phase, service.PhaseRedeemed)
+	if install.Phase != service.PhaseInvited {
+		t.Errorf("phase = %q, want %q", install.Phase, service.PhaseInvited)
+	}
+	if _, err := db.GetNetwork("testnet"); !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("network after rejection: err = %v, want ErrNotFound", err)
 	}
 }
 
-func TestFullInstallLifecycle(t *testing.T) {
+func TestConfirmInstall_ExactRetryReturnsExistingNetwork(t *testing.T) {
+	db := testutil.SetupDB(t)
+	beginInstall(t, db, "testnet")
+	redeemInstall(t, db, "testnet")
+	first, err := db.ConfirmInstall("testnet", "main-priv-key", testutil.FixedTime)
+	if err != nil {
+		t.Fatalf("first confirm: %v", err)
+	}
+
+	second, err := db.ConfirmInstall("testnet", "main-priv-key", testutil.FixedTime.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("retry confirm: %v", err)
+	}
+	if !second.CreatedAt.Equal(first.CreatedAt) {
+		t.Errorf("retry created at = %v, want original %v", second.CreatedAt, first.CreatedAt)
+	}
+}
+
+func TestConfirmInstall_IncompatibleRetryConflicts(t *testing.T) {
+	db := testutil.SetupDB(t)
+	beginInstall(t, db, "testnet")
+	redeemInstall(t, db, "testnet")
+	first, err := db.ConfirmInstall(
+		"testnet",
+		"main-priv-key",
+		testutil.FixedTime,
+	)
+	if err != nil {
+		t.Fatalf("first confirm: %v", err)
+	}
+
+	_, err = db.ConfirmInstall(
+		"testnet",
+		"different-private-key",
+		testutil.FixedTime.Add(time.Hour),
+	)
+	if !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+
+	persisted, err := db.GetNetwork("testnet")
+	if err != nil {
+		t.Fatalf("get network after rejection: %v", err)
+	}
+	if persisted.PrivateKey != first.PrivateKey ||
+		!persisted.CreatedAt.Equal(first.CreatedAt) {
+		t.Errorf("network after rejection = %#v, want unchanged %#v", persisted, first)
+	}
+}
+
+func TestConfirmInstall_NotFound(t *testing.T) {
 	db := testutil.SetupDB(t)
 
-	inst := defaultInstall(t)
-	seedInstall(t, db, inst)
+	_, err := db.ConfirmInstall("missing", "main-priv-key", testutil.FixedTime)
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
 
-	// --- Invited ---
-	got, err := db.GetInstall(inst.Name)
-	if err != nil {
-		t.Fatalf("get invited: %v", err)
-	}
-	if got.Phase != service.PhaseInvited {
-		t.Fatalf("expected invited phase, got %q", got.Phase)
-	}
+func TestDeleteNetworkState_Install(t *testing.T) {
+	db := testutil.SetupDB(t)
+	beginInstall(t, db, "testnet")
 
-	// --- Redeem ---
-	mainServer := service.ServerInfo{
-		PublicKey: "main-server-pubkey",
-		Endpoint:  "5.6.7.8:51820",
-		Route:     "10.42.0.1/32",
-		APIPort:   8443,
+	if err := db.DeleteNetworkState("testnet"); err != nil {
+		t.Fatalf("delete install state: %v", err)
 	}
-	if err := db.RedeemInstall(inst.Name, "10.42.1.10/32", mainServer); err != nil {
-		t.Fatalf("redeem: %v", err)
+	if _, err := db.GetInstall("testnet"); !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("install after delete: err = %v, want ErrNotFound", err)
 	}
+}
 
-	got, err = db.GetInstall(inst.Name)
-	if err != nil {
-		t.Fatalf("get redeemed: %v", err)
-	}
-	if got.Phase != service.PhaseRedeemed {
-		t.Fatalf("expected redeemed phase, got %q", got.Phase)
+func TestDeleteNetworkState_Network(t *testing.T) {
+	db := testutil.SetupDB(t)
+	beginInstall(t, db, "testnet")
+	redeemInstall(t, db, "testnet")
+	if _, err := db.ConfirmInstall("testnet", "main-priv-key", testutil.FixedTime); err != nil {
+		t.Fatalf("confirm install: %v", err)
 	}
 
-	// --- Confirm ---
-	nc := &service.NetworkConfig{
-		Name:          inst.Name,
-		PrivateKey:    inst.MainPrivateKey,
-		InterfaceName: inst.MainIfaceName,
-		AssignedRoute: got.MainAssignedRoute,
-		Server:        got.MainServer,
-		Enabled:       true,
-		CreatedAt:     time.Now(),
+	if err := db.DeleteNetworkState("testnet"); err != nil {
+		t.Fatalf("delete network state: %v", err)
 	}
-	if err := db.ConfirmInstall(inst.Name, nc); err != nil {
-		t.Fatalf("confirm: %v", err)
+	if _, err := db.GetNetwork("testnet"); !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("network after delete: err = %v, want ErrNotFound", err)
 	}
+}
 
-	_, err = db.GetInstall(inst.Name)
-	if err == nil {
-		t.Fatal("install should be gone after confirm")
-	}
+func TestDeleteNetworkState_NotFound(t *testing.T) {
+	db := testutil.SetupDB(t)
 
-	gotNet, err := db.GetNetwork(inst.Name)
-	if err != nil {
-		t.Fatalf("get network after confirm: %v", err)
-	}
-	if gotNet.Name != inst.Name {
-		t.Errorf("network name = %q, want %q", gotNet.Name, inst.Name)
+	err := db.DeleteNetworkState("missing")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }

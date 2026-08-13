@@ -31,7 +31,7 @@ func TestNextCandidate_NeverAttemptedPicksCatalogOrder(t *testing.T) {
 func TestNextCandidate_DwellBlocksRecentAttempt(t *testing.T) {
 	now := rotationBase
 	endpoints := []PeerEndpoint{
-		{Endpoint: "1.1.1.1:51820", LastAttemptedAt: now.Add(-30 * time.Second).Unix()},
+		{Endpoint: "1.1.1.1:51820", LastAttemptedAt: now.Add(-30 * time.Second)},
 		{Endpoint: "2.2.2.2:51820"},
 	}
 
@@ -43,9 +43,9 @@ func TestNextCandidate_DwellBlocksRecentAttempt(t *testing.T) {
 func TestNextCandidate_RoundRobinsLeastRecentlyAttempted(t *testing.T) {
 	now := rotationBase
 	endpoints := []PeerEndpoint{
-		{Endpoint: "1.1.1.1:51820", LastAttemptedAt: now.Add(-3 * RotateInterval).Unix()},
-		{Endpoint: "2.2.2.2:51820", LastAttemptedAt: now.Add(-2 * RotateInterval).Unix()},
-		{Endpoint: "3.3.3.3:51820", LastAttemptedAt: now.Add(-5 * RotateInterval).Unix()},
+		{Endpoint: "1.1.1.1:51820", LastAttemptedAt: now.Add(-3 * RotateInterval)},
+		{Endpoint: "2.2.2.2:51820", LastAttemptedAt: now.Add(-2 * RotateInterval)},
+		{Endpoint: "3.3.3.3:51820", LastAttemptedAt: now.Add(-5 * RotateInterval)},
 	}
 
 	candidate, ok := nextCandidate(endpoints, now)
@@ -60,7 +60,7 @@ func TestNextCandidate_RoundRobinsLeastRecentlyAttempted(t *testing.T) {
 func TestNextCandidate_FreshEndpointWinsOverAttempted(t *testing.T) {
 	now := rotationBase
 	endpoints := []PeerEndpoint{
-		{Endpoint: "1.1.1.1:51820", LastAttemptedAt: now.Add(-2 * RotateInterval).Unix()},
+		{Endpoint: "1.1.1.1:51820", LastAttemptedAt: now.Add(-2 * RotateInterval)},
 		{Endpoint: "2.2.2.2:51820"}, // just arrived from the server
 	}
 
@@ -76,7 +76,7 @@ func TestNextCandidate_FreshEndpointWinsOverAttempted(t *testing.T) {
 func TestNextCandidate_DwellExpiryAllowsNextRotation(t *testing.T) {
 	now := rotationBase
 	endpoints := []PeerEndpoint{
-		{Endpoint: "1.1.1.1:51820", LastAttemptedAt: now.Add(-RotateInterval).Unix()},
+		{Endpoint: "1.1.1.1:51820", LastAttemptedAt: now.Add(-RotateInterval)},
 	}
 
 	candidate, ok := nextCandidate(endpoints, now)

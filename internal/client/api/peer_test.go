@@ -40,13 +40,11 @@ func TestAPIListPeers_WithCachedData(
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	if err := env.Database.SetPeers("mynet", []service.Peer{{
+	testutil.SeedPeers(t, env.Database, "mynet", service.Peer{
 		Name:      "alice",
 		PublicKey: key,
 		Route:     "10.42.0.9/32",
-	}}); err != nil {
-		t.Fatalf("seed peers: %v", err)
-	}
+	})
 
 	// list peers
 	url := "/networks/mynet/peers"

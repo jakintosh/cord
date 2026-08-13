@@ -30,8 +30,29 @@ type ServerInfo struct {
 	APIPort     uint16
 }
 
+// NetworkAssignment is the durable network identity assigned to a client.
+type NetworkAssignment struct {
+	AssignedRoute string
+	Server        ServerInfo
+}
+
+func networkAssignmentFromInvitation(
+	invitation protocol.Invitation,
+) NetworkAssignment {
+	return NetworkAssignment{
+		AssignedRoute: invitation.Peer.Route,
+		Server: ServerInfo{
+			PublicKey:   invitation.Network.PublicKey,
+			Endpoint:    invitation.Network.Endpoint,
+			Route:       invitation.Network.ServerRoute,
+			NetworkCidr: invitation.Network.NetworkCidr,
+			APIPort:     invitation.Network.APIPort,
+		},
+	}
+}
+
 // Install is the transient record of an in-progress network install.
-// Created by BeginInstall, consumed by Confirm.
+// Created by BeginInstall, consumed by ConfirmInstall.
 type Install struct {
 	Name  string
 	Phase string // PhaseInvited or PhaseRedeemed
@@ -53,6 +74,20 @@ type Install struct {
 	CreatedAt time.Time
 }
 
+// BeginInstallParams contains the validated, service-produced values needed
+// to begin an install.
+type BeginInstallParams struct {
+	Name                string
+	ListenPort          uint16
+	InviteIfaceName     string
+	InvitePrivateKey    string
+	InviteAssignedRoute string
+	InviteServer        ServerInfo
+	MainIfaceName       string
+	MainPrivateKey      string
+	CreatedAt           time.Time
+}
+
 // GetInstall returns the persisted install record by name.
 func (s *Service) GetInstall(
 	name string,
@@ -71,8 +106,8 @@ func (s *Service) ListInstalls() (
 	return s.store.ListInstalls()
 }
 
-// InstallNetwork runs the full onboarding flow: BeginInstall → Redeem →
-// Confirm. It is a convenience driver for callers that want to complete
+// InstallNetwork runs the full onboarding flow: BeginInstall → RedeemInstall →
+// ConfirmInstall. It is a convenience driver for callers that want to complete
 // onboarding in a single call. For retry-safe onboarding, call each step
 // individually — the permanent key is persisted at BeginInstall and
 // reused across retries.
@@ -86,36 +121,30 @@ func (s *Service) InstallNetwork(
 	*NetworkConfig,
 	error,
 ) {
-	inst, err := s.BeginInstall(invitation, options)
+	install, err := s.BeginInstall(invitation, options)
 	if err != nil {
 		return nil, err
 	}
 
-	if inst.Phase == PhaseInvited {
-		if _, err := s.Redeem(inst.Name); err != nil {
-			return nil, err
-		}
-	}
+	installName := install.Name
 
-	inst, err = s.store.GetInstall(inst.Name)
-	if err != nil {
+	if _, err := s.RedeemInstall(installName); err != nil {
 		return nil, err
 	}
 
-	if inst.Phase == PhaseRedeemed {
-		if err := s.Confirm(inst.Name); err != nil {
-			return nil, err
-		}
+	if err := s.ConfirmInstall(installName); err != nil {
+		return nil, err
 	}
 
-	return s.store.GetNetwork(inst.Name)
+	return s.store.GetNetwork(installName)
 }
 
 // BeginInstall validates an invite, generates a permanent keypair, and
 // persists an Install record at phase "invited". No WireGuard devices
 // are brought up. Idempotent: if a completed network already exists,
-// returns ErrNetworkExists; if an install with the same name already
-// exists at any phase, the existing record is returned unchanged.
+// returns ErrNetworkExists; a compatible install retry returns the
+// existing record unchanged, while incompatible invitation identity or
+// local options return ErrConflict.
 func (s *Service) BeginInstall(
 	invitation protocol.Invitation,
 	options NetworkOptions,
@@ -142,14 +171,6 @@ func (s *Service) BeginInstall(
 		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 
-	if _, err := s.store.GetNetwork(networkName); err == nil {
-		return nil, ErrNetworkExists
-	}
-
-	if existing, err := s.store.GetInstall(networkName); err == nil {
-		return existing, nil
-	}
-
 	permPrivKey, err := wireguard.GenerateKey()
 	if err != nil {
 		return nil, err
@@ -160,9 +181,8 @@ func (s *Service) BeginInstall(
 		listenPort = *options.ListenPort
 	}
 
-	install := &Install{
+	install, err := s.store.BeginInstall(BeginInstallParams{
 		Name:                networkName,
-		Phase:               PhaseInvited,
 		ListenPort:          listenPort,
 		InviteIfaceName:     inviteIfaceName,
 		InvitePrivateKey:    invitation.Peer.PrivateKey,
@@ -177,23 +197,23 @@ func (s *Service) BeginInstall(
 		MainIfaceName:  mainIfaceName,
 		MainPrivateKey: permPrivKey,
 		CreatedAt:      s.clock(),
-	}
-	if err := s.store.InsertInstall(install); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 	s.log.Info("install started", "network", networkName)
 	return install, nil
 }
 
-// Redeem brings up the temporary invite WireGuard interface, calls
+// RedeemInstall brings up the temporary invite WireGuard interface, calls
 // /redeem with the stored permanent public key, records the main
-// network parameters, and tears down the invite interface. The install
-// must be at phase "invited" or "redeemed". Idempotent: re-calling in
-// the redeemed state re-contacts the server with the same key.
-func (s *Service) Redeem(
+// network parameters, and tears down the invite interface. Idempotent:
+// an already-redeemed install is returned unchanged without contacting
+// the server again.
+func (s *Service) RedeemInstall(
 	name string,
 ) (
-	*protocol.Invitation,
+	*Install,
 	error,
 ) {
 	install, err := s.store.GetInstall(name)
@@ -201,9 +221,15 @@ func (s *Service) Redeem(
 		return nil, err
 	}
 
-	if install.Phase != PhaseInvited && install.Phase != PhaseRedeemed {
-		return nil, fmt.Errorf("%w: install %q is in phase %q, expected invited or redeemed",
-			ErrInvalidInput, name, install.Phase)
+	if install.Phase == PhaseRedeemed {
+		return install, nil
+	} else if install.Phase != PhaseInvited {
+		return nil, fmt.Errorf(
+			"%w: install %q is in phase %q",
+			ErrInstallState,
+			name,
+			install.Phase,
+		)
 	}
 
 	permPubKey, err := wireguard.PublicKey(install.MainPrivateKey)
@@ -243,26 +269,18 @@ func (s *Service) Redeem(
 	if err := result.Validate(false); err != nil {
 		return nil, fmt.Errorf("redeem invite: result invalid: %w", err)
 	}
+	assignment := networkAssignmentFromInvitation(*result)
 
-	if err := s.store.RedeemInstall(
-		name,
-		result.Peer.Route,
-		ServerInfo{
-			PublicKey:   result.Network.PublicKey,
-			Endpoint:    result.Network.Endpoint,
-			Route:       result.Network.ServerRoute,
-			NetworkCidr: result.Network.NetworkCidr,
-			APIPort:     result.Network.APIPort,
-		},
-	); err != nil {
+	install, err = s.store.RedeemInstall(name, assignment)
+	if err != nil {
 		return nil, err
 	}
 
 	s.log.Info("invite redeemed", "network", name, "route", result.Peer.Route)
-	return result, nil
+	return install, nil
 }
 
-// Confirm brings up the main WireGuard interface, calls /confirm to
+// ConfirmInstall brings up the main WireGuard interface, calls /confirm to
 // prove reachability, and transitions the install into a permanent
 // membership. On success the install row is consumed: the NetworkConfig
 // is inserted and the Install row deleted in one transaction. Then a
@@ -271,7 +289,7 @@ func (s *Service) Redeem(
 //
 // If the confirm call or store transaction fails, the tunnel comes down
 // and the install row remains at "redeemed" — retryable.
-func (s *Service) Confirm(
+func (s *Service) ConfirmInstall(
 	name string,
 ) error {
 	install, err := s.store.GetInstall(name)
@@ -280,8 +298,12 @@ func (s *Service) Confirm(
 	}
 
 	if install.Phase != PhaseRedeemed {
-		return fmt.Errorf("%w: install %q is in phase %q, expected redeemed",
-			ErrInvalidInput, name, install.Phase)
+		return fmt.Errorf(
+			"%w: install %q is in phase %q, expected redeemed",
+			ErrInstallState,
+			name,
+			install.Phase,
+		)
 	}
 
 	tunnel, err := newTunnel(
@@ -308,17 +330,12 @@ func (s *Service) Confirm(
 		return fmt.Errorf("confirm peer: %w", err)
 	}
 
-	nc := &NetworkConfig{
-		Name:          name,
-		PrivateKey:    install.MainPrivateKey,
-		InterfaceName: install.MainIfaceName,
-		AssignedRoute: install.MainAssignedRoute,
-		ListenPort:    install.ListenPort,
-		Server:        install.MainServer,
-		Enabled:       true,
-		CreatedAt:     s.clock(),
-	}
-	if err := s.store.ConfirmInstall(name, nc); err != nil {
+	nc, err := s.store.ConfirmInstall(
+		name,
+		install.MainPrivateKey,
+		s.clock(),
+	)
+	if err != nil {
 		_ = tunnel.stop()
 		return err
 	}
@@ -338,17 +355,23 @@ func (s *Service) Confirm(
 	return nil
 }
 
-// UninstallNetwork removes a network and all its local state. If the
-// network is currently enabled, it is disabled first. If a mid-install
-// Install record exists but no network, the install row is deleted.
+// UninstallNetwork stops a running network and removes all of its local
+// state, whether onboarding is complete or still in progress.
 func (s *Service) UninstallNetwork(
 	networkName string,
 ) error {
-	_ = s.DisableNetwork(networkName)
+	s.mu.Lock()
+	network, running := s.running[networkName]
+	if running {
+		delete(s.running, networkName)
+	}
+	s.mu.Unlock()
 
-	if err := s.store.DeleteNetwork(networkName); err == nil {
-		return nil
+	if running {
+		if err := network.stop(); err != nil {
+			s.log.Warn("uninstall: stop network failed", "network", networkName, "err", err)
+		}
 	}
 
-	return s.store.DeleteInstall(networkName)
+	return s.store.DeleteNetworkState(networkName)
 }

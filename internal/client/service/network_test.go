@@ -16,7 +16,7 @@ import (
 
 func TestGetNetwork_Success(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "mynet")
+	testutil.SeedNetworkDirect(t, env.Database, "mynet")
 
 	nw, err := env.Service.GetNetwork("mynet")
 	if err != nil {
@@ -74,8 +74,8 @@ func TestListNetworks_Empty(t *testing.T) {
 
 func TestListNetworks_WithNetworks(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "alpha")
-	testutil.SeedNetworkDirect(t, env.Service, "beta")
+	testutil.SeedNetworkDirect(t, env.Database, "alpha")
+	testutil.SeedNetworkDirect(t, env.Database, "beta")
 
 	names, err := env.Service.ListNetworks()
 	if err != nil {
@@ -328,7 +328,7 @@ func TestInstall_PersistsKeys(t *testing.T) {
 
 func TestUninstallNetwork_Success(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "to-delete")
+	testutil.SeedNetworkDirect(t, env.Database, "to-delete")
 
 	if err := env.Service.UninstallNetwork("to-delete"); err != nil {
 		t.Fatalf("uninstall: %v", err)
@@ -342,7 +342,7 @@ func TestUninstallNetwork_Success(t *testing.T) {
 
 func TestUninstallNetwork_DisablesFirst(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "enabled-net")
+	testutil.SeedNetworkDirect(t, env.Database, "enabled-net")
 
 	if err := env.Service.EnableNetwork("enabled-net"); err != nil {
 		t.Fatalf("enable: %v", err)
@@ -363,7 +363,7 @@ func TestUninstallNetwork_DisablesFirst(t *testing.T) {
 
 func TestEnableNetwork_Success(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "enable-me")
+	testutil.SeedNetworkDirect(t, env.Database, "enable-me")
 
 	if err := env.Service.EnableNetwork("enable-me"); err != nil {
 		t.Fatalf("enable: %v", err)
@@ -384,7 +384,7 @@ func TestEnableNetwork_Success(t *testing.T) {
 
 func TestEnableNetwork_AlreadyRunning(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "running")
+	testutil.SeedNetworkDirect(t, env.Database, "running")
 
 	if err := env.Service.EnableNetwork("running"); err != nil {
 		t.Fatalf("first enable: %v", err)
@@ -410,7 +410,7 @@ func TestEnableNetwork_NotFound(t *testing.T) {
 
 func TestEnableNetwork_DeviceError(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "bad-device")
+	testutil.SeedNetworkDirect(t, env.Database, "bad-device")
 
 	env.Backend.CreateErr = errors.New("device create failed")
 
@@ -430,7 +430,7 @@ func TestEnableNetwork_DeviceError(t *testing.T) {
 
 func TestDisableNetwork_Success(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "disable-me")
+	testutil.SeedNetworkDirect(t, env.Database, "disable-me")
 
 	if err := env.Service.EnableNetwork("disable-me"); err != nil {
 		t.Fatalf("enable: %v", err)
@@ -459,7 +459,7 @@ func TestDisableNetwork_Success(t *testing.T) {
 
 func TestDisableNetwork_NotEnabled(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "not-enabled")
+	testutil.SeedNetworkDirect(t, env.Database, "not-enabled")
 
 	if err := env.Service.DisableNetwork("not-enabled"); err != nil {
 		t.Fatalf("disable: %v", err)
@@ -484,7 +484,7 @@ func TestIsNetworkRunning_WithoutNetworks(t *testing.T) {
 
 func TestIsNetworkRunning_InstalledNotEnabled(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "net-a")
+	testutil.SeedNetworkDirect(t, env.Database, "net-a")
 
 	if env.Service.IsNetworkRunning("net-a") {
 		t.Error("non-enabled network should not be running")
@@ -493,7 +493,7 @@ func TestIsNetworkRunning_InstalledNotEnabled(t *testing.T) {
 
 func TestIsNetworkRunning_EnabledNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "running-net")
+	testutil.SeedNetworkDirect(t, env.Database, "running-net")
 
 	if err := env.Service.EnableNetwork("running-net"); err != nil {
 		t.Fatalf("enable: %v", err)

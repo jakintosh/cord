@@ -134,7 +134,7 @@ func TestAPIShowNetwork_MidInstall(
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
-	if _, err := env.Service.Redeem(inst.Name); err != nil {
+	if _, err := env.Service.RedeemInstall(inst.Name); err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
@@ -421,7 +421,7 @@ func TestAPIConfirmNetwork_Success(
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
-	if _, err := env.Service.Redeem(inst.Name); err != nil {
+	if _, err := env.Service.RedeemInstall(inst.Name); err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
@@ -440,6 +440,27 @@ func TestAPIConfirmNetwork_Success(
 	if !nw.Enabled {
 		t.Fatal("expected network to be enabled after confirm")
 	}
+}
+
+func TestAPIConfirmNetwork_InvitedReturnsConflict(
+	t *testing.T,
+) {
+	// setup invited install
+	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
+	inst, err := env.Service.BeginInstall(
+		installInvite(t, env, "still-invited"),
+		service.NetworkOptions{},
+	)
+	if err != nil {
+		t.Fatalf("begin install: %v", err)
+	}
+
+	// confirm before redemption
+	url := "/networks/" + inst.Name + "/confirm"
+	result := wire.TestPost[any](env.Router, url, "")
+
+	// verify persisted-state conflict
+	result.ExpectStatusError(t, http.StatusConflict)
 }
 
 //

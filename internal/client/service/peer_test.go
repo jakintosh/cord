@@ -16,16 +16,14 @@ import (
 // returns, without waiting for a sync tick.
 func TestEnableNetwork_AppliesCachedPeersSynchronously(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "cached-peers")
+	testutil.SeedNetworkDirect(t, env.Database, "cached-peers")
 
 	peerKey := mustGenKey(t)
-	if err := env.Database.SetPeers("cached-peers", []service.Peer{{
+	testutil.SeedPeers(t, env.Database, "cached-peers", service.Peer{
 		Name:      "alice",
 		PublicKey: peerKey,
 		Route:     "10.42.0.9/32",
-	}}); err != nil {
-		t.Fatalf("seed peers: %v", err)
-	}
+	})
 
 	if err := env.Service.EnableNetwork("cached-peers"); err != nil {
 		t.Fatalf("enable: %v", err)
@@ -52,7 +50,7 @@ func TestEnableNetwork_AppliesCachedPeersSynchronously(t *testing.T) {
 
 func TestEnableNetwork_UsesConfiguredListenPort(t *testing.T) {
 	env := testutil.SetupService(t)
-	network := testutil.SeedNetworkDirect(t, env.Service, "listen-port")
+	network := testutil.SeedNetworkDirect(t, env.Database, "listen-port")
 	network.ListenPort = 51820
 	if err := env.Database.UpdateNetwork(network.Name, service.NetworkOptions{ListenPort: &network.ListenPort}); err != nil {
 		t.Fatalf("set listen port: %v", err)
@@ -72,7 +70,7 @@ func TestEnableNetwork_UsesConfiguredListenPort(t *testing.T) {
 func TestBuildPeers_IncludesServer(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	testutil.SeedNetworkDirect(t, env.Service, "peer-test")
+	testutil.SeedNetworkDirect(t, env.Database, "peer-test")
 
 	err := env.Service.EnableNetwork("peer-test")
 	if err != nil {
@@ -95,7 +93,7 @@ func TestBuildPeers_IncludesServer(t *testing.T) {
 func TestBuildPeers_DoesNotIncludeSelf(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	testutil.SeedNetworkDirect(t, env.Service, "self-test")
+	testutil.SeedNetworkDirect(t, env.Database, "self-test")
 
 	err := env.Service.EnableNetwork("self-test")
 	if err != nil {
@@ -114,7 +112,7 @@ func TestBuildPeers_DoesNotIncludeSelf(t *testing.T) {
 
 func TestListPeers_Empty(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "empty-peers")
+	testutil.SeedNetworkDirect(t, env.Database, "empty-peers")
 
 	peers, err := env.Service.ListPeers("empty-peers")
 	if err != nil {
@@ -128,18 +126,15 @@ func TestListPeers_Empty(t *testing.T) {
 func TestListPeers_NetworkNotFound(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	peers, err := env.Service.ListPeers("nonexistent")
-	if err != nil {
-		t.Fatalf("list peers for nonexistent network: %v", err)
-	}
-	if len(peers) != 0 {
-		t.Errorf("expected 0 peers for nonexistent network, got %d", len(peers))
+	_, err := env.Service.ListPeers("nonexistent")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestListPeers_EmptyForNewNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "count-test")
+	testutil.SeedNetworkDirect(t, env.Database, "count-test")
 
 	peers, err := env.Service.ListPeers("count-test")
 	if err != nil {
@@ -161,16 +156,14 @@ func TestListPeerStatus_NetworkNotFound(t *testing.T) {
 
 func TestListPeerStatus_NotRunning_ReturnsCachedWithZeroRuntimeFields(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "not-running")
+	testutil.SeedNetworkDirect(t, env.Database, "not-running")
 
 	peerKey := mustGenKey(t)
-	if err := env.Database.SetPeers("not-running", []service.Peer{{
+	testutil.SeedPeers(t, env.Database, "not-running", service.Peer{
 		Name:      "alice",
 		PublicKey: peerKey,
 		Route:     "10.42.0.9/32",
-	}}); err != nil {
-		t.Fatalf("seed peers: %v", err)
-	}
+	})
 
 	statuses, err := env.Service.ListPeerStatus("not-running")
 	if err != nil {
@@ -199,16 +192,14 @@ func TestListPeerStatus_NotRunning_ReturnsCachedWithZeroRuntimeFields(t *testing
 
 func TestListPeerStatus_Running_JoinsLiveDeviceState(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "running-net")
+	testutil.SeedNetworkDirect(t, env.Database, "running-net")
 
 	peerKey := mustGenKey(t)
-	if err := env.Database.SetPeers("running-net", []service.Peer{{
+	testutil.SeedPeers(t, env.Database, "running-net", service.Peer{
 		Name:      "alice",
 		PublicKey: peerKey,
 		Route:     "10.42.0.9/32",
-	}}); err != nil {
-		t.Fatalf("seed peers: %v", err)
-	}
+	})
 
 	if err := env.Service.EnableNetwork("running-net"); err != nil {
 		t.Fatalf("enable: %v", err)
@@ -251,16 +242,14 @@ func TestListPeerStatus_Running_JoinsLiveDeviceState(t *testing.T) {
 
 func TestListPeerStatus_Running_StaleHandshakeNotConnected(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "stale-net")
+	testutil.SeedNetworkDirect(t, env.Database, "stale-net")
 
 	peerKey := mustGenKey(t)
-	if err := env.Database.SetPeers("stale-net", []service.Peer{{
+	testutil.SeedPeers(t, env.Database, "stale-net", service.Peer{
 		Name:      "alice",
 		PublicKey: peerKey,
 		Route:     "10.42.0.9/32",
-	}}); err != nil {
-		t.Fatalf("seed peers: %v", err)
-	}
+	})
 
 	if err := env.Service.EnableNetwork("stale-net"); err != nil {
 		t.Fatalf("enable: %v", err)
