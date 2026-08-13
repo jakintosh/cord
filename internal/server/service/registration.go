@@ -10,8 +10,11 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-// Registration is the server-side stored representation of a pending peer
-// registration. It tracks the temporary key, assigned routes, and redemption state.
+// Registration is the server-side stored representation of peer onboarding.
+// It reserves its main route but does not own a CIDR. Before redemption there
+// is no peer or terminal CIDR. Redemption creates both while group intent stays
+// on the registration. Confirmation atomically moves that intent to the CIDR
+// and makes the registration an immutable audit record.
 type Registration struct {
 	Name            string
 	InvitePublicKey string    // the temporary public key the peer uses to redeem
@@ -26,24 +29,105 @@ type Registration struct {
 }
 
 type RegistrationOptions struct {
-	IP        net.IP
+	PeerIP    net.IP
 	Admin     bool
 	ExpiresIn *time.Duration
+}
+
+// CreateRegistrationParams contains the registration properties known before the
+// store allocates its invite route.
+type CreateRegistrationParams struct {
+	Name            string
+	InvitePublicKey string
+	MainRoute       string
+	Admin           bool
+	CreatedAt       time.Time
+	ExpiresAt       time.Time
 }
 
 // ListRegistrations returns all registrations for the given network
 // (active, expired, and redeemed).
 func (s *Service) ListRegistrations(
-	network string,
+	networkName string,
 ) (
 	[]*Registration,
 	error,
 ) {
-	registrations, err := s.store.ListRegistrations(network)
+	registrations, err := s.store.ListRegistrations(networkName)
 	if err != nil {
 		return nil, fmt.Errorf("list registrations: %w", err)
 	}
+
 	return registrations, nil
+}
+
+// ListRegistrationGroups returns the groups held by a registration before
+// confirmation. Confirmed registrations have no registration-held groups.
+func (s *Service) ListRegistrationGroups(
+	networkName string,
+	regName string,
+) (
+	[]*Group,
+	error,
+) {
+	groups, err := s.store.ListRegistrationGroups(networkName, regName)
+	if err != nil {
+		return nil, fmt.Errorf("list registration groups: %w", mapStoreError(err))
+	}
+
+	return groups, nil
+}
+
+// AssignRegistrationGroup records a group assignment as registration intent.
+// The assignment is transferred to the peer's terminal CIDR at confirmation.
+func (s *Service) AssignRegistrationGroup(
+	networkName string,
+	regName string,
+	group string,
+) error {
+	if networkName == "" || regName == "" || group == "" {
+		return fmt.Errorf(
+			"%w: network, registration, and group names are required",
+			ErrInvalidInput,
+		)
+	}
+
+	if err := s.store.AssignRegistrationGroup(
+		networkName,
+		regName,
+		group,
+		s.clock(),
+	); err != nil {
+		return fmt.Errorf("assign registration group: %w", mapStoreError(err))
+	}
+
+	return nil
+}
+
+// RemoveRegistrationGroup removes group intent from an unconfirmed
+// registration. Removing an assignment that is not present is idempotent.
+func (s *Service) RemoveRegistrationGroup(
+	networkName string,
+	regName string,
+	group string,
+) error {
+	if networkName == "" || regName == "" || group == "" {
+		return fmt.Errorf(
+			"%w: network, registration, and group names are required",
+			ErrInvalidInput,
+		)
+	}
+
+	if err := s.store.RemoveRegistrationGroup(
+		networkName,
+		regName,
+		group,
+		s.clock(),
+	); err != nil {
+		return fmt.Errorf("remove registration group: %w", mapStoreError(err))
+	}
+
+	return nil
 }
 
 // CreateRegistration reserves an IP on the main network, allocates a
@@ -52,43 +136,24 @@ func (s *Service) ListRegistrations(
 // to deliver to the peer out-of-band.
 func (s *Service) CreateRegistration(
 	networkName string,
-	name string,
-	options RegistrationOptions,
+	regName string,
+	opts RegistrationOptions,
 ) (
 	*protocol.Invitation,
 	error,
 ) {
-	network, err := s.store.GetNetwork(networkName)
-	if err != nil {
-		return nil, fmt.Errorf("get network: %w", mapStoreError(err))
+	now := s.clock()
+
+	if networkName == "" {
+		return nil, fmt.Errorf("%w: network name required", ErrInvalidInput)
 	}
 
-	if name == "" {
+	if regName == "" {
 		return nil, fmt.Errorf("%w: registration name required", ErrInvalidInput)
 	}
 
-	exists, err := s.store.PeerExists(networkName, name)
-	if err != nil {
-		return nil, fmt.Errorf("check peer exists: %w", err)
-	}
-	if exists {
-		return nil, fmt.Errorf("%w: peer %q already exists", ErrConflict, name)
-	}
-
-	if options.IP == nil {
+	if opts.PeerIP == nil {
 		return nil, fmt.Errorf("%w: peer IP is required", ErrInvalidInput)
-	}
-
-	peerMainAssignedIP := netaddr.Normalize(options.IP)
-	_, mainNet, err := net.ParseCIDR(network.Main.Cidr)
-	if err != nil {
-		return nil, fmt.Errorf("parse main CIDR: %w", err)
-	}
-	if !mainNet.Contains(peerMainAssignedIP) {
-		return nil, fmt.Errorf(
-			"%w: requested IP %s is not within main CIDR %s",
-			ErrInvalidInput, peerMainAssignedIP, network.Main.Cidr,
-		)
 	}
 
 	peerTempPrivKey, err := wireguard.GenerateKey()
@@ -101,53 +166,65 @@ func (s *Service) CreateRegistration(
 		return nil, fmt.Errorf("derive temp public key: %w", err)
 	}
 
-	peerTempAssignedIP, err := s.nextFreeRegistrationIP(networkName, network.Invite.Cidr)
+	network, err := s.store.GetNetwork(networkName)
 	if err != nil {
-		return nil, fmt.Errorf("allocate invite IP: %w", err)
+		return nil, fmt.Errorf("get network: %w", mapStoreError(err))
 	}
 
-	expiry := 24 * time.Hour
-	if options.ExpiresIn != nil && *options.ExpiresIn != 0 {
-		expiry = *options.ExpiresIn
+	serverExternalIP := net.ParseIP(network.ExternalIP)
+	if serverExternalIP == nil {
+		return nil, fmt.Errorf("parse external IP %q: invalid address", network.ExternalIP)
+	}
+	serverInviteExternalAddr := netaddr.Endpoint(serverExternalIP, network.Invite.WireguardPort)
+
+	_, mainNet, err := net.ParseCIDR(network.Main.Cidr)
+	if err != nil {
+		return nil, fmt.Errorf("parse main CIDR: %w", err)
 	}
 
-	now := s.clock()
-	tempRoute := netaddr.HostRoute(peerTempAssignedIP)
-	mainRoute := netaddr.HostRoute(peerMainAssignedIP)
-	reg := &Registration{
-		Name:            name,
-		InvitePublicKey: peerTempPubKey,
-		InviteRoute:     tempRoute.String(),
-		MainRoute:       mainRoute.String(),
-		Admin:           options.Admin,
-		ExpiresAt:       now.Add(expiry),
-		CreatedAt:       now,
+	if !mainNet.Contains(opts.PeerIP) {
+		return nil, fmt.Errorf(
+			"%w: requested IP %s is not within main CIDR %s",
+			ErrInvalidInput, opts.PeerIP, network.Main.Cidr,
+		)
 	}
-
-	if err := s.store.InsertRegistration(networkName, reg); err != nil {
-		return nil, fmt.Errorf("insert registration: %w", mapStoreError(err))
-	}
-	s.reconcile(networkName)
-	s.log.Info("registration created",
-		"network", networkName,
-		"peer", name,
-		"route", mainRoute.String(),
-		"expires_at", reg.ExpiresAt,
-	)
+	mainRoute := netaddr.HostRoute(opts.PeerIP)
 
 	_, inviteNet, err := net.ParseCIDR(network.Invite.Cidr)
 	if err != nil {
 		return nil, fmt.Errorf("parse invite CIDR %q: %w", network.Invite.Cidr, err)
 	}
 
-	serverExternalIP := net.ParseIP(network.ExternalIP)
-	serverInviteExternalAddr := netaddr.Endpoint(serverExternalIP, network.Invite.WireguardPort)
+	expiry := 24 * time.Hour
+	if opts.ExpiresIn != nil && *opts.ExpiresIn != 0 {
+		expiry = *opts.ExpiresIn
+	}
 
-	serverInternalIP := netaddr.FirstAssignable(inviteNet)
+	reg, err := s.store.CreateRegistration(
+		networkName,
+		CreateRegistrationParams{
+			Name:            regName,
+			InvitePublicKey: peerTempPubKey,
+			MainRoute:       mainRoute.String(),
+			Admin:           opts.Admin,
+			ExpiresAt:       now.Add(expiry),
+			CreatedAt:       now,
+		},
+		now,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create registration: %w", mapStoreError(err))
+	}
+	s.reconcile(networkName)
 
-	serverRoute := netaddr.HostRoute(serverInternalIP)
-	peerRoute := netaddr.HostRoute(peerTempAssignedIP)
+	s.log.Info("registration created",
+		"network", networkName,
+		"peer", regName,
+		"route", mainRoute.String(),
+		"expires_at", reg.ExpiresAt,
+	)
 
+	serverRoute := netaddr.HostRoute(netaddr.FirstAssignable(inviteNet))
 	payload := &protocol.Invitation{
 		Network: protocol.NetworkInfo{
 			Name:        network.Name,
@@ -158,7 +235,7 @@ func (s *Service) CreateRegistration(
 			APIPort:     network.Invite.ApiPort,
 		},
 		Peer: protocol.PeerIdentity{
-			Route:      peerRoute.String(),
+			Route:      reg.InviteRoute,
 			PrivateKey: peerTempPrivKey,
 		},
 	}
@@ -167,8 +244,8 @@ func (s *Service) CreateRegistration(
 }
 
 // RedeemRegistration exchanges a temporary registration key for a
-// permanent peer identity. Idempotent: redeeming an already-redeemed
-// registration with the same permanent key returns the same result.
+// permanent peer identity. Redeeming an already-redeemed registration with
+// the same permanent key is idempotent while the peer remains unconfirmed.
 func (s *Service) RedeemRegistration(
 	networkName string,
 	tempPubKey string,
@@ -182,21 +259,17 @@ func (s *Service) RedeemRegistration(
 		return nil, fmt.Errorf("get network: %w", mapStoreError(err))
 	}
 
-	err = s.store.RedeemRegistration(networkName, tempPubKey, permPubKey, s.clock())
+	peer, err := s.store.RedeemRegistration(
+		networkName,
+		tempPubKey,
+		permPubKey,
+		s.clock(),
+	)
 	if err != nil {
-		peer, lookupErr := s.store.GetPeerByKey(networkName, permPubKey)
-		if lookupErr == nil && !peer.Confirmed {
-			s.reconcile(networkName)
-			return s.buildInvitation(network, peer)
-		}
 		return nil, fmt.Errorf("redeem registration: %w", mapStoreError(err))
 	}
 	s.reconcile(networkName)
 
-	peer, err := s.store.GetPeerByKey(networkName, permPubKey)
-	if err != nil {
-		return nil, fmt.Errorf("get redeemed peer: %w", mapStoreError(err))
-	}
 	s.log.Info("registration redeemed",
 		"network", networkName,
 		"peer", peer.Name,
@@ -206,18 +279,24 @@ func (s *Service) RedeemRegistration(
 	return s.buildInvitation(network, peer)
 }
 
-// RevokeRegistration deletes a registration by name, preventing it from
-// being redeemed. Any associated temporary key and IP are released.
-// After redemption, use ConfirmPeer to confirm the peer instead.
+// RevokeRegistration deletes an unconfirmed registration by name, preventing
+// redemption or confirmation. Any provisional peer and its routes are also
+// removed. Confirmed registrations are immutable audit records.
 func (s *Service) RevokeRegistration(
-	network string,
-	name string,
+	networkName string,
+	regName string,
 ) error {
-	if err := s.store.DeleteRegistration(network, name); err != nil {
-		return fmt.Errorf("delete registration %q: %w", name, mapStoreError(err))
+	if err := s.store.DeleteRegistration(networkName, regName); err != nil {
+		return fmt.Errorf("delete registration %q: %w", regName, mapStoreError(err))
 	}
-	s.reconcile(network)
-	s.log.Info("registration revoked", "network", network, "peer", name)
+	s.reconcile(networkName)
+
+	s.log.Info(
+		"registration revoked",
+		"network", networkName,
+		"peer", regName,
+	)
+
 	return nil
 }
 
@@ -256,49 +335,6 @@ func (s *Service) buildInvitation(
 			Route: peerRoute.String(),
 		},
 	}, nil
-}
-
-// nextFreeRegistrationIP finds the lowest free address on the invite
-// network, skipping the network address and the server's invite address.
-func (s *Service) nextFreeRegistrationIP(
-	network string,
-	inviteCidr string,
-) (
-	net.IP,
-	error,
-) {
-	_, ipNet, err := net.ParseCIDR(inviteCidr)
-	if err != nil {
-		return nil, fmt.Errorf("parse invite CIDR: %w", err)
-	}
-
-	regs, err := s.store.ListRegistrations(network)
-	if err != nil {
-		return nil, fmt.Errorf("list registrations: %w", err)
-	}
-
-	used := map[string]bool{}
-	for _, reg := range regs {
-		if reg.InviteRoute != "" {
-			ip, _, _ := net.ParseCIDR(reg.InviteRoute)
-			if ip != nil {
-				used[netaddr.Normalize(ip).String()] = true
-			}
-		}
-	}
-
-	first := netaddr.FirstAssignable(ipNet)
-	_, last := netaddr.Range(ipNet)
-
-	candidate := netaddr.Increment(first)
-	for ipNet.Contains(candidate) && !candidate.Equal(last) {
-		if !used[netaddr.Normalize(candidate).String()] {
-			return netaddr.Normalize(candidate), nil
-		}
-		candidate = netaddr.Increment(candidate)
-	}
-
-	return nil, fmt.Errorf("%w: no free addresses in invite CIDR %s", ErrInvalidInput, inviteCidr)
 }
 
 func registrationsToWireGuardPeers(

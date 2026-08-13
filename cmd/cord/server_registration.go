@@ -16,6 +16,7 @@ var serverRegistrationCmd = &args.Command{
 		serverRegistrationCreate,
 		serverRegistrationList,
 		serverRegistrationRevoke,
+		serverRegistrationGroup,
 	},
 }
 
@@ -156,6 +157,135 @@ var serverRegistrationRevoke = &args.Command{
 		}
 
 		fmt.Printf("registration %q revoked\n", name)
+		return nil
+	},
+}
+
+var serverRegistrationGroup = &args.Command{
+	Name: "group",
+	Help: "manage group assignments for a registration",
+	Subcommands: []*args.Command{
+		serverRegistrationGroupAdd,
+		serverRegistrationGroupRemove,
+		serverRegistrationGroupList,
+	},
+}
+
+var serverRegistrationGroupAdd = &args.Command{
+	Name: "add",
+	Help: "assign a group to a registration",
+	Operands: []args.Operand{
+		{
+			Name: "network",
+			Help: "network name",
+		},
+		{
+			Name: "registration",
+			Help: "registration name",
+		},
+		{
+			Name: "group",
+			Help: "group name",
+		},
+	},
+	Handler: func(i *args.Input) error {
+		network := i.GetOperand("network")
+		registration := i.GetOperand("registration")
+		group := i.GetOperand("group")
+
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+		if err := client.AssignRegistrationGroup(
+			i.Context(),
+			network,
+			registration,
+			group,
+		); err != nil {
+			return err
+		}
+		if !i.GetFlag("json") {
+			fmt.Printf("group %q assigned to registration %q\n", group, registration)
+		}
+		return nil
+	},
+}
+
+var serverRegistrationGroupRemove = &args.Command{
+	Name: "remove",
+	Help: "remove a group from a registration",
+	Operands: []args.Operand{
+		{
+			Name: "network",
+			Help: "network name",
+		},
+		{
+			Name: "registration",
+			Help: "registration name",
+		},
+		{
+			Name: "group",
+			Help: "group name",
+		},
+	},
+	Handler: func(i *args.Input) error {
+		network := i.GetOperand("network")
+		registration := i.GetOperand("registration")
+		group := i.GetOperand("group")
+
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+		if err := client.RemoveRegistrationGroup(
+			i.Context(),
+			network,
+			registration,
+			group,
+		); err != nil {
+			return err
+		}
+		if !i.GetFlag("json") {
+			fmt.Printf("group %q removed from registration %q\n", group, registration)
+		}
+		return nil
+	},
+}
+
+var serverRegistrationGroupList = &args.Command{
+	Name: "list",
+	Help: "list groups assigned to a registration",
+	Operands: []args.Operand{
+		{
+			Name: "network",
+			Help: "network name",
+		},
+		{
+			Name: "registration",
+			Help: "registration name",
+		},
+	},
+	Handler: func(i *args.Input) error {
+		network := i.GetOperand("network")
+		registration := i.GetOperand("registration")
+
+		client, err := serverClient(i)
+		if err != nil {
+			return err
+		}
+		groups, err := client.ListRegistrationGroups(
+			i.Context(),
+			network,
+			registration,
+		)
+		if err != nil {
+			return err
+		}
+		if i.GetFlag("json") {
+			return printJSON(groups)
+		}
+		printGroups(groups)
 		return nil
 	},
 }

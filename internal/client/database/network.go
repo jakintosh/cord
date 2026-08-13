@@ -1,6 +1,7 @@
 package database
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -81,33 +82,6 @@ func (db *DB) ListNetworks() (
 	return networks, nil
 }
 
-func scanNetworkRow(
-	scanner Scanner,
-	nc *service.NetworkConfig,
-) error {
-	var enabledInt int64
-	var createdUnix int64
-	if err := scanner.Scan(
-		&nc.Name,
-		&nc.PrivateKey,
-		&nc.InterfaceName,
-		&nc.AssignedRoute,
-		&nc.Server.PublicKey,
-		&nc.Server.Endpoint,
-		&nc.Server.Route,
-		&nc.Server.NetworkCidr,
-		&nc.Server.APIPort,
-		&nc.ListenPort,
-		&enabledInt,
-		&createdUnix,
-	); err != nil {
-		return err
-	}
-	nc.Enabled = enabledInt != 0
-	nc.CreatedAt = time.Unix(createdUnix, 0)
-	return nil
-}
-
 func (db *DB) ListNetworkNames() (
 	[]string,
 	error,
@@ -136,41 +110,6 @@ func (db *DB) ListNetworkNames() (
 	}
 
 	return names, nil
-}
-
-func (db *DB) InsertNetwork(
-	nc *service.NetworkConfig,
-) error {
-	_, err := db.Conn.Exec(`
-		INSERT INTO network (
-			name,
-			peer_private_key,
-			interface_name,
-			peer_route,
-			server_pubkey,
-			server_endpoint,
-			server_route,
-			server_network_cidr,
-			server_api_port,
-			listen_port,
-			enabled,
-			created_at_unix
-		)
-		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
-		nc.Name,
-		nc.PrivateKey,
-		nc.InterfaceName,
-		nc.AssignedRoute,
-		nc.Server.PublicKey,
-		nc.Server.Endpoint,
-		nc.Server.Route,
-		nc.Server.NetworkCidr,
-		nc.Server.APIPort,
-		nc.ListenPort,
-		boolToInt(nc.Enabled),
-		nc.CreatedAt.Unix(),
-	)
-	return CheckSqliteErr("insert network", err)
 }
 
 func (db *DB) SetNetworkEnabled(
@@ -224,23 +163,166 @@ func (db *DB) UpdateNetwork(
 	return nil
 }
 
-func (db *DB) DeleteNetwork(
+func (db *DB) DeleteNetworkState(
 	name string,
 ) error {
-	result, err := db.Conn.Exec(`
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		return fmt.Errorf("begin delete network state tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	networkAffected, err := sqlDeleteNetworkTx(tx, name)
+	if err != nil {
+		return err
+	}
+
+	installAffected, err := sqlDeleteInstallTx(tx, name)
+	if err != nil {
+		return err
+	}
+
+	if networkAffected+installAffected == 0 {
+		return fmt.Errorf("%w: network %q not found", service.ErrNotFound, name)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete network state tx: %w", err)
+	}
+	return nil
+}
+
+func sqlGetNetworkTx(
+	tx *sql.Tx,
+	name string,
+) (
+	*service.NetworkConfig,
+	error,
+) {
+	row := tx.QueryRow(`
+		SELECT
+			name,
+			peer_private_key,
+			interface_name,
+			peer_route,
+			server_pubkey,
+			server_endpoint,
+			server_route,
+			server_network_cidr,
+			server_api_port,
+			listen_port,
+			enabled,
+			created_at_unix
+		FROM network
+		WHERE name = ?1`,
+		name,
+	)
+
+	var network service.NetworkConfig
+	if err := scanNetworkRow(row, &network); err != nil {
+		return nil, CheckSqliteErr("get network", err)
+	}
+	return &network, nil
+}
+
+func sqlRequireNetworkTx(
+	tx *sql.Tx,
+	name string,
+) error {
+	var exists int
+	if err := tx.QueryRow(`
+		SELECT 1
+		FROM network
+		WHERE name = ?1`,
+		name,
+	).Scan(&exists); err != nil {
+		return CheckSqliteErr("require network", err)
+	}
+	return nil
+}
+
+func sqlInsertNetworkTx(
+	tx *sql.Tx,
+	nc *service.NetworkConfig,
+) error {
+	_, err := tx.Exec(`
+		INSERT INTO network (
+			name,
+			peer_private_key,
+			interface_name,
+			peer_route,
+			server_pubkey,
+			server_endpoint,
+			server_route,
+			server_network_cidr,
+			server_api_port,
+			listen_port,
+			enabled,
+			created_at_unix
+		)
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
+		nc.Name,
+		nc.PrivateKey,
+		nc.InterfaceName,
+		nc.AssignedRoute,
+		nc.Server.PublicKey,
+		nc.Server.Endpoint,
+		nc.Server.Route,
+		nc.Server.NetworkCidr,
+		nc.Server.APIPort,
+		nc.ListenPort,
+		boolToInt(nc.Enabled),
+		nc.CreatedAt.Unix(),
+	)
+	return CheckSqliteErr("insert network", err)
+}
+
+func sqlDeleteNetworkTx(
+	tx *sql.Tx,
+	name string,
+) (
+	int64,
+	error,
+) {
+	result, err := tx.Exec(`
 		DELETE FROM network
 		WHERE name = ?1`,
 		name,
 	)
 	if err != nil {
-		return CheckSqliteErr("delete network", err)
+		return 0, CheckSqliteErr("delete network state", err)
 	}
+
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("delete network: %w", err)
+		return 0, fmt.Errorf("delete network state rows affected: %w", err)
 	}
-	if affected == 0 {
-		return fmt.Errorf("%w: network %q not found", service.ErrNotFound, name)
+	return affected, nil
+}
+
+func scanNetworkRow(
+	scanner Scanner,
+	nc *service.NetworkConfig,
+) error {
+	var enabledInt int64
+	var createdUnix int64
+	if err := scanner.Scan(
+		&nc.Name,
+		&nc.PrivateKey,
+		&nc.InterfaceName,
+		&nc.AssignedRoute,
+		&nc.Server.PublicKey,
+		&nc.Server.Endpoint,
+		&nc.Server.Route,
+		&nc.Server.NetworkCidr,
+		&nc.Server.APIPort,
+		&nc.ListenPort,
+		&enabledInt,
+		&createdUnix,
+	); err != nil {
+		return err
 	}
+	nc.Enabled = enabledInt != 0
+	nc.CreatedAt = time.Unix(createdUnix, 0)
 	return nil
 }

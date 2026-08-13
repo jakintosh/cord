@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,7 +40,18 @@ func TestHandleVisiblePeers_IdentityFails(t *testing.T) {
 }
 
 func TestHandleReportEndpoints_Success(t *testing.T) {
-	_, api := setupPeerTest(t)
+	env, api := setupPeerTest(t)
+	testutil.SeedPeerDB(
+		t,
+		env.Database,
+		"testnet",
+		"observed",
+		"10.0.0.6/32",
+		"peer-key-1",
+		false,
+		true,
+		true,
+	)
 
 	body := `[
 		{"peer_key": "peer-key-1", "endpoint": "1.2.3.4:51820"}
@@ -87,15 +99,20 @@ func TestHandleConfirmPeer_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Database.InsertPeer("testnet", &service.Peer{
-		Name:      "alice",
-		PublicKey: "alice-pub-key",
-		Route:     "10.0.0.5/32",
-		Admin:     false,
-		Enabled:   true,
-		Confirmed: false,
-	}); err != nil {
-		t.Fatalf("seed provisional peer: %v", err)
+	_, err := env.Service.CreateRegistration(
+		"testnet",
+		"alice",
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")},
+	)
+	if err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	regs, err := env.Service.ListRegistrations("testnet")
+	if err != nil {
+		t.Fatalf("list registrations: %v", err)
+	}
+	if _, err := env.Service.RedeemRegistration("testnet", regs[0].InvitePublicKey, "alice-pub-key"); err != nil {
+		t.Fatalf("redeem registration: %v", err)
 	}
 
 	api := New(env.Service, "testnet", nil)
@@ -125,24 +142,13 @@ func TestHandleConfirmPeer_IdentityFails(t *testing.T) {
 	}
 }
 
-// --- Test helpers ---
-
 func setupPeerTest(t *testing.T) (*testutil.ServiceEnv, *API) {
 	t.Helper()
 
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if err := env.Database.InsertPeer("testnet", &service.Peer{
-		Name:      "alice",
-		PublicKey: "alice-pub-key",
-		Route:     "10.0.0.5/32",
-		Admin:     false,
-		Enabled:   true,
-		Confirmed: true,
-	}); err != nil {
-		t.Fatalf("seed peer: %v", err)
-	}
+	testutil.SeedPeerDB(t, env.Database, "testnet", "alice", "10.0.0.5/32", "alice-pub-key", false, true, true)
 
 	api := New(env.Service, "testnet", nil)
 

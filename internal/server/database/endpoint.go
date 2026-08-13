@@ -1,6 +1,7 @@
 package database
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -68,31 +69,29 @@ func (db *DB) InsertEndpointSightings(
 	}
 	defer tx.Rollback()
 
+	if err := sqlRequireNetworkTx(tx, network); err != nil {
+		return err
+	}
+
 	for _, s := range sightings {
-		if _, err := tx.Exec(`
-			INSERT INTO endpoint (network_name, peer, witness, endpoint, time_unix)
-			SELECT
-				?1,
-				p.id,
-				w.id,
-				?4,
-				?5
-			FROM peer p, peer w
-			WHERE p.network_name = ?1
-				AND w.network_name = ?1
-				AND p.public_key = ?2
-				AND w.public_key = ?3
-			ON CONFLICT (network_name, witness, peer) DO UPDATE SET
-				endpoint = excluded.endpoint,
-				time_unix = excluded.time_unix
-			WHERE excluded.time_unix >= endpoint.time_unix`,
+		peerID, err := sqlGetPeerIDByKeyTx(tx, network, s.PeerKey)
+		if err != nil {
+			return fmt.Errorf("get observed peer: %w", err)
+		}
+
+		witnessID, err := sqlGetPeerIDByKeyTx(tx, network, s.WitnessKey)
+		if err != nil {
+			return fmt.Errorf("get witness peer: %w", err)
+		}
+
+		if err := sqlUpsertEndpointSightingTx(
+			tx,
 			network,
-			s.PeerKey,
-			s.WitnessKey,
-			s.Endpoint,
-			s.Timestamp.Unix(),
+			peerID,
+			witnessID,
+			s,
 		); err != nil {
-			return CheckSqliteErr("insert endpoint sighting", err)
+			return err
 		}
 	}
 
@@ -115,4 +114,34 @@ func (db *DB) DeleteEndpointsBefore(
 		before.Unix(),
 	)
 	return CheckSqliteErr("delete endpoints before", err)
+}
+
+func sqlUpsertEndpointSightingTx(
+	tx *sql.Tx,
+	network string,
+	peerID int64,
+	witnessID int64,
+	sighting service.EndpointSighting,
+) error {
+	_, err := tx.Exec(`
+		INSERT INTO endpoint (
+			network_name,
+			peer,
+			witness,
+			endpoint,
+			time_unix
+		)
+		VALUES (?1, ?2, ?3, ?4, ?5)
+		ON CONFLICT (network_name, witness, peer)
+		DO UPDATE SET
+			endpoint = excluded.endpoint,
+			time_unix = excluded.time_unix
+		WHERE excluded.time_unix >= endpoint.time_unix`,
+		network,
+		peerID,
+		witnessID,
+		sighting.Endpoint,
+		sighting.Timestamp.Unix(),
+	)
+	return CheckSqliteErr("insert endpoint sighting", err)
 }

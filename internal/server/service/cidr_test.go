@@ -2,11 +2,54 @@ package service_test
 
 import (
 	"errors"
+	"net"
 	"testing"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
+
+type createCidrStoreSpy struct {
+	service.Store
+	getNetworkCalls int
+	createdNetwork  string
+	createdCidr     *service.Cidr
+}
+
+func (s *createCidrStoreSpy) GetNetwork(string) (*service.NetworkConfig, error) {
+	s.getNetworkCalls++
+	return nil, errors.New("unexpected GetNetwork call")
+}
+
+func (s *createCidrStoreSpy) CreateCidr(network string, cidr *service.Cidr) error {
+	s.createdNetwork = network
+	s.createdCidr = cidr
+	return nil
+}
+
+func TestCreateCidr_DelegatesPersistedContainmentToStore(t *testing.T) {
+	store := &createCidrStoreSpy{}
+	mgr := wireguard.NewManagerWithBackend(wireguardtest.NewMockBackend())
+	svc, err := service.New(service.Options{Store: store, WireGuard: mgr})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	if err := svc.CreateCidr("testnet", "lan", "10.0.1.0/24"); err != nil {
+		t.Fatalf("create CIDR: %v", err)
+	}
+	if store.getNetworkCalls != 0 {
+		t.Fatalf("GetNetwork calls = %d, want 0", store.getNetworkCalls)
+	}
+	if store.createdNetwork != "testnet" {
+		t.Fatalf("created network = %q, want testnet", store.createdNetwork)
+	}
+	if store.createdCidr == nil || store.createdCidr.Cidr != "10.0.1.0/24" {
+		t.Fatalf("created CIDR = %+v, want 10.0.1.0/24", store.createdCidr)
+	}
+}
 
 func TestAddCidr_Success(t *testing.T) {
 	env := testutil.SetupService(t)
@@ -80,6 +123,27 @@ func TestAddCidr_Overlap(t *testing.T) {
 	}
 }
 
+func TestAddCidr_RegistrationReservationConflict(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.50")}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if err := env.Service.CreateCidr("testnet", "reserved", "10.0.0.50/32"); !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("CIDR steals registration route: err = %v, want ErrConflict", err)
+	}
+	if err := env.Service.CreateCidr("testnet", "alice", "10.0.0.51/32"); !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("CIDR steals registration name: err = %v, want ErrConflict", err)
+	}
+	if err := env.Service.RevokeRegistration("testnet", "alice"); err != nil {
+		t.Fatalf("revoke registration: %v", err)
+	}
+	if err := env.Service.CreateCidr("testnet", "reserved", "10.0.0.50/32"); err != nil {
+		t.Fatalf("reuse released route for CIDR: %v", err)
+	}
+}
+
 func TestAddCidr_NonexistentNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
 
@@ -107,8 +171,8 @@ func TestListCidrs_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(cidrs) != 1 {
-		t.Fatalf("expected 1 cidr (root), got %d", len(cidrs))
+	if len(cidrs) != 2 {
+		t.Fatalf("expected 2 cidrs (root + server), got %d", len(cidrs))
 	}
 }
 
@@ -127,11 +191,11 @@ func TestListCidrs_Multiple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(cidrs) != 3 {
-		t.Fatalf("expected 3 cidrs, got %d", len(cidrs))
+	if len(cidrs) != 4 {
+		t.Fatalf("expected 4 cidrs, got %d", len(cidrs))
 	}
-	if cidrs[0].Name != "alpha" || cidrs[1].Name != "beta" || cidrs[2].Name != "testnet" {
-		t.Errorf("unexpected order: %s, %s, %s", cidrs[0].Name, cidrs[1].Name, cidrs[2].Name)
+	if cidrs[0].Name != "alpha" || cidrs[1].Name != "beta" || cidrs[2].Name != "cord-server" || cidrs[3].Name != "testnet" {
+		t.Errorf("unexpected order: %s, %s, %s, %s", cidrs[0].Name, cidrs[1].Name, cidrs[2].Name, cidrs[3].Name)
 	}
 }
 
@@ -196,5 +260,56 @@ func TestUpdateCidr_EmptyName(t *testing.T) {
 	err := env.Service.UpdateCidr("testnet", "cidr1", "")
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestCidrGroups_AddListRemove(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if err := env.Service.CreateCidr("testnet", "servers", "10.0.1.0/24"); err != nil {
+		t.Fatalf("create CIDR: %v", err)
+	}
+	for _, name := range []string{"engineering", "operations"} {
+		if _, err := env.Service.CreateGroup("testnet", name); err != nil {
+			t.Fatalf("create group %q: %v", name, err)
+		}
+	}
+	if err := env.Service.AssignCidrGroup("testnet", "servers", "operations"); err != nil {
+		t.Fatalf("assign operations: %v", err)
+	}
+	if err := env.Service.AssignCidrGroup("testnet", "servers", "engineering"); err != nil {
+		t.Fatalf("assign engineering: %v", err)
+	}
+
+	groups, err := env.Service.ListCidrGroups("testnet", "servers")
+	if err != nil {
+		t.Fatalf("list CIDR groups: %v", err)
+	}
+	if len(groups) != 2 || groups[0].Name != "engineering" || groups[1].Name != "operations" {
+		t.Fatalf("CIDR groups = %+v, want engineering, operations", groups)
+	}
+
+	if err := env.Service.RemoveCidrGroup("testnet", "servers", "engineering"); err != nil {
+		t.Fatalf("remove engineering: %v", err)
+	}
+	groups, err = env.Service.ListCidrGroups("testnet", "servers")
+	if err != nil {
+		t.Fatalf("list CIDR groups after removal: %v", err)
+	}
+	if len(groups) != 1 || groups[0].Name != "operations" {
+		t.Fatalf("CIDR groups after removal = %+v, want operations", groups)
+	}
+}
+
+func TestCidrGroups_MissingCidr(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.ListCidrGroups("testnet", "missing"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("list missing CIDR groups: err = %v, want ErrNotFound", err)
+	}
+	if err := env.Service.RemoveCidrGroup("testnet", "missing", "engineering"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("remove group from missing CIDR: err = %v, want ErrNotFound", err)
 	}
 }

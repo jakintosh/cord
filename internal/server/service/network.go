@@ -17,13 +17,13 @@ import (
 // called without an explicit Invite.Cidr.
 const defaultInviteCidr = "172.16.10.0/24"
 
-// inviteSuffix is the suffix appended to the network name for the
-// invite device.
-const inviteSuffix = "-i"
-
 // defaultReconcileCap is the maximum duration between reconciliation
 // passes. The self-rearming timer uses min(earliest ExpiresAt, now+cap).
 const defaultReconcileCap = 5 * time.Minute
+
+// inviteSuffix is the suffix appended to the network name for the
+// invite device.
+const inviteSuffix = "-i"
 
 // NetworkConfig is the persisted identity of a server network. It holds
 // the server's keypair, address space configuration, and network
@@ -201,8 +201,16 @@ func (s *Service) CreateNetwork(
 
 	serverIP := netaddr.FirstAssignable(mainNet)
 	serverRoute := netaddr.HostRoute(serverIP)
+	serverCidr := &Cidr{
+		Name:     "cord-server",
+		Cidr:     serverRoute.String(),
+		Prefix:   netaddr.TerminalPrefix(serverIP),
+		Bits:     bits,
+		Terminal: true,
+	}
 	serverPeer := &Peer{
 		Name:      "cord-server",
+		CidrName:  serverCidr.Name,
 		Route:     serverRoute.String(),
 		PublicKey: pubKey,
 		Admin:     true,
@@ -210,7 +218,12 @@ func (s *Service) CreateNetwork(
 		Confirmed: true,
 	}
 
-	if err := s.store.BootstrapNetwork(nc, rootCidr, serverPeer); err != nil {
+	if err := s.store.BootstrapNetwork(
+		nc,
+		rootCidr,
+		serverCidr,
+		serverPeer,
+	); err != nil {
 		return nil, fmt.Errorf("bootstrap network: %w", mapStoreError(err))
 	}
 
@@ -465,7 +478,10 @@ func (n *Network) observeMainPeerEndpoints(
 	if len(sightings) == 0 {
 		return
 	}
-	if err := n.store.InsertEndpointSightings(n.config.Name, sightings); err != nil {
+	if err := n.store.InsertEndpointSightings(
+		n.config.Name,
+		sightings,
+	); err != nil {
 		n.log.Warn("reconcile: store main peer endpoints failed", "err", err)
 	}
 }

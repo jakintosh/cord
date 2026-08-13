@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"strconv"
@@ -144,11 +145,38 @@ func TestBeginInstall_Idempotent(t *testing.T) {
 	}
 }
 
+func TestBeginInstall_IncompatibleRetryConflicts(t *testing.T) {
+	env := testutil.SetupService(t)
+	invite := protocol.Invitation{
+		Network: protocol.NetworkInfo{
+			Name:        "incompatible",
+			PublicKey:   "srv-pub",
+			Endpoint:    "1.2.3.4:51821",
+			ServerRoute: "10.43.0.1/32",
+			NetworkCidr: "10.0.0.0/16",
+			APIPort:     8443,
+		},
+		Peer: protocol.PeerIdentity{
+			Route:      "10.43.0.2/24",
+			PrivateKey: "temp-key",
+		},
+	}
+	if _, err := env.Service.BeginInstall(invite, installOptions()); err != nil {
+		t.Fatalf("first begin: %v", err)
+	}
+
+	invite.Peer.Route = "10.43.0.3/24"
+	_, err := env.Service.BeginInstall(invite, installOptions())
+	if !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+}
+
 // TestBeginInstall_ExistingConfirmedNetwork verifies that BeginInstall
 // refuses if a completed network already exists.
 func TestBeginInstall_ExistingConfirmedNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "already-here")
+	testutil.SeedNetworkDirect(t, env.Database, "already-here")
 
 	_, err := env.Service.BeginInstall(protocol.Invitation{
 		Network: protocol.NetworkInfo{
@@ -170,7 +198,7 @@ func TestBeginInstall_ExistingConfirmedNetwork(t *testing.T) {
 }
 
 // TestInstall_ResumesFromInvited verifies that if BeginInstall
-// succeeds but Redeem has not yet run, calling Install resumes from
+// succeeds but RedeemInstall has not yet run, calling Install resumes from
 // the invited state and reuses the persisted permanent key.
 func TestInstall_ResumesFromInvited(t *testing.T) {
 	mux := http.NewServeMux()
@@ -251,14 +279,16 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 	}
 }
 
-// TestInstall_ResumesFromRedeemed verifies that if Redeem succeeds but
-// Confirm has not yet run, calling Install resumes from the redeemed
+// TestInstall_ResumesFromRedeemed verifies that if RedeemInstall succeeds but
+// ConfirmInstall has not yet run, calling Install resumes from the redeemed
 // state and completes confirmation.
 func TestInstall_ResumesFromRedeemed(t *testing.T) {
 	mux := http.NewServeMux()
 	confirmCalled := false
+	redeemCalls := 0
 	srvPubKey := mustGenKey(t)
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
+		redeemCalls++
 		srvHost, srvPortStr, _ := net.SplitHostPort(r.Host)
 		srvPort, _ := strconv.Atoi(srvPortStr)
 		wire.WriteData(w, http.StatusOK, protocol.Invitation{
@@ -308,7 +338,7 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 		t.Fatalf("begin install: %v", err)
 	}
 
-	if _, err := env.Service.Redeem(inst.Name); err != nil {
+	if _, err := env.Service.RedeemInstall(inst.Name); err != nil {
 		t.Fatalf("manual redeem: %v", err)
 	}
 
@@ -322,6 +352,9 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 
 	if !confirmCalled {
 		t.Error("confirm was not called during resume")
+	}
+	if redeemCalls != 1 {
+		t.Errorf("redeem calls = %d, want 1", redeemCalls)
 	}
 	pub1, _ := wireguard.PublicKey(inst.MainPrivateKey)
 	pub2, _ := wireguard.PublicKey(nc.PrivateKey)
@@ -378,7 +411,7 @@ func TestBeginInstall_IdempotentRedeemed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
-	if _, err := env.Service.Redeem(inst.Name); err != nil {
+	if _, err := env.Service.RedeemInstall(inst.Name); err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
@@ -394,9 +427,9 @@ func TestBeginInstall_IdempotentRedeemed(t *testing.T) {
 	}
 }
 
-// TestConfirm_ClearsInstallFields verifies that after Confirm, the
+// TestConfirmInstall_ClearsInstallFields verifies that after ConfirmInstall, the
 // temporary install scratch fields are cleared.
-func TestConfirm_ClearsInstallFields(t *testing.T) {
+func TestConfirmInstall_ClearsInstallFields(t *testing.T) {
 	mux := http.NewServeMux()
 	srvPubKey := mustGenKey(t)
 	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {

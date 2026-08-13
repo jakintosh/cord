@@ -13,9 +13,9 @@ import (
 // when it was last tried as a rotation candidate for a stale peer.
 type PeerEndpoint struct {
 	Endpoint         string
-	ServerObservedAt int64
-	LocalObservedAt  int64
-	LastAttemptedAt  int64
+	ServerObservedAt time.Time
+	LocalObservedAt  time.Time
+	LastAttemptedAt  time.Time
 }
 
 // endpointsFromProtocol extracts all endpoint observations for a single
@@ -27,7 +27,7 @@ func endpointsFromProtocol(
 	for i, ep := range vp.Endpoints {
 		eps[i] = PeerEndpoint{
 			Endpoint:         ep.Endpoint,
-			ServerObservedAt: ep.Timestamp.Unix(),
+			ServerObservedAt: ep.Timestamp,
 		}
 	}
 	return eps
@@ -70,17 +70,34 @@ type Peer struct {
 	Endpoint  string // best known endpoint, populated by ListPeers
 }
 
-// peersFromProtocol converts the server's visible peer list into local
-// Peer records.
+// PeerObservation is one peer and its server-observed endpoints reported
+// during reconciliation.
+type PeerObservation struct {
+	Peer      Peer
+	Endpoints []PeerEndpoint
+}
+
+// PeerReconciliation is one complete server view used to reconcile a
+// network's cached peers. PruneBefore bounds retained endpoint observations.
+type PeerReconciliation struct {
+	Peers       []PeerObservation
+	PruneBefore time.Time
+}
+
+// peersFromProtocol converts the server's visible peer list into a local
+// reconciliation input.
 func peersFromProtocol(
 	visible []protocol.VisiblePeer,
-) []Peer {
-	peers := make([]Peer, len(visible))
+) []PeerObservation {
+	peers := make([]PeerObservation, len(visible))
 	for i, vp := range visible {
-		peers[i] = Peer{
-			Name:      vp.Name,
-			PublicKey: vp.PublicKey,
-			Route:     vp.Route,
+		peers[i] = PeerObservation{
+			Peer: Peer{
+				Name:      vp.Name,
+				PublicKey: vp.PublicKey,
+				Route:     vp.Route,
+			},
+			Endpoints: endpointsFromProtocol(vp),
 		}
 	}
 	return peers
@@ -111,18 +128,14 @@ func (s *Service) ListPeers(
 // with live device state (endpoint, last handshake, connected). If the
 // network exists but isn't running, cached peers are returned with
 // zero-valued runtime fields rather than an error. Returns
-// ErrNetworkNotInstalled/ErrNotFound if the network doesn't exist at
-// all, consistent with GetNetwork.
+// ErrNotFound if the network doesn't exist at all, consistent with
+// GetNetwork.
 func (s *Service) ListPeerStatus(
 	network string,
 ) (
 	[]PeerStatus,
 	error,
 ) {
-	if _, err := s.store.GetNetwork(network); err != nil {
-		return nil, err
-	}
-
 	peers, err := s.store.ListPeers(network)
 	if err != nil {
 		return nil, err

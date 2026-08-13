@@ -75,11 +75,11 @@ func (a *API) handlePatchPeer(
 		return
 	}
 
-	update := service.PeerUpdate{
+	diff := service.PeerDiff{
 		Name:    req.Name,
 		Enabled: req.Enabled,
 	}
-	updated, err := a.service.UpdatePeer(network, peer, update)
+	updated, err := a.service.UpdatePeer(network, peer, diff)
 	if err != nil {
 		writeServiceError(w, err)
 		return

@@ -33,7 +33,27 @@ CREATE TABLE install (
     main_server_network_cidr   TEXT NOT NULL DEFAULT '',
     main_server_api_port       INTEGER NOT NULL DEFAULT 0,
     listen_port                INTEGER NOT NULL DEFAULT 0,
-    created_at_unix            INTEGER NOT NULL
+    created_at_unix            INTEGER NOT NULL,
+    CHECK (phase IN ('invited', 'redeemed')),
+    CHECK (listen_port BETWEEN 0 AND 65535),
+    CHECK (invite_server_api_port BETWEEN 1 AND 65535),
+    CHECK (
+        (phase = 'invited'
+            AND main_peer_route = ''
+            AND main_server_pubkey = ''
+            AND main_server_endpoint = ''
+            AND main_server_route = ''
+            AND main_server_network_cidr = ''
+            AND main_server_api_port = 0)
+        OR
+        (phase = 'redeemed'
+            AND main_peer_route <> ''
+            AND main_server_pubkey <> ''
+            AND main_server_endpoint <> ''
+            AND main_server_route <> ''
+            AND main_server_network_cidr <> ''
+            AND main_server_api_port BETWEEN 1 AND 65535)
+    )
 );
 
 CREATE TABLE network (
@@ -48,7 +68,10 @@ CREATE TABLE network (
     server_api_port     INTEGER NOT NULL,
     listen_port         INTEGER NOT NULL DEFAULT 0,
     enabled             INTEGER NOT NULL DEFAULT 0,
-    created_at_unix     INTEGER NOT NULL
+    created_at_unix     INTEGER NOT NULL,
+    CHECK (listen_port BETWEEN 0 AND 65535),
+    CHECK (enabled IN (0, 1)),
+    CHECK (server_api_port BETWEEN 1 AND 65535)
 );
 
 CREATE TABLE peer (
@@ -60,28 +83,26 @@ CREATE TABLE peer (
     FOREIGN KEY (network_name)
         REFERENCES network (name)
         ON DELETE CASCADE,
-    UNIQUE (network_name, public_key)
+    UNIQUE (network_name, name),
+    UNIQUE (network_name, public_key),
+    UNIQUE (network_name, route)
 );
 
 CREATE TABLE endpoint (
     id                  INTEGER PRIMARY KEY,
-    network_name        TEXT NOT NULL,
     peer_id             INTEGER NOT NULL,
     endpoint            TEXT NOT NULL,
     server_observed_at  INTEGER NOT NULL DEFAULT 0,
     local_observed_at   INTEGER NOT NULL DEFAULT 0,
     last_attempted_at   INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (network_name)
-        REFERENCES network (name)
-        ON DELETE CASCADE,
     FOREIGN KEY (peer_id)
         REFERENCES peer (id)
         ON DELETE CASCADE,
-    UNIQUE (network_name, peer_id, endpoint)
+    UNIQUE (peer_id, endpoint)
 );
 
 CREATE INDEX idx_peer_endpoint_lookup
-    ON endpoint (network_name, peer_id, server_observed_at DESC);
+    ON endpoint (peer_id, local_observed_at DESC, server_observed_at DESC);
 `,
 	},
 }

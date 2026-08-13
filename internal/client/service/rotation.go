@@ -40,8 +40,11 @@ func (n *Network) rotate(
 		return
 	}
 
-	if err := n.store.MarkPeerEndpointAttempt(
-		n.cfg.Name, pubKey, candidate, now.Unix(),
+	if err := n.store.RecordEndpointAttempt(
+		n.cfg.Name,
+		pubKey,
+		candidate,
+		now,
 	); err != nil {
 		n.log.Warn("rotate: mark attempt failed", "peer", pubKey, "err", err)
 	}
@@ -62,17 +65,17 @@ func nextCandidate(
 	}
 
 	oldest := endpoints[0]
-	newest := int64(0)
+	var newest time.Time
 	for _, ep := range endpoints {
-		if ep.LastAttemptedAt < oldest.LastAttemptedAt {
+		if ep.LastAttemptedAt.Before(oldest.LastAttemptedAt) {
 			oldest = ep
 		}
-		if ep.LastAttemptedAt > newest {
+		if ep.LastAttemptedAt.After(newest) {
 			newest = ep.LastAttemptedAt
 		}
 	}
 
-	if now.Unix()-newest < int64(RotateInterval/time.Second) {
+	if !newest.IsZero() && now.Sub(newest) < RotateInterval {
 		return "", false
 	}
 	return oldest.Endpoint, true

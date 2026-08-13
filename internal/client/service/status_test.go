@@ -11,7 +11,7 @@ func TestStatusReportsRefreshSchedules(
 	t *testing.T,
 ) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Service, "mynet")
+	testutil.SeedNetworkDirect(t, env.Database, "mynet")
 
 	status, err := env.Service.Status()
 	if err != nil {

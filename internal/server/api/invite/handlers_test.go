@@ -17,7 +17,7 @@ func TestHandleRedeemInvite_Success(t *testing.T) {
 	body := `{"perm_pubkey": "new-perm-key"}`
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/redeem", strings.NewReader(body))
-	r.RemoteAddr = "10.1.0.5:12345"
+	r.RemoteAddr = "10.1.0.2:12345"
 
 	api.Router().ServeHTTP(w, r)
 
@@ -31,7 +31,7 @@ func TestHandleRedeemInvite_InvalidJSON(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/redeem", strings.NewReader(`{`))
-	r.RemoteAddr = "10.1.0.5:12345"
+	r.RemoteAddr = "10.1.0.2:12345"
 
 	api.Router().ServeHTTP(w, r)
 
@@ -62,18 +62,15 @@ func setupInviteTest(t *testing.T) (*testutil.ServiceEnv, *API) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	// Create a registration directly in the database
-	reg := &service.Registration{
+	_, err := env.Database.CreateRegistration("testnet", service.CreateRegistrationParams{
 		Name:            "invitee",
 		InvitePublicKey: "temp-key-123",
-		InviteRoute:     "10.1.0.5/32",
 		MainRoute:       "10.0.0.50/32",
 		ExpiresAt:       time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC),
 		CreatedAt:       time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC),
-	}
-
-	if err := env.Database.InsertRegistration("testnet", reg); err != nil {
-		t.Fatalf("insert registration: %v", err)
+	}, time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("create registration: %v", err)
 	}
 
 	api := New(env.Service, "testnet", nil)

@@ -9,35 +9,35 @@ import (
 
 var serverAssociationCmd = &args.Command{
 	Name: "association",
-	Help: "manage CIDR associations",
+	Help: "manage group associations",
 	Subcommands: []*args.Command{
-		serverAssociationAdd,
+		serverAssociationCreate,
 		serverAssociationDelete,
 		serverAssociationList,
 	},
 }
 
-var serverAssociationAdd = &args.Command{
-	Name: "add",
-	Help: "associate two CIDRs",
+var serverAssociationCreate = &args.Command{
+	Name: "create",
+	Help: "associate two groups",
 	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "network name",
 		},
 		{
-			Name: "cidr1",
-			Help: "first CIDR name",
+			Name: "group1",
+			Help: "first group name",
 		},
 		{
-			Name: "cidr2",
-			Help: "second CIDR name",
+			Name: "group2",
+			Help: "second group name",
 		},
 	},
 	Handler: func(i *args.Input) error {
 		network := i.GetOperand("network")
-		cidr1 := i.GetOperand("cidr1")
-		cidr2 := i.GetOperand("cidr2")
+		group1 := i.GetOperand("group1")
+		group2 := i.GetOperand("group2")
 
 		client, err := serverClient(i)
 		if err != nil {
@@ -47,8 +47,8 @@ var serverAssociationAdd = &args.Command{
 		if err := client.AddAssociation(
 			i.Context(),
 			network,
-			cidr1,
-			cidr2,
+			group1,
+			group2,
 		); err != nil {
 			return err
 		}
@@ -57,32 +57,32 @@ var serverAssociationAdd = &args.Command{
 			return nil
 		}
 
-		fmt.Printf("cidrs %q and %q associated\n", cidr1, cidr2)
+		fmt.Printf("groups %q and %q associated\n", group1, group2)
 		return nil
 	},
 }
 
 var serverAssociationDelete = &args.Command{
 	Name: "delete",
-	Help: "remove a CIDR association",
+	Help: "remove a group association",
 	Operands: []args.Operand{
 		{
 			Name: "network",
 			Help: "network name",
 		},
 		{
-			Name: "cidr1",
-			Help: "first CIDR name",
+			Name: "group1",
+			Help: "first group name",
 		},
 		{
-			Name: "cidr2",
-			Help: "second CIDR name",
+			Name: "group2",
+			Help: "second group name",
 		},
 	},
 	Handler: func(i *args.Input) error {
 		network := i.GetOperand("network")
-		cidr1 := i.GetOperand("cidr1")
-		cidr2 := i.GetOperand("cidr2")
+		group1 := i.GetOperand("group1")
+		group2 := i.GetOperand("group2")
 
 		client, err := serverClient(i)
 		if err != nil {
@@ -92,8 +92,8 @@ var serverAssociationDelete = &args.Command{
 		if err := client.DeleteAssociation(
 			i.Context(),
 			network,
-			cidr1,
-			cidr2,
+			group1,
+			group2,
 		); err != nil {
 			return err
 		}
@@ -102,14 +102,14 @@ var serverAssociationDelete = &args.Command{
 			return nil
 		}
 
-		fmt.Printf("association %q deleted\n", cidr1+"/"+cidr2)
+		fmt.Printf("association %q deleted\n", group1+"/"+group2)
 		return nil
 	},
 }
 
 var serverAssociationList = &args.Command{
 	Name: "list",
-	Help: "list CIDR associations on a network",
+	Help: "list group associations on a network",
 	Operands: []args.Operand{
 		{
 			Name: "network",
@@ -147,7 +147,7 @@ func printAssociations(
 ) {
 	rows := make([][]string, len(associations))
 	for idx, a := range associations {
-		rows[idx] = []string{a.Cidr1, a.Cidr2}
+		rows[idx] = []string{a.Group1, a.Group2}
 	}
-	printTable([]string{"CIDR1", "CIDR2"}, rows)
+	printTable([]string{"GROUP1", "GROUP2"}, rows)
 }

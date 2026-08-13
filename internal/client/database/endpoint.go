@@ -2,101 +2,88 @@ package database
 
 import (
 	"fmt"
+	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 )
 
-func (db *DB) SetPeerEndpoints(
-	network string,
-	pubKey string,
-	endpoints []service.PeerEndpoint,
-) error {
-	tx, err := db.Conn.Begin()
-	if err != nil {
-		return fmt.Errorf("begin set peer endpoints tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// Look up the peer id.
-	var peerID int64
-	err = tx.QueryRow(`
-		SELECT id FROM peer
-		WHERE network_name = ?1 AND public_key = ?2`,
-		network, pubKey,
-	).Scan(&peerID)
-	if err != nil {
-		return fmt.Errorf("lookup peer %q: %w", pubKey, err)
-	}
-
-	// Upsert each endpoint.
-	for _, ep := range endpoints {
-		if _, err := tx.Exec(`
-			INSERT INTO endpoint (network_name, peer_id, endpoint, server_observed_at)
-			VALUES (?1, ?2, ?3, ?4)
-			ON CONFLICT (network_name, peer_id, endpoint) DO UPDATE SET
-				server_observed_at = CASE
-					WHEN ?4 > server_observed_at THEN ?4
-					ELSE server_observed_at
-				END;`,
-			network,
-			peerID,
-			ep.Endpoint,
-			ep.ServerObservedAt,
-		); err != nil {
-			return fmt.Errorf("upsert endpoint %q for peer %q: %w", ep.Endpoint, pubKey, err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit set peer endpoints tx: %w", err)
-	}
-	return nil
-}
-
-func (db *DB) UpdatePeerEndpointLocal(
+func (db *DB) RecordLocalEndpoint(
 	network string,
 	pubKey string,
 	endpoint string,
-	when int64,
+	observedAt time.Time,
 ) error {
-	_, err := db.Conn.Exec(`
-		INSERT INTO endpoint (network_name, peer_id, endpoint, local_observed_at)
-		SELECT ?1, id, ?3, ?4
+	result, err := db.Conn.Exec(`
+		INSERT INTO endpoint (peer_id, endpoint, local_observed_at)
+		SELECT id, ?3, ?4
 		FROM peer
 		WHERE network_name = ?1 AND public_key = ?2
-		ON CONFLICT (network_name, peer_id, endpoint) DO UPDATE SET
+		ON CONFLICT (peer_id, endpoint) DO UPDATE SET
 			local_observed_at = MAX(local_observed_at, ?4)`,
 		network,
 		pubKey,
 		endpoint,
-		when,
+		observedAt.Unix(),
 	)
 	if err != nil {
-		return fmt.Errorf("update peer endpoint local: %w", err)
+		return CheckSqliteErr("record local peer endpoint", err)
 	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("record local peer endpoint rows affected: %w", err)
+	}
+
+	if affected == 0 {
+		return fmt.Errorf(
+			"%w: peer %q in network %q",
+			service.ErrNotFound,
+			pubKey,
+			network,
+		)
+	}
+
 	return nil
 }
 
-func (db *DB) MarkPeerEndpointAttempt(
+func (db *DB) RecordEndpointAttempt(
 	network string,
 	pubKey string,
 	endpoint string,
-	when int64,
+	attemptedAt time.Time,
 ) error {
-	_, err := db.Conn.Exec(`
+	result, err := db.Conn.Exec(`
 		UPDATE endpoint
-		SET last_attempted_at = ?4
-		WHERE network_name = ?1
-			AND peer_id = (SELECT id FROM peer WHERE network_name = ?1 AND public_key = ?2)
+		SET last_attempted_at = MAX(last_attempted_at, ?4)
+		WHERE peer_id = (
+				SELECT id FROM peer
+				WHERE network_name = ?1 AND public_key = ?2
+			)
 			AND endpoint = ?3`,
 		network,
 		pubKey,
 		endpoint,
-		when,
+		attemptedAt.Unix(),
 	)
 	if err != nil {
-		return fmt.Errorf("mark peer endpoint attempt: %w", err)
+		return CheckSqliteErr("record peer endpoint attempt", err)
 	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("record peer endpoint attempt rows affected: %w", err)
+	}
+
+	if affected == 0 {
+		return fmt.Errorf(
+			"%w: endpoint %q for peer %q in network %q",
+			service.ErrNotFound,
+			endpoint,
+			pubKey,
+			network,
+		)
+	}
+
 	return nil
 }
 
@@ -124,14 +111,20 @@ func (db *DB) ListPeerEndpoints(
 	var endpoints []service.PeerEndpoint
 	for rows.Next() {
 		var ep service.PeerEndpoint
+		var serverObservedAt int64
+		var localObservedAt int64
+		var lastAttemptedAt int64
 		if err := rows.Scan(
 			&ep.Endpoint,
-			&ep.ServerObservedAt,
-			&ep.LocalObservedAt,
-			&ep.LastAttemptedAt,
+			&serverObservedAt,
+			&localObservedAt,
+			&lastAttemptedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan endpoint: %w", err)
 		}
+		ep.ServerObservedAt = unixTimeOrZero(serverObservedAt)
+		ep.LocalObservedAt = unixTimeOrZero(localObservedAt)
+		ep.LastAttemptedAt = unixTimeOrZero(lastAttemptedAt)
 		endpoints = append(endpoints, ep)
 	}
 
@@ -142,27 +135,9 @@ func (db *DB) ListPeerEndpoints(
 	return endpoints, nil
 }
 
-func (db *DB) DeletePeerEndpointsBefore(
-	network string,
-	before int64,
-) error {
-	_, err := db.Conn.Exec(`
-		DELETE FROM endpoint
-		WHERE network_name = ?1
-			AND server_observed_at < ?2
-			AND local_observed_at < ?2`,
-		network,
-		before,
-	)
-	if err != nil {
-		return fmt.Errorf("delete stale peer endpoints: %w", err)
-	}
-	return nil
-}
-
 func (db *DB) ListLocalEndpointsSince(
 	network string,
-	since int64,
+	since time.Time,
 ) (
 	[]service.EndpointSighting,
 	error,
@@ -171,10 +146,10 @@ func (db *DB) ListLocalEndpointsSince(
 		SELECT p.public_key, e.endpoint
 		FROM endpoint e
 		JOIN peer p ON p.id = e.peer_id
-		WHERE e.network_name = ?1 AND e.local_observed_at >= ?2
+		WHERE p.network_name = ?1 AND e.local_observed_at >= ?2
 		ORDER BY p.public_key, e.endpoint`,
 		network,
-		since,
+		since.Unix(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query local endpoints: %w", err)
@@ -195,4 +170,13 @@ func (db *DB) ListLocalEndpointsSince(
 	}
 
 	return sightings, nil
+}
+
+func unixTimeOrZero(
+	unix int64,
+) time.Time {
+	if unix == 0 {
+		return time.Time{}
+	}
+	return time.Unix(unix, 0)
 }

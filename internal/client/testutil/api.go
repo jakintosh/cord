@@ -90,7 +90,7 @@ func (e *APIEnv) SeedNetwork(
 	t *testing.T,
 	name string,
 ) *service.NetworkConfig {
-	return SeedNetworkDirect(t, e.Service, name)
+	return SeedNetworkDirect(t, e.Database, name)
 }
 
 func (e *APIEnv) SeedInstall(

@@ -49,23 +49,32 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("POST /networks/{name}/disable", a.handlePostNetworkDisable)
 	mux.HandleFunc("DELETE /networks/{name}", a.handleDeleteNetwork)
 
-	mux.HandleFunc("GET /networks/{name}/peers", a.handleListPeers)
-
-	mux.HandleFunc("PATCH /networks/{name}/peers/{peer}", a.handlePatchPeer)
-	mux.HandleFunc("DELETE /networks/{name}/peers/{peer}", a.handleDeletePeer)
+	mux.HandleFunc("GET /networks/{name}/registrations", a.handleListRegistrations)
+	mux.HandleFunc("POST /networks/{name}/registrations", a.handlePostRegistration)
+	mux.HandleFunc("DELETE /networks/{name}/registrations/{registration}", a.handleDeleteRegistration)
+	mux.HandleFunc("GET /networks/{name}/registrations/{registration}/groups", a.handleListRegistrationGroups)
+	mux.HandleFunc("POST /networks/{name}/registrations/{registration}/groups", a.handlePostRegistrationGroup)
+	mux.HandleFunc("DELETE /networks/{name}/registrations/{registration}/groups/{group}", a.handleDeleteRegistrationGroup)
 
 	mux.HandleFunc("GET /networks/{name}/cidrs", a.handleListCidrs)
 	mux.HandleFunc("POST /networks/{name}/cidrs", a.handlePostCidr)
 	mux.HandleFunc("PATCH /networks/{name}/cidrs/{cidr}", a.handlePatchCidr)
 	mux.HandleFunc("DELETE /networks/{name}/cidrs/{cidr}", a.handleDeleteCidr)
+	mux.HandleFunc("GET /networks/{name}/cidrs/{cidr}/groups", a.handleListCidrGroups)
+	mux.HandleFunc("POST /networks/{name}/cidrs/{cidr}/groups", a.handlePostCidrGroup)
+	mux.HandleFunc("DELETE /networks/{name}/cidrs/{cidr}/groups/{group}", a.handleDeleteCidrGroup)
+
+	mux.HandleFunc("GET /networks/{name}/peers", a.handleListPeers)
+	mux.HandleFunc("PATCH /networks/{name}/peers/{peer}", a.handlePatchPeer)
+	mux.HandleFunc("DELETE /networks/{name}/peers/{peer}", a.handleDeletePeer)
+
+	mux.HandleFunc("GET /networks/{name}/groups", a.handleListGroups)
+	mux.HandleFunc("POST /networks/{name}/groups", a.handlePostGroup)
+	mux.HandleFunc("DELETE /networks/{name}/groups/{group}", a.handleDeleteGroup)
 
 	mux.HandleFunc("GET /networks/{name}/associations", a.handleListAssociations)
 	mux.HandleFunc("POST /networks/{name}/associations", a.handlePostAssociation)
-	mux.HandleFunc("POST /networks/{name}/associations/delete", a.handlePostAssociationDelete)
-
-	mux.HandleFunc("GET /networks/{name}/registrations", a.handleListRegistrations)
-	mux.HandleFunc("POST /networks/{name}/registrations", a.handlePostRegistration)
-	mux.HandleFunc("DELETE /networks/{name}/registrations/{registration}", a.handleDeleteRegistration)
+	mux.HandleFunc("DELETE /networks/{name}/associations/{group1}/{group2}", a.handleDeleteAssociation)
 
 	return logging.Middleware(a.log, mux)
 }

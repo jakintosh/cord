@@ -1,6 +1,7 @@
 package database_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -39,8 +40,16 @@ func seedNetworkForEndpoint(t *testing.T, db *database.DB) {
 			Prefix: 16,
 			Bits:   32,
 		},
+		&service.Cidr{
+			Name:     "cord-server-cidr",
+			Cidr:     "10.0.0.1/32",
+			Prefix:   32,
+			Bits:     32,
+			Terminal: true,
+		},
 		&service.Peer{
 			Name:      "cord-server",
+			CidrName:  "cord-server-cidr",
 			Route:     "10.0.0.1/32",
 			PublicKey: "pub",
 			Admin:     true,
@@ -50,13 +59,13 @@ func seedNetworkForEndpoint(t *testing.T, db *database.DB) {
 	); err != nil {
 		t.Fatalf("seed network: %v", err)
 	}
-	for _, p := range []service.Peer{
-		{Name: "peer-a", PublicKey: "pub-a", Route: "10.0.1.1/32", Confirmed: true, Enabled: true},
-		{Name: "peer-b", PublicKey: "pub-b", Route: "10.0.1.2/32", Confirmed: true, Enabled: true},
+	for _, p := range []struct {
+		name, cidr, pubKey string
+	}{
+		{"peer-a", "10.0.1.1/32", "pub-a"},
+		{"peer-b", "10.0.1.2/32", "pub-b"},
 	} {
-		if err := db.InsertPeer("epnet", &p); err != nil {
-			t.Fatalf("seed peer %s: %v", p.Name, err)
-		}
+		testutil.SeedPeerDB(t, db, "epnet", p.name, p.cidr, p.pubKey, false, true, true)
 	}
 }
 
@@ -203,23 +212,46 @@ func TestDeleteEndpointsBefore(t *testing.T) {
 	}
 }
 
-func TestInsertEndpointSightings_UnknownPeerSkipped(t *testing.T) {
+func TestInsertEndpointSightings_MissingNetwork(t *testing.T) {
+	db := testutil.SetupDB(t)
+
+	err := db.InsertEndpointSightings("missing", nil)
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestInsertEndpointSightings_UnknownPeerRejectsBatch(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)
 
+	now := time.Now()
 	err := db.InsertEndpointSightings("epnet", []service.EndpointSighting{
-		{WitnessKey: "pub-a", PeerKey: "ghost", Endpoint: "ep:1", Timestamp: time.Now()},
+		{WitnessKey: "pub-a", PeerKey: "pub-b", Endpoint: "valid:1", Timestamp: now},
+		{WitnessKey: "pub-a", PeerKey: "ghost", Endpoint: "invalid:1", Timestamp: now},
 	})
-	if err != nil {
-		t.Fatalf("unknown peer should be silently skipped: %v", err)
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 
-	endpoints, err := db.GetRecentEndpoints("epnet", time.Now().Add(-time.Hour))
+	endpoints, err := db.GetRecentEndpoints("epnet", now.Add(-time.Hour))
 	if err != nil {
 		t.Fatalf("get recent: %v", err)
 	}
 	if len(endpoints) != 0 {
-		t.Fatalf("expected 0 endpoints after skipped insert, got %d", len(endpoints))
+		t.Fatalf("expected atomic rollback, got %d endpoint keys", len(endpoints))
+	}
+}
+
+func TestInsertEndpointSightings_UnknownWitnessRejectsBatch(t *testing.T) {
+	db := testutil.SetupDB(t)
+	seedNetworkForEndpoint(t, db)
+
+	err := db.InsertEndpointSightings("epnet", []service.EndpointSighting{
+		{WitnessKey: "ghost", PeerKey: "pub-b", Endpoint: "ep:1", Timestamp: time.Now()},
+	})
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
 

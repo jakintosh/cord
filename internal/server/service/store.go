@@ -3,6 +3,8 @@ package service
 import (
 	"net"
 	"time"
+
+	"git.studiopollinator.com/pollinator/cord/internal/topology"
 )
 
 // Store is the persistence contract required by the server service. It
@@ -24,10 +26,10 @@ type Store interface {
 	ListNetworkNames() ([]string, error)
 
 	// BootstrapNetwork atomically creates a new network together
-	// with its root CIDR record and initial server peer. All three
-	// are persisted in a single transaction. Returns ErrConflict
-	// when a network with this name already exists.
-	BootstrapNetwork(network *NetworkConfig, rootCidr *Cidr, serverPeer *Peer) error
+	// with its root CIDR record, server CIDR, and initial server
+	// peer. All are persisted in a single transaction. Returns
+	// ErrConflict when a network with this name already exists.
+	BootstrapNetwork(network *NetworkConfig, rootCidr *Cidr, serverCidr *Cidr, serverPeer *Peer) error
 
 	// SetNetworkEnabled updates the enabled flag for a network.
 	// When enabled, the daemon starts the network's WireGuard devices
@@ -39,10 +41,6 @@ type Store interface {
 	DeleteNetwork(name string) error
 
 	// Peer records within a network.
-
-	// PeerExists reports whether a peer with the given name exists
-	// in the network.
-	PeerExists(network, name string) (bool, error)
 
 	// GetPeer returns a peer by name within the given network.
 	GetPeer(network, name string) (*Peer, error)
@@ -58,15 +56,11 @@ type Store interface {
 	// redeemed but not yet confirmed.
 	GetProvisionalPeerByIP(network string, ip net.IP) (*Peer, error)
 
-	// GetPeerByKey returns the peer with the given public key
-	// within the network.
-	GetPeerByKey(network, pubKey string) (*Peer, error)
-
 	// ListPeers returns every peer in the network, ordered by name.
 	ListPeers(network string) ([]*Peer, error)
 
 	// InsertPeer persists a new peer in the network. Returns
-	// ErrConflict when a peer with the same name, IP, or public key
+	// ErrConflict when a peer with the same name, CIDR, or public key
 	// already exists in this network.
 	InsertPeer(network string, peer *Peer) error
 
@@ -75,7 +69,7 @@ type Store interface {
 
 	// UpdatePeer applies a partial update to the named peer and
 	// returns the updated record. Nil pointers mean no change.
-	UpdatePeer(network, name string, update PeerUpdate) (*Peer, error)
+	UpdatePeer(network, name string, update PeerDiff) (*Peer, error)
 
 	// CIDR records within a network.
 
@@ -85,28 +79,60 @@ type Store interface {
 	// ListCidrs returns all CIDRs in the network.
 	ListCidrs(network string) ([]*Cidr, error)
 
-	// InsertCidr persists a new CIDR in the network. Returns
-	// ErrConflict when the range overlaps an existing CIDR.
-	InsertCidr(network string, cidr *Cidr) error
-
-	// DeleteCidr removes a CIDR by name. Associated associations
-	// are also removed via foreign-key cascades.
-	DeleteCidr(network, name string) error
+	// CreateCidr persists a new CIDR contained by the network's main CIDR.
+	// It returns ErrConflict when the name or range is already reserved and
+	// ErrInvalidInput when the range is outside the persisted main CIDR.
+	CreateCidr(network string, cidr *Cidr) error
 
 	// UpdateCidr renames a CIDR and returns the updated record.
 	UpdateCidr(network, name string, newName string) (*Cidr, error)
 
-	// Association records within a network.
+	// DeleteCidr removes a non-root CIDR by name. Associated assignments are
+	// also removed via foreign-key cascades. It returns ErrConflict for the
+	// network's root CIDR and ErrNotFound when the CIDR does not exist.
+	DeleteCidr(network, name string) error
 
-	// ListAssociations returns all associations in the network.
+	// ListCidrGroups returns the groups directly assigned to a CIDR, ordered by
+	// group name. It returns ErrNotFound when the CIDR does not exist.
+	ListCidrGroups(network, cidrName string) ([]*Group, error)
+
+	// AssignCidrGroup assigns a group to a CIDR.
+	AssignCidrGroup(network, cidrName, groupName string) error
+
+	// RemoveCidrGroup removes a group assignment from a CIDR. It returns
+	// ErrNotFound when the CIDR or group does not exist. Removing an absent
+	// assignment is idempotent.
+	RemoveCidrGroup(network, cidrName, groupName string) error
+
+	// Group records within a network.
+
+	// ListGroups returns all groups in the network.
+	ListGroups(network string) ([]*Group, error)
+
+	// InsertGroup creates a new group with the given name.
+	// Returns ErrConflict when a group with this name already exists.
+	InsertGroup(network, name string) (*Group, error)
+
+	// DeleteGroup removes a group by name from the network.
+	DeleteGroup(network, name string) error
+
+	// Association records within a network (Group <-> Group).
+
+	// ListAssociations returns all group associations in the network.
 	ListAssociations(network string) ([]*Association, error)
 
-	// InsertAssociation creates an association between two CIDRs.
-	// Associations are stored normalized (cidr1 < cidr2).
+	// InsertAssociation creates an association between two groups.
+	// Associations are stored normalized (group1 < group2).
 	InsertAssociation(network string, a *Association) error
 
-	// DeleteAssociation removes the association between two CIDRs.
-	DeleteAssociation(network, cidr1, cidr2 string) error
+	// DeleteAssociation removes the association between two groups.
+	DeleteAssociation(network, group1, group2 string) error
+
+	// Topology snapshot for visibility resolution.
+
+	// LoadTopologySnapshot loads a complete topology snapshot for
+	// the given network, suitable for resolving peer visibility.
+	LoadTopologySnapshot(network string) (*topology.Snapshot, error)
 
 	// Registration records within a network.
 
@@ -126,25 +152,42 @@ type Store interface {
 	// registrations in the network.
 	ListActiveRegistrations(network string, now time.Time) ([]*Registration, error)
 
-	// InsertRegistration persists a new registration in the network.
-	InsertRegistration(network string, reg *Registration) error
+	// CreateRegistration atomically prunes expired registrations, allocates the
+	// lowest available invite route, verifies that its main route is contained
+	// by the persisted main CIDR, and persists the completed registration.
+	// It returns ErrConflict for a persisted name, key, or route conflict and
+	// ErrRegistrationAddressExhausted when the invite network has no free route.
+	// It returns ErrInvalidInput when the main route is outside the main CIDR.
+	CreateRegistration(
+		network string,
+		params CreateRegistrationParams,
+		now time.Time,
+	) (*Registration, error)
 
-	// RedeemRegistration marks a registration as redeemed with the
-	// given permanent public key. The temporary key is recorded as
-	// the lookup key. now is used to check the registration has not
-	// expired.
-	RedeemRegistration(network string, tempPubKey, permPubKey string, now time.Time) error
+	// RedeemRegistration atomically redeems an unexpired registration and
+	// returns its provisional peer. Repeating redemption with the same keys is
+	// idempotent while the peer remains unconfirmed. It returns
+	// ErrRegistrationRedeemed when the registration was redeemed with another
+	// key or its peer is already confirmed, and ErrRegistrationExpired when an
+	// unredeemed registration has expired.
+	RedeemRegistration(
+		network string,
+		tempPubKey string,
+		permPubKey string,
+		now time.Time,
+	) (*Peer, error)
 
-	// ConfirmRegistration marks a registration as confirmed.
-	ConfirmRegistration(network, name string) error
+	// ConfirmPeer atomically marks a peer and its unexpired registration
+	// confirmed and transfers registration group assignments to the peer's
+	// terminal CIDR. now determines whether the registration has expired.
+	// Confirmation is idempotent. It returns ErrRegistrationExpired when the
+	// provisional peer's registration has expired.
+	ConfirmPeer(network, name string, now time.Time) error
 
-	// DeleteRegistration removes a registration by name from the
-	// network.
+	// DeleteRegistration revokes an unconfirmed registration by name and
+	// removes any provisional peer reality. Confirmed registrations are
+	// immutable and return ErrConflict.
 	DeleteRegistration(network, name string) error
-
-	// DeleteExpiredRegistrations removes all registrations whose
-	// expiration time is before the given timestamp.
-	DeleteExpiredRegistrations(network string, before time.Time) error
 
 	// PruneExpiredRegistrations removes expired unconfirmed
 	// registrations and any provisional peer rows whose registration
@@ -154,14 +197,34 @@ type Store interface {
 	// from clean state.
 	PruneExpiredRegistrations(network string, now time.Time) error
 
+	// ListRegistrationGroups returns the groups assigned to a pending
+	// registration, ordered by group name. It returns ErrNotFound when the
+	// registration does not exist.
+	ListRegistrationGroups(network, registration string) ([]*Group, error)
+
+	// AssignRegistrationGroup assigns a group to an unconfirmed, unexpired
+	// registration. now determines whether the registration has expired.
+	// It returns ErrConflict for a confirmed registration and
+	// ErrRegistrationExpired for an expired registration.
+	AssignRegistrationGroup(network, registration, group string, now time.Time) error
+
+	// RemoveRegistrationGroup removes a group assignment from an unconfirmed,
+	// unexpired registration. Removing an assignment that is not present is
+	// idempotent. now determines whether the registration has expired. It returns
+	// ErrConflict for a confirmed registration and ErrRegistrationExpired for an
+	// expired registration.
+	RemoveRegistrationGroup(network, registration, group string, now time.Time) error
+
 	// Endpoint records within a network.
 
 	// GetRecentEndpoints returns endpoint sightings since the given
 	// time, keyed by peer public key. Used for endpoint gossip.
 	GetRecentEndpoints(network string, since time.Time) (map[string][]EndpointWitness, error)
 
-	// InsertEndpointSightings persists endpoint sightings reported
-	// by peers or observed by the server's WireGuard device.
+	// InsertEndpointSightings atomically persists endpoint sightings reported
+	// by peers or observed by the server's WireGuard device. It returns
+	// ErrNotFound when the network or any referenced peer does not exist and
+	// leaves the entire batch unchanged.
 	InsertEndpointSightings(network string, sightings []EndpointSighting) error
 
 	// DeleteEndpointsBefore removes all endpoint records older than

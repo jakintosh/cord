@@ -1,9 +1,11 @@
 package database
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"net"
+	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
@@ -18,24 +20,22 @@ func (db *DB) GetPeer(
 ) {
 	row := db.Conn.QueryRow(`
 		SELECT
-			name,
-			public_key,
-			route,
-			admin,
-			enabled,
-			confirmed
-		FROM peer
-		WHERE network_name = ?1
-			AND name = ?2`,
+			p.name,
+			p.public_key,
+			c.name,
+			c.cidr,
+			p.admin,
+			p.enabled,
+			p.confirmed
+		FROM peer p
+		JOIN cidr c ON c.id = p.cidr_id
+		WHERE p.network_name = ?1
+			AND p.name = ?2`,
 		network,
 		name,
 	)
 
-	peer, err := scanPeer(row)
-	if err != nil {
-		return nil, err
-	}
-	return peer, nil
+	return scanPeer(row)
 }
 
 func (db *DB) GetPeerByIP(
@@ -48,26 +48,24 @@ func (db *DB) GetPeerByIP(
 	route := netaddr.HostRoute(netaddr.Normalize(ip))
 	row := db.Conn.QueryRow(`
 		SELECT
-			name,
-			public_key,
-			route,
-			admin,
-			enabled,
-			confirmed
-		FROM peer
-		WHERE network_name = ?1
-			AND route = ?2
-			AND confirmed = 1
-			AND enabled = 1`,
+			p.name,
+			p.public_key,
+			c.name,
+			c.cidr,
+			p.admin,
+			p.enabled,
+			p.confirmed
+		FROM peer p
+		JOIN cidr c ON c.id = p.cidr_id
+		WHERE p.network_name = ?1
+			AND c.cidr = ?2
+			AND p.confirmed = 1
+			AND p.enabled = 1`,
 		network,
 		route.String(),
 	)
 
-	peer, err := scanPeer(row)
-	if err != nil {
-		return nil, err
-	}
-	return peer, nil
+	return scanPeer(row)
 }
 
 func (db *DB) GetProvisionalPeerByIP(
@@ -80,55 +78,24 @@ func (db *DB) GetProvisionalPeerByIP(
 	route := netaddr.HostRoute(netaddr.Normalize(ip))
 	row := db.Conn.QueryRow(`
 		SELECT
-			name,
-			public_key,
-			route,
-			admin,
-			enabled,
-			confirmed
-		FROM peer
-		WHERE network_name = ?1
-			AND route = ?2
-			AND confirmed = 0
-			AND enabled = 1`,
+			p.name,
+			p.public_key,
+			c.name,
+			c.cidr,
+			p.admin,
+			p.enabled,
+			p.confirmed
+		FROM peer p
+		JOIN cidr c ON c.id = p.cidr_id
+		WHERE p.network_name = ?1
+			AND c.cidr = ?2
+			AND p.confirmed = 0
+			AND p.enabled = 1`,
 		network,
 		route.String(),
 	)
 
-	peer, err := scanPeer(row)
-	if err != nil {
-		return nil, err
-	}
-	return peer, nil
-}
-
-func (db *DB) GetPeerByKey(
-	network string,
-	pubKey string,
-) (
-	*service.Peer,
-	error,
-) {
-	row := db.Conn.QueryRow(`
-		SELECT
-			name,
-			public_key,
-			route,
-			admin,
-			enabled,
-			confirmed
-		FROM peer
-		WHERE network_name = ?1
-			AND public_key = ?2`,
-		network,
-		pubKey,
-	)
-
-	peer, err := scanPeer(row)
-	if err != nil {
-		return nil, err
-	}
-	return peer, nil
+	return scanPeer(row)
 }
 
 func (db *DB) ListPeers(
@@ -139,15 +106,17 @@ func (db *DB) ListPeers(
 ) {
 	rows, err := db.Conn.Query(`
 		SELECT
-			name,
-			public_key,
-			route,
-			admin,
-			enabled,
-			confirmed
-		FROM peer
-		WHERE network_name = ?1
-		ORDER BY name ASC`,
+			p.name,
+			p.public_key,
+			c.name,
+			c.cidr,
+			p.admin,
+			p.enabled,
+			p.confirmed
+		FROM peer p
+		JOIN cidr c ON c.id = p.cidr_id
+		WHERE p.network_name = ?1
+		ORDER BY p.name ASC`,
 		network,
 	)
 	if err != nil {
@@ -175,25 +144,147 @@ func (db *DB) InsertPeer(
 	network string,
 	peer *service.Peer,
 ) error {
-	_, cidr, err := net.ParseCIDR(peer.Route)
+	tx, err := db.Conn.Begin()
 	if err != nil {
-		return fmt.Errorf("insert peer %q: parse route: %w", peer.Name, err)
+		return fmt.Errorf("begin insert peer tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	cidrID, err := sqlGetCidrIdTx(tx, network, peer.CidrName, "lookup cidr for peer")
+	if err != nil {
+		return err
+	}
+	if err := sqlInsertPeerTx(tx, network, cidrID, peer); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit insert peer tx: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) UpdatePeer(
+	network string,
+	name string,
+	update service.PeerDiff,
+) (
+	*service.Peer,
+	error,
+) {
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin update peer tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	state, err := sqlUpdatePeerTx(tx, network, name, update)
+	if err != nil {
+		return nil, err
+	}
+	cidrName, cidrStr, err := sqlGetCidrTx(tx, state.cidrID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit update peer tx: %w", err)
 	}
 
-	ones, bits := cidr.Mask.Size()
-	if ones != bits {
-		return fmt.Errorf(
-			"%w: peer route %q must be a terminal prefix (/%d)",
-			service.ErrInvalidInput, peer.Route, bits,
-		)
+	return &service.Peer{
+		Name:      state.name,
+		PublicKey: state.publicKey,
+		CidrName:  cidrName,
+		Route:     cidrStr,
+		Admin:     state.admin,
+		Enabled:   state.enabled,
+		Confirmed: state.confirmed,
+	}, nil
+}
+
+func (db *DB) DeletePeer(
+	network string,
+	name string,
+) error {
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		return fmt.Errorf("begin delete peer tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	peerID, cidrID, publicKey, err := sqlGetPeerForDeletionTx(tx, network, name)
+	if err != nil {
+		return err
+	}
+	if err := sqlDeleteRegistrationByKeyTx(tx, network, publicKey); err != nil {
+		return err
+	}
+	if err := sqlDeletePeerTx(tx, peerID); err != nil {
+		return err
+	}
+	if err := sqlDeleteCidrTx(tx, cidrID); err != nil {
+		return err
 	}
 
-	_, err = db.Conn.Exec(`
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete peer tx: %w", err)
+	}
+
+	return nil
+}
+
+type peerConfirmationState struct {
+	id        int64
+	cidrID    int64
+	publicKey string
+	confirmed bool
+}
+
+type peerUpdateState struct {
+	name      string
+	publicKey string
+	cidrID    int64
+	admin     bool
+	enabled   bool
+	confirmed bool
+}
+
+func sqlGetPeerForDeletionTx(
+	tx *sql.Tx,
+	network string,
+	name string,
+) (
+	int64,
+	int64,
+	string,
+	error,
+) {
+	row := tx.QueryRow(`
+		SELECT id, cidr_id, public_key
+		FROM peer
+		WHERE network_name = ?1 AND name = ?2`,
+		network,
+		name,
+	)
+
+	var peerID int64
+	var cidrID int64
+	var publicKey string
+	if err := row.Scan(&peerID, &cidrID, &publicKey); err != nil {
+		return 0, 0, "", CheckSqliteErr("find peer to delete", err)
+	}
+	return peerID, cidrID, publicKey, nil
+}
+func sqlInsertPeerTx(
+	tx *sql.Tx,
+	network string,
+	cidrID int64,
+	peer *service.Peer,
+) error {
+	_, err := tx.Exec(`
 		INSERT INTO peer (
 			network_name,
 			name,
+			cidr_id,
 			public_key,
-			route,
 			admin,
 			enabled,
 			confirmed
@@ -201,8 +292,8 @@ func (db *DB) InsertPeer(
 		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
 		network,
 		peer.Name,
+		cidrID,
 		peer.PublicKey,
-		peer.Route,
 		boolToInt(peer.Admin),
 		boolToInt(peer.Enabled),
 		boolToInt(peer.Confirmed),
@@ -210,15 +301,16 @@ func (db *DB) InsertPeer(
 	return CheckSqliteErr("insert peer", err)
 }
 
-func (db *DB) UpdatePeer(
+func sqlUpdatePeerTx(
+	tx *sql.Tx,
 	network string,
 	name string,
-	update service.PeerUpdate,
+	update service.PeerDiff,
 ) (
-	*service.Peer,
+	peerUpdateState,
 	error,
 ) {
-	row := db.Conn.QueryRow(`
+	row := tx.QueryRow(`
 		UPDATE peer
 		SET
 			name = CASE
@@ -232,17 +324,13 @@ func (db *DB) UpdatePeer(
 			enabled = CASE
 				WHEN ?5 IS NOT NULL THEN ?5
 				ELSE enabled
-			END,
-			confirmed = CASE
-				WHEN ?6 IS NOT NULL THEN ?6
-				ELSE confirmed
 			END
 		WHERE network_name = ?1
 			AND name = ?2
 		RETURNING
 			name,
 			public_key,
-			route,
+			cidr_id,
 			admin,
 			enabled,
 			confirmed`,
@@ -251,85 +339,259 @@ func (db *DB) UpdatePeer(
 		update.Name,
 		validOptBool(update.Admin),
 		validOptBool(update.Enabled),
-		validOptBool(update.Confirmed),
 	)
 
-	peer, err := scanPeer(row)
-	if err != nil {
-		return nil, err
+	var state peerUpdateState
+	var admin int64
+	var enabled int64
+	var confirmed int64
+	if err := row.Scan(
+		&state.name,
+		&state.publicKey,
+		&state.cidrID,
+		&admin,
+		&enabled,
+		&confirmed,
+	); err != nil {
+		return peerUpdateState{}, CheckSqliteErr("update peer", err)
 	}
-	return peer, nil
+	state.admin = admin != 0
+	state.enabled = enabled != 0
+	state.confirmed = confirmed != 0
+	return state, nil
 }
 
-func (db *DB) DeletePeer(
+func sqlDeletePeerTx(
+	tx *sql.Tx,
+	peerID int64,
+) error {
+	_, err := tx.Exec(`DELETE FROM peer WHERE id = ?1`, peerID)
+	return CheckSqliteErr("delete peer", err)
+}
+
+func sqlGetPeerIDByKeyTx(
+	tx *sql.Tx,
+	network string,
+	publicKey string,
+) (
+	int64,
+	error,
+) {
+	var id int64
+	if err := tx.QueryRow(`
+		SELECT id
+		FROM peer
+		WHERE network_name = ?1
+			AND public_key = ?2`,
+		network,
+		publicKey,
+	).Scan(&id); err != nil {
+		return 0, CheckSqliteErr("get peer ID by key", err)
+	}
+	return id, nil
+}
+
+func sqlGetPeerForConfirmationTx(
+	tx *sql.Tx,
 	network string,
 	name string,
-) error {
-	tx, err := db.Conn.Begin()
-	if err != nil {
-		return fmt.Errorf("begin delete peer tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(`
-		DELETE FROM registration
-		WHERE final_route IN (
-			SELECT route FROM peer
-			WHERE network_name = ?1 AND name = ?2
-		)`,
+) (
+	peerConfirmationState,
+	error,
+) {
+	var state peerConfirmationState
+	var confirmed int64
+	if err := tx.QueryRow(`
+		SELECT id, cidr_id, public_key, confirmed
+		FROM peer
+		WHERE network_name = ?1 AND name = ?2`,
 		network,
 		name,
+	).Scan(
+		&state.id,
+		&state.cidrID,
+		&state.publicKey,
+		&confirmed,
 	); err != nil {
-		return CheckSqliteErr("delete peer registration", err)
+		return peerConfirmationState{}, CheckSqliteErr("find peer to confirm", err)
 	}
+	state.confirmed = confirmed != 0
+	return state, nil
+}
 
-	result, err := tx.Exec(`
-		DELETE FROM peer
-		WHERE network_name = ?1
-			AND name = ?2`,
+func sqlInsertBootstrapPeerTx(
+	tx *sql.Tx,
+	network string,
+	cidrID int64,
+	peer *service.Peer,
+) error {
+	_, err := tx.Exec(`
+		INSERT INTO peer (
+			network_name,
+			name,
+			cidr_id,
+			public_key,
+			admin,
+			enabled,
+			confirmed
+		)
+		VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
 		network,
-		name,
+		peer.Name,
+		cidrID,
+		peer.PublicKey,
+		boolToInt(peer.Admin),
+		boolToInt(peer.Enabled),
+		boolToInt(peer.Confirmed),
 	)
-	if err != nil {
-		return CheckSqliteErr("delete peer", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete peer rows affected: %w", err)
-	}
-	if affected == 0 {
-		return fmt.Errorf("%w: peer %q not found", service.ErrNotFound, name)
-	}
+	return CheckSqliteErr("insert server peer", err)
+}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit delete peer tx: %w", err)
+func sqlInsertRedeemedPeerTx(
+	tx *sql.Tx,
+	network string,
+	registration *registrationRedemption,
+	cidrID int64,
+	permPubKey string,
+) error {
+	if _, err := tx.Exec(`
+		INSERT INTO peer (
+			network_name,
+			name,
+			cidr_id,
+			public_key,
+			admin,
+			enabled,
+			confirmed
+		)
+		VALUES (?1, ?2, ?3, ?4, ?5, 1, 0)`,
+		network,
+		registration.name,
+		cidrID,
+		permPubKey,
+		boolToInt(registration.admin),
+	); err != nil {
+		return CheckSqliteErr("redeem create peer", err)
 	}
 
 	return nil
 }
 
-func (db *DB) PeerExists(
+func sqlMarkPeerConfirmedTx(
+	tx *sql.Tx,
+	peerID int64,
+) error {
+	_, err := tx.Exec(`
+		UPDATE peer
+		SET confirmed = 1
+		WHERE id = ?1`,
+		peerID,
+	)
+	return CheckSqliteErr("confirm peer", err)
+}
+
+func sqlDeleteRevokedPeerTx(
+	tx *sql.Tx,
 	network string,
-	name string,
+	publicKey string,
+) error {
+	_, err := tx.Exec(`
+		DELETE FROM peer
+		WHERE network_name = ?1 AND public_key = ?2`,
+		network,
+		publicKey,
+	)
+	return CheckSqliteErr("delete revoked provisional peer", err)
+}
+
+func sqlLookupProvisionalPeerCidrTx(
+	tx *sql.Tx,
+	network string,
+	publicKey string,
 ) (
+	int64,
 	bool,
 	error,
 ) {
-	row := db.Conn.QueryRow(`
-		SELECT COUNT(*)
-		FROM peer
+	var cidrID int64
+	if err := tx.QueryRow(`
+		SELECT cidr_id FROM peer
 		WHERE network_name = ?1
-			AND name = ?2`,
+			AND public_key = ?2
+			AND confirmed = 0`,
 		network,
-		name,
-	)
+		publicKey,
+	).Scan(&cidrID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, false, nil
+		}
+		return 0, false, CheckSqliteErr("find provisional peer to revoke", err)
+	}
+	return cidrID, true, nil
+}
 
-	var count int64
-	if err := row.Scan(&count); err != nil {
-		return false, fmt.Errorf("peer exists %q: %w", name, err)
+func sqlListPrunablePeerCidrIDsTx(
+	tx *sql.Tx,
+	network string,
+	now time.Time,
+) (
+	[]int64,
+	error,
+) {
+	rows, err := tx.Query(`
+		SELECT cidr_id
+		FROM peer p
+		WHERE p.network_name = ?1
+			AND p.confirmed = 0
+			AND NOT EXISTS (
+				SELECT 1 FROM registration r
+				WHERE r.network_name = p.network_name
+					AND r.redeemed_key = p.public_key
+					AND r.confirmed = 0
+					AND r.expires_at_unix > ?2
+			)`,
+		network,
+		now.Unix(),
+	)
+	if err != nil {
+		return nil, CheckSqliteErr("find provisional peer CIDRs to prune", err)
+	}
+	defer rows.Close()
+
+	var cidrIDs []int64
+	for rows.Next() {
+		var cidrID int64
+		if err := rows.Scan(&cidrID); err != nil {
+			return nil, CheckSqliteErr("scan provisional peer CIDR", err)
+		}
+		cidrIDs = append(cidrIDs, cidrID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate provisional peer CIDRs: %w", err)
 	}
 
-	return count > 0, nil
+	return cidrIDs, nil
+}
+
+func sqlDeletePrunablePeersTx(
+	tx *sql.Tx,
+	network string,
+	now time.Time,
+) error {
+	_, err := tx.Exec(`
+		DELETE FROM peer
+		WHERE network_name = ?1 AND confirmed = 0
+			AND NOT EXISTS (
+				SELECT 1 FROM registration r
+				WHERE r.network_name = peer.network_name
+					AND r.redeemed_key = peer.public_key
+					AND r.confirmed = 0
+					AND r.expires_at_unix > ?2
+			)`,
+		network,
+		now.Unix(),
+	)
+	return CheckSqliteErr("prune provisional peers", err)
 }
 
 func scanPeer(
@@ -339,16 +601,17 @@ func scanPeer(
 	error,
 ) {
 	var name string
-	var publicKey string
-	var route string
+	var pubKey string
+	var cidrName string
+	var cidrStr string
 	var admin int64
 	var enabled int64
 	var confirmed int64
-
 	if err := s.Scan(
 		&name,
-		&publicKey,
-		&route,
+		&pubKey,
+		&cidrName,
+		&cidrStr,
 		&admin,
 		&enabled,
 		&confirmed,
@@ -361,8 +624,9 @@ func scanPeer(
 
 	return &service.Peer{
 		Name:      name,
-		PublicKey: publicKey,
-		Route:     route,
+		PublicKey: pubKey,
+		CidrName:  cidrName,
+		Route:     cidrStr,
 		Admin:     admin != 0,
 		Enabled:   enabled != 0,
 		Confirmed: confirmed != 0,

@@ -1,11 +1,13 @@
 package admin_test
 
 import (
+	"net"
 	"net/http"
 	"testing"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
+	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
@@ -125,8 +127,8 @@ func TestAPIListCidrs_Empty(
 
 	// verify result
 	data := result.ExpectOK(t)
-	if len(data) != 1 {
-		t.Fatalf("expected 1 cidr (root), got %d", len(data))
+	if len(data) != 2 {
+		t.Fatalf("expected 2 cidrs (root + server), got %d", len(data))
 	}
 }
 
@@ -144,8 +146,8 @@ func TestAPIListCidrs_WithData(
 
 	// verify result
 	data := result.ExpectOK(t)
-	if len(data) != 2 {
-		t.Fatalf("expected 2 cidrs (root + engineering), got %d", len(data))
+	if len(data) != 3 {
+		t.Fatalf("expected 3 cidrs (root + server + engineering), got %d", len(data))
 	}
 	foundEng := false
 	for _, c := range data {
@@ -156,9 +158,6 @@ func TestAPIListCidrs_WithData(
 	}
 	if !foundEng {
 		t.Fatal("engineering cidr not found in list")
-	}
-	if data[0].Cidr != "10.0.1.0/24" {
-		t.Fatalf("cidr = %q, want 10.0.1.0/24", data[0].Cidr)
 	}
 }
 
@@ -239,4 +238,69 @@ func TestAPIDeleteCidr_NotFound(
 
 	// verify result
 	result.ExpectStatusError(t, http.StatusNotFound)
+}
+
+func TestAPICidrGroups_AddListRemove(t *testing.T) {
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+	env.SeedCIDR(t, "testnet", "servers", "10.0.1.0/24")
+	seedGroup(t, env, "engineering")
+
+	url := "/networks/testnet/cidrs/servers/groups"
+	body := `{"group":"engineering"}`
+	wire.TestPost[any](env.Router, url, body).ExpectStatusOK(t, http.StatusCreated)
+
+	groups := wire.TestGet[[]admin.Group](env.Router, url).ExpectOK(t)
+	if len(groups) != 1 || groups[0].Name != "engineering" {
+		t.Fatalf("groups = %+v, want engineering", groups)
+	}
+
+	wire.TestPost[any](env.Router, url, body).ExpectStatusError(t, http.StatusConflict)
+	wire.TestDelete[any](env.Router, url+"/engineering").ExpectOK(t)
+	groups = wire.TestGet[[]admin.Group](env.Router, url).ExpectOK(t)
+	if len(groups) != 0 {
+		t.Fatalf("groups after removal = %+v, want empty", groups)
+	}
+}
+
+func TestAPICidrGroups_RejectsInvalidRequestAndMissingCidr(t *testing.T) {
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+	seedGroup(t, env, "engineering")
+
+	missingURL := "/networks/testnet/cidrs/missing/groups"
+	wire.TestGet[[]admin.Group](env.Router, missingURL).ExpectStatusError(t, http.StatusNotFound)
+	wire.TestPost[any](env.Router, missingURL, `{"group":"engineering"}`).ExpectStatusError(t, http.StatusNotFound)
+	wire.TestDelete[any](env.Router, missingURL+"/engineering").ExpectStatusError(t, http.StatusNotFound)
+
+	env.SeedCIDR(t, "testnet", "servers", "10.0.1.0/24")
+	wire.TestPost[any](env.Router, "/networks/testnet/cidrs/servers/groups", `{`).ExpectStatusError(t, http.StatusBadRequest)
+}
+
+func TestAPICidrGroups_RejectsProvisionalPeerCidr(t *testing.T) {
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+	seedGroup(t, env, "engineering")
+
+	if _, err := env.Service.CreateRegistration(
+		"testnet",
+		"alice",
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")},
+	); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	registrations, err := env.Service.ListRegistrations("testnet")
+	if err != nil {
+		t.Fatalf("list registrations: %v", err)
+	}
+	if _, err := env.Service.RedeemRegistration(
+		"testnet",
+		registrations[0].InvitePublicKey,
+		"alice-key",
+	); err != nil {
+		t.Fatalf("redeem registration: %v", err)
+	}
+
+	url := "/networks/testnet/cidrs/alice/groups"
+	wire.TestPost[any](env.Router, url, `{"group":"engineering"}`).ExpectStatusError(t, http.StatusConflict)
 }

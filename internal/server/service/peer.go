@@ -1,11 +1,11 @@
 package service
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
+	"git.studiopollinator.com/pollinator/cord/internal/topology"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -13,20 +13,20 @@ import (
 // It includes the identity, assigned address, and management flags.
 type Peer struct {
 	Name      string
-	Route     string // terminal host route, e.g. "10.42.0.5/32" or "fd00::5/128"
+	CidrName  string // the name of the terminal CIDR the peer is assigned to
+	Route     string // terminal host route, e.g. "10.42.0.5/32" or "fd00::5/128", derived from CIDR
 	PublicKey string
 	Admin     bool // whether the peer has administrative privileges
 	Enabled   bool // whether the peer's WireGuard config is applied
 	Confirmed bool // whether the peer has proven reachability on the main network
 }
 
-// PeerUpdate describes a partial change to a persisted peer. Nil fields mean
+// PeerDiff describes a partial change to a persisted peer. Nil fields mean
 // no change; lifecycle methods construct updates for their own state changes.
-type PeerUpdate struct {
-	Name      *string
-	Admin     *bool
-	Enabled   *bool
-	Confirmed *bool
+type PeerDiff struct {
+	Name    *string
+	Admin   *bool
+	Enabled *bool
 }
 
 // VisiblePeer is a peer as it appears to other peers on the network.
@@ -86,7 +86,9 @@ func (s *Service) ListPeers(
 }
 
 // ListVisiblePeers returns the peers visible to the named peer, each
-// with recently witnessed endpoints. Used for endpoint gossip — peers
+// with recently witnessed endpoints. Visibility is determined by the
+// group-based topology model: effective groups (direct + inherited)
+// combined with group associations. Used for endpoint gossip — peers
 // discover each other's endpoints through this list.
 func (s *Service) ListVisiblePeers(
 	network string,
@@ -95,9 +97,19 @@ func (s *Service) ListVisiblePeers(
 	[]*VisiblePeer,
 	error,
 ) {
-	peers, err := s.store.ListPeers(network)
+	snapshot, err := s.store.LoadTopologySnapshot(network)
 	if err != nil {
-		return nil, fmt.Errorf("list peers for visibility: %w", err)
+		return nil, fmt.Errorf("load topology snapshot: %w", err)
+	}
+
+	resolver, err := topology.NewResolver(snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("create topology resolver: %w", err)
+	}
+
+	visible, err := resolver.VisiblePeers(peerName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve visible peers for %q: %w", peerName, err)
 	}
 
 	since := s.clock().Add(-defaultEndpointTTL)
@@ -106,9 +118,12 @@ func (s *Service) ListVisiblePeers(
 		return nil, fmt.Errorf("get recent endpoints: %w", err)
 	}
 
-	var visible []*VisiblePeer
-	for _, p := range peers {
-		if p.Name == peerName {
+	result := make([]*VisiblePeer, 0, len(visible))
+	for _, p := range visible {
+		// The server peer is not returned in the visible peer set.
+		// Clients pin the server configuration from redemption data.
+		// TODO: make sure that cord-server *cant* show up here
+		if p.Name == "cord-server" {
 			continue
 		}
 
@@ -122,7 +137,7 @@ func (s *Service) ListVisiblePeers(
 			}
 		}
 
-		visible = append(visible, &VisiblePeer{
+		result = append(result, &VisiblePeer{
 			Name:      p.Name,
 			Route:     p.Route,
 			PublicKey: p.PublicKey,
@@ -130,7 +145,7 @@ func (s *Service) ListVisiblePeers(
 		})
 	}
 
-	return visible, nil
+	return result, nil
 }
 
 // UpdatePeer applies a partial update to a peer and returns the
@@ -138,23 +153,23 @@ func (s *Service) ListVisiblePeers(
 func (s *Service) UpdatePeer(
 	network string,
 	name string,
-	update PeerUpdate,
+	diff PeerDiff,
 ) (
 	*Peer,
 	error,
 ) {
-	if update.Name == nil &&
-		update.Admin == nil &&
-		update.Enabled == nil &&
-		update.Confirmed == nil {
+	if diff.Name == nil &&
+		diff.Admin == nil &&
+		diff.Enabled == nil {
 		return nil, ErrInvalidInput
 	}
 
-	p, err := s.store.UpdatePeer(network, name, update)
+	p, err := s.store.UpdatePeer(network, name, diff)
 	if err != nil {
 		return nil, fmt.Errorf("update peer %q: %w", name, mapStoreError(err))
 	}
 	s.reconcile(network)
+
 	return p, nil
 }
 
@@ -164,31 +179,30 @@ func (s *Service) UpdatePeer(
 // who disabled the peer before confirm gets a peer that is
 // confirmed but not live until re-enabled.
 //
-// The corresponding registration is marked confirmed, which removes
-// the temp peer from the invite device and releases the invite IPs.
-// If the registration is already gone (revoked or already confirmed)
-// the registration update is treated as a no-op rather than an error,
-// so confirm remains idempotent.
+// The corresponding registration is marked confirmed in the same
+// transaction, and its group assignments are transferred to the peer's
+// terminal CIDR. Confirmation is idempotent.
 func (s *Service) ConfirmPeer(
 	network string,
 	name string,
 ) error {
-	confirmed := true
-	update := PeerUpdate{
-		Confirmed: &confirmed,
-	}
-	_, err := s.store.UpdatePeer(network, name, update)
-	if err != nil {
+	defer s.reconcile(network)
+
+	if err := s.store.ConfirmPeer(
+		network,
+		name,
+		s.clock(),
+	); err != nil {
 		return fmt.Errorf("confirm peer %q: %w", name, mapStoreError(err))
 	}
 
-	if err := s.store.ConfirmRegistration(network, name); err != nil {
-		if !errors.Is(err, ErrNotFound) {
-			return fmt.Errorf("confirm registration %q: %w", name, mapStoreError(err))
-		}
-	}
-	s.reconcile(network)
-	s.log.Info("peer confirmed", "network", network, "peer", name)
+	s.log.Info(
+		"peer confirmed",
+		"network",
+		network,
+		"peer",
+		name,
+	)
 
 	return nil
 }
@@ -200,10 +214,14 @@ func (s *Service) RemovePeer(
 	network string,
 	name string,
 ) error {
-	if err := s.store.DeletePeer(network, name); err != nil {
+	if err := s.store.DeletePeer(
+		network,
+		name,
+	); err != nil {
 		return fmt.Errorf("delete peer %q: %w", name, mapStoreError(err))
 	}
 	s.reconcile(network)
+
 	return nil
 }
 
@@ -214,14 +232,13 @@ func (s *Service) ReportEndpoints(
 	network string,
 	sightings []EndpointSighting,
 ) error {
-	_, err := s.store.GetNetwork(network)
-	if err != nil {
-		return fmt.Errorf("get network: %w", mapStoreError(err))
+	if err := s.store.InsertEndpointSightings(
+		network,
+		sightings,
+	); err != nil {
+		return fmt.Errorf("insert endpoint sightings: %w", mapStoreError(err))
 	}
 
-	if err := s.store.InsertEndpointSightings(network, sightings); err != nil {
-		return fmt.Errorf("insert endpoint sightings: %w", err)
-	}
 	return nil
 }
 

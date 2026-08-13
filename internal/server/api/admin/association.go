@@ -10,26 +10,21 @@ import (
 )
 
 type Association struct {
-	Cidr1 string `json:"cidr1"`
-	Cidr2 string `json:"cidr2"`
+	Group1 string `json:"group1"`
+	Group2 string `json:"group2"`
 }
 
 type CreateAssociationRequest struct {
-	Cidr1 string `json:"cidr1"`
-	Cidr2 string `json:"cidr2"`
-}
-
-type DeleteAssociationRequest struct {
-	Cidr1 string `json:"cidr1"`
-	Cidr2 string `json:"cidr2"`
+	Group1 string `json:"group1"`
+	Group2 string `json:"group2"`
 }
 
 func associationFromService(
 	a service.Association,
 ) Association {
 	return Association{
-		Cidr1: a.Cidr1,
-		Cidr2: a.Cidr2,
+		Group1: a.Group1,
+		Group2: a.Group2,
 	}
 }
 
@@ -73,7 +68,11 @@ func (a *API) handlePostAssociation(
 		return
 	}
 
-	if err := a.service.CreateAssociation(network, req.Cidr1, req.Cidr2); err != nil {
+	if err := a.service.CreateAssociation(
+		network,
+		req.Group1,
+		req.Group2,
+	); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -81,19 +80,19 @@ func (a *API) handlePostAssociation(
 	wire.WriteData(w, http.StatusCreated, nil)
 }
 
-func (a *API) handlePostAssociationDelete(
+func (a *API) handleDeleteAssociation(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
 	network := r.PathValue("name")
+	group1 := r.PathValue("group1")
+	group2 := r.PathValue("group2")
 
-	var req DeleteAssociationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		wire.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	if err := a.service.DeleteAssociation(network, req.Cidr1, req.Cidr2); err != nil {
+	if err := a.service.DeleteAssociation(
+		network,
+		group1,
+		group2,
+	); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -115,10 +114,13 @@ func (c *Client) ListAssociations(
 func (c *Client) AddAssociation(
 	ctx context.Context,
 	network string,
-	cidr1 string,
-	cidr2 string,
+	group1 string,
+	group2 string,
 ) error {
-	req := CreateAssociationRequest{Cidr1: cidr1, Cidr2: cidr2}
+	req := CreateAssociationRequest{
+		Group1: group1,
+		Group2: group2,
+	}
 	body, err := marshalJSON(req)
 	if err != nil {
 		return err
@@ -129,13 +131,9 @@ func (c *Client) AddAssociation(
 func (c *Client) DeleteAssociation(
 	ctx context.Context,
 	network string,
-	cidr1 string,
-	cidr2 string,
+	group1 string,
+	group2 string,
 ) error {
-	req := DeleteAssociationRequest{Cidr1: cidr1, Cidr2: cidr2}
-	body, err := marshalJSON(req)
-	if err != nil {
-		return err
-	}
-	return c.wire.Post(ctx, "/networks/"+network+"/associations/delete", body, nil)
+	path := "/networks/" + network + "/associations/" + group1 + "/" + group2
+	return c.wire.Delete(ctx, path, nil)
 }

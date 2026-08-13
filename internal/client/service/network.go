@@ -119,14 +119,6 @@ func (s *Service) ListNetworks() (
 	return s.store.ListNetworkNames()
 }
 
-// InsertNetworkDirect persists a pre-built NetworkConfig record.
-// Exported for test seeding only.
-func (s *Service) InsertNetworkDirect(
-	cfg *NetworkConfig,
-) error {
-	return s.store.InsertNetwork(cfg)
-}
-
 // EnableNetwork brings up the WireGuard interface for the named
 // network and starts the activity timers. It persists enabled=true.
 // Idempotent: enabling an already-running network is a no-op.
@@ -352,26 +344,12 @@ func (n *Network) sync() error {
 	}
 	n.log.Debug("sync", "peers", len(visible))
 
-	peers := peersFromProtocol(visible)
-	if err := n.store.SetPeers(n.cfg.Name, peers); err != nil {
-		return fmt.Errorf("set peers: %w", err)
+	reconciliation := PeerReconciliation{
+		Peers:       peersFromProtocol(visible),
+		PruneBefore: n.clock().Add(-EndpointTTL),
 	}
-
-	for _, vp := range visible {
-		eps := endpointsFromProtocol(vp)
-		if len(eps) == 0 {
-			continue
-		}
-		if err := n.store.SetPeerEndpoints(n.cfg.Name, vp.PublicKey, eps); err != nil {
-			n.log.Warn("sync: set endpoints failed", "peer", vp.PublicKey, "err", err)
-		}
-	}
-
-	if err := n.store.DeletePeerEndpointsBefore(
-		n.cfg.Name,
-		n.clock().Add(-EndpointTTL).Unix(),
-	); err != nil {
-		return fmt.Errorf("prune endpoints: %w", err)
+	if err := n.store.ApplyPeerReconciliation(n.cfg.Name, reconciliation); err != nil {
+		return fmt.Errorf("apply peer reconciliation: %w", err)
 	}
 
 	return n.reconcile()
@@ -415,8 +393,11 @@ func (n *Network) scan() error {
 			continue
 		}
 
-		if err := n.store.UpdatePeerEndpointLocal(
-			n.cfg.Name, pubKey, peer.Endpoint.String(), now.Unix(),
+		if err := n.store.RecordLocalEndpoint(
+			n.cfg.Name,
+			pubKey,
+			peer.Endpoint.String(),
+			now,
 		); err != nil {
 			n.log.Warn("scan: record endpoint failed", "peer", pubKey, "err", err)
 		}
@@ -437,7 +418,7 @@ func (n *Network) report() error {
 	}
 	defer n.completeRefresh(n.reportTimer, n.reportInterval, &n.lastReportAt)
 
-	since := n.clock().Add(-n.reportInterval).Unix()
+	since := n.clock().Add(-n.reportInterval)
 	sightings, err := n.store.ListLocalEndpointsSince(n.cfg.Name, since)
 	if err != nil {
 		return fmt.Errorf("list local endpoints: %w", err)
