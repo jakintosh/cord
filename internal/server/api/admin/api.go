@@ -44,6 +44,7 @@ func (a *API) Router() http.Handler {
 
 	mux.HandleFunc("GET /networks", a.handleListNetworks)
 	mux.HandleFunc("GET /networks/{name}", a.handleGetNetwork)
+	mux.HandleFunc("GET /networks/{name}/topology", a.handleGetNetworkTopology)
 	mux.HandleFunc("POST /networks", a.handlePostNetwork)
 	mux.HandleFunc("POST /networks/{name}/enable", a.handlePostNetworkEnable)
 	mux.HandleFunc("POST /networks/{name}/disable", a.handlePostNetworkDisable)

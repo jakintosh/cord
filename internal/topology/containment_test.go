@@ -1,6 +1,7 @@
 package topology
 
 import (
+	"net"
 	"strings"
 	"testing"
 )
@@ -68,6 +69,27 @@ func TestBuildContainment_RejectsDuplicateRange(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "same range") {
 		t.Fatalf("expected duplicate range error, got %v", err)
+	}
+}
+
+func TestBuildContainment_RejectsMismatchedCIDRMetadata(t *testing.T) {
+	cidr := makeCidr("network", "10.0.0.0/24", false)
+	cidr.Cidr = "10.0.1.0/24"
+
+	_, err := buildContainment([]Cidr{cidr})
+	if err == nil || !strings.Contains(err.Error(), "range does not match") {
+		t.Fatalf("buildContainment() error = %v, want range mismatch", err)
+	}
+}
+
+func TestBuildContainment_RejectsMismatchedPrefixMetadata(t *testing.T) {
+	cidr := makeCidr("network", "10.0.0.0/24", false)
+	cidr.Prefix = 25
+	cidr.Last = net.ParseIP("10.0.0.127").To4()
+
+	_, err := buildContainment([]Cidr{cidr})
+	if err == nil || !strings.Contains(err.Error(), "metadata does not match") {
+		t.Fatalf("buildContainment() error = %v, want metadata mismatch", err)
 	}
 }
 

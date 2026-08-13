@@ -10,14 +10,15 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 )
 
-func TestListPeers_Success(t *testing.T) {
+func TestGetSnapshot_Success(t *testing.T) {
 	c, teardown := newTestPeerClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/peers" {
+		if r.Method != http.MethodGet || r.URL.Path != "/snapshot" {
 			wire.WriteError(w, http.StatusNotFound, "not found")
 			return
 		}
-		wire.WriteData(w, http.StatusOK, []protocol.VisiblePeer{
-			{
+		wire.WriteData(w, http.StatusOK, protocol.VisibleNetworkSnapshot{
+			GeneratedAt: time.Unix(1718956800, 0),
+			Peers: []protocol.VisiblePeer{{
 				Name:      "alice",
 				Route:     "10.42.0.5/32",
 				PublicKey: "alice-key",
@@ -27,15 +28,23 @@ func TestListPeers_Success(t *testing.T) {
 						Timestamp: time.Unix(1718956800, 0),
 					},
 				},
+			}},
+			Topology: protocol.TopologyView{
+				SubjectPeer: "self",
+				Nodes: []protocol.TopologyNode{{
+					Name: "self", CIDR: "10.42.0.5/32", Terminal: true,
+					PeerName: "self", Subject: true,
+				}},
 			},
 		})
 	})
 	defer teardown()
 
-	peers, err := c.ListPeers()
+	snapshot, err := c.GetSnapshot()
 	if err != nil {
-		t.Fatalf("ListPeers: %v", err)
+		t.Fatalf("GetSnapshot: %v", err)
 	}
+	peers := snapshot.Peers
 	if len(peers) != 1 {
 		t.Fatalf("got %d peers, want 1", len(peers))
 	}
@@ -57,13 +66,13 @@ func TestListPeers_Success(t *testing.T) {
 	}
 }
 
-func TestListPeers_Forbidden(t *testing.T) {
+func TestGetSnapshot_Forbidden(t *testing.T) {
 	c, teardown := newTestPeerClient(t, func(w http.ResponseWriter, r *http.Request) {
 		wire.WriteError(w, http.StatusForbidden, "identity unknown")
 	})
 	defer teardown()
 
-	_, err := c.ListPeers()
+	_, err := c.GetSnapshot()
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

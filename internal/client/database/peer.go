@@ -36,16 +36,18 @@ func (db *DB) ListPeers(
 	return peers, nil
 }
 
-func (db *DB) ApplyPeerReconciliation(
-	network string,
-	reconciliation service.PeerReconciliation,
-) error {
-	publicKeys := make([]string, len(reconciliation.Peers))
-	seenPublicKeys := make(map[string]struct{}, len(reconciliation.Peers))
-	for i, observation := range reconciliation.Peers {
+func validatePeerObservations(
+	peers []service.PeerObservation,
+) (
+	[]string,
+	error,
+) {
+	publicKeys := make([]string, len(peers))
+	seenPublicKeys := make(map[string]struct{}, len(peers))
+	for i, observation := range peers {
 		publicKey := observation.Peer.PublicKey
 		if _, exists := seenPublicKeys[publicKey]; exists {
-			return fmt.Errorf(
+			return nil, fmt.Errorf(
 				"%w: duplicate peer public key %q in reconciliation",
 				service.ErrConflict,
 				publicKey,
@@ -54,17 +56,16 @@ func (db *DB) ApplyPeerReconciliation(
 		seenPublicKeys[publicKey] = struct{}{}
 		publicKeys[i] = publicKey
 	}
+	return publicKeys, nil
+}
 
-	tx, err := db.Conn.Begin()
-	if err != nil {
-		return fmt.Errorf("begin apply peer reconciliation tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	if err := sqlRequireNetworkTx(tx, network); err != nil {
-		return err
-	}
-
+func sqlApplyPeerReconciliationTx(
+	tx *sql.Tx,
+	network string,
+	peers []service.PeerObservation,
+	publicKeys []string,
+	pruneBefore time.Time,
+) error {
 	if err := sqlDeletePeersAbsentFromReconciliationTx(
 		tx,
 		network,
@@ -73,7 +74,7 @@ func (db *DB) ApplyPeerReconciliation(
 		return err
 	}
 
-	for _, observation := range reconciliation.Peers {
+	for _, observation := range peers {
 		peerID, err := sqlUpsertObservedPeerTx(
 			tx,
 			network,
@@ -98,13 +99,9 @@ func (db *DB) ApplyPeerReconciliation(
 	if err := sqlPruneStalePeerEndpointsTx(
 		tx,
 		network,
-		reconciliation.PruneBefore,
+		pruneBefore,
 	); err != nil {
 		return err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit apply peer reconciliation tx: %w", err)
 	}
 	return nil
 }

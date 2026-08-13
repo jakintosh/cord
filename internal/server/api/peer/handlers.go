@@ -11,24 +11,19 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
-func (a *API) handleVisiblePeers(
+func (a *API) handleVisibleSnapshot(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
 	caller := identity.Caller(r.Context())
 
-	peers, err := a.service.ListVisiblePeers(a.network, caller.Name)
+	snapshot, err := a.service.GetVisibleNetworkSnapshot(a.network, caller.Name)
 	if err != nil {
 		wire.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	visible := make([]protocol.VisiblePeer, len(peers))
-	for i, p := range peers {
-		visible[i] = toVisiblePeer(p)
-	}
-
-	wire.WriteData(w, http.StatusOK, visible)
+	wire.WriteData(w, http.StatusOK, toVisibleNetworkSnapshot(snapshot))
 }
 
 func (a *API) handleReportEndpoints(

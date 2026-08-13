@@ -1,21 +1,23 @@
 package peer
 
 import (
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
-func TestHandleVisiblePeers_Success(t *testing.T) {
+func TestHandleVisibleSnapshot_Success(t *testing.T) {
 	_, api := setupPeerTest(t)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/peers", nil)
+	r := httptest.NewRequest("GET", "/snapshot", nil)
 	r.RemoteAddr = "10.0.0.5:12345"
 
 	api.Router().ServeHTTP(w, r)
@@ -23,13 +25,25 @@ func TestHandleVisiblePeers_Success(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
+	var response struct {
+		Data protocol.VisibleNetworkSnapshot `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Data.Topology.SubjectPeer != "alice" {
+		t.Fatalf("subject peer = %q, want alice", response.Data.Topology.SubjectPeer)
+	}
+	if len(response.Data.Topology.Nodes) == 0 {
+		t.Fatal("expected projected topology nodes")
+	}
 }
 
-func TestHandleVisiblePeers_IdentityFails(t *testing.T) {
+func TestHandleVisibleSnapshot_IdentityFails(t *testing.T) {
 	_, api := setupPeerTest(t)
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/peers", nil)
+	r := httptest.NewRequest("GET", "/snapshot", nil)
 	r.RemoteAddr = "10.0.0.99:12345"
 
 	api.Router().ServeHTTP(w, r)

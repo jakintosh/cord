@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	// SyncInterval is the default period between full peer-set syncs
+	// SyncInterval is the default period between full network snapshot syncs
 	// from the server. Syncs are 1:N — every client polls the same
 	// server — so this stays coarse.
 	SyncInterval = 2 * time.Minute
@@ -238,7 +238,7 @@ func (s *Service) UpdateNetwork(
 	return nil
 }
 
-// SyncNetwork triggers an on-demand peer fetch and device reconciliation
+// SyncNetwork triggers an on-demand network snapshot fetch and reconciliation
 // for the named running network. Returns ErrNetworkNotEnabled if the
 // network is not running.
 func (s *Service) SyncNetwork(
@@ -324,9 +324,9 @@ func (n *Network) stop() error {
 	return n.tunnel.stop()
 }
 
-// sync fetches the visible peer list from the server, persists it,
-// projects it onto the device, and schedules the next sync. It is the
-// only writer of the full device peer set. Called by both the sync
+// sync fetches the visible network snapshot from the server, persists it,
+// projects its peers onto the device, and schedules the next sync. It is the
+// only writer of the full cached server view. Called by both the sync
 // timer and on-demand Service.Sync, so an on-demand sync defers the
 // next scheduled one.
 func (n *Network) sync() error {
@@ -338,18 +338,23 @@ func (n *Network) sync() error {
 	}
 	defer n.completeRefresh(n.syncTimer, n.syncInterval, &n.lastSyncAt)
 
-	visible, err := n.client.ListPeers()
+	snapshot, err := n.client.GetSnapshot()
 	if err != nil {
-		return fmt.Errorf("fetch peers: %w", err)
+		return fmt.Errorf("fetch network snapshot: %w", err)
 	}
-	n.log.Debug("sync", "peers", len(visible))
+	n.log.Debug("sync", "peers", len(snapshot.Peers), "topology_nodes", len(snapshot.Topology.Nodes))
 
-	reconciliation := PeerReconciliation{
-		Peers:       peersFromProtocol(visible),
-		PruneBefore: n.clock().Add(-EndpointTTL),
+	now := n.clock()
+	reconciliation, err := networkReconciliationFromProtocol(
+		snapshot,
+		now,
+		now.Add(-EndpointTTL),
+	)
+	if err != nil {
+		return fmt.Errorf("validate network snapshot: %w", err)
 	}
-	if err := n.store.ApplyPeerReconciliation(n.cfg.Name, reconciliation); err != nil {
-		return fmt.Errorf("apply peer reconciliation: %w", err)
+	if err := n.store.ApplyNetworkReconciliation(n.cfg.Name, reconciliation); err != nil {
+		return fmt.Errorf("apply network reconciliation: %w", err)
 	}
 
 	return n.reconcile()

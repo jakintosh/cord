@@ -35,7 +35,8 @@ func writeServiceError(
 	case errors.Is(err, service.ErrConflict),
 		errors.Is(err, service.ErrInstallState),
 		errors.Is(err, service.ErrNetworkExists),
-		errors.Is(err, service.ErrNetworkNotEnabled):
+		errors.Is(err, service.ErrNetworkNotEnabled),
+		errors.Is(err, service.ErrTopologyUnavailable):
 		wire.WriteError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, service.ErrInvalidInput):
 		wire.WriteError(w, http.StatusBadRequest, err.Error())

@@ -11,11 +11,8 @@ import (
 
 func reconciliation(
 	peers ...service.PeerObservation,
-) service.PeerReconciliation {
-	return service.PeerReconciliation{
-		Peers:       peers,
-		PruneBefore: testutil.FixedTime.Add(-service.EndpointTTL),
-	}
+) service.NetworkReconciliation {
+	return testutil.NetworkReconciliation(peers...)
 }
 
 func peerObservation(
@@ -34,11 +31,11 @@ func peerObservation(
 	}
 }
 
-func TestApplyPeerReconciliation_InsertsAndListsPeers(t *testing.T) {
+func TestApplyNetworkReconciliation_InsertsAndListsPeers(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "testnet")
 
-	err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("bob", "bob-key", "10.42.0.6/32"),
 		peerObservation("alice", "alice-key", "10.42.0.5/32"),
 	))
@@ -58,17 +55,17 @@ func TestApplyPeerReconciliation_InsertsAndListsPeers(t *testing.T) {
 	}
 }
 
-func TestApplyPeerReconciliation_UpdatesAndPrunesPeers(t *testing.T) {
+func TestApplyNetworkReconciliation_UpdatesAndPrunesPeers(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "testnet")
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("alice", "alice-key", "10.42.0.5/32"),
 		peerObservation("bob", "bob-key", "10.42.0.6/32"),
 	)); err != nil {
 		t.Fatalf("seed reconciliation: %v", err)
 	}
 
-	err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("alice-renamed", "alice-key", "10.42.0.9/32"),
 	))
 	if err != nil {
@@ -87,16 +84,16 @@ func TestApplyPeerReconciliation_UpdatesAndPrunesPeers(t *testing.T) {
 	}
 }
 
-func TestApplyPeerReconciliation_AllowsDepartedIdentityReplacement(t *testing.T) {
+func TestApplyNetworkReconciliation_AllowsDepartedIdentityReplacement(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "testnet")
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("alice", "old-key", "10.42.0.5/32"),
 	)); err != nil {
 		t.Fatalf("seed reconciliation: %v", err)
 	}
 
-	err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("alice", "new-key", "10.42.0.5/32"),
 	))
 	if err != nil {
@@ -112,16 +109,16 @@ func TestApplyPeerReconciliation_AllowsDepartedIdentityReplacement(t *testing.T)
 	}
 }
 
-func TestApplyPeerReconciliation_EmptyClearsPeers(t *testing.T) {
+func TestApplyNetworkReconciliation_EmptyClearsPeers(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "testnet")
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("alice", "alice-key", "10.42.0.5/32"),
 	)); err != nil {
 		t.Fatalf("seed reconciliation: %v", err)
 	}
 
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation()); err != nil {
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation()); err != nil {
 		t.Fatalf("apply empty reconciliation: %v", err)
 	}
 
@@ -134,10 +131,10 @@ func TestApplyPeerReconciliation_EmptyClearsPeers(t *testing.T) {
 	}
 }
 
-func TestApplyPeerReconciliation_MissingNetworkLeavesStateUnchanged(t *testing.T) {
+func TestApplyNetworkReconciliation_MissingNetworkLeavesStateUnchanged(t *testing.T) {
 	db := testutil.SetupDB(t)
 
-	err := db.ApplyPeerReconciliation("missing", reconciliation(
+	err := db.ApplyNetworkReconciliation("missing", reconciliation(
 		peerObservation("alice", "alice-key", "10.42.0.5/32"),
 	))
 	if !errors.Is(err, service.ErrNotFound) {
@@ -153,16 +150,16 @@ func TestApplyPeerReconciliation_MissingNetworkLeavesStateUnchanged(t *testing.T
 	}
 }
 
-func TestApplyPeerReconciliation_IdentityConflictRollsBack(t *testing.T) {
+func TestApplyNetworkReconciliation_IdentityConflictRollsBack(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "testnet")
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("existing", "existing-key", "10.42.0.5/32"),
 	)); err != nil {
 		t.Fatalf("seed reconciliation: %v", err)
 	}
 
-	err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("duplicate", "key-a", "10.42.0.6/32"),
 		peerObservation("duplicate", "key-b", "10.42.0.7/32"),
 	))
@@ -179,16 +176,16 @@ func TestApplyPeerReconciliation_IdentityConflictRollsBack(t *testing.T) {
 	}
 }
 
-func TestApplyPeerReconciliation_DuplicatePublicKeyLeavesStateUnchanged(t *testing.T) {
+func TestApplyNetworkReconciliation_DuplicatePublicKeyLeavesStateUnchanged(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "testnet")
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("existing", "existing-key", "10.42.0.5/32"),
 	)); err != nil {
 		t.Fatalf("seed reconciliation: %v", err)
 	}
 
-	err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("alice", "duplicate-key", "10.42.0.6/32"),
 		peerObservation("bob", "duplicate-key", "10.42.0.7/32"),
 	))
@@ -205,12 +202,12 @@ func TestApplyPeerReconciliation_DuplicatePublicKeyLeavesStateUnchanged(t *testi
 	}
 }
 
-func TestApplyPeerReconciliation_MergesEndpointsMonotonically(t *testing.T) {
+func TestApplyNetworkReconciliation_MergesEndpointsMonotonically(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "testnet")
 	newer := testutil.FixedTime
 	older := newer.Add(-time.Hour)
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("alice", "alice-key", "10.42.0.5/32", service.PeerEndpoint{
 			Endpoint:         "1.2.3.4:51820",
 			ServerObservedAt: newer,
@@ -219,7 +216,7 @@ func TestApplyPeerReconciliation_MergesEndpointsMonotonically(t *testing.T) {
 		t.Fatalf("seed endpoint: %v", err)
 	}
 
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("alice", "alice-key", "10.42.0.5/32", service.PeerEndpoint{
 			Endpoint:         "1.2.3.4:51820",
 			ServerObservedAt: older,
@@ -240,7 +237,7 @@ func TestApplyPeerReconciliation_MergesEndpointsMonotonically(t *testing.T) {
 	}
 }
 
-func TestApplyPeerReconciliation_RetainsLocalObservationAndAttempt(t *testing.T) {
+func TestApplyNetworkReconciliation_RetainsLocalObservationAndAttempt(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "testnet")
 	serverObservedAt := testutil.FixedTime.Add(-time.Hour)
@@ -253,7 +250,7 @@ func TestApplyPeerReconciliation_RetainsLocalObservationAndAttempt(t *testing.T)
 			ServerObservedAt: serverObservedAt,
 		},
 	)
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation(entry)); err != nil {
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(entry)); err != nil {
 		t.Fatalf("seed reconciliation: %v", err)
 	}
 	localObservedAt := testutil.FixedTime
@@ -276,7 +273,7 @@ func TestApplyPeerReconciliation_RetainsLocalObservationAndAttempt(t *testing.T)
 	}
 
 	entry.Endpoints[0].ServerObservedAt = testutil.FixedTime.Add(time.Hour)
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation(entry)); err != nil {
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(entry)); err != nil {
 		t.Fatalf("reapply reconciliation: %v", err)
 	}
 
@@ -295,23 +292,20 @@ func TestApplyPeerReconciliation_RetainsLocalObservationAndAttempt(t *testing.T)
 	}
 }
 
-func TestApplyPeerReconciliation_PrunesOnlyFullyStaleEndpoints(t *testing.T) {
+func TestApplyNetworkReconciliation_PrunesOnlyFullyStaleEndpoints(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "testnet")
 	stale := testutil.FixedTime.Add(-2 * service.EndpointTTL)
 	recentLocal := testutil.FixedTime.Add(-time.Hour)
-	if err := db.ApplyPeerReconciliation("testnet", service.PeerReconciliation{
-		Peers: []service.PeerObservation{
-			peerObservation(
-				"alice",
-				"alice-key",
-				"10.42.0.5/32",
-				service.PeerEndpoint{Endpoint: "stale:51820", ServerObservedAt: stale},
-				service.PeerEndpoint{Endpoint: "local:51820", ServerObservedAt: stale},
-			),
-		},
-		PruneBefore: stale.Add(-time.Hour),
-	}); err != nil {
+	seed := reconciliation(peerObservation(
+		"alice",
+		"alice-key",
+		"10.42.0.5/32",
+		service.PeerEndpoint{Endpoint: "stale:51820", ServerObservedAt: stale},
+		service.PeerEndpoint{Endpoint: "local:51820", ServerObservedAt: stale},
+	))
+	seed.PruneBefore = stale.Add(-time.Hour)
+	if err := db.ApplyNetworkReconciliation("testnet", seed); err != nil {
 		t.Fatalf("seed endpoints: %v", err)
 	}
 	if err := db.RecordLocalEndpoint(
@@ -323,12 +317,9 @@ func TestApplyPeerReconciliation_PrunesOnlyFullyStaleEndpoints(t *testing.T) {
 		t.Fatalf("record local endpoint: %v", err)
 	}
 
-	if err := db.ApplyPeerReconciliation("testnet", service.PeerReconciliation{
-		Peers: []service.PeerObservation{
-			peerObservation("alice", "alice-key", "10.42.0.5/32"),
-		},
-		PruneBefore: testutil.FixedTime.Add(-service.EndpointTTL),
-	}); err != nil {
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(
+		peerObservation("alice", "alice-key", "10.42.0.5/32"),
+	)); err != nil {
 		t.Fatalf("apply pruning reconciliation: %v", err)
 	}
 
@@ -353,7 +344,7 @@ func TestListPeers_MissingNetwork(t *testing.T) {
 func TestListPeers_PrefersMostRecentLocalEndpoint(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "testnet")
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation(
 			"alice",
 			"alice-key",
@@ -405,7 +396,7 @@ func TestRecordLocalEndpoint_MissingPeer(t *testing.T) {
 func TestRecordLocalEndpoint_DoesNotRegress(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "testnet")
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("alice", "alice-key", "10.42.0.5/32"),
 	)); err != nil {
 		t.Fatalf("apply reconciliation: %v", err)
@@ -441,7 +432,7 @@ func TestRecordLocalEndpoint_DoesNotRegress(t *testing.T) {
 func TestRecordEndpointAttempt_MissingEndpoint(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "testnet")
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("alice", "alice-key", "10.42.0.5/32"),
 	)); err != nil {
 		t.Fatalf("apply reconciliation: %v", err)
@@ -461,7 +452,7 @@ func TestRecordEndpointAttempt_MissingEndpoint(t *testing.T) {
 func TestRecordEndpointAttempt_DoesNotRegress(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "testnet")
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation(
 			"alice",
 			"alice-key",
@@ -505,7 +496,7 @@ func TestRecordEndpointAttempt_DoesNotRegress(t *testing.T) {
 func TestListLocalEndpointsSince(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "testnet")
-	if err := db.ApplyPeerReconciliation("testnet", reconciliation(
+	if err := db.ApplyNetworkReconciliation("testnet", reconciliation(
 		peerObservation("alice", "alice-key", "10.42.0.5/32"),
 		peerObservation("bob", "bob-key", "10.42.0.6/32"),
 	)); err != nil {

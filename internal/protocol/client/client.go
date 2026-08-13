@@ -80,14 +80,15 @@ func NewPeerClient(
 	}, nil
 }
 
-// ListPeers calls GET /peers and returns the visible peer list.
-func (c *PeerClient) ListPeers() (
-	[]protocol.VisiblePeer,
+// GetSnapshot calls GET /snapshot and returns the caller's complete visible
+// network snapshot.
+func (c *PeerClient) GetSnapshot() (
+	protocol.VisibleNetworkSnapshot,
 	error,
 ) {
-	var peers []protocol.VisiblePeer
-	err := c.client.Get(context.Background(), "/peers", &peers)
-	return peers, err
+	var snapshot protocol.VisibleNetworkSnapshot
+	err := c.client.Get(context.Background(), "/snapshot", &snapshot)
+	return snapshot, err
 }
 
 // ConfirmPeer calls POST /confirm, proving WireGuard reachability.

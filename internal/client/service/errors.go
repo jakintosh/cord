@@ -9,5 +9,6 @@ var (
 	ErrNetworkExists        = errors.New("network already installed")
 	ErrNetworkNotEnabled    = errors.New("network not enabled")
 	ErrInvalidInput         = errors.New("invalid input")
+	ErrTopologyUnavailable  = errors.New("topology unavailable before first sync")
 	ErrWireGuardUnavailable = errors.New("wireguard backend not configured")
 )

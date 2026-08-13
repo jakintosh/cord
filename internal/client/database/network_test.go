@@ -120,22 +120,20 @@ func TestListNetworkNames_Ordered(t *testing.T) {
 func TestDeleteNetworkState_CascadesPeersAndEndpoints(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "cascadenet")
-	err := db.ApplyPeerReconciliation("cascadenet", service.PeerReconciliation{
-		Peers: []service.PeerObservation{{
-			Peer: service.Peer{
-				Name:      "peer-1",
-				PublicKey: "peer-key-1",
-				Route:     "10.42.1.5/32",
-			},
-			Endpoints: []service.PeerEndpoint{{
-				Endpoint:         "1.2.3.4:51820",
-				ServerObservedAt: testutil.FixedTime,
-			}},
+	reconciliation := testutil.NetworkReconciliation(service.PeerObservation{
+		Peer: service.Peer{
+			Name:      "peer-1",
+			PublicKey: "peer-key-1",
+			Route:     "10.42.1.5/32",
+		},
+		Endpoints: []service.PeerEndpoint{{
+			Endpoint:         "1.2.3.4:51820",
+			ServerObservedAt: testutil.FixedTime,
 		}},
-		PruneBefore: testutil.FixedTime.Add(-service.EndpointTTL),
 	})
+	err := db.ApplyNetworkReconciliation("cascadenet", reconciliation)
 	if err != nil {
-		t.Fatalf("apply peer reconciliation: %v", err)
+		t.Fatalf("apply network reconciliation: %v", err)
 	}
 
 	if err := db.DeleteNetworkState("cascadenet"); err != nil {

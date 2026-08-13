@@ -6,6 +6,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
+	"git.studiopollinator.com/pollinator/cord/internal/topology"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -23,6 +24,50 @@ var defaultInvite = protocol.Invitation{
 		Route:      "10.42.0.5/32",
 		PrivateKey: mustGenerateKey(),
 	},
+}
+
+func NetworkSnapshot(
+	peers ...protocol.VisiblePeer,
+) protocol.VisibleNetworkSnapshot {
+	return protocol.VisibleNetworkSnapshot{
+		GeneratedAt: FixedTime,
+		Peers:       peers,
+		Topology: protocol.TopologyView{
+			SubjectPeer: "self",
+			Nodes: []protocol.TopologyNode{
+				{
+					Name:     "self",
+					CIDR:     "10.42.0.5/32",
+					Terminal: true,
+					PeerName: "self",
+					Subject:  true,
+				},
+			},
+		},
+	}
+}
+
+func NetworkReconciliation(
+	peers ...service.PeerObservation,
+) service.NetworkReconciliation {
+	self, err := topology.CidrFromString("self", "10.42.0.5/32", true)
+	if err != nil {
+		panic("construct test topology: " + err.Error())
+	}
+	return service.NetworkReconciliation{
+		Peers: peers,
+		Topology: topology.View{
+			SubjectPeer: "self",
+			Nodes: []topology.ViewNode{{
+				Cidr:     self,
+				PeerName: "self",
+				Subject:  true,
+			}},
+		},
+		GeneratedAt: FixedTime,
+		ReceivedAt:  FixedTime,
+		PruneBefore: FixedTime.Add(-service.EndpointTTL),
+	}
 }
 
 func mustGenerateKey() string {
@@ -143,10 +188,10 @@ func SeedPeers(
 	for i, peer := range peers {
 		observations[i] = service.PeerObservation{Peer: peer}
 	}
-	if err := db.ApplyPeerReconciliation(network, service.PeerReconciliation{
-		Peers:       observations,
-		PruneBefore: FixedTime.Add(-service.EndpointTTL),
-	}); err != nil {
+	if err := db.ApplyNetworkReconciliation(
+		network,
+		NetworkReconciliation(observations...),
+	); err != nil {
 		t.Fatalf("seed peers: %v", err)
 	}
 }

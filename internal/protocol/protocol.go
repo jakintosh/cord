@@ -114,13 +114,43 @@ type RedeemRequest struct {
 }
 
 // VisiblePeer is a peer as seen from the perspective of another peer on
-// the main network. It carries identity and recently witnessed
-// endpoints, and is returned by GET /peers.
+// the main network. It carries identity and recently witnessed endpoints and
+// is returned as part of GET /snapshot.
 type VisiblePeer struct {
 	Name      string            `json:"name"`
 	Route     string            `json:"route"`
 	PublicKey string            `json:"public_key"`
 	Endpoints []EndpointWitness `json:"endpoints"`
+}
+
+// VisibleNetworkSnapshot is one complete peer synchronization response.
+// Peers and topology are derived from the same server-side source snapshot.
+type VisibleNetworkSnapshot struct {
+	GeneratedAt time.Time     `json:"generated_at"`
+	Peers       []VisiblePeer `json:"peers"`
+	Topology    TopologyView  `json:"topology"`
+}
+
+type TopologyView struct {
+	Nodes           []TopologyNode        `json:"nodes"`
+	Associations    []TopologyAssociation `json:"associations"`
+	EffectiveGroups []string              `json:"effective_groups"`
+	SubjectPeer     string                `json:"subject_peer"`
+}
+
+type TopologyNode struct {
+	Name          string   `json:"name"`
+	CIDR          string   `json:"cidr"`
+	Terminal      bool     `json:"terminal"`
+	DisplayParent string   `json:"display_parent,omitempty"`
+	Groups        []string `json:"groups"`
+	PeerName      string   `json:"peer_name,omitempty"`
+	Subject       bool     `json:"subject"`
+}
+
+type TopologyAssociation struct {
+	Group1 string `json:"group1"`
+	Group2 string `json:"group2"`
 }
 
 // EndpointWitness records a peer's endpoint and when it was observed.

@@ -166,8 +166,8 @@ type Store interface {
 
 	// Peer cache within a network.
 
-	// ApplyPeerReconciliation atomically reconciles cached peers with one
-	// complete server view.
+	// ApplyNetworkReconciliation atomically reconciles cached peers and replaces
+	// the cached topology with one complete server view.
 	//
 	// Persisted preconditions:
 	//   - The completed network exists.
@@ -179,19 +179,32 @@ type Store interface {
 	//   - Local observations and endpoint-attempt history are retained.
 	//   - Endpoints older than PruneBefore in both observation channels are
 	//     deleted.
+	//   - The prior topology projection is replaced in full.
 	//
 	// Retry:
 	//   - Reapplying the same reconciliation succeeds unchanged.
 	//
 	// Errors:
 	//   - ErrNotFound when the completed network does not exist.
+	//   - ErrInvalidInput when the topology projection is malformed.
 	//   - ErrConflict when the reconciliation contains duplicate peer public keys.
 	//   - ErrConflict when peer identities conflict with durable uniqueness
 	//     rules.
-	ApplyPeerReconciliation(
+	ApplyNetworkReconciliation(
 		network string,
-		reconciliation PeerReconciliation,
+		reconciliation NetworkReconciliation,
 	) error
+
+	// GetNetworkTopology returns the last complete projected topology and its
+	// server generation and local synchronization times. It returns ErrNotFound
+	// when the network is absent and ErrTopologyUnavailable before its first
+	// successful synchronization.
+	GetNetworkTopology(
+		network string,
+	) (
+		*CachedTopology,
+		error,
+	)
 
 	// ListPeers returns all cached peers for the named network,
 	// ordered by name ascending. Each peer's Endpoint field is

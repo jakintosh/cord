@@ -29,14 +29,14 @@ func names(peers []Peer) []string {
 	return n
 }
 
-func TestNewResolver_Invalid(t *testing.T) {
+func TestNewResolver_EmptySnapshot(t *testing.T) {
 	_, err := NewResolver(&Snapshot{})
 	if err != nil {
 		t.Fatal("empty &snapshot should be valid")
 	}
 }
 
-func TestEffectiveGroups_NoInheritance(t *testing.T) {
+func TestEffectiveGroups_InheritsDirectGroups(t *testing.T) {
 	s := &Snapshot{
 		Cidrs: []Cidr{
 			makeCidr("root", "10.0.0.0/16", false),
@@ -54,7 +54,10 @@ func TestEffectiveGroups_NoInheritance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leafGroups, _ := r.GetEffectiveGroups("leaf")
+	leafGroups, err := r.GetEffectiveGroups("leaf")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !contains(leafGroups, "users") {
 		t.Error("leaf should inherit 'users' from root")
 	}
@@ -83,12 +86,41 @@ func TestEffectiveGroups_MultiLevelInheritance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leafGroups, _ := r.GetEffectiveGroups("leaf")
+	leafGroups, err := r.GetEffectiveGroups("leaf")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !contains(leafGroups, "org") {
 		t.Error("leaf should inherit 'org' from root via subnet")
 	}
 	if !contains(leafGroups, "engineering") {
 		t.Error("leaf should inherit 'engineering' from subnet")
+	}
+}
+
+func TestGetEffectiveGroups_ReturnsCopy(t *testing.T) {
+	r, err := NewResolver(&Snapshot{
+		Cidrs: []Cidr{makeCidr("network", "10.0.0.0/24", false)},
+		Assignments: map[string][]string{
+			"network": {"group"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	groups, err := r.GetEffectiveGroups("network")
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(groups, "group")
+
+	groups, err = r.GetEffectiveGroups("network")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !groups["group"] {
+		t.Fatal("mutating returned groups changed resolver state")
 	}
 }
 
@@ -114,8 +146,14 @@ func TestEffectiveGroups_SiblingIndependence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	aliceGroups, _ := r.GetEffectiveGroups("alice")
-	bobGroups, _ := r.GetEffectiveGroups("bob")
+	aliceGroups, err := r.GetEffectiveGroups("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobGroups, err := r.GetEffectiveGroups("bob")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !contains(aliceGroups, "engineering") {
 		t.Error("alice should have engineering")
 	}
@@ -199,11 +237,17 @@ func TestVisiblePeers_NoSelfAssociation_Unidirectional(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	visible, _ := r.VisiblePeers("svr")
+	visible, err := r.VisiblePeers("svr")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(visible) != 1 || visible[0].Name != "usr" {
 		t.Errorf("svr should see usr, got %v", names(visible))
 	}
-	visible, _ = r.VisiblePeers("usr")
+	visible, err = r.VisiblePeers("usr")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(visible) != 1 || visible[0].Name != "svr" {
 		t.Errorf("usr should see svr, got %v", names(visible))
 	}
@@ -234,7 +278,10 @@ func TestVisiblePeers_NoGroupMembership_NoVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	visible, _ := r.VisiblePeers("alice")
+	visible, err := r.VisiblePeers("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(visible) != 0 {
 		t.Errorf("alice should see nobody (no associations), got %v", names(visible))
 	}

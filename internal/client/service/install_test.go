@@ -230,8 +230,8 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 	mux.HandleFunc("POST /confirm", func(w http.ResponseWriter, r *http.Request) {
 		wire.WriteData(w, http.StatusOK, map[string]string{"status": "confirmed"})
 	})
-	mux.HandleFunc("GET /peers", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, []protocol.VisiblePeer{})
+	mux.HandleFunc("GET /snapshot", func(w http.ResponseWriter, r *http.Request) {
+		wire.WriteData(w, http.StatusOK, testutil.NetworkSnapshot())
 	})
 
 	env := testutil.SetupServiceWithServer(t, mux)
@@ -309,8 +309,8 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 		confirmCalled = true
 		wire.WriteData(w, http.StatusOK, map[string]string{"status": "confirmed"})
 	})
-	mux.HandleFunc("GET /peers", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, []protocol.VisiblePeer{})
+	mux.HandleFunc("GET /snapshot", func(w http.ResponseWriter, r *http.Request) {
+		wire.WriteData(w, http.StatusOK, testutil.NetworkSnapshot())
 	})
 
 	env := testutil.SetupServiceWithServer(t, mux)
@@ -452,8 +452,8 @@ func TestConfirmInstall_ClearsInstallFields(t *testing.T) {
 	mux.HandleFunc("POST /confirm", func(w http.ResponseWriter, r *http.Request) {
 		wire.WriteData(w, http.StatusOK, map[string]string{"status": "confirmed"})
 	})
-	mux.HandleFunc("GET /peers", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, []protocol.VisiblePeer{})
+	mux.HandleFunc("GET /snapshot", func(w http.ResponseWriter, r *http.Request) {
+		wire.WriteData(w, http.StatusOK, testutil.NetworkSnapshot())
 	})
 
 	env := testutil.SetupServiceWithServer(t, mux)

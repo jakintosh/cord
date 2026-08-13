@@ -87,51 +87,6 @@ func renderConnectingPaths(
 	return found
 }
 
-func renderVisiblePeers(
-	visible []topology.Peer,
-	visibleGroups map[string]bool,
-	resolver *topology.Resolver,
-) {
-	if len(visible) == 0 {
-		fmt.Println("(none)")
-		return
-	}
-
-	byGroup := make(map[string][]topology.Peer)
-	for _, p := range visible {
-		cidrName, ok := resolver.GetPeerCIDR(p.Name)
-		if !ok {
-			continue
-		}
-		peerGroups, err := resolver.GetEffectiveGroups(cidrName)
-		if err != nil {
-			continue
-		}
-		for g := range peerGroups {
-			if visibleGroups[g] {
-				byGroup[g] = append(byGroup[g], p)
-			}
-		}
-	}
-
-	groupNames := make([]string, 0, len(byGroup))
-	for g := range byGroup {
-		groupNames = append(groupNames, g)
-	}
-	sort.Strings(groupNames)
-
-	for _, g := range groupNames {
-		peers := byGroup[g]
-		sort.Slice(peers, func(i, j int) bool {
-			return peers[i].Name < peers[j].Name
-		})
-		fmt.Println(g)
-		for _, p := range peers {
-			fmt.Printf("- %s | %s\n", p.Route, p.Name)
-		}
-	}
-}
-
 func printAssoc(
 	left string,
 	right string,

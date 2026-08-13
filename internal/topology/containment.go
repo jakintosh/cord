@@ -2,7 +2,6 @@ package topology
 
 import (
 	"bytes"
-	"cmp"
 	"fmt"
 	"net"
 	"slices"
@@ -23,6 +22,79 @@ type containmentEntry struct {
 	cidr   Cidr
 	parent int
 	depth  int
+}
+
+func (c *containmentIndex) index(
+	name string,
+) (
+	int,
+	bool,
+) {
+	index, ok := c.byName[name]
+	return index, ok
+}
+
+func (c *containmentIndex) entry(
+	name string,
+) (
+	containmentEntry,
+	bool,
+) {
+	index, ok := c.index(name)
+	if !ok {
+		return containmentEntry{}, false
+	}
+	return c.entries[index], true
+}
+
+func (c *containmentIndex) ancestryIndexes(
+	name string,
+) (
+	[]int,
+	bool,
+) {
+	index, ok := c.index(name)
+	if !ok {
+		return nil, false
+	}
+
+	ancestry := make([]int, 0, c.entries[index].depth+1)
+	for index != noParent {
+		ancestry = append(ancestry, index)
+		index = c.entries[index].parent
+	}
+	return ancestry, true
+}
+
+func (c *containmentIndex) ancestryNames(
+	name string,
+) (
+	stringSet,
+	bool,
+) {
+	indexes, ok := c.ancestryIndexes(name)
+	if !ok {
+		return nil, false
+	}
+
+	names := make(stringSet, len(indexes))
+	for _, index := range indexes {
+		names.add(c.entries[index].cidr.Name)
+	}
+	return names, true
+}
+
+func (c *containmentIndex) nearestAncestorName(
+	entry containmentEntry,
+	include func(string) bool,
+) string {
+	for parent := entry.parent; parent != noParent; parent = c.entries[parent].parent {
+		name := c.entries[parent].cidr.Name
+		if include(name) {
+			return name
+		}
+	}
+	return ""
 }
 
 func buildContainment(
@@ -49,21 +121,9 @@ func buildContainment(
 
 	// Base-address order keeps descendants together. When bases match, the
 	// shorter prefix comes first so a parent always precedes its children.
-	slices.SortFunc(ordered, func(a, b Cidr) int {
-		if n := cmp.Compare(a.Bits, b.Bits); n != 0 {
-			return n
-		}
-		if n := bytes.Compare(a.Base, b.Base); n != 0 {
-			return n
-		}
-		if n := cmp.Compare(a.Prefix, b.Prefix); n != 0 {
-			return n
-		}
-		return cmp.Compare(a.Name, b.Name)
-	})
+	sortCidrs(ordered)
 
-	// ensure no duplicate ranges
-	// equal ranges are adjacent after sorting
+	// Equal ranges are adjacent after sorting, so reject them in one pass.
 	for i := 1; i < len(ordered); i++ {
 		previous := ordered[i-1]
 		current := ordered[i]
@@ -83,11 +143,10 @@ func buildContainment(
 	byName := make(map[string]int, len(ordered))
 	entries := make([]containmentEntry, 0, len(ordered))
 	for _, cidr := range ordered {
-
 		// Pop completed or disjoint branches until the nearest parent is on top.
 		for len(stack) > 0 {
 			parent := entries[stack[len(stack)-1]].cidr
-			if containsCidr(parent, cidr) {
+			if parent.contains(cidr) {
 				break
 			}
 			stack = stack[:len(stack)-1]
@@ -124,6 +183,11 @@ func normalizeCidrInfo(
 	if cidr.Name == "" {
 		return Cidr{}, fmt.Errorf("CIDR name is required")
 	}
+	network, err := netaddr.ParseNetworkCIDR(cidr.Cidr)
+	if err != nil {
+		return Cidr{}, fmt.Errorf("parse CIDR %q: %w", cidr.Cidr, err)
+	}
+	parsedPrefix, parsedBits := network.Mask.Size()
 
 	if cidr.Bits != 32 && cidr.Bits != 128 {
 		return Cidr{}, fmt.Errorf(
@@ -141,6 +205,13 @@ func normalizeCidrInfo(
 			cidr.Bits,
 		)
 	}
+	if cidr.Prefix != parsedPrefix || cidr.Bits != parsedBits {
+		return Cidr{}, fmt.Errorf(
+			"CIDR %q metadata does not match %q",
+			cidr.Name,
+			cidr.Cidr,
+		)
+	}
 
 	base := normalizeIP(cidr.Base, cidr.Bits)
 	last := normalizeIP(cidr.Last, cidr.Bits)
@@ -152,11 +223,12 @@ func normalizeCidrInfo(
 		)
 	}
 
-	network := net.IPNet{
+	metadataNetwork := net.IPNet{
 		IP:   base,
 		Mask: net.CIDRMask(cidr.Prefix, cidr.Bits),
 	}
-	expectedBase, expectedLast := netaddr.Range(&network)
+	expectedBase, expectedLast := netaddr.Range(&metadataNetwork)
+	parsedBase, parsedLast := netaddr.Range(network)
 
 	if !bytes.Equal(base, expectedBase) || !bytes.Equal(last, expectedLast) {
 		return Cidr{}, fmt.Errorf(
@@ -165,7 +237,15 @@ func normalizeCidrInfo(
 			cidr.Prefix,
 		)
 	}
+	if !bytes.Equal(base, parsedBase) || !bytes.Equal(last, parsedLast) {
+		return Cidr{}, fmt.Errorf(
+			"CIDR %q range does not match %q",
+			cidr.Name,
+			cidr.Cidr,
+		)
+	}
 
+	cidr.Cidr = network.String()
 	cidr.Base = base
 	cidr.Last = last
 	return cidr, nil
@@ -180,13 +260,4 @@ func normalizeIP(
 		return nil
 	}
 	return slices.Clone(ip)
-}
-
-func containsCidr(
-	outer Cidr,
-	inner Cidr,
-) bool {
-	return outer.Bits == inner.Bits &&
-		bytes.Compare(outer.Base, inner.Base) <= 0 &&
-		bytes.Compare(outer.Last, inner.Last) >= 0
 }

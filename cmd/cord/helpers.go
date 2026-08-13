@@ -78,6 +78,16 @@ func printTable(
 	w.Flush()
 }
 
+func terminalStyleEnabled(
+	file *os.File,
+) bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
 func humanizeOptionalTime(timestamp *string) string {
 	if timestamp == nil {
 		return "never"

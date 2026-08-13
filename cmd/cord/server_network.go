@@ -15,6 +15,7 @@ var serverNetworkCmd = &args.Command{
 		serverNetworkDelete,
 		serverNetworkList,
 		serverNetworkShow,
+		serverNetworkTopology,
 		serverNetworkEnable,
 		serverNetworkDisable,
 	},

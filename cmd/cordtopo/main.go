@@ -9,6 +9,7 @@ import (
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.sr.ht/~jakintosh/command-go/pkg/version"
 	"git.studiopollinator.com/pollinator/cord/internal/topology"
+	topotext "git.studiopollinator.com/pollinator/cord/internal/topology/text"
 )
 
 const (
@@ -30,6 +31,29 @@ var root = &args.Command{
 	Subcommands: []*args.Command{
 		version.Command(VersionInfo),
 		{
+			Name: "full",
+			Help: "show the complete topology",
+			Operands: []args.Operand{
+				{
+					Name: "config",
+					Help: "path to the topology config JSON",
+				},
+			},
+			Handler: func(i *args.Input) error {
+				configPath := i.GetOperand("config")
+				snap, _, db, err := setup(configPath)
+				if err != nil {
+					return err
+				}
+				defer db.Close()
+				topo, err := topology.New(snap)
+				if err != nil {
+					return fmt.Errorf("compile topology: %w", err)
+				}
+				return topotext.Render(os.Stdout, topo.FullView(), topotext.Options{})
+			},
+		},
+		{
 			Name: "visible",
 			Help: "show the visible topology for a peer",
 			Operands: []args.Operand{
@@ -46,7 +70,7 @@ var root = &args.Command{
 				configPath := i.GetOperand("config")
 				peerName := i.GetOperand("peer")
 
-				snap, cfg, db, err := setup(configPath)
+				snap, _, db, err := setup(configPath)
 				if err != nil {
 					return err
 				}
@@ -56,45 +80,13 @@ var root = &args.Command{
 				if err != nil {
 					return fmt.Errorf("compile topology: %w", err)
 				}
-				resolver := topo.Resolver()
-
-				cidrName, ok := resolver.GetPeerCIDR(peerName)
-				if !ok {
-					return fmt.Errorf("peer %q not found", peerName)
-				}
-
-				effGroups, err := resolver.GetEffectiveGroups(cidrName)
+				view, err := topo.ProjectedView(peerName)
 				if err != nil {
 					return err
 				}
-
-				visiblePeers, err := resolver.VisiblePeers(peerName)
-				if err != nil {
-					return err
-				}
-
-				visibleGroups := make(map[string]bool)
-				for _, a := range cfg.Associations {
-					if effGroups[a.Group1] {
-						visibleGroups[a.Group2] = true
-					}
-					if effGroups[a.Group2] {
-						visibleGroups[a.Group1] = true
-					}
-				}
-
-				renderHeading("topology")
-				renderPeerAncestryAndGroups(os.Stdout, cidrName, effGroups, topo.Tree())
-
-				fmt.Println()
-				renderHeading("associations")
-				renderAllAssociations(cfg.Associations, effGroups)
-
-				fmt.Println()
-				renderHeading("visible peers")
-				renderVisiblePeers(visiblePeers, visibleGroups, resolver)
-
-				return nil
+				return topotext.Render(os.Stdout, view, topotext.Options{
+					Heading: "topology (projected)",
+				})
 			},
 		},
 		{

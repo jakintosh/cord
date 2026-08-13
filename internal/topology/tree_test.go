@@ -119,7 +119,7 @@ func TestNewTree_GroupsAttached(t *testing.T) {
 	}
 }
 
-func TestNewTree_Ipv6(t *testing.T) {
+func TestNewTree_IPv6(t *testing.T) {
 	s := &Snapshot{
 		Cidrs: []Cidr{
 			makeCidr("v6root", "fd00::/32", false),

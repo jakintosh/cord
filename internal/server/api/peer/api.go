@@ -34,7 +34,7 @@ func New(
 
 func (a *API) Router() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /peers", identity.Require(a.log, a.lookupPeer, a.handleVisiblePeers))
+	mux.HandleFunc("GET /snapshot", identity.Require(a.log, a.lookupPeer, a.handleVisibleSnapshot))
 	mux.HandleFunc("POST /endpoints", identity.Require(a.log, a.lookupPeer, a.handleReportEndpoints))
 	mux.HandleFunc("POST /confirm", identity.Require(a.log, a.lookupProvisional, a.handleConfirmPeer))
 	return logging.Middleware(a.log, mux)

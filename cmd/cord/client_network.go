@@ -18,6 +18,7 @@ var clientNetworkCmd = &args.Command{
 	Subcommands: []*args.Command{
 		clientNetworkList,
 		clientNetworkShow,
+		clientNetworkTopology,
 		clientNetworkInstall,
 		clientNetworkRedeem,
 		clientNetworkConfirm,

@@ -77,15 +77,8 @@ type PeerObservation struct {
 	Endpoints []PeerEndpoint
 }
 
-// PeerReconciliation is one complete server view used to reconcile a
-// network's cached peers. PruneBefore bounds retained endpoint observations.
-type PeerReconciliation struct {
-	Peers       []PeerObservation
-	PruneBefore time.Time
-}
-
-// peersFromProtocol converts the server's visible peer list into a local
-// reconciliation input.
+// peersFromProtocol converts the server snapshot's visible peer list into a
+// local reconciliation input.
 func peersFromProtocol(
 	visible []protocol.VisiblePeer,
 ) []PeerObservation {

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
-	"git.studiopollinator.com/pollinator/cord/internal/topology"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -97,55 +96,11 @@ func (s *Service) ListVisiblePeers(
 	[]*VisiblePeer,
 	error,
 ) {
-	snapshot, err := s.store.LoadTopologySnapshot(network)
+	snapshot, err := s.GetVisibleNetworkSnapshot(network, peerName)
 	if err != nil {
-		return nil, fmt.Errorf("load topology snapshot: %w", err)
+		return nil, err
 	}
-
-	resolver, err := topology.NewResolver(snapshot)
-	if err != nil {
-		return nil, fmt.Errorf("create topology resolver: %w", err)
-	}
-
-	visible, err := resolver.VisiblePeers(peerName)
-	if err != nil {
-		return nil, fmt.Errorf("resolve visible peers for %q: %w", peerName, err)
-	}
-
-	since := s.clock().Add(-defaultEndpointTTL)
-	recentEndpoints, err := s.store.GetRecentEndpoints(network, since)
-	if err != nil {
-		return nil, fmt.Errorf("get recent endpoints: %w", err)
-	}
-
-	result := make([]*VisiblePeer, 0, len(visible))
-	for _, p := range visible {
-		// The server peer is not returned in the visible peer set.
-		// Clients pin the server configuration from redemption data.
-		// TODO: make sure that cord-server *cant* show up here
-		if p.Name == "cord-server" {
-			continue
-		}
-
-		witnesses := recentEndpoints[p.PublicKey]
-		endpoints := make([]EndpointWitness, len(witnesses))
-		for i, w := range witnesses {
-			endpoints[i] = EndpointWitness{
-				Witness:   w.Witness,
-				Endpoint:  w.Endpoint,
-				Timestamp: w.Timestamp,
-			}
-		}
-
-		result = append(result, &VisiblePeer{
-			Name:      p.Name,
-			Route:     p.Route,
-			PublicKey: p.PublicKey,
-			Endpoints: endpoints,
-		})
-	}
-
-	return result, nil
+	return snapshot.Peers, nil
 }
 
 // UpdatePeer applies a partial update to a peer and returns the

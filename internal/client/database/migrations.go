@@ -74,6 +74,16 @@ CREATE TABLE network (
     CHECK (server_api_port BETWEEN 1 AND 65535)
 );
 
+CREATE TABLE topology (
+    network_name       TEXT PRIMARY KEY,
+    view_json          TEXT NOT NULL,
+    generated_at_unix  INTEGER NOT NULL,
+    synced_at_unix     INTEGER NOT NULL,
+    FOREIGN KEY (network_name)
+        REFERENCES network (name)
+        ON DELETE CASCADE
+);
+
 CREATE TABLE peer (
     id              INTEGER PRIMARY KEY,
     network_name    TEXT NOT NULL,
