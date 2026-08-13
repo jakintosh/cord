@@ -99,6 +99,42 @@ func TestAddCidr_InvalidFormat(t *testing.T) {
 	}
 }
 
+func TestAddCidr_HostBitsSet(t *testing.T) {
+	store := &createCidrStoreSpy{}
+	mgr := wireguard.NewManagerWithBackend(wireguardtest.NewMockBackend())
+	svc, err := service.New(service.Options{Store: store, WireGuard: mgr})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	err = svc.CreateCidr("testnet", "bad", "10.0.99.0/16")
+	if !errors.Is(err, service.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+	if got := err.Error(); got != `invalid input: invalid CIDR "10.0.99.0/16": host bits are set; network address is "10.0.0.0/16"` {
+		t.Fatalf("err = %q", got)
+	}
+	if store.createdCidr != nil {
+		t.Fatalf("CreateCidr called after rejected input: %+v", store.createdCidr)
+	}
+}
+
+func TestAddCidr_CanonicalizesBeforePersistence(t *testing.T) {
+	store := &createCidrStoreSpy{}
+	mgr := wireguard.NewManagerWithBackend(wireguardtest.NewMockBackend())
+	svc, err := service.New(service.Options{Store: store, WireGuard: mgr})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	if err := svc.CreateCidr("testnet", "v6", "FD00:0:0:1::/64"); err != nil {
+		t.Fatalf("create CIDR: %v", err)
+	}
+	if store.createdCidr == nil || store.createdCidr.Cidr != "fd00:0:0:1::/64" {
+		t.Fatalf("created CIDR = %+v, want canonical fd00:0:0:1::/64", store.createdCidr)
+	}
+}
+
 func TestAddCidr_NotContainedInRoot(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)

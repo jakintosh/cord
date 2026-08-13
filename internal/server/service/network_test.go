@@ -147,6 +147,68 @@ func TestCreateNetwork_InvalidMainCIDR(t *testing.T) {
 	}
 }
 
+func TestCreateNetwork_MainCIDRWithHostBits(t *testing.T) {
+	env := testutil.SetupService(t)
+
+	_, err := env.Service.CreateNetwork(
+		"hostbits",
+		"1.2.3.4",
+		service.PlaneConfig{Cidr: "10.0.99.0/16"},
+		service.PlaneConfig{},
+	)
+	if !errors.Is(err, service.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+	if got := err.Error(); got != `main: invalid input: invalid CIDR "10.0.99.0/16": host bits are set; network address is "10.0.0.0/16"` {
+		t.Fatalf("err = %q", got)
+	}
+	if _, err := env.Service.GetNetwork("hostbits"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("GetNetwork after rejection: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCreateNetwork_CanonicalizesStoredCIDRs(t *testing.T) {
+	env := testutil.SetupService(t)
+
+	nw, err := env.Service.CreateNetwork(
+		"canonical",
+		"1.2.3.4",
+		service.PlaneConfig{Cidr: "FD00:0:0:0::/64"},
+		service.PlaneConfig{Cidr: "FD01:0:0:0::/64"},
+	)
+	if err != nil {
+		t.Fatalf("create network: %v", err)
+	}
+	if nw.Main.Cidr != "fd00::/64" || nw.Invite.Cidr != "fd01::/64" {
+		t.Fatalf("created CIDRs = %q, %q; want canonical IPv6", nw.Main.Cidr, nw.Invite.Cidr)
+	}
+
+	stored, err := env.Service.GetNetwork("canonical")
+	if err != nil {
+		t.Fatalf("get network: %v", err)
+	}
+	if stored.Main.Cidr != "fd00::/64" || stored.Invite.Cidr != "fd01::/64" {
+		t.Fatalf("stored CIDRs = %q, %q; want canonical IPv6", stored.Main.Cidr, stored.Invite.Cidr)
+	}
+
+	cidrs, err := env.Service.ListCidrs("canonical")
+	if err != nil {
+		t.Fatalf("list CIDRs: %v", err)
+	}
+	foundRoot := false
+	for _, cidr := range cidrs {
+		if cidr.Name == "canonical" {
+			foundRoot = true
+			if cidr.Cidr != "fd00::/64" {
+				t.Fatalf("stored root CIDR = %q, want fd00::/64", cidr.Cidr)
+			}
+		}
+	}
+	if !foundRoot {
+		t.Fatal("stored root CIDR not found")
+	}
+}
+
 func TestCreateNetwork_InvalidInviteCIDR(t *testing.T) {
 	env := testutil.SetupService(t)
 
@@ -158,6 +220,26 @@ func TestCreateNetwork_InvalidInviteCIDR(t *testing.T) {
 	)
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestCreateNetwork_InviteCIDRWithHostBits(t *testing.T) {
+	env := testutil.SetupService(t)
+
+	_, err := env.Service.CreateNetwork(
+		"hostbits",
+		"1.2.3.4",
+		service.PlaneConfig{Cidr: "10.99.0.0/16"},
+		service.PlaneConfig{Cidr: "172.16.10.99/24"},
+	)
+	if !errors.Is(err, service.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+	if got := err.Error(); got != `invite: invalid input: invalid CIDR "172.16.10.99/24": host bits are set; network address is "172.16.10.0/24"` {
+		t.Fatalf("err = %q", got)
+	}
+	if _, err := env.Service.GetNetwork("hostbits"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("GetNetwork after rejection: err = %v, want ErrNotFound", err)
 	}
 }
 

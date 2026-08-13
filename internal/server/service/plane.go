@@ -23,15 +23,16 @@ type PlaneConfig struct {
 	ApiPort       uint16
 }
 
-// validate checks that a single plane config has a valid device name
-// and CIDR.
-func (pc *PlaneConfig) validate() error {
+// normalize validates a plane config and canonicalizes its network CIDR.
+func (pc *PlaneConfig) normalize() error {
 	if err := wireguard.ValidateDeviceName(pc.Name); err != nil {
 		return fmt.Errorf("%w: invalid device name: %v", ErrInvalidInput, err)
 	}
-	if _, _, err := net.ParseCIDR(pc.Cidr); err != nil {
+	cidr, err := netaddr.ParseNetworkCIDR(pc.Cidr)
+	if err != nil {
 		return fmt.Errorf("%w: invalid CIDR %q: %v", ErrInvalidInput, pc.Cidr, err)
 	}
+	pc.Cidr = cidr.String()
 	return nil
 }
 

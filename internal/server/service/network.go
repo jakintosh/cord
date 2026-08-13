@@ -79,12 +79,12 @@ func (n *NetworkConfig) Normalize() error {
 	}
 
 	// Validate main plane
-	if err := n.Main.validate(); err != nil {
+	if err := n.Main.normalize(); err != nil {
 		return fmt.Errorf("main: %w", err)
 	}
 
 	// Validate invite plane
-	if err := n.Invite.validate(); err != nil {
+	if err := n.Invite.normalize(); err != nil {
 		return fmt.Errorf("invite: %w", err)
 	}
 

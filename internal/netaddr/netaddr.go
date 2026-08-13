@@ -82,6 +82,28 @@ func TerminalPrefix(
 	return 128
 }
 
+// ParseNetworkCIDR parses s as a network range in CIDR notation. It rejects
+// addresses with host bits set instead of silently masking them, and returns
+// the canonical network representation for accepted input.
+func ParseNetworkCIDR(
+	s string,
+) (
+	*net.IPNet,
+	error,
+) {
+	ip, network, err := net.ParseCIDR(s)
+	if err != nil {
+		return nil, err
+	}
+	if !ip.Equal(network.IP) {
+		return nil, fmt.Errorf(
+			"host bits are set; network address is %q",
+			network.String(),
+		)
+	}
+	return network, nil
+}
+
 // InterfaceRoute returns the route to assign to a device on network
 // n: the first assignable host IP carrying n's prefix length (e.g.
 // 10.0.0.1/16). This is deliberately not a masked network address — the

@@ -63,6 +63,54 @@ func TestIncrement(t *testing.T) {
 	}
 }
 
+func TestParseNetworkCIDR(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr string
+	}{
+		{
+			name: "ipv4",
+			in:   "10.99.0.0/16",
+			want: "10.99.0.0/16",
+		},
+		{
+			name: "canonicalizes ipv6",
+			in:   "FD00:0:0:0::/64",
+			want: "fd00::/64",
+		},
+		{
+			name:    "rejects ipv4 host bits",
+			in:      "10.0.99.0/16",
+			wantErr: `host bits are set; network address is "10.0.0.0/16"`,
+		},
+		{
+			name:    "rejects ipv6 host bits",
+			in:      "fd00::1/64",
+			wantErr: `host bits are set; network address is "fd00::/64"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseNetworkCIDR(tt.in)
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("ParseNetworkCIDR(%q) error = %v, want %q", tt.in, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseNetworkCIDR(%q): %v", tt.in, err)
+			}
+			if got.String() != tt.want {
+				t.Fatalf("ParseNetworkCIDR(%q) = %q, want %q", tt.in, got.String(), tt.want)
+			}
+		})
+	}
+}
+
 func TestIncrement_DoesNotMutateInput(t *testing.T) {
 	in := net.ParseIP("10.0.0.1")
 	before := in.String()

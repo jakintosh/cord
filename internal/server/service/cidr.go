@@ -2,7 +2,8 @@ package service
 
 import (
 	"fmt"
-	"net"
+
+	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 )
 
 // Cidr is a named CIDR range within a server network. CIDRs partition
@@ -62,7 +63,7 @@ func (s *Service) CreateCidr(
 		return fmt.Errorf("%w: CIDR name required", ErrInvalidInput)
 	}
 
-	_, cidrNet, err := net.ParseCIDR(cidrStr)
+	cidrNet, err := netaddr.ParseNetworkCIDR(cidrStr)
 	if err != nil {
 		return fmt.Errorf("%w: invalid CIDR %q: %v", ErrInvalidInput, cidrStr, err)
 	}
@@ -70,7 +71,7 @@ func (s *Service) CreateCidr(
 	ones, bits := cidrNet.Mask.Size()
 	cidr := &Cidr{
 		Name:   name,
-		Cidr:   cidrStr,
+		Cidr:   cidrNet.String(),
 		Prefix: ones,
 		Bits:   bits,
 	}

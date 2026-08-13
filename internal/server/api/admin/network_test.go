@@ -152,6 +152,20 @@ func TestAPICreateNetwork_InvalidCIDR(
 	result.ExpectStatusError(t, http.StatusBadRequest)
 }
 
+func TestAPICreateNetwork_CIDRWithHostBits(
+	t *testing.T,
+) {
+	env := testutil.Setup(t)
+
+	result := wire.TestPost[any](env.Router, "/networks", `{
+		"name": "hostbits",
+		"external_ip": "1.2.3.4",
+		"main_cidr": "10.0.99.0/16"
+	}`)
+
+	result.ExpectStatusError(t, http.StatusBadRequest)
+}
+
 func TestAPICreateNetwork_MissingExternalIP(
 	t *testing.T,
 ) {
