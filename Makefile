@@ -45,7 +45,7 @@ install: generate
 	GOBIN=/usr/local/bin $(GO) install $(CMD)
 
 run: build
-	$(BIN) daemon
+	$(BIN) server daemon
 
 clean:
 	rm -rf $(BIN_DIR)
