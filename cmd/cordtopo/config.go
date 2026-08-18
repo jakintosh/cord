@@ -9,7 +9,6 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
-	"git.studiopollinator.com/pollinator/cord/internal/topology"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -67,7 +66,7 @@ func loadConfig(
 func setup(
 	configPath string,
 ) (
-	*topology.Snapshot,
+	*service.TopologyState,
 	*Config,
 	*database.DB,
 	error,
@@ -82,13 +81,13 @@ func setup(
 		return nil, nil, nil, err
 	}
 
-	snap, err := db.LoadTopologySnapshot(cfg.Network)
+	state, err := db.LoadTopologyState(cfg.Network)
 	if err != nil {
 		db.Close()
 		return nil, nil, nil, fmt.Errorf("load topology: %w", err)
 	}
 
-	return snap, cfg, db, nil
+	return state, cfg, db, nil
 }
 
 func seedDB(
@@ -142,7 +141,7 @@ func seedDB(
 	serverIP := netaddr.FirstAssignable(rootNet)
 	serverRoute := netaddr.HostRoute(serverIP)
 	serverCidr := &service.Cidr{
-		Name:     "cord-server-cidr",
+		Name:     "cord-server",
 		Cidr:     serverRoute.String(),
 		Prefix:   netaddr.TerminalPrefix(serverIP),
 		Bits:     rootCidr.Bits,
@@ -151,7 +150,7 @@ func seedDB(
 
 	serverPeer := &service.Peer{
 		Name:      "cord-server",
-		CidrName:  "cord-server-cidr",
+		CidrName:  "cord-server",
 		Route:     serverRoute.String(),
 		PublicKey: pubKey,
 		Admin:     true,

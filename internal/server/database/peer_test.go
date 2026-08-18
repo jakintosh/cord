@@ -32,7 +32,7 @@ func seedNetwork(t *testing.T, db *database.DB) {
 			Bits:   32,
 		},
 		&service.Cidr{
-			Name:     "cord-server-cidr",
+			Name:     "cord-server",
 			Cidr:     "10.0.0.1/32",
 			Prefix:   32,
 			Bits:     32,
@@ -40,7 +40,7 @@ func seedNetwork(t *testing.T, db *database.DB) {
 		},
 		&service.Peer{
 			Name:      "cord-server",
-			CidrName:  "cord-server-cidr",
+			CidrName:  "cord-server",
 			Route:     "10.0.0.1/32",
 			PublicKey: "pub-test",
 			Admin:     true,
@@ -242,7 +242,7 @@ func TestInsertPeer_SameNameDifferentNetwork(t *testing.T) {
 			Bits:   32,
 		},
 		&service.Cidr{
-			Name:     "cord-server-cidr",
+			Name:     "cord-server",
 			Cidr:     "172.16.0.1/32",
 			Prefix:   32,
 			Bits:     32,
@@ -250,7 +250,7 @@ func TestInsertPeer_SameNameDifferentNetwork(t *testing.T) {
 		},
 		&service.Peer{
 			Name:      "cord-server",
-			CidrName:  "cord-server-cidr",
+			CidrName:  "cord-server",
 			Route:     "172.16.0.1/32",
 			PublicKey: "pub2",
 			Admin:     true,

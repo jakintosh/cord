@@ -1,6 +1,7 @@
 package database_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -40,7 +41,7 @@ func seedTopologyNetwork(t *testing.T, db *database.DB) {
 			Bits:   32,
 		},
 		&service.Cidr{
-			Name:     "cord-server-cidr",
+			Name:     "cord-server",
 			Cidr:     "10.50.0.1/32",
 			Prefix:   32,
 			Bits:     32,
@@ -48,7 +49,7 @@ func seedTopologyNetwork(t *testing.T, db *database.DB) {
 		},
 		&service.Peer{
 			Name:      "cord-server",
-			CidrName:  "cord-server-cidr",
+			CidrName:  "cord-server",
 			Route:     "10.50.0.1/32",
 			PublicKey: "pub-server",
 			Admin:     true,
@@ -73,14 +74,14 @@ func seedTopologyNetwork(t *testing.T, db *database.DB) {
 			Bits:   32,
 		},
 		{
-			Name:     "alice-host",
+			Name:     "alice",
 			Cidr:     "10.50.1.5/32",
 			Prefix:   32,
 			Bits:     32,
 			Terminal: true,
 		},
 		{
-			Name:     "bob-host",
+			Name:     "bob",
 			Cidr:     "10.50.2.5/32",
 			Prefix:   32,
 			Bits:     32,
@@ -100,7 +101,7 @@ func seedTopologyNetwork(t *testing.T, db *database.DB) {
 
 	for _, pair := range [][2]string{
 		{"subnet-a", "devops"},
-		{"alice-host", "platform"},
+		{"alice", "platform"},
 	} {
 		if err := db.AssignCidrGroup("toponet", pair[0], pair[1]); err != nil {
 			t.Fatalf("assign %s -> %s: %v", pair[0], pair[1], err)
@@ -117,7 +118,7 @@ func seedTopologyNetwork(t *testing.T, db *database.DB) {
 	for _, p := range []service.Peer{
 		{
 			Name:      "alice",
-			CidrName:  "alice-host",
+			CidrName:  "alice",
 			Route:     "10.50.1.5/32",
 			PublicKey: "pub-alice",
 			Admin:     false,
@@ -126,7 +127,7 @@ func seedTopologyNetwork(t *testing.T, db *database.DB) {
 		},
 		{
 			Name:      "bob",
-			CidrName:  "bob-host",
+			CidrName:  "bob",
 			Route:     "10.50.2.5/32",
 			PublicKey: "pub-bob",
 			Admin:     false,
@@ -140,42 +141,42 @@ func seedTopologyNetwork(t *testing.T, db *database.DB) {
 	}
 }
 
-func TestLoadTopologySnapshot_Cidrs(t *testing.T) {
+func TestLoadTopologyState_Cidrs(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedTopologyNetwork(t, db)
 
-	snap, err := db.LoadTopologySnapshot("toponet")
+	state, err := db.LoadTopologyState("toponet")
 	if err != nil {
-		t.Fatalf("load snapshot: %v", err)
+		t.Fatalf("load topology state: %v", err)
 	}
 
-	if len(snap.Cidrs) != 6 {
-		t.Fatalf("expected 6 cidrs, got %d", len(snap.Cidrs))
+	if len(state.Cidrs) != 6 {
+		t.Fatalf("expected 6 cidrs, got %d", len(state.Cidrs))
 	}
 
 	byName := make(map[string]bool)
-	for _, c := range snap.Cidrs {
+	for _, c := range state.Cidrs {
 		byName[c.Name] = true
 	}
-	for _, want := range []string{"toponet", "cord-server-cidr", "subnet-a", "subnet-b", "alice-host", "bob-host"} {
+	for _, want := range []string{"toponet", "cord-server", "subnet-a", "subnet-b", "alice", "bob"} {
 		if !byName[want] {
 			t.Errorf("missing cidr %q", want)
 		}
 	}
 
-	for _, c := range snap.Cidrs {
-		if c.Name == "cord-server-cidr" {
+	for _, c := range state.Cidrs {
+		if c.Name == "cord-server" {
 			if !c.Terminal {
-				t.Error("cord-server-cidr should be terminal")
+				t.Error("cord-server should be terminal")
 			}
 			if c.Cidr != "10.50.0.1/32" {
-				t.Errorf("cord-server-cidr cidr = %q, want 10.50.0.1/32", c.Cidr)
+				t.Errorf("cord-server cidr = %q, want 10.50.0.1/32", c.Cidr)
 			}
 			if c.Prefix != 32 {
-				t.Errorf("cord-server-cidr prefix = %d, want 32", c.Prefix)
+				t.Errorf("cord-server prefix = %d, want 32", c.Prefix)
 			}
 			if c.Bits != 32 {
-				t.Errorf("cord-server-cidr bits = %d, want 32", c.Bits)
+				t.Errorf("cord-server bits = %d, want 32", c.Bits)
 			}
 		}
 		if c.Name == "toponet" {
@@ -189,84 +190,82 @@ func TestLoadTopologySnapshot_Cidrs(t *testing.T) {
 	}
 }
 
-func TestLoadTopologySnapshot_Assignments(t *testing.T) {
+func TestLoadTopologyState_Assignments(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedTopologyNetwork(t, db)
 
-	snap, err := db.LoadTopologySnapshot("toponet")
+	state, err := db.LoadTopologyState("toponet")
 	if err != nil {
-		t.Fatalf("load snapshot: %v", err)
+		t.Fatalf("load topology state: %v", err)
 	}
 
-	if len(snap.Assignments) == 0 {
+	if len(state.Assignments) == 0 {
 		t.Fatal("expected assignments, got none")
 	}
 
-	groups := snap.Assignments["subnet-a"]
+	groups := state.Assignments["subnet-a"]
 	if len(groups) != 1 || groups[0] != "devops" {
 		t.Errorf("subnet-a assignments = %v, want [devops]", groups)
 	}
 
-	groups = snap.Assignments["alice-host"]
+	groups = state.Assignments["alice"]
 	if len(groups) != 1 || groups[0] != "platform" {
-		t.Errorf("alice-host assignments = %v, want [platform]", groups)
+		t.Errorf("alice assignments = %v, want [platform]", groups)
 	}
 
-	if _, ok := snap.Assignments["subnet-b"]; ok {
+	if _, ok := state.Assignments["subnet-b"]; ok {
 		t.Error("subnet-b should have no assignments")
 	}
 }
 
-func TestLoadTopologySnapshot_Associations(t *testing.T) {
+func TestLoadTopologyState_Associations(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedTopologyNetwork(t, db)
 
-	snap, err := db.LoadTopologySnapshot("toponet")
+	state, err := db.LoadTopologyState("toponet")
 	if err != nil {
-		t.Fatalf("load snapshot: %v", err)
+		t.Fatalf("load topology state: %v", err)
 	}
 
-	if len(snap.Associations) != 2 {
-		t.Fatalf("expected 2 groups in associations, got %d", len(snap.Associations))
+	if len(state.Associations) != 2 {
+		t.Fatalf("expected 2 groups in associations, got %d", len(state.Associations))
 	}
 
-	if !snap.Associations["devops"]["platform"] {
+	if !state.Associations["devops"]["platform"] {
 		t.Error("devops->platform should be associated")
 	}
-	if !snap.Associations["platform"]["devops"] {
+	if !state.Associations["platform"]["devops"] {
 		t.Error("platform->devops should be associated (symmetric)")
 	}
 }
 
-func TestLoadTopologySnapshot_Peers(t *testing.T) {
+func TestLoadTopologyState_Peers(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedTopologyNetwork(t, db)
 
-	snap, err := db.LoadTopologySnapshot("toponet")
+	state, err := db.LoadTopologyState("toponet")
 	if err != nil {
-		t.Fatalf("load snapshot: %v", err)
+		t.Fatalf("load topology state: %v", err)
 	}
 
-	if len(snap.PeerCidr) != 3 {
-		t.Fatalf("expected 3 peer cidr entries, got %d", len(snap.PeerCidr))
-	}
-	if len(snap.PeerInfo) != 3 {
-		t.Fatalf("expected 3 peer info entries, got %d", len(snap.PeerInfo))
+	if len(state.Peers) != 3 {
+		t.Fatalf("expected 3 peers, got %d", len(state.Peers))
 	}
 
-	if snap.PeerCidr["alice"] != "alice-host" {
-		t.Errorf("alice cidr = %q, want alice-host", snap.PeerCidr["alice"])
-	}
-	if snap.PeerCidr["bob"] != "bob-host" {
-		t.Errorf("bob cidr = %q, want bob-host", snap.PeerCidr["bob"])
-	}
-	if snap.PeerCidr["cord-server"] != "cord-server-cidr" {
-		t.Errorf("cord-server cidr = %q, want cord-server-cidr", snap.PeerCidr["cord-server"])
+	byName := make(map[string]*service.Peer, len(state.Peers))
+	for _, peer := range state.Peers {
+		byName[peer.Name] = peer
 	}
 
-	info := snap.PeerInfo["alice"]
+	info := byName["alice"]
+	if info == nil {
+		t.Fatal("missing alice peer")
+	}
 	if info.Name != "alice" {
 		t.Errorf("name = %q, want alice", info.Name)
+	}
+	if info.CidrName != "alice" {
+		t.Errorf("cidr name = %q, want alice", info.CidrName)
 	}
 	if info.PublicKey != "pub-alice" {
 		t.Errorf("public_key = %q, want pub-alice", info.PublicKey)
@@ -276,7 +275,7 @@ func TestLoadTopologySnapshot_Peers(t *testing.T) {
 	}
 }
 
-func TestLoadTopologySnapshot_ExcludesProvisionalPeers(t *testing.T) {
+func TestLoadTopologyState_IncludesManagedPeerStates(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedTopologyNetwork(t, db)
 	testutil.SeedPeerDB(
@@ -290,20 +289,35 @@ func TestLoadTopologySnapshot_ExcludesProvisionalPeers(t *testing.T) {
 		true,
 		false,
 	)
+	testutil.SeedPeerDB(
+		t,
+		db,
+		"toponet",
+		"disabled",
+		"10.50.1.8/32",
+		"pub-disabled",
+		false,
+		false,
+		true,
+	)
 
-	snap, err := db.LoadTopologySnapshot("toponet")
+	state, err := db.LoadTopologyState("toponet")
 	if err != nil {
-		t.Fatalf("load snapshot: %v", err)
+		t.Fatalf("load topology state: %v", err)
 	}
-	if _, ok := snap.PeerCidr["pending"]; ok {
-		t.Error("provisional peer should not have a topology CIDR entry")
+	byName := make(map[string]*service.Peer, len(state.Peers))
+	for _, peer := range state.Peers {
+		byName[peer.Name] = peer
 	}
-	if _, ok := snap.PeerInfo["pending"]; ok {
-		t.Error("provisional peer should not have a topology info entry")
+	if pending := byName["pending"]; pending == nil || pending.Confirmed || !pending.Enabled {
+		t.Errorf("pending peer = %+v, want enabled and unconfirmed", pending)
+	}
+	if disabled := byName["disabled"]; disabled == nil || !disabled.Confirmed || disabled.Enabled {
+		t.Errorf("disabled peer = %+v, want confirmed and disabled", disabled)
 	}
 }
 
-func TestLoadTopologySnapshot_EmptyNetwork(t *testing.T) {
+func TestLoadTopologyState_EmptyNetwork(t *testing.T) {
 	db := testutil.SetupDB(t)
 
 	name := "emptynet"
@@ -334,7 +348,7 @@ func TestLoadTopologySnapshot_EmptyNetwork(t *testing.T) {
 			Bits:   32,
 		},
 		&service.Cidr{
-			Name:     "cord-server-cidr",
+			Name:     "cord-server",
 			Cidr:     "10.60.0.1/32",
 			Prefix:   32,
 			Bits:     32,
@@ -342,7 +356,7 @@ func TestLoadTopologySnapshot_EmptyNetwork(t *testing.T) {
 		},
 		&service.Peer{
 			Name:      "cord-server",
-			CidrName:  "cord-server-cidr",
+			CidrName:  "cord-server",
 			Route:     "10.60.0.1/32",
 			PublicKey: "pub-server",
 			Admin:     true,
@@ -353,31 +367,31 @@ func TestLoadTopologySnapshot_EmptyNetwork(t *testing.T) {
 		t.Fatalf("seed network: %v", err)
 	}
 
-	snap, err := db.LoadTopologySnapshot("emptynet")
+	state, err := db.LoadTopologyState("emptynet")
 	if err != nil {
-		t.Fatalf("load snapshot: %v", err)
+		t.Fatalf("load topology state: %v", err)
 	}
 
-	if len(snap.Cidrs) != 2 {
-		t.Fatalf("expected 2 cidrs (root + server), got %d", len(snap.Cidrs))
+	if len(state.Cidrs) != 2 {
+		t.Fatalf("expected 2 cidrs (root + server), got %d", len(state.Cidrs))
 	}
 
-	if len(snap.PeerCidr) != 1 {
-		t.Fatalf("expected 1 peer, got %d", len(snap.PeerCidr))
+	if len(state.Peers) != 1 {
+		t.Fatalf("expected 1 peer, got %d", len(state.Peers))
 	}
-	if _, ok := snap.PeerCidr["cord-server"]; !ok {
+	if state.Peers[0].Name != "cord-server" {
 		t.Error("missing cord-server peer")
 	}
 
-	if len(snap.Assignments) != 0 {
-		t.Errorf("expected 0 assignments, got %d", len(snap.Assignments))
+	if len(state.Assignments) != 0 {
+		t.Errorf("expected 0 assignments, got %d", len(state.Assignments))
 	}
-	if len(snap.Associations) != 0 {
-		t.Errorf("expected 0 associations, got %d", len(snap.Associations))
+	if len(state.Associations) != 0 {
+		t.Errorf("expected 0 associations, got %d", len(state.Associations))
 	}
 }
 
-func TestLoadTopologySnapshot_MultipleAssociations(t *testing.T) {
+func TestLoadTopologyState_MultipleAssociations(t *testing.T) {
 	db := testutil.SetupDB(t)
 	seedTopologyNetwork(t, db)
 
@@ -396,30 +410,30 @@ func TestLoadTopologySnapshot_MultipleAssociations(t *testing.T) {
 		}
 	}
 
-	snap, err := db.LoadTopologySnapshot("toponet")
+	state, err := db.LoadTopologyState("toponet")
 	if err != nil {
-		t.Fatalf("load snapshot: %v", err)
+		t.Fatalf("load topology state: %v", err)
 	}
 
-	if len(snap.Associations) != 3 {
-		t.Fatalf("expected 3 groups in associations, got %d", len(snap.Associations))
+	if len(state.Associations) != 3 {
+		t.Fatalf("expected 3 groups in associations, got %d", len(state.Associations))
 	}
 
-	if !snap.Associations["security"]["devops"] {
+	if !state.Associations["security"]["devops"] {
 		t.Error("security->devops should be associated")
 	}
-	if !snap.Associations["security"]["platform"] {
+	if !state.Associations["security"]["platform"] {
 		t.Error("security->platform should be associated")
 	}
-	if !snap.Associations["devops"]["security"] {
+	if !state.Associations["devops"]["security"] {
 		t.Error("devops->security should be associated (symmetric)")
 	}
-	if !snap.Associations["platform"]["security"] {
+	if !state.Associations["platform"]["security"] {
 		t.Error("platform->security should be associated (symmetric)")
 	}
 }
 
-func TestLoadTopologySnapshot_NoAssignments(t *testing.T) {
+func TestLoadTopologyState_NoAssignments(t *testing.T) {
 	db := testutil.SetupDB(t)
 
 	name := "noassign"
@@ -450,7 +464,7 @@ func TestLoadTopologySnapshot_NoAssignments(t *testing.T) {
 			Bits:   32,
 		},
 		&service.Cidr{
-			Name:     "cord-server-cidr",
+			Name:     "cord-server",
 			Cidr:     "10.70.0.1/32",
 			Prefix:   32,
 			Bits:     32,
@@ -458,7 +472,7 @@ func TestLoadTopologySnapshot_NoAssignments(t *testing.T) {
 		},
 		&service.Peer{
 			Name:      "cord-server",
-			CidrName:  "cord-server-cidr",
+			CidrName:  "cord-server",
 			Route:     "10.70.0.1/32",
 			PublicKey: "pub-server",
 			Admin:     true,
@@ -473,46 +487,29 @@ func TestLoadTopologySnapshot_NoAssignments(t *testing.T) {
 		t.Fatalf("seed group: %v", err)
 	}
 
-	snap, err := db.LoadTopologySnapshot("noassign")
+	state, err := db.LoadTopologyState("noassign")
 	if err != nil {
-		t.Fatalf("load snapshot: %v", err)
+		t.Fatalf("load topology state: %v", err)
 	}
 
-	if len(snap.Cidrs) != 2 {
-		t.Fatalf("expected 2 cidrs, got %d", len(snap.Cidrs))
+	if len(state.Cidrs) != 2 {
+		t.Fatalf("expected 2 cidrs, got %d", len(state.Cidrs))
 	}
-	if len(snap.PeerCidr) != 1 {
-		t.Fatalf("expected 1 peer, got %d", len(snap.PeerCidr))
+	if len(state.Peers) != 1 {
+		t.Fatalf("expected 1 peer, got %d", len(state.Peers))
 	}
-	if len(snap.Assignments) != 0 {
-		t.Errorf("expected 0 assignments, got %d", len(snap.Assignments))
+	if len(state.Assignments) != 0 {
+		t.Errorf("expected 0 assignments, got %d", len(state.Assignments))
 	}
-	if len(snap.Associations) != 0 {
-		t.Errorf("expected 0 associations, got %d", len(snap.Associations))
+	if len(state.Associations) != 0 {
+		t.Errorf("expected 0 associations, got %d", len(state.Associations))
 	}
 }
 
-func TestLoadTopologySnapshot_NonexistentNetwork(t *testing.T) {
+func TestLoadTopologyState_NonexistentNetwork(t *testing.T) {
 	db := testutil.SetupDB(t)
 
-	snap, err := db.LoadTopologySnapshot("doesnotexist")
-	if err != nil {
-		t.Fatalf("load snapshot: %v", err)
-	}
-
-	if len(snap.Cidrs) != 0 {
-		t.Errorf("expected 0 cidrs, got %d", len(snap.Cidrs))
-	}
-	if len(snap.Assignments) != 0 {
-		t.Errorf("expected 0 assignments, got %d", len(snap.Assignments))
-	}
-	if len(snap.Associations) != 0 {
-		t.Errorf("expected 0 associations, got %d", len(snap.Associations))
-	}
-	if len(snap.PeerCidr) != 0 {
-		t.Errorf("expected 0 peer cidr, got %d", len(snap.PeerCidr))
-	}
-	if len(snap.PeerInfo) != 0 {
-		t.Errorf("expected 0 peer info, got %d", len(snap.PeerInfo))
+	if _, err := db.LoadTopologyState("doesnotexist"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("load topology state error = %v, want ErrNotFound", err)
 	}
 }

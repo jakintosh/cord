@@ -41,7 +41,7 @@ func seedNetworkForCidr(t *testing.T, db *database.DB) {
 			Bits:   32,
 		},
 		&service.Cidr{
-			Name:     "cord-server-cidr",
+			Name:     "cord-server",
 			Cidr:     "10.0.0.1/32",
 			Prefix:   32,
 			Bits:     32,
@@ -54,7 +54,7 @@ func seedNetworkForCidr(t *testing.T, db *database.DB) {
 			Admin:     true,
 			Enabled:   true,
 			Confirmed: true,
-			CidrName:  "cord-server-cidr",
+			CidrName:  "cord-server",
 		},
 	); err != nil {
 		t.Fatalf("seed network: %v", err)

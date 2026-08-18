@@ -57,3 +57,28 @@ func TestRender_SortsAndHighlightsSubjectInPlace(
 		t.Fatalf("subject not highlighted in place:\n%s", text)
 	}
 }
+
+func TestRender_LabelsPeerWhenNameDiffersFromCIDR(t *testing.T) {
+	view := topology.View{Nodes: []topology.ViewNode{
+		{
+			Cidr:     renderCidr(t, "cord-server-cidr", "10.0.0.1/32"),
+			PeerName: "cord-server",
+		},
+		{
+			Cidr:     renderCidr(t, "alice", "10.0.0.2/32"),
+			PeerName: "alice",
+		},
+	}}
+
+	var output bytes.Buffer
+	if err := topotext.Render(&output, view, topotext.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	text := output.String()
+	if !strings.Contains(text, "10.0.0.1/32 => cord-server-cidr (peer: cord-server)\n") {
+		t.Fatalf("differing peer name not rendered:\n%s", text)
+	}
+	if strings.Contains(text, "alice (peer: alice)") {
+		t.Fatalf("matching peer name rendered redundantly:\n%s", text)
+	}
+}

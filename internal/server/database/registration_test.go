@@ -51,7 +51,7 @@ func seedNetworkForRegistrationWithInviteCIDR(
 			Bits:   32,
 		},
 		&service.Cidr{
-			Name:     "cord-server-cidr",
+			Name:     "cord-server",
 			Cidr:     "10.0.0.1/32",
 			Prefix:   32,
 			Bits:     32,
@@ -59,7 +59,7 @@ func seedNetworkForRegistrationWithInviteCIDR(
 		},
 		&service.Peer{
 			Name:      "cord-server",
-			CidrName:  "cord-server-cidr",
+			CidrName:  "cord-server",
 			PublicKey: "pub",
 			Admin:     true,
 			Enabled:   true,

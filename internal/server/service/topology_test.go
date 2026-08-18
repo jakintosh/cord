@@ -4,8 +4,100 @@ import (
 	"reflect"
 	"testing"
 
+	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/topology"
 )
+
+func TestTopologyState_CompilesAllOrActivePeers(t *testing.T) {
+	var cidrs []topology.Cidr
+	for _, name := range []string{"active", "disabled", "pending"} {
+		cidr, err := topology.CidrFromString(name, map[string]string{
+			"active":   "10.0.0.1/32",
+			"disabled": "10.0.0.2/32",
+			"pending":  "10.0.0.3/32",
+		}[name], true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cidrs = append(cidrs, cidr)
+	}
+
+	state := &service.TopologyState{
+		Cidrs: cidrs,
+		Peers: []*service.Peer{
+			{Name: "active", CidrName: "active", Enabled: true, Confirmed: true},
+			{Name: "disabled", CidrName: "disabled", Enabled: false, Confirmed: true},
+			{Name: "pending", CidrName: "pending", Enabled: true, Confirmed: false},
+		},
+	}
+
+	allPeers, err := state.CompileAllPeers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"active", "disabled", "pending"} {
+		if cidr, ok := allPeers.Resolver().GetPeerCIDR(name); !ok || cidr != name {
+			t.Errorf("all-peer topology CIDR for %q = %q, %v", name, cidr, ok)
+		}
+	}
+
+	activePeers, err := state.CompileActivePeers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cidr, ok := activePeers.Resolver().GetPeerCIDR("active"); !ok || cidr != "active" {
+		t.Fatalf("active peer CIDR = %q, %v", cidr, ok)
+	}
+	for _, name := range []string{"disabled", "pending"} {
+		if _, ok := activePeers.Resolver().GetPeerCIDR(name); ok {
+			t.Errorf("inactive peer %q included in active topology", name)
+		}
+	}
+}
+
+func TestTopologyState_PreservesDistinctPeerAndCIDRNames(t *testing.T) {
+	cidr, err := topology.CidrFromString("cord-server-cidr", "10.0.0.1/32", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &service.TopologyState{
+		Cidrs: []topology.Cidr{cidr},
+		Peers: []*service.Peer{
+			{Name: "cord-server", CidrName: "cord-server-cidr"},
+		},
+	}
+
+	compiled, err := state.CompileAllPeers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerCIDR, ok := compiled.Resolver().GetPeerCIDR("cord-server")
+	if !ok || peerCIDR != "cord-server-cidr" {
+		t.Fatalf("peer CIDR = %q, %v, want cord-server-cidr", peerCIDR, ok)
+	}
+}
+
+func TestGetNetworkTopology_IncludesDisabledAndUnconfirmedPeers(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+	testutil.SeedPeerDB(t, env.Database, "testnet", "disabled", "10.0.0.40/32", "disabled-key", false, false, true)
+	testutil.SeedPeerDB(t, env.Database, "testnet", "pending", "10.0.0.41/32", "pending-key", false, true, false)
+
+	view, err := env.Service.GetNetworkTopology("testnet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerByCIDR := make(map[string]string, len(view.Nodes))
+	for _, node := range view.Nodes {
+		peerByCIDR[node.Cidr.Name] = node.PeerName
+	}
+	for _, name := range []string{"disabled", "pending"} {
+		if peerByCIDR[name] != name {
+			t.Errorf("peer for CIDR %q = %q, want %q", name, peerByCIDR[name], name)
+		}
+	}
+}
 
 func TestGetVisibleNetworkSnapshot_ProjectsMiddleCIDRAndContractsParent(
 	t *testing.T,

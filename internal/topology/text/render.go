@@ -110,6 +110,9 @@ func renderNode(
 	}
 
 	line := fmt.Sprintf("%s => %s", node.Cidr.Cidr, node.Cidr.Name)
+	if node.PeerName != "" && node.PeerName != node.Cidr.Name {
+		line += " (peer: " + node.PeerName + ")"
+	}
 	if len(node.Groups) > 0 {
 		line += " [" + strings.Join(node.Groups, ", ") + "]"
 	}

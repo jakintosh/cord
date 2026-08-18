@@ -11,7 +11,7 @@ import (
 
 func serverCidr() *service.Cidr {
 	return &service.Cidr{
-		Name:     "cord-server-cidr",
+		Name:     "cord-server",
 		Cidr:     "10.0.0.1/32",
 		Prefix:   32,
 		Bits:     32,
@@ -22,7 +22,7 @@ func serverCidr() *service.Cidr {
 func serverPeer(pubKey string) *service.Peer {
 	return &service.Peer{
 		Name:      "cord-server",
-		CidrName:  "cord-server-cidr",
+		CidrName:  "cord-server",
 		PublicKey: pubKey,
 		Admin:     true,
 		Enabled:   true,

@@ -124,7 +124,7 @@ type VisiblePeer struct {
 }
 
 // VisibleNetworkSnapshot is one complete peer synchronization response.
-// Peers and topology are derived from the same server-side source snapshot.
+// Peers and topology are derived from the same server-side topology state.
 type VisibleNetworkSnapshot struct {
 	GeneratedAt time.Time     `json:"generated_at"`
 	Peers       []VisiblePeer `json:"peers"`

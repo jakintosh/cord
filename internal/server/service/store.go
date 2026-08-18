@@ -3,8 +3,6 @@ package service
 import (
 	"net"
 	"time"
-
-	"git.studiopollinator.com/pollinator/cord/internal/topology"
 )
 
 // Store is the persistence contract required by the server service. It
@@ -128,11 +126,12 @@ type Store interface {
 	// DeleteAssociation removes the association between two groups.
 	DeleteAssociation(network, group1, group2 string) error
 
-	// Topology snapshot for visibility resolution.
+	// Network topology facts.
 
-	// LoadTopologySnapshot loads a complete topology snapshot for
-	// the given network, suitable for resolving peer visibility.
-	LoadTopologySnapshot(network string) (*topology.Snapshot, error)
+	// LoadTopologyState loads every CIDR, assignment, association, and managed
+	// peer in one consistent read. It returns ErrNotFound when the network does
+	// not exist.
+	LoadTopologyState(network string) (*TopologyState, error)
 
 	// Registration records within a network.
 

@@ -5,13 +5,14 @@ import (
 	"database/sql"
 	"fmt"
 
+	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/topology"
 )
 
-func (db *DB) LoadTopologySnapshot(
+func (db *DB) LoadTopologyState(
 	network string,
 ) (
-	*topology.Snapshot,
+	*service.TopologyState,
 	error,
 ) {
 	opts := &sql.TxOptions{
@@ -22,6 +23,10 @@ func (db *DB) LoadTopologySnapshot(
 		return nil, fmt.Errorf("begin read tx: %w", err)
 	}
 	defer tx.Rollback()
+
+	if err := sqlRequireNetworkTx(tx, network); err != nil {
+		return nil, err
+	}
 
 	cidrs, err := db.sqlLoadCidrsTx(tx, network)
 	if err != nil {
@@ -38,18 +43,23 @@ func (db *DB) LoadTopologySnapshot(
 		return nil, err
 	}
 
-	peerCidr, peerInfo, err := db.sqlLoadPeersTx(tx, network)
+	peers, err := db.sqlLoadTopologyPeersTx(tx, network)
 	if err != nil {
 		return nil, err
 	}
 
-	return &topology.Snapshot{
+	state := &service.TopologyState{
 		Cidrs:        cidrs,
 		Assignments:  assignments,
 		Associations: associations,
-		PeerCidr:     peerCidr,
-		PeerInfo:     peerInfo,
-	}, nil
+		Peers:        peers,
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit topology state read: %w", err)
+	}
+
+	return state, nil
 }
 
 func (db *DB) sqlLoadCidrsTx(
@@ -183,51 +193,44 @@ func (db *DB) sqlLoadAssociationsTx(
 	return associations, nil
 }
 
-func (db *DB) sqlLoadPeersTx(
+func (db *DB) sqlLoadTopologyPeersTx(
 	tx *sql.Tx,
 	network string,
 ) (
-	map[string]string,
-	map[string]topology.Peer,
+	[]*service.Peer,
 	error,
 ) {
-	peerCidr := make(map[string]string)
-	peerInfo := make(map[string]topology.Peer)
 	rows, err := tx.Query(`
-		SELECT p.name, p.public_key, c.name, c.cidr
+		SELECT
+			p.name,
+			p.public_key,
+			c.name,
+			c.cidr,
+			p.admin,
+			p.enabled,
+			p.confirmed
 		FROM peer p
 		JOIN cidr c ON c.id = p.cidr_id
 		WHERE p.network_name = ?1
-			AND p.confirmed = 1
-			AND p.enabled = 1`,
+		ORDER BY p.name ASC`,
 		network,
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("load peers: %w", err)
+		return nil, fmt.Errorf("load topology peers: %w", err)
 	}
 	defer rows.Close()
 
+	var peers []*service.Peer
 	for rows.Next() {
-		var peerName, pubKey, cidrName, cidrVal string
-		if err := rows.Scan(
-			&peerName,
-			&pubKey,
-			&cidrName,
-			&cidrVal,
-		); err != nil {
-			rows.Close()
-			return nil, nil, fmt.Errorf("scan peer: %w", err)
+		peer, err := scanPeer(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan topology peer: %w", err)
 		}
-		peerCidr[peerName] = cidrName
-		peerInfo[peerName] = topology.Peer{
-			Name:      peerName,
-			PublicKey: pubKey,
-			Route:     cidrVal,
-		}
+		peers = append(peers, peer)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, nil, fmt.Errorf("iterate peers: %w", err)
+		return nil, fmt.Errorf("iterate topology peers: %w", err)
 	}
 
-	return peerCidr, peerInfo, nil
+	return peers, nil
 }

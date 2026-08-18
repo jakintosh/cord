@@ -8,7 +8,6 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.sr.ht/~jakintosh/command-go/pkg/version"
-	"git.studiopollinator.com/pollinator/cord/internal/topology"
 	topotext "git.studiopollinator.com/pollinator/cord/internal/topology/text"
 )
 
@@ -41,12 +40,12 @@ var root = &args.Command{
 			},
 			Handler: func(i *args.Input) error {
 				configPath := i.GetOperand("config")
-				snap, _, db, err := setup(configPath)
+				state, _, db, err := setup(configPath)
 				if err != nil {
 					return err
 				}
 				defer db.Close()
-				topo, err := topology.New(snap)
+				topo, err := state.CompileAllPeers()
 				if err != nil {
 					return fmt.Errorf("compile topology: %w", err)
 				}
@@ -70,13 +69,13 @@ var root = &args.Command{
 				configPath := i.GetOperand("config")
 				peerName := i.GetOperand("peer")
 
-				snap, _, db, err := setup(configPath)
+				state, _, db, err := setup(configPath)
 				if err != nil {
 					return err
 				}
 				defer db.Close()
 
-				topo, err := topology.New(snap)
+				topo, err := state.CompileActivePeers()
 				if err != nil {
 					return fmt.Errorf("compile topology: %w", err)
 				}
@@ -111,13 +110,13 @@ var root = &args.Command{
 				peer1 := i.GetOperand("peer1")
 				peer2 := i.GetOperand("peer2")
 
-				snap, cfg, db, err := setup(configPath)
+				state, cfg, db, err := setup(configPath)
 				if err != nil {
 					return err
 				}
 				defer db.Close()
 
-				topo, err := topology.New(snap)
+				topo, err := state.CompileActivePeers()
 				if err != nil {
 					return fmt.Errorf("compile topology: %w", err)
 				}
@@ -172,16 +171,17 @@ var root = &args.Command{
 			Handler: func(i *args.Input) error {
 				configPath := i.GetOperand("config")
 
-				snap, cfg, db, err := setup(configPath)
+				state, cfg, db, err := setup(configPath)
 				if err != nil {
 					return err
 				}
 				defer db.Close()
 
-				resolver, err := topology.NewResolver(snap)
+				topo, err := state.CompileActivePeers()
 				if err != nil {
 					return fmt.Errorf("compile topology: %w", err)
 				}
+				resolver := topo.Resolver()
 
 				failures := 0
 				for peerName, expected := range cfg.Expected {
