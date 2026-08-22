@@ -1,0 +1,42 @@
+# Example systemd unit for the cord client daemon.
+#
+#   sudo groupadd --system cord
+#   sudo usermod --append --groups cord <admin-user>
+#   sudo cp deploy/cord-client.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cord-client
+#
+#   systemctl status cord-client
+#   journalctl -u cord-client -f
+#   cord client status
+
+[Unit]
+Description=cord client daemon
+Documentation=https://git.studiopollinator.com/pollinator/cord
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The daemon creates and configures WireGuard interfaces (and opens
+# /dev/net/tun with the userspace backend), so it must run as root
+# or with an equivalent set of network capabilities.
+User=root
+Group=cord
+ExecStart=/usr/local/bin/cord client daemon --socket-mode 0660
+Restart=on-failure
+RestartSec=2s
+# The daemon shuts down gracefully within 5s of SIGTERM.
+TimeoutStopSec=30s
+# The control socket is /var/run/cord/client.sock (/run/cord/client.sock
+# on systemd hosts). Members of the cord group can connect.
+RuntimeDirectory=cord
+RuntimeDirectoryMode=0750
+# The SQLite database is opened at data/client.db relative to the
+# working directory, so pin the working directory to a durable,
+# systemd-managed state directory.
+StateDirectory=cord/data
+WorkingDirectory=/var/lib/cord
+
+[Install]
+WantedBy=multi-user.target

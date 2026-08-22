@@ -54,23 +54,25 @@ current working directory.
 
 ## Running under systemd
 
-An example unit for the server daemon lives in
-[deploy/cord-server.service](deploy/cord-server.service). It starts
-the daemon at boot, restarts it if it exits with a failure, and pins
+Example units for the [server](deploy/cord-server.service) and
+[client](deploy/cord-client.service) daemons live in `deploy/`. They start
+the daemons at boot, restart them if they exit with a failure, and pin
 the working directory to `/var/lib/cord` (systemd creates it), so the
-SQLite database lives at `/var/lib/cord/data/server.db` and survives
-reboots. The unit runs as root because the daemon must create
-WireGuard interfaces. The CLI uses the same default socket path.
+SQLite databases live under `/var/lib/cord/data/` and survive reboots.
+The units run as root because the daemons must create WireGuard interfaces.
+The CLI uses the same default socket path.
 
 Create the administrative group, add the users who should manage cord, and
-install the hardened example unit:
+install the desired hardened example units (omit either service if that host
+only has one role):
 
 ```sh
 sudo groupadd --system cord
 sudo usermod --append --groups cord <admin-user>
 sudo cp deploy/cord-server.service /etc/systemd/system/
+sudo cp deploy/cord-client.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now cord-server
+sudo systemctl enable --now cord-server cord-client
 ```
 
 Check status and follow the logs:
@@ -79,6 +81,10 @@ Check status and follow the logs:
 systemctl status cord-server
 journalctl -u cord-server -f
 cord server status
+
+systemctl status cord-client
+journalctl -u cord-client -f
+cord client status
 ```
 
 Start a new login session after changing group membership.
@@ -93,11 +99,6 @@ sudo cord server daemon --socket-mode 0600 # root only
 sudo -g cord cord server daemon --socket-mode 0660 # root and cord group
 ```
 
-The example systemd unit uses `0660` and runs the daemon with primary group
-`cord`. Launchd deployments can apply the same policy by assigning the daemon
+The example systemd units use `0660` and run the daemons with primary group
+`cord`. Launchd deployments can apply the same policy by assigning each daemon
 an administrative group.
-
-To run the client daemon under systemd instead, copy the same unit
-and change `ExecStart` to `/usr/local/bin/cord client daemon`; the
-client's database is `data/client.db` relative to the working
-directory.
