@@ -110,7 +110,7 @@ func TestSync_AppliesServerSnapshot(t *testing.T) {
 	})
 	server := newInstallServer(t)
 
-	if _, err := rt.Install(server.invitation("testnet"), service.NetworkOptions{}); err != nil {
+	if _, err := rt.Install(t.Context(), server.invitation("testnet"), service.NetworkOptions{}); err != nil {
 		t.Fatalf("install network: %v", err)
 	}
 
@@ -171,7 +171,7 @@ func TestStop_RetiresActivityTimers(t *testing.T) {
 	})
 	server := newInstallServer(t)
 
-	if _, err := rt.Install(server.invitation("testnet"), service.NetworkOptions{}); err != nil {
+	if _, err := rt.Install(t.Context(), server.invitation("testnet"), service.NetworkOptions{}); err != nil {
 		t.Fatalf("install network: %v", err)
 	}
 	waitFor(t, func() bool { return server.calls("snapshot") >= 2 }, "the sync timer to rearm")

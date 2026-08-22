@@ -105,6 +105,7 @@ func (a *API) handlePostNetwork(
 	}
 
 	network, err := a.runtime.Install(
+		r.Context(),
 		request.Invitation,
 		service.NetworkOptions{
 			ListenPort: request.ListenPort,
@@ -152,7 +153,7 @@ func (a *API) handlePostNetworkRedeem(
 ) {
 	name := r.PathValue("name")
 
-	inst, err := a.runtime.RedeemInstall(name)
+	inst, err := a.runtime.RedeemInstall(r.Context(), name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -167,7 +168,7 @@ func (a *API) handlePostNetworkConfirm(
 ) {
 	name := r.PathValue("name")
 
-	if _, err := a.runtime.ConfirmInstall(name); err != nil {
+	if _, err := a.runtime.ConfirmInstall(r.Context(), name); err != nil {
 		writeServiceError(w, err)
 		return
 	}

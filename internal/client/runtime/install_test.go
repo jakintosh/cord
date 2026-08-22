@@ -1,6 +1,7 @@
 package runtime_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -24,7 +25,7 @@ func TestInstall_Success(t *testing.T) {
 	rt := newRuntime(t, env, backend, runtime.Options{Interval: time.Hour})
 	server := newInstallServer(t)
 
-	network, err := rt.Install(server.invitation("install-me"), service.NetworkOptions{})
+	network, err := rt.Install(t.Context(), server.invitation("install-me"), service.NetworkOptions{})
 	if err != nil {
 		t.Fatalf("install network: %v", err)
 	}
@@ -91,7 +92,7 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 		t.Fatalf("begin install: %v", err)
 	}
 
-	network, err := rt.Install(invitation, service.NetworkOptions{})
+	network, err := rt.Install(t.Context(), invitation, service.NetworkOptions{})
 	if err != nil {
 		t.Fatalf("install (resume): %v", err)
 	}
@@ -121,11 +122,11 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
-	if _, err := rt.RedeemInstall(install.Name); err != nil {
+	if _, err := rt.RedeemInstall(t.Context(), install.Name); err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
-	if _, err := rt.Install(invitation, service.NetworkOptions{}); err != nil {
+	if _, err := rt.Install(t.Context(), invitation, service.NetworkOptions{}); err != nil {
 		t.Fatalf("install (resume from redeemed): %v", err)
 	}
 
@@ -153,11 +154,11 @@ func TestRedeem_Idempotent(t *testing.T) {
 		t.Fatalf("begin install: %v", err)
 	}
 
-	first, err := rt.RedeemInstall(install.Name)
+	first, err := rt.RedeemInstall(t.Context(), install.Name)
 	if err != nil {
 		t.Fatalf("first redeem: %v", err)
 	}
-	again, err := rt.RedeemInstall(install.Name)
+	again, err := rt.RedeemInstall(t.Context(), install.Name)
 	if err != nil {
 		t.Fatalf("second redeem: %v", err)
 	}
@@ -170,6 +171,56 @@ func TestRedeem_Idempotent(t *testing.T) {
 	}
 	if got := server.calls("redeem"); got != 1 {
 		t.Errorf("redeem calls = %d, want 1", got)
+	}
+}
+
+func TestRedeem_CancellationStopsRemoteCall(t *testing.T) {
+	env := testutil.SetupService(t)
+	backend := wireguardtest.NewMockBackend()
+	rt := newRuntime(t, env, backend, runtime.Options{Interval: time.Hour})
+	server := newInstallServer(t)
+	started := server.blockRedemption()
+
+	install, err := env.Service.BeginInstall(
+		server.invitation("cancel-redeem"),
+		service.NetworkOptions{},
+	)
+	if err != nil {
+		t.Fatalf("begin install: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := rt.RedeemInstall(ctx, install.Name)
+		errCh <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("redeem request did not reach the server")
+	}
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("redeem: got %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("redeem did not stop when its context was cancelled")
+	}
+
+	stored, err := env.Service.GetInstall(install.Name)
+	if err != nil {
+		t.Fatalf("get install: %v", err)
+	}
+	if stored.Phase != service.PhaseInvited {
+		t.Fatalf("phase = %q, want %q", stored.Phase, service.PhaseInvited)
+	}
+	if device := backend.Device(install.InviteIfaceName); device == nil || device.CloseCalls != 1 {
+		t.Fatalf("invite device = %+v, want one closed device", device)
 	}
 }
 
@@ -186,7 +237,7 @@ func TestConfirm_RequiresRedeemedInstall(t *testing.T) {
 		t.Fatalf("begin install: %v", err)
 	}
 
-	_, err := rt.ConfirmInstall("still-invited")
+	_, err := rt.ConfirmInstall(t.Context(), "still-invited")
 	if !errors.Is(err, service.ErrInstallState) {
 		t.Errorf("err = %v, want ErrInstallState", err)
 	}
@@ -204,6 +255,9 @@ type installServer struct {
 	counts  map[string]int
 	permKey string
 	peers   []protocol.VisiblePeer
+
+	blockRedeem   bool
+	redeemStarted chan struct{}
 }
 
 // newInstallServer starts a server whose redeemed network points back at
@@ -229,7 +283,14 @@ func newInstallServer(
 		s.mu.Lock()
 		s.counts["redeem"]++
 		s.permKey = request.PermPubKey
+		block := s.blockRedeem
+		started := s.redeemStarted
 		s.mu.Unlock()
+		if block {
+			started <- struct{}{}
+			<-r.Context().Done()
+			return
+		}
 
 		wire.WriteData(w, http.StatusOK, redeemed)
 	})
@@ -251,6 +312,15 @@ func newInstallServer(
 	t.Cleanup(s.server.Close)
 
 	return s
+}
+
+func (s *installServer) blockRedemption() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.blockRedeem = true
+	s.redeemStarted = make(chan struct{}, 1)
+	return s.redeemStarted
 }
 
 // invitation returns an invite for the named network whose invite server

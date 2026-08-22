@@ -1,6 +1,8 @@
 package client
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -40,7 +42,7 @@ func TestGetSnapshot_Success(t *testing.T) {
 	})
 	defer teardown()
 
-	snapshot, err := c.GetSnapshot()
+	snapshot, err := c.GetSnapshot(t.Context())
 	if err != nil {
 		t.Fatalf("GetSnapshot: %v", err)
 	}
@@ -72,7 +74,7 @@ func TestGetSnapshot_Forbidden(t *testing.T) {
 	})
 	defer teardown()
 
-	_, err := c.GetSnapshot()
+	_, err := c.GetSnapshot(t.Context())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -91,7 +93,7 @@ func TestConfirmPeer_Success(t *testing.T) {
 	})
 	defer teardown()
 
-	if err := c.ConfirmPeer(); err != nil {
+	if err := c.ConfirmPeer(t.Context()); err != nil {
 		t.Fatalf("ConfirmPeer: %v", err)
 	}
 }
@@ -102,7 +104,7 @@ func TestConfirmPeer_Forbidden(t *testing.T) {
 	})
 	defer teardown()
 
-	err := c.ConfirmPeer()
+	err := c.ConfirmPeer(t.Context())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -121,7 +123,7 @@ func TestReportEndpoints_Success(t *testing.T) {
 	})
 	defer teardown()
 
-	err := c.ReportEndpoints([]protocol.EndpointSighting{
+	err := c.ReportEndpoints(t.Context(), []protocol.EndpointSighting{
 		{PeerKey: "peer-a", Endpoint: "5.6.7.8:51820"},
 	})
 	if err != nil {
@@ -135,7 +137,7 @@ func TestReportEndpoints_Forbidden(t *testing.T) {
 	})
 	defer teardown()
 
-	err := c.ReportEndpoints(nil)
+	err := c.ReportEndpoints(t.Context(), nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -164,7 +166,7 @@ func TestRedeemInvite_Success(t *testing.T) {
 	})
 	defer teardown()
 
-	result, err := c.RedeemInvitation("perm-key")
+	result, err := c.RedeemInvitation(t.Context(), "perm-key")
 	if err != nil {
 		t.Fatalf("RedeemInvite: %v", err)
 	}
@@ -188,12 +190,43 @@ func TestRedeemInvite_Forbidden(t *testing.T) {
 	})
 	defer teardown()
 
-	_, err := c.RedeemInvitation("perm-key")
+	_, err := c.RedeemInvitation(t.Context(), "perm-key")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if !wire.IsStatus(err, http.StatusForbidden) {
 		t.Errorf("expected 403, got %v", err)
+	}
+}
+
+func TestConfirmPeer_CancellationStopsRetry(t *testing.T) {
+	backoffs := retryBackoffs
+	retryBackoffs = []time.Duration{time.Hour, time.Hour, time.Hour}
+	t.Cleanup(func() { retryBackoffs = backoffs })
+
+	called := make(chan struct{}, 1)
+	c, teardown := newTestPeerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		called <- struct{}{}
+		wire.WriteError(w, http.StatusServiceUnavailable, "try again")
+	})
+	defer teardown()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- c.ConfirmPeer(ctx)
+	}()
+
+	<-called
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("ConfirmPeer: got %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ConfirmPeer did not stop when its context was cancelled")
 	}
 }
 

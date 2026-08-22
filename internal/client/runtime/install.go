@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
@@ -20,23 +21,28 @@ import (
 // If the install already exists (from a previous partial run), Install
 // resumes from whatever phase it is at.
 func (r *Runtime) Install(
+	ctx context.Context,
 	invitation protocol.Invitation,
 	options service.NetworkOptions,
 ) (
 	*service.Network,
 	error,
 ) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	install, err := r.service.BeginInstall(invitation, options)
 	if err != nil {
 		return nil, err
 	}
 
-	install, err = r.redeemInstall(install)
+	install, err = r.redeemInstall(ctx, install)
 	if err != nil {
 		return nil, err
 	}
 
-	network, err := r.confirmInstall(install)
+	network, err := r.confirmInstall(ctx, install)
 	if err != nil {
 		return nil, err
 	}
@@ -50,17 +56,22 @@ func (r *Runtime) Install(
 // already-redeemed install is returned unchanged without contacting the
 // server again.
 func (r *Runtime) RedeemInstall(
+	ctx context.Context,
 	name string,
 ) (
 	*service.Install,
 	error,
 ) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	install, err := r.service.GetInstall(name)
 	if err != nil {
 		return nil, err
 	}
 
-	return r.redeemInstall(install)
+	return r.redeemInstall(ctx, install)
 }
 
 // ConfirmInstall brings up the main tunnel, calls /confirm to prove
@@ -72,17 +83,22 @@ func (r *Runtime) RedeemInstall(
 // If the confirm call or store transaction fails, the tunnel comes down
 // and the install row remains at "redeemed" — retryable.
 func (r *Runtime) ConfirmInstall(
+	ctx context.Context,
 	name string,
 ) (
 	*service.Network,
 	error,
 ) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	install, err := r.service.GetInstall(name)
 	if err != nil {
 		return nil, err
 	}
 
-	return r.confirmInstall(install)
+	return r.confirmInstall(ctx, install)
 }
 
 // redeemInstall redeems the install's invite over a one-shot tunnel and
@@ -91,6 +107,7 @@ func (r *Runtime) ConfirmInstall(
 // already-redeemed install is returned unchanged without contacting the
 // server again.
 func (r *Runtime) redeemInstall(
+	ctx context.Context,
 	install *service.Install,
 ) (
 	*service.Install,
@@ -110,6 +127,10 @@ func (r *Runtime) redeemInstall(
 			install.Name,
 			install.Phase,
 		)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	// create new public key
@@ -151,12 +172,12 @@ func (r *Runtime) redeemInstall(
 		}
 	}()
 
-	inviteClient, err := client.NewInviteClient(tunnel.apiAddr, r.httpClient)
+	inviteNetClient, err := client.NewInviteClient(tunnel.apiAddr, r.httpClient)
 	if err != nil {
 		return nil, fmt.Errorf("create invite client: %w", err)
 	}
 
-	invitation, err := inviteClient.RedeemInvitation(permPubKey)
+	invitation, err := inviteNetClient.RedeemInvitation(ctx, permPubKey)
 	if err != nil {
 		return nil, fmt.Errorf("redeem invite: %w", err)
 	}
@@ -168,6 +189,7 @@ func (r *Runtime) redeemInstall(
 // tunnel and consumes the install into a permanent membership. Only a
 // redeemed install can be confirmed.
 func (r *Runtime) confirmInstall(
+	ctx context.Context,
 	install *service.Install,
 ) (
 	*service.Network,
@@ -184,6 +206,10 @@ func (r *Runtime) confirmInstall(
 			install.Name,
 			install.Phase,
 		)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	tunnel := &Tunnel{
@@ -214,7 +240,7 @@ func (r *Runtime) confirmInstall(
 		return nil, fmt.Errorf("create peer client: %w", err)
 	}
 
-	if err := peerNetClient.ConfirmPeer(); err != nil {
+	if err := peerNetClient.ConfirmPeer(ctx); err != nil {
 		return nil, fmt.Errorf("confirm peer: %w", err)
 	}
 

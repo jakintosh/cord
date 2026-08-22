@@ -135,7 +135,7 @@ func TestAPIShowNetwork_MidInstall(
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
-	if _, err := env.Runtime.RedeemInstall(inst.Name); err != nil {
+	if _, err := env.Runtime.RedeemInstall(t.Context(), inst.Name); err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
@@ -394,7 +394,7 @@ func TestAPIConfirmNetwork_Success(
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
-	if _, err := env.Runtime.RedeemInstall(inst.Name); err != nil {
+	if _, err := env.Runtime.RedeemInstall(t.Context(), inst.Name); err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 

@@ -28,14 +28,20 @@ var retryBackoffs = []time.Duration{
 // 4xx responses are not retried — they indicate a client-side problem
 // that repeating won't fix. All server endpoints called through this
 // client are idempotent by design.
-func withRetry(fn func() error) error {
+func withRetry(
+	ctx context.Context,
+	fn func(context.Context) error,
+) error {
 	var lastErr error
 	for attempt := range retryMaxAttempts {
-		err := fn()
+		err := fn(ctx)
 		if err == nil {
 			return nil
 		}
 		lastErr = err
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 
 		if httpErr, ok := wire.AsHTTPError(err); ok {
 			if httpErr.StatusCode >= 400 && httpErr.StatusCode < 500 {
@@ -44,7 +50,13 @@ func withRetry(fn func() error) error {
 		}
 
 		if attempt < retryMaxAttempts-1 {
-			time.Sleep(retryBackoffs[attempt])
+			timer := time.NewTimer(retryBackoffs[attempt])
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
 		}
 	}
 	return lastErr
@@ -82,27 +94,31 @@ func NewPeerClient(
 
 // GetSnapshot calls GET /snapshot and returns the caller's complete visible
 // network snapshot.
-func (c *PeerClient) GetSnapshot() (
+func (c *PeerClient) GetSnapshot(
+	ctx context.Context,
+) (
 	protocol.VisibleNetworkSnapshot,
 	error,
 ) {
 	var snapshot protocol.VisibleNetworkSnapshot
-	err := c.client.Get(context.Background(), "/snapshot", &snapshot)
+	err := c.client.Get(ctx, "/snapshot", &snapshot)
 	return snapshot, err
 }
 
 // ConfirmPeer calls POST /confirm, proving WireGuard reachability.
-func (c *PeerClient) ConfirmPeer() error {
+func (c *PeerClient) ConfirmPeer(
+	ctx context.Context,
+) error {
 	var result protocol.StatusResponse
-	return withRetry(func() error {
-		// TODO: at some point we should figure out a real context to use here
-		return c.client.Post(context.Background(), "/confirm", nil, &result)
+	return withRetry(ctx, func(ctx context.Context) error {
+		return c.client.Post(ctx, "/confirm", nil, &result)
 	})
 }
 
 // ReportEndpoints calls POST /endpoints, sending locally-observed
 // peer endpoints for gossip distribution.
 func (c *PeerClient) ReportEndpoints(
+	ctx context.Context,
 	sightings []protocol.EndpointSighting,
 ) error {
 	body, err := json.Marshal(sightings)
@@ -111,8 +127,8 @@ func (c *PeerClient) ReportEndpoints(
 	}
 
 	var result protocol.StatusResponse
-	return withRetry(func() error {
-		return c.client.Post(context.Background(), "/endpoints", body, &result)
+	return withRetry(ctx, func(ctx context.Context) error {
+		return c.client.Post(ctx, "/endpoints", body, &result)
 	})
 }
 
@@ -141,6 +157,7 @@ func NewInviteClient(
 // RedeemInvitation calls POST /redeem, exchanging a temporary invite
 // key for a permanent peer identity and the main network server details.
 func (c *InviteClient) RedeemInvitation(
+	ctx context.Context,
 	permPubKey string,
 ) (
 	*protocol.Invitation,
@@ -156,8 +173,8 @@ func (c *InviteClient) RedeemInvitation(
 	}
 
 	var result protocol.Invitation
-	err = withRetry(func() error {
-		return c.client.Post(context.Background(), "/redeem", body, &result)
+	err = withRetry(ctx, func(ctx context.Context) error {
+		return c.client.Post(ctx, "/redeem", body, &result)
 	})
 	if err != nil {
 		return nil, err

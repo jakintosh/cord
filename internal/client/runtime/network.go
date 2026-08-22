@@ -39,14 +39,6 @@ const (
 	StaleThreshold = wireguard.ActiveHandshakeThreshold
 )
 
-// peerHealthy reports whether a peer's last handshake is recent enough
-// to consider it connected. Peers that have never handshaken are not
-// healthy.
-func peerHealthy(peerStatus wireguard.PeerStatus, now time.Time) bool {
-	return !peerStatus.LastHandshake.IsZero() &&
-		now.Sub(peerStatus.LastHandshake) < StaleThreshold
-}
-
 // Network is a client network running in this process: one Tunnel plus
 // three self-rearming activity timers. It holds no durable state of its
 // own — every read and write goes through the service, and the
@@ -161,8 +153,9 @@ func (n *Network) start(
 // waiting on the lock sees the cancelled context and returns without
 // touching the device.
 func (n *Network) stop() error {
-	n.mu.Lock()
 	n.cancel()
+
+	n.mu.Lock()
 	n.syncTimer.Stop()
 	n.scanTimer.Stop()
 	n.reportTimer.Stop()
@@ -197,7 +190,7 @@ func (n *Network) sync() error {
 	}
 	defer n.completeRefresh(n.syncTimer, n.syncInterval, &n.lastSyncAt)
 
-	snapshot, err := n.client.GetSnapshot()
+	snapshot, err := n.client.GetSnapshot(n.ctx)
 	if err != nil {
 		return fmt.Errorf("fetch network snapshot: %w", err)
 	}
@@ -292,7 +285,7 @@ func (n *Network) report() error {
 	)
 
 	sightingsDTO := sightingsToProtocol(sightings)
-	return n.client.ReportEndpoints(sightingsDTO)
+	return n.client.ReportEndpoints(n.ctx, sightingsDTO)
 }
 
 // applyPeers projects the cached peer set onto the WireGuard device.
@@ -387,6 +380,17 @@ func (n *Network) getPeerStatuses() (
 		return nil, nil
 	}
 	return n.tunnel.device.Peers()
+}
+
+// peerHealthy reports whether a peer's last handshake is recent enough
+// to consider it connected. Peers that have never handshaken are not
+// healthy.
+func peerHealthy(
+	peerStatus wireguard.PeerStatus,
+	now time.Time,
+) bool {
+	return !peerStatus.LastHandshake.IsZero() &&
+		now.Sub(peerStatus.LastHandshake) < StaleThreshold
 }
 
 // sightingsToProtocol converts stored domain sightings into the protocol
