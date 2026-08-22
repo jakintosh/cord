@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
@@ -105,32 +106,42 @@ var clientStatusCmd = &args.Command{
 	},
 }
 
-// printClientStatus prints the ok/version line followed by a table of
-// installed networks and, when present, a table of in-progress installs.
+// printClientStatus prints daemon and network health followed, when
+// present, by a table of in-progress installs.
 func printClientStatus(
 	s api.Status,
 ) {
-	fmt.Printf("client daemon ok (%s)\n\n", s.Version)
+	fmt.Printf(
+		"client daemon ok (%s), managed networks %s\n\n",
+		s.Version,
+		s.Health,
+	)
 
 	if len(s.Networks) > 0 {
 		rows := make([][]string, len(s.Networks))
 		for idx, n := range s.Networks {
-			reason := n.Reason
-			if reason == "" {
-				reason = "-"
-			}
 			rows[idx] = []string{
 				n.Name,
 				strconv.FormatBool(n.Enabled),
 				strconv.FormatBool(n.Running),
-				humanizeOptionalTime(n.Sync.LastRunAt),
-				humanizeOptionalTime(n.Scan.LastRunAt),
-				humanizeOptionalTime(n.Report.LastRunAt),
-				reason,
+				n.Health,
+				humanizeOptionalTime(n.Sync.LastSuccessAt),
+				humanizeOptionalTime(n.Scan.LastSuccessAt),
+				humanizeOptionalTime(n.Report.LastSuccessAt),
+				clientStatusDetail(n),
 			}
 		}
 		printTable(
-			[]string{"NETWORK", "ENABLED", "RUNNING", "LAST SYNC", "LAST SCAN", "LAST REPORT", "REASON"},
+			[]string{
+				"NETWORK",
+				"ENABLED",
+				"RUNNING",
+				"HEALTH",
+				"LAST SYNC",
+				"LAST SCAN",
+				"LAST REPORT",
+				"DETAIL",
+			},
 			rows,
 		)
 	}
@@ -138,8 +149,48 @@ func printClientStatus(
 	if len(s.Installs) > 0 {
 		rows := make([][]string, len(s.Installs))
 		for idx, inst := range s.Installs {
-			rows[idx] = []string{inst.Name, inst.State}
+			rows[idx] = []string{
+				inst.Name,
+				inst.State,
+			}
 		}
-		printTable([]string{"INSTALL", "STATE"}, rows)
+		printTable([]string{
+			"INSTALL",
+			"STATE",
+		}, rows)
 	}
+}
+
+func clientStatusDetail(
+	status api.NetworkStatus,
+) string {
+	if status.Reason != "" {
+		return status.Reason
+	}
+	activities := []struct {
+		name   string
+		status api.ActivityStatus
+	}{
+		{name: "reconcile", status: status.Reconcile},
+		{name: "sync", status: status.Sync},
+		{name: "scan", status: status.Scan},
+		{name: "report", status: status.Report},
+	}
+	var details []string
+	for _, activity := range activities {
+		if activity.status.Error != "" {
+			details = append(
+				details,
+				activity.name+": "+strings.ReplaceAll(
+					activity.status.Error,
+					"\n",
+					"; ",
+				),
+			)
+		}
+	}
+	if len(details) == 0 {
+		return "-"
+	}
+	return strings.Join(details, "; ")
 }

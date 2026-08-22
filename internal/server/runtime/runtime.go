@@ -2,8 +2,8 @@
 // running. It is the only place a network is brought up: it reads the
 // desired state the service persists, compares it against the networks
 // actually running in this process, and converges the difference.
-// Failures never change the desired state — they are recorded as a
-// reason and retried on the next pass.
+// Failures never change the desired state: startup failures are recorded
+// as a reason, and failures of running work are recorded as health.
 package runtime
 
 import (
@@ -25,6 +25,12 @@ import (
 // when nothing wakes it earlier. It is also the retry interval for a
 // network that failed to start.
 const DefaultInterval = 30 * time.Second
+
+const (
+	HealthInactive = "inactive"
+	HealthHealthy  = "healthy"
+	HealthDegraded = "degraded"
+)
 
 // Options configures the runtime.
 type Options struct {
@@ -78,26 +84,43 @@ type Runtime struct {
 
 // Status is a snapshot of every network known to the server daemon.
 type Status struct {
+	Health   string
 	Networks []NetworkStatus
 }
 
-// NetworkStatus is the operator-facing state of a server network: the
-// persisted intent, what the process is actually doing, and — when the
-// two differ — why.
+// NetworkStatus is the operator-facing state of a server network:
+// persisted intent, actual process state, and the health of running work.
 type NetworkStatus struct {
 	Name      string
 	Enabled   bool
 	Running   bool
 	Reason    string
-	Reconcile ReconcileStatus
+	Health    string
+	Reconcile ActivityStatus
+	MainAPI   ActivityStatus
+	InviteAPI ActivityStatus
 }
 
-// ReconcileStatus describes the latest reconciliation of a running
-// network and the maximum interval used when no registration expiry
-// schedules an earlier run.
-type ReconcileStatus struct {
-	MaxInterval time.Duration
-	LastRunAt   time.Time
+// ActivityStatus describes the latest result of one runtime activity.
+// Interval is zero for work without a periodic schedule.
+type ActivityStatus struct {
+	Interval      time.Duration
+	LastAttemptAt time.Time
+	LastSuccessAt time.Time
+	Error         string
+}
+
+func (s *ActivityStatus) record(
+	at time.Time,
+	err error,
+) {
+	s.LastAttemptAt = at
+	if err != nil {
+		s.Error = err.Error()
+		return
+	}
+	s.LastSuccessAt = at
+	s.Error = ""
 }
 
 // New returns a runtime that is not yet running. Call Start to converge
@@ -288,6 +311,7 @@ func (r *Runtime) Status() (
 	}
 
 	return Status{
+		Health:   statusHealth(statuses),
 		Networks: statuses,
 	}, nil
 }
@@ -377,10 +401,11 @@ func (r *Runtime) startNetwork(
 	}
 
 	network := &Network{
-		record:  record,
-		service: r.service,
-		clock:   r.clock,
-		log:     r.log.With("network", record.Name),
+		record:          record,
+		service:         r.service,
+		clock:           r.clock,
+		log:             r.log.With("network", record.Name),
+		reconcileStatus: ActivityStatus{Interval: reconcileCap},
 	}
 
 	var mainHandler, inviteHandler http.Handler
@@ -453,17 +478,49 @@ func (r *Runtime) parseStatusOf(
 	network *service.Network,
 ) NetworkStatus {
 	running, isRunning := r.running[network.Name]
-	reconcile := ReconcileStatus{
-		MaxInterval: reconcileCap,
-	}
-	if isRunning {
-		reconcile.LastRunAt = running.getLastReconcile()
-	}
-	return NetworkStatus{
+	status := NetworkStatus{
 		Name:      network.Name,
 		Enabled:   network.Enabled,
 		Running:   isRunning,
 		Reason:    r.reasons[network.Name],
-		Reconcile: reconcile,
+		Reconcile: ActivityStatus{Interval: reconcileCap},
 	}
+	if isRunning {
+		status.Reconcile, status.MainAPI, status.InviteAPI = running.getActivityStatuses()
+	}
+	status.Health = networkHealth(status)
+	return status
+}
+
+func networkHealth(
+	status NetworkStatus,
+) string {
+	if !status.Enabled && !status.Running {
+		return HealthInactive
+	}
+	if status.Enabled != status.Running {
+		return HealthDegraded
+	}
+	activities := []ActivityStatus{
+		status.Reconcile,
+		status.MainAPI,
+		status.InviteAPI,
+	}
+	for _, activity := range activities {
+		if activity.Error != "" {
+			return HealthDegraded
+		}
+	}
+	return HealthHealthy
+}
+
+func statusHealth(
+	statuses []NetworkStatus,
+) string {
+	for _, status := range statuses {
+		if status.Health == HealthDegraded {
+			return HealthDegraded
+		}
+	}
+	return HealthHealthy
 }

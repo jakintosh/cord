@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"fmt"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
@@ -26,16 +27,15 @@ const RotateInterval = 90 * time.Second
 func (n *Network) rotate(
 	pubKey string,
 	now time.Time,
-) {
+) error {
 	endpoints, err := n.service.ListPeerEndpoints(n.record.Name, pubKey)
 	if err != nil {
-		n.log.Warn("rotate: list endpoints failed", "peer", pubKey, "err", err)
-		return
+		return fmt.Errorf("rotate peer %q: list endpoints: %w", pubKey, err)
 	}
 
 	candidate, ok := nextCandidate(endpoints, now)
 	if !ok {
-		return
+		return nil
 	}
 
 	n.log.Debug(
@@ -46,17 +46,11 @@ func (n *Network) rotate(
 		candidate,
 	)
 
-	if err := n.tunnel.device.SetPeerEndpoint(pubKey, candidate); err != nil {
-		n.log.Warn(
-			"rotate: set endpoint failed",
-			"peer",
-			pubKey,
-			"endpoint",
-			candidate,
-			"err",
-			err,
-		)
-		return
+	if err := n.tunnel.device.SetPeerEndpoint(
+		pubKey,
+		candidate,
+	); err != nil {
+		return fmt.Errorf("rotate peer %q: set endpoint %q: %w", pubKey, candidate, err)
 	}
 
 	if err := n.service.RecordEndpointAttempt(
@@ -65,14 +59,10 @@ func (n *Network) rotate(
 		candidate,
 		now,
 	); err != nil {
-		n.log.Warn(
-			"rotate: mark attempt failed",
-			"peer",
-			pubKey,
-			"err",
-			err,
-		)
+		return fmt.Errorf("rotate peer %q: record attempt: %w", pubKey, err)
 	}
+
+	return nil
 }
 
 // nextCandidate picks the least-recently-attempted endpoint, or

@@ -32,8 +32,11 @@ func TestStart_StartsEnabledNetworks(t *testing.T) {
 	if network.Reason != "" {
 		t.Fatalf("reason = %q, want empty", network.Reason)
 	}
-	if !network.Reconcile.LastRunAt.Equal(testutil.FixedTime) {
-		t.Fatalf("last reconcile = %v, want %v", network.Reconcile.LastRunAt, testutil.FixedTime)
+	if !network.Reconcile.LastAttemptAt.Equal(testutil.FixedTime) {
+		t.Fatalf("last reconcile attempt = %v, want %v", network.Reconcile.LastAttemptAt, testutil.FixedTime)
+	}
+	if !network.Reconcile.LastSuccessAt.Equal(testutil.FixedTime) {
+		t.Fatalf("last reconcile success = %v, want %v", network.Reconcile.LastSuccessAt, testutil.FixedTime)
 	}
 	if env.Backend.Device("testnet") == nil || env.Backend.Device("testnet-i") == nil {
 		t.Fatal("expected both plane devices")
@@ -51,6 +54,9 @@ func TestStart_LeavesDisabledNetworksStopped(t *testing.T) {
 	network := networkStatus(t, env.Runtime, "testnet")
 	if network.Enabled || network.Running {
 		t.Fatalf("status = %+v, want disabled and stopped", network)
+	}
+	if network.Health != runtime.HealthInactive {
+		t.Fatalf("health = %q, want inactive", network.Health)
 	}
 	if env.Backend.Device("testnet") != nil {
 		t.Fatal("disabled network should not create a device")
@@ -86,6 +92,9 @@ func TestConverge_FailedStartKeepsIntentAndReportsReason(t *testing.T) {
 	}
 	if network.Reason == "" {
 		t.Fatal("status reason should explain the divergence")
+	}
+	if network.Health != runtime.HealthDegraded {
+		t.Fatalf("health = %q, want degraded", network.Health)
 	}
 }
 
@@ -141,6 +150,61 @@ func TestConverge_DisableStopsRunningNetwork(t *testing.T) {
 	}
 	if device := env.Backend.Device("testnet-i"); device == nil || device.CloseCalls != 1 {
 		t.Fatalf("invite device close calls = %+v, want 1", device)
+	}
+}
+
+func TestConverge_RecordsFailureAndRecovery(t *testing.T) {
+	now := testutil.FixedTime
+	env := testutil.SetupRuntimeWithClock(t, func() time.Time { return now })
+	testutil.SeedNetwork(t, env.Service)
+	env.Enable(t, "testnet")
+
+	main := env.Backend.Device("testnet")
+	now = now.Add(time.Minute)
+	main.PeersErr = errors.New("read peers failed")
+	env.Converge(t, "testnet")
+
+	status := networkStatus(t, env.Runtime, "testnet")
+	if status.Health != runtime.HealthDegraded {
+		t.Fatalf("health = %q, want degraded", status.Health)
+	}
+	if status.Reconcile.Error == "" {
+		t.Fatal("reconcile error should describe the current failure")
+	}
+	if !status.Reconcile.LastAttemptAt.Equal(now) {
+		t.Fatalf("last attempt = %v, want %v", status.Reconcile.LastAttemptAt, now)
+	}
+	if !status.Reconcile.LastSuccessAt.Equal(testutil.FixedTime) {
+		t.Fatalf("last success = %v, want %v", status.Reconcile.LastSuccessAt, testutil.FixedTime)
+	}
+	overall, err := env.Runtime.Status()
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if overall.Health != runtime.HealthDegraded {
+		t.Fatalf("overall health = %q, want degraded", overall.Health)
+	}
+
+	now = now.Add(time.Minute)
+	main.PeersErr = nil
+	env.Converge(t, "testnet")
+
+	status = networkStatus(t, env.Runtime, "testnet")
+	if status.Health != runtime.HealthHealthy {
+		t.Fatalf("health = %q, want healthy", status.Health)
+	}
+	if status.Reconcile.Error != "" {
+		t.Fatalf("reconcile error = %q, want cleared", status.Reconcile.Error)
+	}
+	if !status.Reconcile.LastSuccessAt.Equal(now) {
+		t.Fatalf("last success = %v, want %v", status.Reconcile.LastSuccessAt, now)
+	}
+	overall, err = env.Runtime.Status()
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if overall.Health != runtime.HealthHealthy {
+		t.Fatalf("overall health = %q, want healthy", overall.Health)
 	}
 }
 

@@ -251,10 +251,11 @@ func TestConfirm_RequiresRedeemedInstall(t *testing.T) {
 type installServer struct {
 	server *httptest.Server
 
-	mu      sync.Mutex
-	counts  map[string]int
-	permKey string
-	peers   []protocol.VisiblePeer
+	mu           sync.Mutex
+	counts       map[string]int
+	permKey      string
+	peers        []protocol.VisiblePeer
+	failSnapshot bool
 
 	blockRedeem   bool
 	redeemStarted chan struct{}
@@ -303,7 +304,12 @@ func newInstallServer(
 
 		s.mu.Lock()
 		peers := s.peers
+		fail := s.failSnapshot
 		s.mu.Unlock()
+		if fail {
+			wire.WriteError(w, http.StatusInternalServerError, "snapshot failed")
+			return
+		}
 		wire.WriteData(w, http.StatusOK, testutil.NetworkSnapshot(peers...))
 	})
 
@@ -338,6 +344,14 @@ func (s *installServer) serve(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.peers = peers
+}
+
+func (s *installServer) setSnapshotFailure(
+	fail bool,
+) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failSnapshot = fail
 }
 
 func (s *installServer) record(

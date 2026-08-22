@@ -155,8 +155,84 @@ func TestSync_AppliesServerSnapshot(t *testing.T) {
 	}
 
 	status := networkStatus(t, rt, "testnet")
-	if !status.Sync.LastRunAt.Equal(testutil.FixedTime) {
-		t.Errorf("last sync = %v, want %v", status.Sync.LastRunAt, testutil.FixedTime)
+	if !status.Sync.LastAttemptAt.Equal(testutil.FixedTime) {
+		t.Errorf("last sync attempt = %v, want %v", status.Sync.LastAttemptAt, testutil.FixedTime)
+	}
+	if !status.Sync.LastSuccessAt.Equal(testutil.FixedTime) {
+		t.Errorf("last sync success = %v, want %v", status.Sync.LastSuccessAt, testutil.FixedTime)
+	}
+}
+
+func TestSync_RecordsFailureAndRecovery(t *testing.T) {
+	env := testutil.SetupService(t)
+	backend := wireguardtest.NewMockBackend()
+	now := testutil.FixedTime
+	rt := newRuntime(t, env, backend, runtime.Options{
+		Interval:     time.Hour,
+		SyncInterval: time.Hour,
+		Clock:        func() time.Time { return now },
+	})
+	server := newInstallServer(t)
+
+	if _, err := rt.Install(t.Context(), server.invitation("testnet"), service.NetworkOptions{}); err != nil {
+		t.Fatalf("install network: %v", err)
+	}
+	waitFor(t, func() bool {
+		return server.calls("snapshot") >= 1
+	}, "initial sync to start")
+	if _, err := rt.Sync("testnet"); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+
+	now = now.Add(time.Minute)
+	server.setSnapshotFailure(true)
+	if _, err := rt.Sync("testnet"); err == nil {
+		t.Fatal("sync unexpectedly succeeded")
+	}
+
+	status := networkStatus(t, rt, "testnet")
+	if status.Health != runtime.HealthDegraded {
+		t.Fatalf("health = %q, want degraded", status.Health)
+	}
+	if status.Sync.Error == "" {
+		t.Fatal("sync error should describe the current failure")
+	}
+	if !status.Sync.LastAttemptAt.Equal(now) {
+		t.Fatalf("last attempt = %v, want %v", status.Sync.LastAttemptAt, now)
+	}
+	if !status.Sync.LastSuccessAt.Equal(testutil.FixedTime) {
+		t.Fatalf("last success = %v, want %v", status.Sync.LastSuccessAt, testutil.FixedTime)
+	}
+	overall, err := rt.Status()
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if overall.Health != runtime.HealthDegraded {
+		t.Fatalf("overall health = %q, want degraded", overall.Health)
+	}
+
+	now = now.Add(time.Minute)
+	server.setSnapshotFailure(false)
+	if _, err := rt.Sync("testnet"); err != nil {
+		t.Fatalf("recovery sync: %v", err)
+	}
+
+	status = networkStatus(t, rt, "testnet")
+	if status.Health != runtime.HealthHealthy {
+		t.Fatalf("health = %q, want healthy", status.Health)
+	}
+	if status.Sync.Error != "" {
+		t.Fatalf("sync error = %q, want cleared", status.Sync.Error)
+	}
+	if !status.Sync.LastSuccessAt.Equal(now) {
+		t.Fatalf("last success = %v, want %v", status.Sync.LastSuccessAt, now)
+	}
+	overall, err = rt.Status()
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if overall.Health != runtime.HealthHealthy {
+		t.Fatalf("overall health = %q, want healthy", overall.Health)
 	}
 }
 

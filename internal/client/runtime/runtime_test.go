@@ -49,6 +49,9 @@ func TestStart_LeavesDisabledNetworksStopped(t *testing.T) {
 	if network.Enabled || network.Running {
 		t.Fatalf("status = %+v, want disabled and stopped", network)
 	}
+	if network.Health != runtime.HealthInactive {
+		t.Fatalf("health = %q, want inactive", network.Health)
+	}
 	if env.Backend.Device("testnet") != nil {
 		t.Fatal("disabled network should not create a device")
 	}
@@ -83,6 +86,9 @@ func TestConverge_FailedStartKeepsIntentAndReportsReason(t *testing.T) {
 	}
 	if network.Reason == "" {
 		t.Fatal("status reason should explain the divergence")
+	}
+	if network.Health != runtime.HealthDegraded {
+		t.Fatalf("health = %q, want degraded", network.Health)
 	}
 }
 

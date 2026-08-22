@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -64,13 +65,14 @@ type Network struct {
 
 	// mu is held for the whole of an activity, so stop() waits for one
 	// in flight and no activity survives the stop.
-	mu           sync.Mutex
-	syncTimer    *time.Timer
-	scanTimer    *time.Timer
-	reportTimer  *time.Timer
-	lastSyncAt   time.Time
-	lastScanAt   time.Time
-	lastReportAt time.Time
+	mu              sync.Mutex
+	syncTimer       *time.Timer
+	scanTimer       *time.Timer
+	reportTimer     *time.Timer
+	reconcileStatus ActivityStatus
+	syncStatus      ActivityStatus
+	scanStatus      ActivityStatus
+	reportStatus    ActivityStatus
 }
 
 // start brings up the tunnel under ctx, reconciles the device from the
@@ -123,6 +125,8 @@ func (n *Network) start(
 		return err
 	}
 
+	n.reconcileStatus.record(n.clock(), nil)
+
 	// Sync now: the cached peer set may be stale, so freshen it first.
 	n.syncTimer = time.AfterFunc(0, func() {
 		if err := n.sync(); err != nil {
@@ -173,7 +177,10 @@ func (n *Network) reconcile() error {
 	if n.isStopped() {
 		return nil
 	}
-	return n.applyPeers()
+
+	err := n.applyPeers()
+	n.reconcileStatus.record(n.clock(), err)
+	return err
 }
 
 // sync fetches the visible network snapshot from the server, hands it to
@@ -188,12 +195,22 @@ func (n *Network) sync() error {
 	if n.isStopped() {
 		return service.ErrNetworkNotEnabled
 	}
-	defer n.completeRefresh(n.syncTimer, n.syncInterval, &n.lastSyncAt)
+
+	refreshSync := func(err error) error {
+		n.completeRefresh(
+			n.syncTimer,
+			n.syncInterval,
+			&n.syncStatus,
+			err,
+		)
+		return err
+	}
 
 	snapshot, err := n.client.GetSnapshot(n.ctx)
 	if err != nil {
-		return fmt.Errorf("fetch network snapshot: %w", err)
+		return refreshSync(fmt.Errorf("fetch network snapshot: %w", err))
 	}
+
 	n.log.Debug(
 		"sync",
 		"peers",
@@ -202,11 +219,18 @@ func (n *Network) sync() error {
 		len(snapshot.Topology.Nodes),
 	)
 
-	if err := n.service.ApplyNetworkSnapshot(n.record.Name, snapshot); err != nil {
-		return err
+	if err := n.service.ApplyNetworkSnapshot(
+		n.record.Name,
+		snapshot,
+	); err != nil {
+		return refreshSync(err)
 	}
 
-	return n.applyPeers()
+	if err := n.applyPeers(); err != nil {
+		return refreshSync(err)
+	}
+
+	return refreshSync(nil)
 }
 
 // scan reads live handshake state from the device and schedules the
@@ -220,15 +244,25 @@ func (n *Network) scan() error {
 	if n.isStopped() {
 		return nil
 	}
-	defer n.completeRefresh(n.scanTimer, n.scanInterval, &n.lastScanAt)
+
+	refreshScan := func(err error) error {
+		n.completeRefresh(
+			n.scanTimer,
+			n.scanInterval,
+			&n.scanStatus,
+			err,
+		)
+		return err
+	}
 
 	now := n.clock()
 
 	devicePeerStatuses, err := n.tunnel.device.Peers()
 	if err != nil {
-		return fmt.Errorf("peers: %w", err)
+		return refreshScan(fmt.Errorf("peers: %w", err))
 	}
 
+	var errs []error
 	for _, peerStatus := range devicePeerStatuses {
 		pubKey := peerStatus.PublicKey.String()
 		if pubKey == n.record.Server.PublicKey {
@@ -236,7 +270,9 @@ func (n *Network) scan() error {
 		}
 
 		if !peerHealthy(peerStatus, now) {
-			n.rotate(pubKey, now)
+			if err := n.rotate(pubKey, now); err != nil {
+				errs = append(errs, err)
+			}
 			continue
 		}
 
@@ -250,11 +286,19 @@ func (n *Network) scan() error {
 			peerStatus.Endpoint.String(),
 			now,
 		); err != nil {
-			n.log.Warn("scan: record endpoint failed", "peer", pubKey, "err", err)
+			errs = append(errs, fmt.Errorf("record endpoint for peer %q: %w", pubKey, err))
+
+			n.log.Warn(
+				"scan: record endpoint failed",
+				"peer",
+				pubKey,
+				"err",
+				err,
+			)
 		}
 	}
 
-	return nil
+	return refreshScan(errors.Join(errs...))
 }
 
 // report sends endpoints observed locally within the last report
@@ -267,15 +311,24 @@ func (n *Network) report() error {
 	if n.isStopped() {
 		return nil
 	}
-	defer n.completeRefresh(n.reportTimer, n.reportInterval, &n.lastReportAt)
+
+	refreshReport := func(err error) error {
+		n.completeRefresh(
+			n.reportTimer,
+			n.reportInterval,
+			&n.reportStatus,
+			err,
+		)
+		return err
+	}
 
 	since := n.clock().Add(-n.reportInterval)
 	sightings, err := n.service.ListLocalEndpoints(n.record.Name, since)
 	if err != nil {
-		return fmt.Errorf("list local endpoints: %w", err)
+		return refreshReport(fmt.Errorf("list local endpoints: %w", err))
 	}
 	if len(sightings) == 0 {
-		return nil
+		return refreshReport(nil)
 	}
 
 	n.log.Debug(
@@ -285,7 +338,11 @@ func (n *Network) report() error {
 	)
 
 	sightingsDTO := sightingsToProtocol(sightings)
-	return n.client.ReportEndpoints(n.ctx, sightingsDTO)
+	if err := n.client.ReportEndpoints(n.ctx, sightingsDTO); err != nil {
+		return refreshReport(fmt.Errorf("report endpoints: %w", err))
+	}
+
+	return refreshReport(nil)
 }
 
 // applyPeers projects the cached peer set onto the WireGuard device.
@@ -330,9 +387,10 @@ func (n *Network) applyPeers() error {
 func (n *Network) completeRefresh(
 	timer *time.Timer,
 	cadence time.Duration,
-	lastRunAt *time.Time,
+	status *ActivityStatus,
+	err error,
 ) {
-	*lastRunAt = n.clock()
+	status.record(n.clock(), err)
 	if n.isStopped() {
 		return
 	}
@@ -357,15 +415,16 @@ func (n *Network) isDiverged(
 		n.record.Server != record.Server
 }
 
-// getLastRuns returns a consistent snapshot of this network's activity times.
-func (n *Network) getLastRuns() (
-	time.Time,
-	time.Time,
-	time.Time,
+// getActivityStatuses returns a consistent snapshot of this network's work.
+func (n *Network) getActivityStatuses() (
+	ActivityStatus,
+	ActivityStatus,
+	ActivityStatus,
+	ActivityStatus,
 ) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return n.lastSyncAt, n.lastScanAt, n.lastReportAt
+	return n.reconcileStatus, n.syncStatus, n.scanStatus, n.reportStatus
 }
 
 // getPeerStatuses reports the live device state for this network's getPeerStatuses.

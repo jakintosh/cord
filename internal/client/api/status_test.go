@@ -23,6 +23,9 @@ func TestAPIStatus_Success(
 	if data.Status != "ok" {
 		t.Fatalf("status = %q, want ok", data.Status)
 	}
+	if data.Health != "healthy" {
+		t.Fatalf("health = %q, want healthy", data.Health)
+	}
 	if data.Networks == nil {
 		t.Fatal("expected networks to be a non-nil empty list")
 	}
@@ -60,13 +63,16 @@ func TestAPIStatus_IncludesNetworks(
 	if network.Running {
 		t.Fatal("seeded network should not be running")
 	}
-	if network.Sync.CadenceSeconds != 30 ||
-		network.Scan.CadenceSeconds != 30 ||
-		network.Report.CadenceSeconds != 30 {
-		t.Fatalf("refresh cadences = sync %d, scan %d, report %d; want 30s each", network.Sync.CadenceSeconds, network.Scan.CadenceSeconds, network.Report.CadenceSeconds)
+	if network.Health != "inactive" {
+		t.Fatalf("health = %q, want inactive", network.Health)
 	}
-	if network.Sync.LastRunAt != nil {
-		t.Fatalf("disabled last sync = %v, want nil", network.Sync.LastRunAt)
+	if network.Sync.IntervalSeconds != 30 ||
+		network.Scan.IntervalSeconds != 30 ||
+		network.Report.IntervalSeconds != 30 {
+		t.Fatalf("refresh intervals = sync %d, scan %d, report %d; want 30s each", network.Sync.IntervalSeconds, network.Scan.IntervalSeconds, network.Report.IntervalSeconds)
+	}
+	if network.Sync.LastAttemptAt != nil || network.Sync.LastSuccessAt != nil {
+		t.Fatalf("disabled sync status = %+v, want no attempts", network.Sync)
 	}
 }
 
@@ -90,8 +96,8 @@ func TestAPIStatus_ReportsEnabledAndRunning(
 	if !network.Running {
 		t.Fatal("enabled network should report running")
 	}
-	if network.Scan.LastRunAt != nil {
-		t.Fatalf("last scan = %v, want nil before first scan", *network.Scan.LastRunAt)
+	if network.Scan.LastAttemptAt != nil {
+		t.Fatalf("last scan attempt = %v, want nil before first scan", *network.Scan.LastAttemptAt)
 	}
 }
 

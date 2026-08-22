@@ -20,11 +20,12 @@ const shutdownTimeout = 5 * time.Second
 // Plane is a running WireGuard plane: one WG device plus an optional
 // HTTP API server served over the tunnel.
 type Plane struct {
-	device     *wireguard.Device
-	server     *http.Server
-	config     service.Plane
-	privateKey string
-	log        *slog.Logger
+	device        *wireguard.Device
+	server        *http.Server
+	config        service.Plane
+	privateKey    string
+	log           *slog.Logger
+	onServeResult func(error)
 }
 
 // start creates the WireGuard device, then synchronously starts the HTTP
@@ -73,15 +74,36 @@ func (p *Plane) start(
 			return fmt.Errorf("listen %q on %s: %w", p.config.Name, apiEndpoint, err)
 		}
 		p.log.Debug("api listening", "addr", apiEndpoint)
-		go func() {
-			if err := p.server.Serve(ln); err != nil && err != http.ErrServerClosed {
-				// not fatal — the device is still up
-				p.log.Error("api server exited", "addr", apiEndpoint, "err", err)
-			}
-		}()
+		p.serve(ln, apiEndpoint)
 	}
 
 	return nil
+}
+
+func (p *Plane) serve(
+	listener net.Listener,
+	address string,
+) {
+	if p.onServeResult != nil {
+		p.onServeResult(nil)
+	}
+	go func() {
+		err := p.server.Serve(listener)
+
+		if err != nil && err != http.ErrServerClosed {
+			// not fatal — the device is still up
+			p.log.Error(
+				"api server exited",
+				"addr",
+				address,
+				"err",
+				err,
+			)
+			if p.onServeResult != nil {
+				p.onServeResult(err)
+			}
+		}
+	}()
 }
 
 // stop shuts down the API server (with a bounded timeout) then closes

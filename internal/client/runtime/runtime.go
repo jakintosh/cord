@@ -2,8 +2,8 @@
 // running. It is the only place a network is brought up: it reads the
 // desired state the service persists, compares it against the networks
 // actually running in this process, and converges the difference.
-// Failures never change the desired state — they are recorded as a
-// reason and retried on the next pass.
+// Failures never change the desired state: startup failures are recorded
+// as a reason, and failures of running work are recorded as health.
 package runtime
 
 import (
@@ -24,6 +24,12 @@ import (
 // when nothing wakes it earlier. It is also the retry interval for a
 // network that failed to start.
 const DefaultInterval = 30 * time.Second
+
+const (
+	HealthInactive = "inactive"
+	HealthHealthy  = "healthy"
+	HealthDegraded = "degraded"
+)
 
 // Options configures the runtime.
 type Options struct {
@@ -85,27 +91,44 @@ type Runtime struct {
 
 // Status is a snapshot of every network known to the client daemon.
 type Status struct {
+	Health   string
 	Networks []NetworkStatus
 }
 
 // NetworkStatus is the operator-facing state of an installed network:
-// the persisted intent, what the process is actually doing, and — when
-// the two differ — why.
+// persisted intent, actual process state, and the health of running work.
 type NetworkStatus struct {
-	Name    string
-	Enabled bool
-	Running bool
-	Reason  string
-	Sync    RefreshStatus
-	Scan    RefreshStatus
-	Report  RefreshStatus
+	Name      string
+	Enabled   bool
+	Running   bool
+	Reason    string
+	Health    string
+	Reconcile ActivityStatus
+	Sync      ActivityStatus
+	Scan      ActivityStatus
+	Report    ActivityStatus
 }
 
-// RefreshStatus describes one periodic activity of a running network:
-// how often it runs and when it last did.
-type RefreshStatus struct {
-	Cadence   time.Duration
-	LastRunAt time.Time
+// ActivityStatus describes the latest result of one runtime activity.
+// Interval is zero for work without a periodic schedule.
+type ActivityStatus struct {
+	Interval      time.Duration
+	LastAttemptAt time.Time
+	LastSuccessAt time.Time
+	Error         string
+}
+
+func (s *ActivityStatus) record(
+	at time.Time,
+	err error,
+) {
+	s.LastAttemptAt = at
+	if err != nil {
+		s.Error = err.Error()
+		return
+	}
+	s.LastSuccessAt = at
+	s.Error = ""
 }
 
 // PeerStatus is a cached peer joined with its live WireGuard device
@@ -408,6 +431,7 @@ func (r *Runtime) Status() (
 	}
 
 	return Status{
+		Health:   statusHealth(statuses),
 		Networks: statuses,
 	}, nil
 }
@@ -563,8 +587,15 @@ func (r *Runtime) startNetwork(
 		syncInterval:   r.syncInterval,
 		scanInterval:   r.scanInterval,
 		reportInterval: r.reportInterval,
+		syncStatus:     ActivityStatus{Interval: r.syncInterval},
+		scanStatus:     ActivityStatus{Interval: r.scanInterval},
+		reportStatus:   ActivityStatus{Interval: r.reportInterval},
 	}
-	if err := network.start(ctx, r.wireguard, r.httpClient); err != nil {
+	if err := network.start(
+		ctx,
+		r.wireguard,
+		r.httpClient,
+	); err != nil {
 		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)
 		return err
 	}
@@ -669,16 +700,49 @@ func (r *Runtime) parseStatusOf(
 		Enabled: record.Enabled,
 		Running: isRunning,
 		Reason:  r.reasons[record.Name],
-		Sync:    RefreshStatus{Cadence: r.syncInterval},
-		Scan:    RefreshStatus{Cadence: r.scanInterval},
-		Report:  RefreshStatus{Cadence: r.reportInterval},
+		Sync:    ActivityStatus{Interval: r.syncInterval},
+		Scan:    ActivityStatus{Interval: r.scanInterval},
+		Report:  ActivityStatus{Interval: r.reportInterval},
 	}
 	if isRunning {
-		status.Sync.LastRunAt,
-			status.Scan.LastRunAt,
-			status.Report.LastRunAt = network.getLastRuns()
+		status.Reconcile, status.Sync, status.Scan, status.Report = network.getActivityStatuses()
 	}
+	status.Health = networkHealth(status)
 	return status
+}
+
+func networkHealth(
+	status NetworkStatus,
+) string {
+	if !status.Enabled && !status.Running {
+		return HealthInactive
+	}
+	if status.Enabled != status.Running {
+		return HealthDegraded
+	}
+	activities := []ActivityStatus{
+		status.Reconcile,
+		status.Sync,
+		status.Scan,
+		status.Report,
+	}
+	for _, activity := range activities {
+		if activity.Error != "" {
+			return HealthDegraded
+		}
+	}
+	return HealthHealthy
+}
+
+func statusHealth(
+	statuses []NetworkStatus,
+) string {
+	for _, status := range statuses {
+		if status.Health == HealthDegraded {
+			return HealthDegraded
+		}
+	}
+	return HealthHealthy
 }
 
 // intervalOr returns value, or fallback when value is not positive.

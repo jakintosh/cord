@@ -12,6 +12,7 @@ import (
 
 type Status struct {
 	Status   string          `json:"status"`
+	Health   string          `json:"health"`
 	Version  string          `json:"version"`
 	Installs []InstallStatus `json:"installs"`
 	Networks []NetworkStatus `json:"networks"`
@@ -33,47 +34,57 @@ func installStatusFromService(
 	}
 }
 
-// NetworkStatus reports a network's persisted intent alongside what the
-// daemon is actually doing. Reason explains any divergence — a network
-// that is enabled but not running says why here.
+// NetworkStatus reports persisted intent, actual process state, and the
+// health of a network's runtime work. Reason explains state divergence.
 type NetworkStatus struct {
-	Name    string        `json:"name"`
-	Enabled bool          `json:"enabled"`
-	Running bool          `json:"running"`
-	Reason  string        `json:"reason,omitempty"`
-	Sync    RefreshStatus `json:"sync"`
-	Scan    RefreshStatus `json:"scan"`
-	Report  RefreshStatus `json:"report"`
+	Name      string         `json:"name"`
+	Enabled   bool           `json:"enabled"`
+	Running   bool           `json:"running"`
+	Reason    string         `json:"reason,omitempty"`
+	Health    string         `json:"health"`
+	Reconcile ActivityStatus `json:"reconcile"`
+	Sync      ActivityStatus `json:"sync"`
+	Scan      ActivityStatus `json:"scan"`
+	Report    ActivityStatus `json:"report"`
 }
 
 func networkStatusFromRuntime(
 	status runtime.NetworkStatus,
 ) NetworkStatus {
 	return NetworkStatus{
-		Name:    status.Name,
-		Enabled: status.Enabled,
-		Running: status.Running,
-		Reason:  status.Reason,
-		Sync:    refreshStatusFromRuntime(status.Sync),
-		Scan:    refreshStatusFromRuntime(status.Scan),
-		Report:  refreshStatusFromRuntime(status.Report),
+		Name:      status.Name,
+		Enabled:   status.Enabled,
+		Running:   status.Running,
+		Reason:    status.Reason,
+		Health:    status.Health,
+		Reconcile: activityStatusFromRuntime(status.Reconcile),
+		Sync:      activityStatusFromRuntime(status.Sync),
+		Scan:      activityStatusFromRuntime(status.Scan),
+		Report:    activityStatusFromRuntime(status.Report),
 	}
 }
 
-type RefreshStatus struct {
-	CadenceSeconds int64   `json:"cadence_seconds"`
-	LastRunAt      *string `json:"last_run_at"`
+type ActivityStatus struct {
+	IntervalSeconds int64   `json:"interval_seconds,omitempty"`
+	LastAttemptAt   *string `json:"last_attempt_at"`
+	LastSuccessAt   *string `json:"last_success_at"`
+	Error           string  `json:"error,omitempty"`
 }
 
-func refreshStatusFromRuntime(
-	status runtime.RefreshStatus,
-) RefreshStatus {
-	result := RefreshStatus{
-		CadenceSeconds: int64(status.Cadence / time.Second),
+func activityStatusFromRuntime(
+	status runtime.ActivityStatus,
+) ActivityStatus {
+	result := ActivityStatus{
+		IntervalSeconds: int64(status.Interval / time.Second),
+		Error:           status.Error,
 	}
-	if !status.LastRunAt.IsZero() {
-		formatted := status.LastRunAt.Format(time.RFC3339)
-		result.LastRunAt = &formatted
+	if !status.LastAttemptAt.IsZero() {
+		formatted := status.LastAttemptAt.Format(time.RFC3339)
+		result.LastAttemptAt = &formatted
+	}
+	if !status.LastSuccessAt.IsZero() {
+		formatted := status.LastSuccessAt.Format(time.RFC3339)
+		result.LastSuccessAt = &formatted
 	}
 	return result
 }
@@ -106,6 +117,7 @@ func (a *API) handleGetStatus(
 
 	wire.WriteData(w, http.StatusOK, Status{
 		Status:   "ok",
+		Health:   status.Health,
 		Version:  a.version,
 		Networks: networkStatuses,
 		Installs: installStatuses,

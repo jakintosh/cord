@@ -34,10 +34,12 @@ type Network struct {
 
 	// mu is held for the whole of reconcile, so stop() waits for a pass
 	// in flight and no pass survives the stop.
-	mu      sync.Mutex
-	timer   *time.Timer
-	stopped bool
-	lastRun time.Time
+	mu              sync.Mutex
+	timer           *time.Timer
+	stopped         bool
+	reconcileStatus ActivityStatus
+	mainAPIStatus   ActivityStatus
+	inviteAPIStatus ActivityStatus
 }
 
 // start brings up both planes under ctx and runs the first
@@ -54,6 +56,9 @@ func (n *Network) start(
 		config:     n.record.Main,
 		privateKey: n.record.PrivateKey,
 		log:        n.log.With("plane", "main"),
+		onServeResult: func(err error) {
+			n.recordActivity(&n.mainAPIStatus, err)
+		},
 	}
 	if err := n.main.start(ctx, wg, mainHandler); err != nil {
 		n.cancel()
@@ -64,6 +69,9 @@ func (n *Network) start(
 		config:     n.record.Invite,
 		privateKey: n.record.PrivateKey,
 		log:        n.log.With("plane", "invite"),
+		onServeResult: func(err error) {
+			n.recordActivity(&n.inviteAPIStatus, err)
+		},
 	}
 	if err := n.invite.start(ctx, wg, inviteHandler); err != nil {
 		n.cancel()
@@ -120,12 +128,19 @@ func (n *Network) reconcile() {
 
 	name := n.record.Name
 	now := n.clock()
-	n.lastRun = now
-
-	// Rearm on every exit path: a failed step still records the attempt
-	// and schedules the next pass, so the timer can never stall.
 	var expiry time.Time
-	defer func() { n.rearm(now, expiry) }()
+
+	// refresh records the pass outcome in the status and rearms the
+	// timer. The first failure of a pass wins the status slot; later
+	// failures are logged but don't displace it.
+	var passErr error
+	refresh := func(err error) {
+		if passErr == nil {
+			passErr = err
+		}
+		n.reconcileStatus.record(n.clock(), passErr)
+		n.rearm(now, expiry)
+	}
 
 	if err := n.service.PruneNetwork(name); err != nil {
 		n.log.Warn(
@@ -133,6 +148,7 @@ func (n *Network) reconcile() {
 			"err",
 			err,
 		)
+		refresh(fmt.Errorf("prune: %w", err))
 		return
 	}
 
@@ -143,6 +159,7 @@ func (n *Network) reconcile() {
 			"err",
 			err,
 		)
+		refresh(fmt.Errorf("list main peers: %w", err))
 		return
 	}
 	if err := n.main.device.SetPeers(mainPeers...); err != nil {
@@ -151,8 +168,14 @@ func (n *Network) reconcile() {
 			"err",
 			err,
 		)
-	} else {
-		n.observe(now)
+		refresh(fmt.Errorf("apply main peers: %w", err))
+	} else if err := n.observe(now); err != nil {
+		n.log.Warn(
+			"reconcile: observe failed",
+			"err",
+			err,
+		)
+		refresh(err)
 	}
 
 	invitePeers, expiry, err := n.service.ListRegistrationPeers(name)
@@ -162,6 +185,7 @@ func (n *Network) reconcile() {
 			"err",
 			err,
 		)
+		refresh(fmt.Errorf("list invite peers: %w", err))
 		return
 	}
 	if err := n.invite.device.SetPeers(invitePeers...); err != nil {
@@ -170,6 +194,7 @@ func (n *Network) reconcile() {
 			"err",
 			err,
 		)
+		refresh(fmt.Errorf("apply invite peers: %w", err))
 	}
 
 	n.log.Debug(
@@ -179,6 +204,7 @@ func (n *Network) reconcile() {
 		"registrations",
 		len(invitePeers),
 	)
+	refresh(nil)
 }
 
 // observe reports the endpoints the main device currently sees for its
@@ -186,15 +212,10 @@ func (n *Network) reconcile() {
 // service decides which of the observed keys are peers worth recording.
 func (n *Network) observe(
 	now time.Time,
-) {
+) error {
 	livePeers, err := n.main.device.Peers()
 	if err != nil {
-		n.log.Warn(
-			"reconcile: read main peers failed",
-			"err",
-			err,
-		)
-		return
+		return fmt.Errorf("read main peers: %w", err)
 	}
 
 	sightings := make([]service.EndpointSighting, 0, len(livePeers))
@@ -209,17 +230,19 @@ func (n *Network) observe(
 			Timestamp:  now,
 		})
 	}
+
 	if len(sightings) == 0 {
-		return
+		return nil
 	}
 
-	if err := n.service.ObserveEndpoints(n.record.Name, sightings); err != nil {
-		n.log.Warn(
-			"reconcile: store main peer endpoints failed",
-			"err",
-			err,
-		)
+	if err := n.service.ObserveEndpoints(
+		n.record.Name,
+		sightings,
+	); err != nil {
+		return fmt.Errorf("store main peer endpoints: %w", err)
 	}
+
+	return nil
 }
 
 // rearm schedules the next reconciliation: at the earliest registration
@@ -245,11 +268,24 @@ func (n *Network) rearm(
 	n.timer.Reset(delay)
 }
 
-// getLastReconcile returns when this network last reconciled.
-func (n *Network) getLastReconcile() time.Time {
+// getActivityStatuses returns a consistent snapshot of this network's work.
+func (n *Network) getActivityStatuses() (
+	ActivityStatus,
+	ActivityStatus,
+	ActivityStatus,
+) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return n.lastRun
+	return n.reconcileStatus, n.mainAPIStatus, n.inviteAPIStatus
+}
+
+func (n *Network) recordActivity(
+	status *ActivityStatus,
+	err error,
+) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	status.record(n.clock(), err)
 }
 
 // peerHealthy reports whether a peer's last handshake is recent enough

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
@@ -62,10 +63,10 @@ var serverDaemonCmd = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		debug := i.GetFlag("debug")
 		socketPath := serverSocket(i)
-		backend := i.GetParameterOr("backend", "auto")
 		socketModeStr := i.GetParameterOr("socket-mode", "0666")
+		backend := i.GetParameterOr("backend", "auto")
+		debug := i.GetFlag("debug")
 
 		socketMode, err := daemon.ParseSocketMode(socketModeStr)
 		if err != nil {
@@ -110,26 +111,66 @@ var serverStatusCmd = &args.Command{
 	},
 }
 
-// printServerStatus prints the ok/version line followed by a per-network
-// status table.
+// printServerStatus prints daemon and per-network health.
 func printServerStatus(
 	s admin.Status,
 ) {
-	fmt.Printf("server daemon ok (version %s)\n", s.Version)
+	fmt.Printf(
+		"server daemon ok (version %s), managed networks %s\n",
+		s.Version,
+		s.Health,
+	)
 
 	rows := make([][]string, len(s.Networks))
 	for idx, n := range s.Networks {
-		reason := n.Reason
-		if reason == "" {
-			reason = "-"
-		}
 		rows[idx] = []string{
 			n.Name,
 			strconv.FormatBool(n.Enabled),
 			strconv.FormatBool(n.Running),
-			humanizeOptionalTime(n.Reconcile.LastRunAt),
-			reason,
+			n.Health,
+			humanizeOptionalTime(n.Reconcile.LastSuccessAt),
+			serverStatusDetail(n),
 		}
 	}
-	printTable([]string{"NAME", "ENABLED", "RUNNING", "LAST RECONCILE", "REASON"}, rows)
+	printTable([]string{
+		"NAME",
+		"ENABLED",
+		"RUNNING",
+		"HEALTH",
+		"LAST RECONCILE",
+		"DETAIL",
+	}, rows)
+}
+
+func serverStatusDetail(
+	status admin.NetworkStatus,
+) string {
+	if status.Reason != "" {
+		return status.Reason
+	}
+	activities := []struct {
+		name   string
+		status admin.ActivityStatus
+	}{
+		{name: "reconcile", status: status.Reconcile},
+		{name: "main api", status: status.MainAPI},
+		{name: "invite api", status: status.InviteAPI},
+	}
+	var details []string
+	for _, activity := range activities {
+		if activity.status.Error != "" {
+			details = append(
+				details,
+				activity.name+": "+strings.ReplaceAll(
+					activity.status.Error,
+					"\n",
+					"; ",
+				),
+			)
+		}
+	}
+	if len(details) == 0 {
+		return "-"
+	}
+	return strings.Join(details, "; ")
 }

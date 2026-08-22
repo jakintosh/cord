@@ -11,19 +11,22 @@ import (
 
 type Status struct {
 	Status   string          `json:"status"`
+	Health   string          `json:"health"`
 	Version  string          `json:"version"`
 	Networks []NetworkStatus `json:"networks"`
 }
 
-// NetworkStatus reports a network's persisted intent alongside what the
-// daemon is actually doing. Reason explains any divergence — a network
-// that is enabled but not running says why here.
+// NetworkStatus reports persisted intent, actual process state, and the
+// health of a network's runtime work. Reason explains state divergence.
 type NetworkStatus struct {
-	Name      string          `json:"name"`
-	Enabled   bool            `json:"enabled"`
-	Running   bool            `json:"running"`
-	Reason    string          `json:"reason,omitempty"`
-	Reconcile ReconcileStatus `json:"reconcile"`
+	Name      string         `json:"name"`
+	Enabled   bool           `json:"enabled"`
+	Running   bool           `json:"running"`
+	Reason    string         `json:"reason,omitempty"`
+	Health    string         `json:"health"`
+	Reconcile ActivityStatus `json:"reconcile"`
+	MainAPI   ActivityStatus `json:"main_api"`
+	InviteAPI ActivityStatus `json:"invite_api"`
 }
 
 func networkStatusFromRuntime(
@@ -34,24 +37,34 @@ func networkStatusFromRuntime(
 		Enabled:   status.Enabled,
 		Running:   status.Running,
 		Reason:    status.Reason,
-		Reconcile: reconcileStatusFromRuntime(status.Reconcile),
+		Health:    status.Health,
+		Reconcile: activityStatusFromRuntime(status.Reconcile),
+		MainAPI:   activityStatusFromRuntime(status.MainAPI),
+		InviteAPI: activityStatusFromRuntime(status.InviteAPI),
 	}
 }
 
-type ReconcileStatus struct {
-	MaxIntervalSeconds int64   `json:"max_interval_seconds"`
-	LastRunAt          *string `json:"last_run_at"`
+type ActivityStatus struct {
+	IntervalSeconds int64   `json:"interval_seconds,omitempty"`
+	LastAttemptAt   *string `json:"last_attempt_at"`
+	LastSuccessAt   *string `json:"last_success_at"`
+	Error           string  `json:"error,omitempty"`
 }
 
-func reconcileStatusFromRuntime(
-	status runtime.ReconcileStatus,
-) ReconcileStatus {
-	result := ReconcileStatus{
-		MaxIntervalSeconds: int64(status.MaxInterval / time.Second),
+func activityStatusFromRuntime(
+	status runtime.ActivityStatus,
+) ActivityStatus {
+	result := ActivityStatus{
+		IntervalSeconds: int64(status.Interval / time.Second),
+		Error:           status.Error,
 	}
-	if !status.LastRunAt.IsZero() {
-		formatted := status.LastRunAt.Format(time.RFC3339)
-		result.LastRunAt = &formatted
+	if !status.LastAttemptAt.IsZero() {
+		formatted := status.LastAttemptAt.Format(time.RFC3339)
+		result.LastAttemptAt = &formatted
+	}
+	if !status.LastSuccessAt.IsZero() {
+		formatted := status.LastSuccessAt.Format(time.RFC3339)
+		result.LastSuccessAt = &formatted
 	}
 	return result
 }
@@ -73,6 +86,7 @@ func (a *API) handleGetStatus(
 
 	wire.WriteData(w, http.StatusOK, Status{
 		Status:   "ok",
+		Health:   status.Health,
 		Version:  a.version,
 		Networks: networks,
 	})
