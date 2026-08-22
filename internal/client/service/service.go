@@ -1,52 +1,44 @@
 package service
 
 import (
-	"errors"
+	"fmt"
 	"log/slog"
-	"net/http"
-	"sync"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
-	"git.studiopollinator.com/pollinator/cord/internal/protocol/client"
-	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 // Options configures the domain core for the cord client daemon.
 type Options struct {
-	Store     Store
-	WireGuard *wireguard.Manager
-	Clock     func() time.Time
-	Logger    *slog.Logger
+	// Store is the persistence adapter for client-side network state.
+	Store Store
 
-	// Overrides for tests only — defaults are package consts.
-	SyncInterval   time.Duration
-	ScanInterval   time.Duration
-	ReportInterval time.Duration
+	// Clock returns the current time. Defaults to time.Now when nil.
+	Clock func() time.Time
 
-	HTTPClient *http.Client
+	// Logger receives internal diagnostics from the service. Nil
+	// discards everything.
+	Logger *slog.Logger
+
+	// Wake receives the name of a network whose desired state changed,
+	// so the runtime can converge it promptly. Nil means nothing is
+	// listening; sends are dropped when the channel is full.
+	Wake chan<- string
 }
 
-// Service is the domain core for the cord client daemon. It manages
-// client-side network memberships, their WireGuard interfaces, and
-// background peer synchronization. All domain operations are methods on
-// Service, scoped by a network name parameter.
+// Service is the domain core for the cord client daemon. All domain
+// operations are methods on Service, scoped by a network name
+// parameter. It owns durable state through the Store and validates
+// everything that becomes a membership record, but never touches
+// devices, network clients, goroutines, or timers.
 type Service struct {
-	store      Store
-	wireguard  *wireguard.Manager
-	clock      func() time.Time
-	log        *slog.Logger
-	httpClient *http.Client
-
-	syncInterval   time.Duration
-	scanInterval   time.Duration
-	reportInterval time.Duration
-
-	mu      sync.Mutex
-	running map[string]*Network
+	store Store
+	clock func() time.Time
+	log   *slog.Logger
+	wake  chan<- string
 }
 
-// New returns a ready-to-use Service. Store and WG must be non-nil.
+// New returns a ready-to-use Service.
 func New(
 	opts Options,
 ) (
@@ -54,99 +46,38 @@ func New(
 	error,
 ) {
 	if opts.Store == nil {
-		return nil, errors.New("service: Store is required")
+		return nil, fmt.Errorf("client: store required")
 	}
-	if opts.WireGuard == nil {
-		return nil, errors.New("service: WG is required")
+
+	clock := opts.Clock
+	if clock == nil {
+		clock = time.Now
 	}
-	if opts.Clock == nil {
-		opts.Clock = time.Now
-	}
-	syncInterval := opts.SyncInterval
-	if syncInterval == 0 {
-		syncInterval = SyncInterval
-	}
-	scanInterval := opts.ScanInterval
-	if scanInterval == 0 {
-		scanInterval = ScanInterval
-	}
-	reportInterval := opts.ReportInterval
-	if reportInterval == 0 {
-		reportInterval = ReportInterval
-	}
+
 	log := opts.Logger
 	if log == nil {
 		log = logging.Discard()
 	}
+
 	return &Service{
-		store:          opts.Store,
-		wireguard:      opts.WireGuard,
-		clock:          opts.Clock,
-		log:            log,
-		httpClient:     opts.HTTPClient,
-		running:        make(map[string]*Network),
-		syncInterval:   syncInterval,
-		scanInterval:   scanInterval,
-		reportInterval: reportInterval,
+		store: opts.Store,
+		clock: clock,
+		log:   log,
+		wake:  opts.Wake,
 	}, nil
 }
 
-// Start brings up every network with enabled=true. Networks that fail
-// to start are logged and left disabled. No context is needed — the
-// Service owns its own start/shutdown lifecycle.
-func (s *Service) Start() error {
-	names, err := s.store.ListNetworkNames()
-	if err != nil {
-		return err
-	}
-
-	for _, name := range names {
-		nc, err := s.store.GetNetwork(name)
-		if err != nil {
-			s.log.Error("start: get network failed", "network", name, "err", err)
-			continue
-		}
-		if !nc.Enabled {
-			continue
-		}
-
-		if err := s.EnableNetwork(name); err != nil {
-			s.log.Error("start: enable network failed", "network", name, "err", err)
-		}
-	}
-
-	return nil
-}
-
-// Close shuts down all running networks and releases resources.
-func (s *Service) Close() error {
-	s.mu.Lock()
-	running := s.running
-	s.running = make(map[string]*Network)
-	s.mu.Unlock()
-
-	for name, n := range running {
-		if err := n.stop(); err != nil {
-			s.log.Warn("close: stop network failed", "network", name, "err", err)
-		}
-	}
-	return nil
-}
-
-func (s *Service) newInviteClient(
-	tunnel *Tunnel,
-) (
-	*client.InviteClient,
-	error,
+// requestReconcile tells the runtime that the named network's desired state
+// changed. The send never blocks: a full channel already holds a wake
+// the runtime has not consumed yet, and its periodic pass catches up.
+func (s *Service) requestReconcile(
+	network string,
 ) {
-	return client.NewInviteClient(tunnel.apiAddr, s.httpClient)
-}
-
-func (s *Service) newPeerClient(
-	tunnel *Tunnel,
-) (
-	*client.PeerClient,
-	error,
-) {
-	return client.NewPeerClient(tunnel.apiAddr, s.httpClient)
+	if s.wake == nil {
+		return
+	}
+	select {
+	case s.wake <- network:
+	default:
+	}
 }

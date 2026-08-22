@@ -1,0 +1,35 @@
+# Example systemd unit for the cord server daemon.
+#
+#   sudo cp deploy/cord-server.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cord-server
+#
+#   systemctl status cord-server
+#   journalctl -u cord-server -f
+#   cord server status
+
+[Unit]
+Description=cord server daemon
+Documentation=https://git.studiopollinator.com/pollinator/cord
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The daemon creates and configures WireGuard interfaces (and opens
+# /dev/net/tun with the userspace backend), so it must run as root
+# or with an equivalent set of network capabilities.
+User=root
+ExecStart=/usr/local/bin/cord server daemon
+Restart=on-failure
+RestartSec=2s
+# The daemon shuts down gracefully within 5s of SIGTERM.
+TimeoutStopSec=30s
+# The SQLite database is opened at data/server.db relative to the
+# working directory, so pin the working directory to a durable,
+# systemd-managed state directory.
+StateDirectory=cord/data
+WorkingDirectory=/var/lib/cord
+
+[Install]
+WantedBy=multi-user.target

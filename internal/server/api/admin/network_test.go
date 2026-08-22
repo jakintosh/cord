@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"errors"
 	"net/http"
 	"testing"
 
@@ -342,6 +343,24 @@ func TestAPIDeleteNetwork_NotFound(
 	result.ExpectStatusError(t, http.StatusNotFound)
 }
 
+func TestAPIDeleteNetwork_RefusesEnabled(
+	t *testing.T,
+) {
+	// setup env, seed and enable a network
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+	wire.TestPost[admin.NetworkStatus](env.Router, "/networks/testnet/enable", "").ExpectOK(t)
+
+	// delete the enabled network
+	result := wire.TestDelete[any](env.Router, "/networks/testnet")
+
+	// verify result
+	result.ExpectStatusError(t, http.StatusConflict)
+	if _, err := env.Service.GetNetwork("testnet"); err != nil {
+		t.Fatalf("network should survive a refused delete: %v", err)
+	}
+}
+
 func TestAPIEnableNetwork_Success(
 	t *testing.T,
 ) {
@@ -351,10 +370,16 @@ func TestAPIEnableNetwork_Success(
 
 	// enable network
 	url := "/networks/testnet/enable"
-	result := wire.TestPost[any](env.Router, url, "")
+	result := wire.TestPost[admin.NetworkStatus](env.Router, url, "")
 
-	// verify result — status-only mutation, no response body
-	result.ExpectOK(t)
+	// verify result — the network is enabled and running, with no divergence
+	data := result.ExpectOK(t)
+	if !data.Enabled || !data.Running {
+		t.Fatalf("status = %+v, want enabled and running", data)
+	}
+	if data.Reason != "" {
+		t.Fatalf("reason = %q, want empty", data.Reason)
+	}
 
 	// verify network is enabled in store
 	nw, err := env.Service.GetNetwork("testnet")
@@ -363,6 +388,36 @@ func TestAPIEnableNetwork_Success(
 	}
 	if !nw.Enabled {
 		t.Fatal("expected network to be enabled in store")
+	}
+}
+
+func TestAPIEnableNetwork_StartFailureKeepsIntent(
+	t *testing.T,
+) {
+	// setup env and seed network, with a WireGuard backend that fails
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+	env.Backend.CreateErr = errors.New("no such device")
+
+	// enable network
+	result := wire.TestPost[admin.NetworkStatus](env.Router, "/networks/testnet/enable", "")
+
+	// verify result — the intent stands and the response explains reality
+	data := result.ExpectOK(t)
+	if !data.Enabled || data.Running {
+		t.Fatalf("status = %+v, want enabled but not running", data)
+	}
+	if data.Reason == "" {
+		t.Fatal("expected a reason for the divergence")
+	}
+
+	// verify the enabled flag survived the failed start
+	nw, err := env.Service.GetNetwork("testnet")
+	if err != nil {
+		t.Fatalf("get network: %v", err)
+	}
+	if !nw.Enabled {
+		t.Fatal("a failed start must not un-set the enabled flag")
 	}
 }
 
@@ -389,13 +444,16 @@ func TestAPIDisableNetwork_Success(
 
 	// enable then disable network
 	enableURL := "/networks/testnet/enable"
-	wire.TestPost[any](env.Router, enableURL, "").ExpectOK(t)
+	wire.TestPost[admin.NetworkStatus](env.Router, enableURL, "").ExpectOK(t)
 
 	url := "/networks/testnet/disable"
-	result := wire.TestPost[any](env.Router, url, "")
+	result := wire.TestPost[admin.NetworkStatus](env.Router, url, "")
 
-	// verify result — status-only mutation, no response body
-	result.ExpectOK(t)
+	// verify result — the network is neither enabled nor running
+	data := result.ExpectOK(t)
+	if data.Enabled || data.Running {
+		t.Fatalf("status = %+v, want disabled and stopped", data)
+	}
 
 	// verify network is disabled in store
 	nw, err := env.Service.GetNetwork("testnet")

@@ -69,9 +69,7 @@ func TestAPIStatus_IncludesRunningReconcileSchedule(
 ) {
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
-	if err := env.Service.EnableNetwork("testnet"); err != nil {
-		t.Fatalf("enable network: %v", err)
-	}
+	wire.TestPost[admin.NetworkStatus](env.Router, "/networks/testnet/enable", "").ExpectOK(t)
 
 	result := wire.TestGet[admin.Status](env.Router, "/status")
 	data := result.ExpectOK(t)

@@ -37,7 +37,7 @@ type CreateNetworkRequest struct {
 }
 
 func networkFromService(
-	n service.NetworkConfig,
+	n service.Network,
 ) Network {
 	return Network{
 		Name:          n.Name,
@@ -58,13 +58,15 @@ func (a *API) handleListNetworks(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	names, err := a.service.ListNetworks()
+	networks, err := a.service.ListNetworks()
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	if names == nil {
-		names = []string{}
+
+	names := make([]string, len(networks))
+	for i, network := range networks {
+		names[i] = network.Name
 	}
 
 	wire.WriteData(w, http.StatusOK, names)
@@ -95,7 +97,7 @@ func (a *API) handlePostNetwork(
 		return
 	}
 
-	main := service.PlaneConfig{
+	main := service.Plane{
 		Cidr:          req.MainCidr,
 		WireguardPort: ptrVal(req.MainWgPort, 0),
 		ApiPort:       ptrVal(req.MainApiPort, 0),
@@ -104,7 +106,7 @@ func (a *API) handlePostNetwork(
 		main.Name = *req.MainName
 	}
 
-	invite := service.PlaneConfig{
+	invite := service.Plane{
 		WireguardPort: ptrVal(req.InviteWgPort, 0),
 		ApiPort:       ptrVal(req.InviteApiPort, 0),
 	}
@@ -156,12 +158,14 @@ func (a *API) handlePostNetworkEnable(
 ) {
 	name := r.PathValue("name")
 
-	if err := a.service.EnableNetwork(name); err != nil {
+	status, err := a.runtime.SetNetworkEnabled(name, true)
+	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, nil)
+	statusDTO := networkStatusFromRuntime(status)
+	wire.WriteData(w, http.StatusOK, statusDTO)
 }
 
 func (a *API) handlePostNetworkDisable(
@@ -170,12 +174,14 @@ func (a *API) handlePostNetworkDisable(
 ) {
 	name := r.PathValue("name")
 
-	if err := a.service.DisableNetwork(name); err != nil {
+	status, err := a.runtime.SetNetworkEnabled(name, false)
+	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, nil)
+	statusDTO := networkStatusFromRuntime(status)
+	wire.WriteData(w, http.StatusOK, statusDTO)
 }
 
 func (c *Client) ListNetworks(
@@ -224,13 +230,21 @@ func (c *Client) DeleteNetwork(
 func (c *Client) EnableNetwork(
 	ctx context.Context,
 	name string,
-) error {
-	return c.wire.Post(ctx, "/networks/"+name+"/enable", nil, nil)
+) (
+	NetworkStatus,
+	error,
+) {
+	var result NetworkStatus
+	return result, c.wire.Post(ctx, "/networks/"+name+"/enable", nil, &result)
 }
 
 func (c *Client) DisableNetwork(
 	ctx context.Context,
 	name string,
-) error {
-	return c.wire.Post(ctx, "/networks/"+name+"/disable", nil, nil)
+) (
+	NetworkStatus,
+	error,
+) {
+	var result NetworkStatus
+	return result, c.wire.Post(ctx, "/networks/"+name+"/disable", nil, &result)
 }

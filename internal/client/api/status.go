@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
+	"git.studiopollinator.com/pollinator/cord/internal/client/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 )
 
@@ -16,18 +17,47 @@ type Status struct {
 	Networks []NetworkStatus `json:"networks"`
 }
 
+// InstallStatus reports an in-progress install. Completed installs are
+// consumed into networks at confirm, so only mid-install records appear.
 type InstallStatus struct {
 	Name  string `json:"name"`
 	State string `json:"state"`
 }
 
+func installStatusFromService(
+	install service.Install,
+) InstallStatus {
+	return InstallStatus{
+		Name:  install.Name,
+		State: install.Phase,
+	}
+}
+
+// NetworkStatus reports a network's persisted intent alongside what the
+// daemon is actually doing. Reason explains any divergence — a network
+// that is enabled but not running says why here.
 type NetworkStatus struct {
 	Name    string        `json:"name"`
 	Enabled bool          `json:"enabled"`
 	Running bool          `json:"running"`
+	Reason  string        `json:"reason,omitempty"`
 	Sync    RefreshStatus `json:"sync"`
 	Scan    RefreshStatus `json:"scan"`
 	Report  RefreshStatus `json:"report"`
+}
+
+func networkStatusFromRuntime(
+	status runtime.NetworkStatus,
+) NetworkStatus {
+	return NetworkStatus{
+		Name:    status.Name,
+		Enabled: status.Enabled,
+		Running: status.Running,
+		Reason:  status.Reason,
+		Sync:    refreshStatusFromRuntime(status.Sync),
+		Scan:    refreshStatusFromRuntime(status.Scan),
+		Report:  refreshStatusFromRuntime(status.Report),
+	}
 }
 
 type RefreshStatus struct {
@@ -35,8 +65,8 @@ type RefreshStatus struct {
 	LastRunAt      *string `json:"last_run_at"`
 }
 
-func refreshStatusFromService(
-	status service.RefreshStatus,
+func refreshStatusFromRuntime(
+	status runtime.RefreshStatus,
 ) RefreshStatus {
 	result := RefreshStatus{
 		CadenceSeconds: int64(status.Cadence / time.Second),
@@ -52,37 +82,33 @@ func (a *API) handleGetStatus(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	status, err := a.service.Status()
+	status, err := a.runtime.Status()
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	networks := make([]NetworkStatus, len(status.Networks))
-	for i, n := range status.Networks {
-		networks[i] = NetworkStatus{
-			Name:    n.Name,
-			Enabled: n.Enabled,
-			Running: n.Running,
-			Sync:    refreshStatusFromService(n.Sync),
-			Scan:    refreshStatusFromService(n.Scan),
-			Report:  refreshStatusFromService(n.Report),
-		}
+	installs, err := a.service.ListInstalls()
+	if err != nil {
+		writeServiceError(w, err)
+		return
 	}
 
-	installs := make([]InstallStatus, len(status.Installs))
-	for i, inst := range status.Installs {
-		installs[i] = InstallStatus{
-			Name:  inst.Name,
-			State: inst.State,
-		}
+	networkStatuses := make([]NetworkStatus, len(status.Networks))
+	for i, network := range status.Networks {
+		networkStatuses[i] = networkStatusFromRuntime(network)
+	}
+
+	installStatuses := make([]InstallStatus, len(installs))
+	for i, install := range installs {
+		installStatuses[i] = installStatusFromService(*install)
 	}
 
 	wire.WriteData(w, http.StatusOK, Status{
 		Status:   "ok",
 		Version:  a.version,
-		Networks: networks,
-		Installs: installs,
+		Networks: networkStatuses,
+		Installs: installStatuses,
 	})
 }
 

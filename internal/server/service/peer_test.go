@@ -377,33 +377,6 @@ func TestConfirmPeer_PreservesDisabledState(t *testing.T) {
 	}
 }
 
-func TestConfirmPeer_ReconcilesRunningDevices(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-	if err := env.Service.EnableNetwork("testnet"); err != nil {
-		t.Fatalf("enable network: %v", err)
-	}
-
-	if _, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")}); err != nil {
-		t.Fatalf("create registration: %v", err)
-	}
-	tempKey := lastTempKey(t, env.Service, "testnet")
-	permKey := mustGenKey(t)
-	if _, err := env.Service.RedeemRegistration("testnet", tempKey, permKey); err != nil {
-		t.Fatalf("redeem: %v", err)
-	}
-	if err := env.Service.ConfirmPeer("testnet", "alice"); err != nil {
-		t.Fatalf("confirm: %v", err)
-	}
-
-	if hasPeerOp(env.Backend.LastAppliedOpsFor("testnet-i"), tempKey) {
-		t.Error("invite device should not have confirmed registration peer")
-	}
-	if !hasPeerOp(env.Backend.LastAppliedOpsFor("testnet"), permKey) {
-		t.Error("main device missing confirmed peer")
-	}
-}
-
 func TestConfirmPeer_FollowsPermanentKeyAfterProvisionalRename(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)

@@ -76,12 +76,3 @@ func mustGenKey(t *testing.T) string {
 	}
 	return pub
 }
-
-func hasPeerOp(ops []wireguard.PeerOp, pubKey string) bool {
-	for _, op := range ops {
-		if !op.Remove && op.Target.PublicKey.String() == pubKey {
-			return true
-		}
-	}
-	return false
-}

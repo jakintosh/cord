@@ -84,6 +84,26 @@ func (s *Service) ListPeers(
 	return peers, nil
 }
 
+// ListMainPeers returns the WireGuard peer set the network's main plane
+// should carry: every enabled peer, each on its own terminal host route.
+func (s *Service) ListMainPeers(
+	network string,
+) (
+	[]wireguard.PeerConfig,
+	error,
+) {
+	peers, err := s.store.ListPeers(network)
+	if err != nil {
+		return nil, fmt.Errorf("main peers: %w", mapStoreError(err))
+	}
+
+	wgpeers, err := peersToWireGuardPeers(peers)
+	if err != nil {
+		return nil, fmt.Errorf("main peers: %w", err)
+	}
+	return wgpeers, nil
+}
+
 // ListVisiblePeers returns the peers visible to the named peer, each
 // with recently witnessed endpoints. Visibility is determined by the
 // group-based topology model: effective groups (direct + inherited)
@@ -123,7 +143,7 @@ func (s *Service) UpdatePeer(
 	if err != nil {
 		return nil, fmt.Errorf("update peer %q: %w", name, mapStoreError(err))
 	}
-	s.reconcile(network)
+	s.requestReconcile(network)
 
 	return p, nil
 }
@@ -141,7 +161,7 @@ func (s *Service) ConfirmPeer(
 	network string,
 	name string,
 ) error {
-	defer s.reconcile(network)
+	defer s.requestReconcile(network)
 
 	if err := s.store.ConfirmPeer(
 		network,
@@ -175,7 +195,7 @@ func (s *Service) RemovePeer(
 	); err != nil {
 		return fmt.Errorf("delete peer %q: %w", name, mapStoreError(err))
 	}
-	s.reconcile(network)
+	s.requestReconcile(network)
 
 	return nil
 }
@@ -197,21 +217,62 @@ func (s *Service) ReportEndpoints(
 	return nil
 }
 
+// ObserveEndpoints records endpoint sightings the server's own WireGuard
+// device made of the peers connected to it. These are the first endpoint
+// candidates a peer has, before it can hear about others from gossip.
+// Sightings of anything that is not a confirmed, enabled peer of the
+// network — the witness itself included — are dropped.
+func (s *Service) ObserveEndpoints(
+	network string,
+	sightings []EndpointSighting,
+) error {
+	peers, err := s.store.ListPeers(network)
+	if err != nil {
+		return fmt.Errorf("observe endpoints: %w", mapStoreError(err))
+	}
+
+	known := make(map[string]struct{}, len(peers))
+	for _, peer := range peers {
+		if !peer.Enabled || !peer.Confirmed {
+			continue
+		}
+		known[peer.PublicKey] = struct{}{}
+	}
+
+	observed := make([]EndpointSighting, 0, len(sightings))
+	for _, sighting := range sightings {
+		if sighting.PeerKey == sighting.WitnessKey {
+			continue
+		}
+		if _, ok := known[sighting.PeerKey]; !ok {
+			continue
+		}
+		observed = append(observed, sighting)
+	}
+	if len(observed) == 0 {
+		return nil
+	}
+
+	return s.ReportEndpoints(network, observed)
+}
+
 func peersToWireGuardPeers(
 	peers []*Peer,
 ) (
 	[]wireguard.PeerConfig,
 	error,
 ) {
-	var wgpeers []wireguard.PeerConfig
+	wgpeers := make([]wireguard.PeerConfig, 0, len(peers))
 	for _, peer := range peers {
 		if !peer.Enabled {
 			continue
 		}
+
 		peerRoute, err := netaddr.ParseRoute(peer.Route)
 		if err != nil {
 			return nil, fmt.Errorf("parse peer route %q: %w", peer.Route, err)
 		}
+
 		wgpeers = append(wgpeers, wireguard.PeerConfig{
 			PublicKey:      peer.PublicKey,
 			AllowedIPs:     []string{peerRoute.String()},

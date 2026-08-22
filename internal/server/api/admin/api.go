@@ -1,21 +1,25 @@
 package admin
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
+	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
 type Options struct {
 	Service *service.Service
+	Runtime *runtime.Runtime
 	Logger  *slog.Logger
 	Version string
 }
 
 type API struct {
 	service *service.Service
+	runtime *runtime.Runtime
 	log     *slog.Logger
 	version string
 }
@@ -26,13 +30,23 @@ func New(
 	*API,
 	error,
 ) {
-	log := opts.Logger
-	if log == nil {
-		log = logging.Discard()
+	if opts.Service == nil {
+		return nil, fmt.Errorf("server: service required")
 	}
+
+	if opts.Runtime == nil {
+		return nil, fmt.Errorf("server: runtime required")
+	}
+
+	logger := opts.Logger
+	if logger == nil {
+		logger = logging.Discard()
+	}
+
 	return &API{
 		service: opts.Service,
-		log:     log,
+		runtime: opts.Runtime,
+		log:     logger,
 		version: opts.Version,
 	}, nil
 }
@@ -50,12 +64,30 @@ func (a *API) Router() http.Handler {
 	mux.HandleFunc("POST /networks/{name}/disable", a.handlePostNetworkDisable)
 	mux.HandleFunc("DELETE /networks/{name}", a.handleDeleteNetwork)
 
-	mux.HandleFunc("GET /networks/{name}/registrations", a.handleListRegistrations)
-	mux.HandleFunc("POST /networks/{name}/registrations", a.handlePostRegistration)
-	mux.HandleFunc("DELETE /networks/{name}/registrations/{registration}", a.handleDeleteRegistration)
-	mux.HandleFunc("GET /networks/{name}/registrations/{registration}/groups", a.handleListRegistrationGroups)
-	mux.HandleFunc("POST /networks/{name}/registrations/{registration}/groups", a.handlePostRegistrationGroup)
-	mux.HandleFunc("DELETE /networks/{name}/registrations/{registration}/groups/{group}", a.handleDeleteRegistrationGroup)
+	mux.HandleFunc(
+		"GET /networks/{name}/registrations",
+		a.handleListRegistrations,
+	)
+	mux.HandleFunc(
+		"POST /networks/{name}/registrations",
+		a.handlePostRegistration,
+	)
+	mux.HandleFunc(
+		"DELETE /networks/{name}/registrations/{registration}",
+		a.handleDeleteRegistration,
+	)
+	mux.HandleFunc(
+		"GET /networks/{name}/registrations/{registration}/groups",
+		a.handleListRegistrationGroups,
+	)
+	mux.HandleFunc(
+		"POST /networks/{name}/registrations/{registration}/groups",
+		a.handlePostRegistrationGroup,
+	)
+	mux.HandleFunc(
+		"DELETE /networks/{name}/registrations/{registration}/groups/{group}",
+		a.handleDeleteRegistrationGroup,
+	)
 
 	mux.HandleFunc("GET /networks/{name}/cidrs", a.handleListCidrs)
 	mux.HandleFunc("POST /networks/{name}/cidrs", a.handlePostCidr)

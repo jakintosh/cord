@@ -16,13 +16,13 @@ func seedNetwork(t *testing.T, db *database.DB) {
 
 	name := "testnet"
 	if err := db.BootstrapNetwork(
-		&service.NetworkConfig{
+		&service.Network{
 			Name:       name,
 			PrivateKey: "priv-" + name,
 			PublicKey:  "pub-" + name,
 			ExternalIP: "1.1.1.1",
-			Main:       service.PlaneConfig{Name: name, Cidr: "10.0.0.0/16", WireguardPort: 51820, ApiPort: 8080},
-			Invite:     service.PlaneConfig{Name: name + "-i", Cidr: "10.1.0.0/24", WireguardPort: 51821, ApiPort: 8080},
+			Main:       service.Plane{Name: name, Cidr: "10.0.0.0/16", WireguardPort: 51820, ApiPort: 8080},
+			Invite:     service.Plane{Name: name + "-i", Cidr: "10.1.0.0/24", WireguardPort: 51821, ApiPort: 8080},
 			CreatedAt:  time.Now(),
 		},
 		&service.Cidr{
@@ -216,18 +216,18 @@ func TestInsertPeer_SameNameDifferentNetwork(t *testing.T) {
 
 	now := time.Now()
 	if err := db.BootstrapNetwork(
-		&service.NetworkConfig{
+		&service.Network{
 			Name:       "net2",
 			PrivateKey: "priv2",
 			PublicKey:  "pub2",
 			ExternalIP: "1.1.1.2",
-			Main: service.PlaneConfig{
+			Main: service.Plane{
 				Name:          "net2",
 				Cidr:          "172.16.0.0/16",
 				WireguardPort: 51822,
 				ApiPort:       8081,
 			},
-			Invite: service.PlaneConfig{
+			Invite: service.Plane{
 				Name:          "net2-i",
 				Cidr:          "172.17.0.0/24",
 				WireguardPort: 51823,

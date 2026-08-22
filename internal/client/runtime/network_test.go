@@ -1,0 +1,287 @@
+package runtime_test
+
+import (
+	"net"
+	"testing"
+	"time"
+
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+
+	"git.studiopollinator.com/pollinator/cord/internal/client/runtime"
+	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
+)
+
+// TestConverge_AppliesCachedPeersSynchronously verifies that the cached
+// peer set is on the device by the time a converge returns, without
+// waiting for a sync.
+func TestConverge_AppliesCachedPeersSynchronously(t *testing.T) {
+	env := testutil.SetupRuntime(t)
+	testutil.SeedNetworkDirect(t, env.Database, "testnet")
+
+	peerKey := mustGenKey(t)
+	testutil.SeedPeers(t, env.Database, "testnet", service.Peer{
+		Name:      "alice",
+		PublicKey: peerKey,
+		Route:     "10.42.0.9/32",
+	})
+
+	env.Enable(t, "testnet")
+
+	device := env.Backend.Device("testnet")
+	if device == nil {
+		t.Fatal("expected the network device")
+	}
+
+	var found bool
+	for _, op := range device.AppliedOps() {
+		if op.Target.PublicKey.String() != peerKey {
+			continue
+		}
+		found = true
+		if op.Target.PersistentKeepalive != runtime.PersistentKeepaliveInterval {
+			t.Errorf(
+				"keepalive = %v, want %v",
+				op.Target.PersistentKeepalive,
+				runtime.PersistentKeepaliveInterval,
+			)
+		}
+	}
+	if !found {
+		t.Errorf("cached peer %q was not applied to the device", peerKey)
+	}
+}
+
+// TestConverge_PinsTheServerPeer verifies that a network with no cached
+// peers still gets the one peer it always has.
+func TestConverge_PinsTheServerPeer(t *testing.T) {
+	env := testutil.SetupRuntime(t)
+	network := testutil.SeedNetworkDirect(t, env.Database, "testnet")
+	env.Enable(t, "testnet")
+
+	ops := env.Backend.AppliedOpsFor("testnet")
+	if len(ops) != 1 {
+		t.Fatalf("peer ops = %d, want 1 (the server)", len(ops))
+	}
+	if got := ops[0].Target.PublicKey.String(); got != network.Server.PublicKey {
+		t.Errorf("public key = %q, want the server key %q", got, network.Server.PublicKey)
+	}
+	if ops[0].Target.PersistentKeepalive != runtime.PersistentKeepaliveInterval {
+		t.Errorf(
+			"server keepalive = %v, want %v",
+			ops[0].Target.PersistentKeepalive,
+			runtime.PersistentKeepaliveInterval,
+		)
+	}
+}
+
+func TestConverge_UsesConfiguredListenPort(t *testing.T) {
+	env := testutil.SetupRuntime(t)
+	testutil.SeedNetworkDirect(t, env.Database, "testnet")
+
+	port := uint16(51820)
+	if err := env.Service.UpdateNetwork(
+		"testnet",
+		service.NetworkOptions{ListenPort: &port},
+	); err != nil {
+		t.Fatalf("set listen port: %v", err)
+	}
+	env.Enable(t, "testnet")
+
+	if len(env.Backend.CreateCalls) != 1 {
+		t.Fatalf("device creates = %d, want 1", len(env.Backend.CreateCalls))
+	}
+	if got := env.Backend.CreateCalls[0].ListenPort; got != port {
+		t.Errorf("listen port = %d, want %d", got, port)
+	}
+}
+
+// TestSync_AppliesServerSnapshot verifies the on-demand sync round trip:
+// fetch, persist through the service, project onto the device.
+func TestSync_AppliesServerSnapshot(t *testing.T) {
+	env := testutil.SetupService(t)
+	backend := wireguardtest.NewMockBackend()
+	rt := newRuntime(t, env, backend, runtime.Options{
+		Interval:     time.Hour,
+		SyncInterval: time.Hour,
+	})
+	server := newInstallServer(t)
+
+	if _, err := rt.Install(server.invitation("testnet"), service.NetworkOptions{}); err != nil {
+		t.Fatalf("install network: %v", err)
+	}
+
+	peerKey := mustGenKey(t)
+	server.serve(protocol.VisiblePeer{
+		Name:      "alice",
+		Route:     "10.42.0.9/32",
+		PublicKey: peerKey,
+		Endpoints: []protocol.EndpointWitness{{
+			Endpoint:  "5.6.7.8:51820",
+			Timestamp: testutil.FixedTime,
+		}},
+	})
+
+	network, err := rt.Sync("testnet")
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if network == nil || network.Name != "testnet" {
+		t.Fatalf("synced network = %+v, want testnet record", network)
+	}
+
+	peers, err := env.Service.ListPeers("testnet")
+	if err != nil {
+		t.Fatalf("list peers: %v", err)
+	}
+	if len(peers) != 1 {
+		t.Fatalf("cached peers = %d, want 1", len(peers))
+	}
+	if peers[0].Name != "alice" {
+		t.Errorf("cached peer name = %q, want alice", peers[0].Name)
+	}
+
+	var found bool
+	for _, op := range backend.LastAppliedOpsFor("testnet") {
+		if op.Target.PublicKey.String() == peerKey {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("synced peer %q was not applied to the device", peerKey)
+	}
+
+	status := networkStatus(t, rt, "testnet")
+	if !status.Sync.LastRunAt.Equal(testutil.FixedTime) {
+		t.Errorf("last sync = %v, want %v", status.Sync.LastRunAt, testutil.FixedTime)
+	}
+}
+
+// TestStop_RetiresActivityTimers verifies that no activity outlives the
+// network whose device it configures.
+func TestStop_RetiresActivityTimers(t *testing.T) {
+	env := testutil.SetupService(t)
+	backend := wireguardtest.NewMockBackend()
+	rt := newRuntime(t, env, backend, runtime.Options{
+		Interval:     time.Hour,
+		SyncInterval: 5 * time.Millisecond,
+	})
+	server := newInstallServer(t)
+
+	if _, err := rt.Install(server.invitation("testnet"), service.NetworkOptions{}); err != nil {
+		t.Fatalf("install network: %v", err)
+	}
+	waitFor(t, func() bool { return server.calls("snapshot") >= 2 }, "the sync timer to rearm")
+
+	rt.Stop()
+	syncs := server.calls("snapshot")
+
+	time.Sleep(50 * time.Millisecond)
+
+	if got := server.calls("snapshot"); got != syncs {
+		t.Fatalf("syncs after stop = %d, want %d — a timer outlived the network", got, syncs)
+	}
+}
+
+func TestPeerStatus_NotRunning(t *testing.T) {
+	env := testutil.SetupRuntime(t)
+	testutil.SeedNetworkDirect(t, env.Database, "testnet")
+	testutil.SeedPeers(t, env.Database, "testnet", service.Peer{
+		Name:      "alice",
+		PublicKey: mustGenKey(t),
+		Route:     "10.42.0.9/32",
+	})
+
+	statuses, err := env.Runtime.PeerStatus("testnet")
+	if err != nil {
+		t.Fatalf("peer status: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("peer statuses = %d, want 1", len(statuses))
+	}
+	got := statuses[0]
+	if got.Name != "alice" || got.Route != "10.42.0.9/32" {
+		t.Fatalf("status = %+v, want the cached peer", got)
+	}
+	if got.Connected || got.Endpoint != "" || !got.LastHandshake.IsZero() {
+		t.Fatalf("status = %+v, want zero-valued device fields", got)
+	}
+}
+
+func TestPeerStatus_JoinsLiveDeviceState(t *testing.T) {
+	tests := []struct {
+		name          string
+		lastHandshake time.Time
+		wantConnected bool
+	}{
+		{
+			name:          "fresh handshake",
+			lastHandshake: testutil.FixedTime,
+			wantConnected: true,
+		},
+		{
+			name:          "stale handshake",
+			lastHandshake: testutil.FixedTime.Add(-2 * runtime.StaleThreshold),
+			wantConnected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := testutil.SetupRuntime(t)
+			testutil.SeedNetworkDirect(t, env.Database, "testnet")
+
+			peerKey := mustGenKey(t)
+			testutil.SeedPeers(t, env.Database, "testnet", service.Peer{
+				Name:      "alice",
+				PublicKey: peerKey,
+				Route:     "10.42.0.9/32",
+			})
+			env.Enable(t, "testnet")
+
+			key, err := wgtypes.ParseKey(peerKey)
+			if err != nil {
+				t.Fatalf("parse key: %v", err)
+			}
+			env.Backend.Device("testnet").SetPeers(wireguard.PeerStatus{
+				PublicKey:     key,
+				Endpoint:      &net.UDPAddr{IP: net.ParseIP("5.6.7.8"), Port: 51820},
+				LastHandshake: tt.lastHandshake,
+			})
+
+			statuses, err := env.Runtime.PeerStatus("testnet")
+			if err != nil {
+				t.Fatalf("peer status: %v", err)
+			}
+			if len(statuses) != 1 {
+				t.Fatalf("peer statuses = %d, want 1", len(statuses))
+			}
+			got := statuses[0]
+			if got.Endpoint != "5.6.7.8:51820" {
+				t.Errorf("endpoint = %q, want 5.6.7.8:51820", got.Endpoint)
+			}
+			if !got.LastHandshake.Equal(tt.lastHandshake) {
+				t.Errorf("last handshake = %v, want %v", got.LastHandshake, tt.lastHandshake)
+			}
+			if got.Connected != tt.wantConnected {
+				t.Errorf("connected = %t, want %t", got.Connected, tt.wantConnected)
+			}
+		})
+	}
+}
+
+func mustGenKey(t *testing.T) string {
+	t.Helper()
+	key, err := wireguard.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	pub, err := wireguard.PublicKey(key)
+	if err != nil {
+		t.Fatalf("derive public key: %v", err)
+	}
+	return pub
+}

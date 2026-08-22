@@ -2,112 +2,21 @@ package service_test
 
 import (
 	"errors"
-	"net"
 	"testing"
+	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-// TestEnableNetwork_AppliesCachedPeersSynchronously verifies that the
-// cached peer set is applied to the device by the time EnableNetwork
-// returns, without waiting for a sync tick.
-func TestEnableNetwork_AppliesCachedPeersSynchronously(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Database, "cached-peers")
-
-	peerKey := mustGenKey(t)
-	testutil.SeedPeers(t, env.Database, "cached-peers", service.Peer{
-		Name:      "alice",
-		PublicKey: peerKey,
-		Route:     "10.42.0.9/32",
-	})
-
-	if err := env.Service.EnableNetwork("cached-peers"); err != nil {
-		t.Fatalf("enable: %v", err)
-	}
-
-	dev := env.Backend.Device("cached-peers")
-	if dev == nil {
-		t.Fatal("expected device was created")
-	}
-
-	found := false
-	for _, op := range dev.AppliedOps() {
-		if op.Target.PublicKey.String() == peerKey {
-			found = true
-			if op.Target.PersistentKeepalive != service.PersistentKeepaliveInterval {
-				t.Errorf("keepalive = %v, want %v", op.Target.PersistentKeepalive, service.PersistentKeepaliveInterval)
-			}
-		}
-	}
-	if !found {
-		t.Errorf("cached peer %q not applied to device after enable", peerKey)
-	}
-}
-
-func TestEnableNetwork_UsesConfiguredListenPort(t *testing.T) {
-	env := testutil.SetupService(t)
-	network := testutil.SeedNetworkDirect(t, env.Database, "listen-port")
-	network.ListenPort = 51820
-	if err := env.Database.UpdateNetwork(network.Name, service.NetworkOptions{ListenPort: &network.ListenPort}); err != nil {
-		t.Fatalf("set listen port: %v", err)
-	}
-
-	if err := env.Service.EnableNetwork(network.Name); err != nil {
-		t.Fatalf("enable: %v", err)
-	}
-	if len(env.Backend.CreateCalls) != 1 {
-		t.Fatalf("device creates = %d, want 1", len(env.Backend.CreateCalls))
-	}
-	if got := env.Backend.CreateCalls[0].ListenPort; got != network.ListenPort {
-		t.Errorf("listen port = %d, want %d", got, network.ListenPort)
-	}
-}
-
-func TestBuildPeers_IncludesServer(t *testing.T) {
-	env := testutil.SetupService(t)
-
-	testutil.SeedNetworkDirect(t, env.Database, "peer-test")
-
-	err := env.Service.EnableNetwork("peer-test")
+func mustGenKey(t *testing.T) string {
+	t.Helper()
+	k, err := wireguard.GenerateKey()
 	if err != nil {
-		t.Fatalf("enable: %v", err)
+		t.Fatalf("generate key: %v", err)
 	}
-
-	if env.Backend.Device("peer-test") == nil {
-		t.Fatal("expected device was created")
-	}
-
-	ops := env.Backend.AppliedOpsFor("peer-test")
-	if len(ops) != 1 {
-		t.Fatalf("expected 1 peer op (server), got %d", len(ops))
-	}
-	if ops[0].Target.PersistentKeepalive != service.PersistentKeepaliveInterval {
-		t.Errorf("server keepalive = %v, want %v", ops[0].Target.PersistentKeepalive, service.PersistentKeepaliveInterval)
-	}
-}
-
-func TestBuildPeers_DoesNotIncludeSelf(t *testing.T) {
-	env := testutil.SetupService(t)
-
-	testutil.SeedNetworkDirect(t, env.Database, "self-test")
-
-	err := env.Service.EnableNetwork("self-test")
-	if err != nil {
-		t.Fatalf("enable: %v", err)
-	}
-
-	if env.Backend.Device("self-test") == nil {
-		t.Fatal("expected device was created")
-	}
-
-	ops := env.Backend.AppliedOpsFor("self-test")
-	if len(ops) != 1 {
-		t.Fatalf("expected 1 peer op (server only), got %d", len(ops))
-	}
+	return k
 }
 
 func TestListPeers_Empty(t *testing.T) {
@@ -132,152 +41,119 @@ func TestListPeers_NetworkNotFound(t *testing.T) {
 	}
 }
 
-func TestListPeers_EmptyForNewNetwork(t *testing.T) {
+func TestListPeers_CachedPeers(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Database, "count-test")
+	testutil.SeedNetworkDirect(t, env.Database, "cached")
 
-	peers, err := env.Service.ListPeers("count-test")
+	peerKey := mustGenKey(t)
+	testutil.SeedPeers(t, env.Database, "cached", service.Peer{
+		Name:      "alice",
+		PublicKey: peerKey,
+		Route:     "10.42.0.9/32",
+	})
+
+	peers, err := env.Service.ListPeers("cached")
 	if err != nil {
 		t.Fatalf("list peers: %v", err)
 	}
-	if len(peers) != 0 {
-		t.Errorf("peer count = %d, want 0 before any fetch", len(peers))
+	if len(peers) != 1 {
+		t.Fatalf("expected 1 peer, got %d", len(peers))
+	}
+	if peers[0].Name != "alice" {
+		t.Errorf("name = %q, want alice", peers[0].Name)
+	}
+	if peers[0].PublicKey != peerKey {
+		t.Errorf("public key = %q, want %q", peers[0].PublicKey, peerKey)
 	}
 }
 
-func TestListPeerStatus_NetworkNotFound(t *testing.T) {
+// TestRecordLocalEndpoint_FeedsTheCatalog verifies that an endpoint the
+// runtime observed becomes a rotation candidate for that peer.
+func TestRecordLocalEndpoint_FeedsTheCatalog(t *testing.T) {
 	env := testutil.SetupService(t)
-
-	_, err := env.Service.ListPeerStatus("nonexistent")
-	if !errors.Is(err, service.ErrNotFound) {
-		t.Errorf("err = %v, want ErrNotFound", err)
-	}
-}
-
-func TestListPeerStatus_NotRunning_ReturnsCachedWithZeroRuntimeFields(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Database, "not-running")
+	testutil.SeedNetworkDirect(t, env.Database, "endpoints")
 
 	peerKey := mustGenKey(t)
-	testutil.SeedPeers(t, env.Database, "not-running", service.Peer{
+	testutil.SeedPeers(t, env.Database, "endpoints", service.Peer{
 		Name:      "alice",
 		PublicKey: peerKey,
 		Route:     "10.42.0.9/32",
 	})
 
-	statuses, err := env.Service.ListPeerStatus("not-running")
+	if err := env.Service.RecordLocalEndpoint(
+		"endpoints",
+		peerKey,
+		"5.6.7.8:51820",
+		testutil.FixedTime,
+	); err != nil {
+		t.Fatalf("record local endpoint: %v", err)
+	}
+
+	endpoints, err := env.Service.ListPeerEndpoints("endpoints", peerKey)
 	if err != nil {
-		t.Fatalf("list peer status: %v", err)
+		t.Fatalf("list peer endpoints: %v", err)
 	}
-	if len(statuses) != 1 {
-		t.Fatalf("expected 1 peer, got %d", len(statuses))
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(endpoints))
 	}
-	got := statuses[0]
-	if got.Name != "alice" {
-		t.Errorf("name = %q, want alice", got.Name)
+	if endpoints[0].Endpoint != "5.6.7.8:51820" {
+		t.Errorf("endpoint = %q, want 5.6.7.8:51820", endpoints[0].Endpoint)
 	}
-	if got.Route != "10.42.0.9/32" {
-		t.Errorf("route = %q, want 10.42.0.9/32", got.Route)
+
+	sightings, err := env.Service.ListLocalEndpoints(
+		"endpoints",
+		testutil.FixedTime.Add(-time.Second),
+	)
+	if err != nil {
+		t.Fatalf("list local endpoints: %v", err)
 	}
-	if got.Connected {
-		t.Error("expected connected=false for a non-running network")
+	if len(sightings) != 1 {
+		t.Fatalf("expected 1 sighting, got %d", len(sightings))
 	}
-	if got.Endpoint != "" {
-		t.Errorf("endpoint = %q, want empty", got.Endpoint)
-	}
-	if !got.LastHandshake.IsZero() {
-		t.Errorf("last_handshake = %v, want zero", got.LastHandshake)
+	if sightings[0].PeerKey != peerKey {
+		t.Errorf("peer key = %q, want %q", sightings[0].PeerKey, peerKey)
 	}
 }
 
-func TestListPeerStatus_Running_JoinsLiveDeviceState(t *testing.T) {
+// TestRecordEndpointAttempt_AdvancesRotationState verifies that a
+// recorded attempt is visible in the endpoint catalog, so rotation
+// resumes where it left off after a restart.
+func TestRecordEndpointAttempt_AdvancesRotationState(t *testing.T) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Database, "running-net")
+	testutil.SeedNetworkDirect(t, env.Database, "attempts")
 
 	peerKey := mustGenKey(t)
-	testutil.SeedPeers(t, env.Database, "running-net", service.Peer{
+	testutil.SeedPeers(t, env.Database, "attempts", service.Peer{
 		Name:      "alice",
 		PublicKey: peerKey,
 		Route:     "10.42.0.9/32",
 	})
-
-	if err := env.Service.EnableNetwork("running-net"); err != nil {
-		t.Fatalf("enable: %v", err)
+	if err := env.Service.RecordLocalEndpoint(
+		"attempts",
+		peerKey,
+		"5.6.7.8:51820",
+		testutil.FixedTime,
+	); err != nil {
+		t.Fatalf("record local endpoint: %v", err)
 	}
 
-	dev := env.Backend.Device("running-net")
-	if dev == nil {
-		t.Fatal("expected device was created")
+	if err := env.Service.RecordEndpointAttempt(
+		"attempts",
+		peerKey,
+		"5.6.7.8:51820",
+		testutil.FixedTime,
+	); err != nil {
+		t.Fatalf("record endpoint attempt: %v", err)
 	}
 
-	parsedKey, err := wgtypes.ParseKey(peerKey)
+	endpoints, err := env.Service.ListPeerEndpoints("attempts", peerKey)
 	if err != nil {
-		t.Fatalf("parse key: %v", err)
+		t.Fatalf("list peer endpoints: %v", err)
 	}
-	now := testutil.FixedTime
-	dev.SetPeers(wireguard.PeerStatus{
-		PublicKey:     parsedKey,
-		Endpoint:      &net.UDPAddr{IP: net.ParseIP("5.6.7.8"), Port: 51820},
-		LastHandshake: now,
-	})
-
-	statuses, err := env.Service.ListPeerStatus("running-net")
-	if err != nil {
-		t.Fatalf("list peer status: %v", err)
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(endpoints))
 	}
-	if len(statuses) != 1 {
-		t.Fatalf("expected 1 peer, got %d", len(statuses))
-	}
-	got := statuses[0]
-	if got.Endpoint != "5.6.7.8:51820" {
-		t.Errorf("endpoint = %q, want 5.6.7.8:51820", got.Endpoint)
-	}
-	if !got.LastHandshake.Equal(now) {
-		t.Errorf("last_handshake = %v, want %v", got.LastHandshake, now)
-	}
-	if !got.Connected {
-		t.Error("expected connected=true for a fresh handshake")
-	}
-}
-
-func TestListPeerStatus_Running_StaleHandshakeNotConnected(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Database, "stale-net")
-
-	peerKey := mustGenKey(t)
-	testutil.SeedPeers(t, env.Database, "stale-net", service.Peer{
-		Name:      "alice",
-		PublicKey: peerKey,
-		Route:     "10.42.0.9/32",
-	})
-
-	if err := env.Service.EnableNetwork("stale-net"); err != nil {
-		t.Fatalf("enable: %v", err)
-	}
-
-	dev := env.Backend.Device("stale-net")
-	if dev == nil {
-		t.Fatal("expected device was created")
-	}
-
-	parsedKey, err := wgtypes.ParseKey(peerKey)
-	if err != nil {
-		t.Fatalf("parse key: %v", err)
-	}
-	stale := testutil.FixedTime.Add(-service.StaleThreshold * 2)
-	dev.SetPeers(wireguard.PeerStatus{
-		PublicKey:     parsedKey,
-		LastHandshake: stale,
-	})
-
-	statuses, err := env.Service.ListPeerStatus("stale-net")
-	if err != nil {
-		t.Fatalf("list peer status: %v", err)
-	}
-	if len(statuses) != 1 {
-		t.Fatalf("expected 1 peer, got %d", len(statuses))
-	}
-	if statuses[0].Connected {
-		t.Error("expected connected=false for a stale handshake")
+	if !endpoints[0].LastAttemptedAt.Equal(testutil.FixedTime) {
+		t.Errorf("last attempted = %v, want %v", endpoints[0].LastAttemptedAt, testutil.FixedTime)
 	}
 }

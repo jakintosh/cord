@@ -15,10 +15,8 @@ var (
 	ErrRegistrationExpired          = errors.New("registration has expired")
 	ErrRegistrationRedeemed         = errors.New("registration already redeemed")
 	ErrPeerNotConfirmed             = errors.New("peer not yet confirmed")
-	ErrNetworkRunning               = errors.New("network is already running")
-	ErrNetworkNotRunning            = errors.New("network is not running")
+	ErrNetworkEnabled               = errors.New("network is enabled; disable it first")
 	ErrNotImplemented               = errors.New("not implemented")
-	ErrWireGuardUnavailable         = errors.New("wireguard backend not configured")
 )
 
 // mapStoreError translates store-level sentinel errors into

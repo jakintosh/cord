@@ -1,4 +1,4 @@
-package peer
+package peer_test
 
 import (
 	"encoding/json"
@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/peer"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
@@ -20,7 +21,7 @@ func TestHandleVisibleSnapshot_Success(t *testing.T) {
 	r := httptest.NewRequest("GET", "/snapshot", nil)
 	r.RemoteAddr = "10.0.0.5:12345"
 
-	api.Router().ServeHTTP(w, r)
+	api.Router("testnet").ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -46,7 +47,7 @@ func TestHandleVisibleSnapshot_IdentityFails(t *testing.T) {
 	r := httptest.NewRequest("GET", "/snapshot", nil)
 	r.RemoteAddr = "10.0.0.99:12345"
 
-	api.Router().ServeHTTP(w, r)
+	api.Router("testnet").ServeHTTP(w, r)
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
@@ -74,7 +75,7 @@ func TestHandleReportEndpoints_Success(t *testing.T) {
 	r := httptest.NewRequest("POST", "/endpoints", strings.NewReader(body))
 	r.RemoteAddr = "10.0.0.5:12345"
 
-	api.Router().ServeHTTP(w, r)
+	api.Router("testnet").ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -88,7 +89,7 @@ func TestHandleReportEndpoints_InvalidJSON(t *testing.T) {
 	r := httptest.NewRequest("POST", "/endpoints", strings.NewReader(`{`))
 	r.RemoteAddr = "10.0.0.5:12345"
 
-	api.Router().ServeHTTP(w, r)
+	api.Router("testnet").ServeHTTP(w, r)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -102,7 +103,7 @@ func TestHandleReportEndpoints_IdentityFails(t *testing.T) {
 	r := httptest.NewRequest("POST", "/endpoints", strings.NewReader(`[]`))
 	r.RemoteAddr = "10.0.0.99:12345"
 
-	api.Router().ServeHTTP(w, r)
+	api.Router("testnet").ServeHTTP(w, r)
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
@@ -129,13 +130,13 @@ func TestHandleConfirmPeer_Success(t *testing.T) {
 		t.Fatalf("redeem registration: %v", err)
 	}
 
-	api := New(env.Service, "testnet", nil)
+	api := peer.New(env.Service, nil)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/confirm", nil)
 	r.RemoteAddr = "10.0.0.5:12345"
 
-	api.Router().ServeHTTP(w, r)
+	api.Router("testnet").ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
@@ -149,14 +150,14 @@ func TestHandleConfirmPeer_IdentityFails(t *testing.T) {
 	r := httptest.NewRequest("POST", "/confirm", nil)
 	r.RemoteAddr = "10.0.0.99:12345"
 
-	api.Router().ServeHTTP(w, r)
+	api.Router("testnet").ServeHTTP(w, r)
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
 	}
 }
 
-func setupPeerTest(t *testing.T) (*testutil.ServiceEnv, *API) {
+func setupPeerTest(t *testing.T) (*testutil.ServiceEnv, *peer.API) {
 	t.Helper()
 
 	env := testutil.SetupService(t)
@@ -164,7 +165,7 @@ func setupPeerTest(t *testing.T) (*testutil.ServiceEnv, *API) {
 
 	testutil.SeedPeerDB(t, env.Database, "testnet", "alice", "10.0.0.5/32", "alice-pub-key", false, true, true)
 
-	api := New(env.Service, "testnet", nil)
+	api := peer.New(env.Service, nil)
 
 	return env, api
 }

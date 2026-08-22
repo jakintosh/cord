@@ -102,6 +102,10 @@ func printClientStatus(
 	if len(s.Networks) > 0 {
 		rows := make([][]string, len(s.Networks))
 		for idx, n := range s.Networks {
+			reason := n.Reason
+			if reason == "" {
+				reason = "-"
+			}
 			rows[idx] = []string{
 				n.Name,
 				strconv.FormatBool(n.Enabled),
@@ -109,10 +113,11 @@ func printClientStatus(
 				humanizeOptionalTime(n.Sync.LastRunAt),
 				humanizeOptionalTime(n.Scan.LastRunAt),
 				humanizeOptionalTime(n.Report.LastRunAt),
+				reason,
 			}
 		}
 		printTable(
-			[]string{"NETWORK", "ENABLED", "RUNNING", "LAST SYNC", "LAST SCAN", "LAST REPORT"},
+			[]string{"NETWORK", "ENABLED", "RUNNING", "LAST SYNC", "LAST SCAN", "LAST REPORT", "REASON"},
 			rows,
 		)
 	}

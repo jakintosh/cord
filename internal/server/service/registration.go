@@ -45,22 +45,6 @@ type CreateRegistrationParams struct {
 	ExpiresAt       time.Time
 }
 
-// ListRegistrations returns all registrations for the given network
-// (active, expired, and redeemed).
-func (s *Service) ListRegistrations(
-	networkName string,
-) (
-	[]*Registration,
-	error,
-) {
-	registrations, err := s.store.ListRegistrations(networkName)
-	if err != nil {
-		return nil, fmt.Errorf("list registrations: %w", err)
-	}
-
-	return registrations, nil
-}
-
 // ListRegistrationGroups returns the groups held by a registration before
 // confirmation. Confirmed registrations have no registration-held groups.
 func (s *Service) ListRegistrationGroups(
@@ -128,6 +112,49 @@ func (s *Service) RemoveRegistrationGroup(
 	}
 
 	return nil
+}
+
+// ListRegistrations returns all registrations for the given network
+// (active, expired, and redeemed).
+func (s *Service) ListRegistrations(
+	networkName string,
+) (
+	[]*Registration,
+	error,
+) {
+	registrations, err := s.store.ListRegistrations(networkName)
+	if err != nil {
+		return nil, fmt.Errorf("list registrations: %w", err)
+	}
+
+	return registrations, nil
+}
+
+// ListRegistrationPeers returns the WireGuard peer set the network's invite plane
+// should carry — one temporary peer per unexpired, unredeemed
+// registration — together with the earliest expiry among them. The
+// expiry is zero when no registration is pending; the runtime uses it to
+// schedule the reconciliation that retires the peer.
+func (s *Service) ListRegistrationPeers(
+	network string,
+) (
+	[]wireguard.PeerConfig,
+	time.Time,
+	error,
+) {
+	regs, err := s.store.ListActiveRegistrations(network, s.clock())
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("invite peers: %w", mapStoreError(err))
+	}
+
+	var expiry time.Time
+	for _, reg := range regs {
+		if expiry.IsZero() || reg.ExpiresAt.Before(expiry) {
+			expiry = reg.ExpiresAt
+		}
+	}
+
+	return registrationsToWireGuardPeers(regs), expiry, nil
 }
 
 // CreateRegistration reserves an IP on the main network, allocates a
@@ -215,7 +242,8 @@ func (s *Service) CreateRegistration(
 	if err != nil {
 		return nil, fmt.Errorf("create registration: %w", mapStoreError(err))
 	}
-	s.reconcile(networkName)
+
+	s.requestReconcile(networkName)
 
 	s.log.Info("registration created",
 		"network", networkName,
@@ -268,7 +296,8 @@ func (s *Service) RedeemRegistration(
 	if err != nil {
 		return nil, fmt.Errorf("redeem registration: %w", mapStoreError(err))
 	}
-	s.reconcile(networkName)
+
+	s.requestReconcile(networkName)
 
 	s.log.Info("registration redeemed",
 		"network", networkName,
@@ -286,10 +315,14 @@ func (s *Service) RevokeRegistration(
 	networkName string,
 	regName string,
 ) error {
-	if err := s.store.DeleteRegistration(networkName, regName); err != nil {
+	if err := s.store.DeleteRegistration(
+		networkName,
+		regName,
+	); err != nil {
 		return fmt.Errorf("delete registration %q: %w", regName, mapStoreError(err))
 	}
-	s.reconcile(networkName)
+
+	s.requestReconcile(networkName)
 
 	s.log.Info(
 		"registration revoked",
@@ -303,7 +336,7 @@ func (s *Service) RevokeRegistration(
 // buildInvitation constructs an Invitation from a network config and a
 // redeemed peer.
 func (s *Service) buildInvitation(
-	network *NetworkConfig,
+	network *Network,
 	peer *Peer,
 ) (
 	*protocol.Invitation,
@@ -340,7 +373,7 @@ func (s *Service) buildInvitation(
 func registrationsToWireGuardPeers(
 	regs []*Registration,
 ) []wireguard.PeerConfig {
-	var wgpeers []wireguard.PeerConfig
+	wgpeers := make([]wireguard.PeerConfig, 0, len(regs))
 	for _, reg := range regs {
 		wgpeers = append(wgpeers, wireguard.PeerConfig{
 			PublicKey:      reg.InvitePublicKey,

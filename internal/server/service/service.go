@@ -1,16 +1,12 @@
 package service
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
-	"net/http"
-	"sync"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
-	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 // defaultEndpointTTL is how long an endpoint sighting is considered current.
@@ -21,9 +17,6 @@ type Options struct {
 	// Store is the persistence adapter for server-side network state.
 	Store Store
 
-	// WireGuard is the WireGuard manager for managing network devices.
-	WireGuard *wireguard.Manager
-
 	// Clock returns the current time. Defaults to time.Now when nil.
 	Clock func() time.Time
 
@@ -31,31 +24,21 @@ type Options struct {
 	// discards everything.
 	Logger *slog.Logger
 
-	// APIFactory creates per-network HTTP handlers. Called when
-	// starting a network. Nil means no API listeners are started.
-	APIFactory func(network string) APIHandlers
-}
-
-// APIHandlers holds the HTTP handlers for a single network's main-facing
-// and invite-facing APIs.
-type APIHandlers struct {
-	Main   http.Handler
-	Invite http.Handler
+	// Wake receives the name of a network whose derived state changed,
+	// so the runtime can converge it promptly. Nil means nothing is
+	// listening; sends are dropped when the channel is full.
+	Wake chan<- string
 }
 
 // Service is the domain core for the cord server. All domain operations
 // are methods on Service, scoped by a network name parameter. It owns
-// durable state through the Store and live WireGuard state through WG.
+// durable state through the Store and computes the desired WireGuard
+// state, but never touches devices, listeners, goroutines, or timers.
 type Service struct {
-	store      Store
-	wireguard  *wireguard.Manager
-	clock      func() time.Time
-	log        *slog.Logger
-	mu         sync.Mutex
-	apiFactory func(network string) APIHandlers
-
-	// running tracks networks that are up (WG devices + API servers).
-	running map[string]*Network
+	store Store
+	clock func() time.Time
+	log   *slog.Logger
+	wake  chan<- string
 }
 
 // New returns a ready-to-use Service.
@@ -65,8 +48,8 @@ func New(
 	*Service,
 	error,
 ) {
-	if opts.WireGuard == nil {
-		return nil, fmt.Errorf("server: wireguard manager required")
+	if opts.Store == nil {
+		return nil, fmt.Errorf("server: store required")
 	}
 
 	clock := opts.Clock
@@ -80,98 +63,11 @@ func New(
 	}
 
 	return &Service{
-		store:      opts.Store,
-		wireguard:  opts.WireGuard,
-		clock:      clock,
-		log:        log,
-		running:    make(map[string]*Network),
-		apiFactory: opts.APIFactory,
+		store: opts.Store,
+		clock: clock,
+		log:   log,
+		wake:  opts.Wake,
 	}, nil
-}
-
-// Start reads all persisted configs and starts every enabled network.
-// Non-fatal per network: failures are logged and the rest continue.
-func (s *Service) Start() error {
-	names, err := s.store.ListNetworkNames()
-	if err != nil {
-		return fmt.Errorf("list networks: %w", err)
-	}
-
-	var lastErr error
-	for _, name := range names {
-		nc, err := s.store.GetNetwork(name)
-		if err != nil {
-			s.log.Error("start: get network failed", "network", name, "err", err)
-			lastErr = err
-			continue
-		}
-		if !nc.Enabled {
-			continue
-		}
-		if err := s.startNetwork(name); err != nil {
-			s.log.Error("start: network failed", "network", name, "err", err)
-			lastErr = err
-		}
-	}
-	return lastErr
-}
-
-// startNetwork constructs and starts a runtime Network from its
-// persisted config. Must not be called while holding s.mu.
-func (s *Service) startNetwork(
-	name string,
-) error {
-	s.mu.Lock()
-	if _, exists := s.running[name]; exists {
-		s.mu.Unlock()
-		return nil
-	}
-	s.mu.Unlock()
-
-	nc, err := s.store.GetNetwork(name)
-	if err != nil {
-		return fmt.Errorf("start network: %w", mapStoreError(err))
-	}
-
-	n := &Network{
-		config: nc,
-		store:  s.store,
-		wg:     s.wireguard,
-		api:    s.apiFactory,
-		clock:  s.clock,
-		log:    s.log.With("network", name),
-	}
-
-	if err := n.start(); err != nil {
-		return fmt.Errorf("start network %q: %w", name, err)
-	}
-
-	s.mu.Lock()
-	s.running[name] = n
-	s.mu.Unlock()
-
-	n.log.Info("network started")
-	return nil
-}
-
-// Close shuts down all running networks, stops their reconciliation
-// timers, and releases resources.
-func (s *Service) Close() error {
-	s.mu.Lock()
-	networks := make([]*Network, 0, len(s.running))
-	for _, n := range s.running {
-		networks = append(networks, n)
-	}
-	s.running = make(map[string]*Network)
-	s.mu.Unlock()
-
-	var errs []error
-	for _, n := range networks {
-		if err := n.stop(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
 }
 
 // ResolveRegistrationIdentity looks up an unredeemed, unexpired
@@ -220,4 +116,20 @@ func (s *Service) ResolveProvisionalIdentity(
 		return nil, fmt.Errorf("resolve provisional identity: %w", mapStoreError(err))
 	}
 	return p, nil
+}
+
+// requestReconcile tells the runtime that the named network's desired
+// state changed. The send never blocks: a full channel already holds a
+// wake the runtime has not consumed yet, and its periodic pass catches
+// up.
+func (s *Service) requestReconcile(
+	network string,
+) {
+	if s.wake == nil {
+		return
+	}
+	select {
+	case s.wake <- network:
+	default:
+	}
 }

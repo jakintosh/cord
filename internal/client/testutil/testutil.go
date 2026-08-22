@@ -1,6 +1,8 @@
 package testutil
 
 import (
+	"net"
+	"strconv"
 	"testing"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
@@ -12,18 +14,43 @@ import (
 
 const DefaultNetworkName = "testnet"
 
-var defaultInvite = protocol.Invitation{
-	Network: protocol.NetworkInfo{
-		PublicKey:   "server-pub-key",
+// Invitation builds a complete invite whose invite network is reachable
+// at apiAddr, so the tunnel a redemption brings up actually reaches the
+// test server listening there.
+func Invitation(
+	name string,
+	apiAddr string,
+) protocol.Invitation {
+	return protocol.Invitation{
+		Network: servedNetwork(name, apiAddr),
+		Peer: protocol.PeerIdentity{
+			Route:      "10.43.0.2/24",
+			PrivateKey: mustGenerateKey(),
+		},
+	}
+}
+
+// servedNetwork describes a network whose API answers at apiAddr.
+func servedNetwork(
+	name string,
+	apiAddr string,
+) protocol.NetworkInfo {
+	host, portStr, err := net.SplitHostPort(apiAddr)
+	if err != nil {
+		panic("split test server address: " + err.Error())
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		panic("parse test server port: " + err.Error())
+	}
+	return protocol.NetworkInfo{
+		Name:        name,
+		PublicKey:   mustGenerateKey(),
 		Endpoint:    "1.2.3.4:51820",
-		ServerRoute: "10.42.0.1/32",
-		NetworkCidr: "10.42.0.0/16",
-		APIPort:     8443,
-	},
-	Peer: protocol.PeerIdentity{
-		Route:      "10.42.0.5/32",
-		PrivateKey: mustGenerateKey(),
-	},
+		ServerRoute: host + "/32",
+		NetworkCidr: "10.0.0.0/16",
+		APIPort:     uint16(port),
+	}
 }
 
 func NetworkSnapshot(
@@ -78,29 +105,6 @@ func mustGenerateKey() string {
 	return key
 }
 
-func SeedNetwork(
-	t *testing.T,
-	svc *service.Service,
-) *service.NetworkConfig {
-	return SeedNetworkWithName(t, svc, DefaultNetworkName)
-}
-
-func SeedNetworkWithName(
-	t *testing.T,
-	svc *service.Service,
-	name string,
-) *service.NetworkConfig {
-	t.Helper()
-
-	invite := defaultInvite
-	invite.Network.Name = name
-	nc, err := svc.InstallNetwork(invite, service.NetworkOptions{})
-	if err != nil {
-		t.Fatalf("seed network %q: %v", name, err)
-	}
-	return nc
-}
-
 // SeedInstall creates an in-progress install record at phase "invited"
 // without redeeming or confirming it.
 func SeedInstall(
@@ -110,9 +114,10 @@ func SeedInstall(
 ) *service.Install {
 	t.Helper()
 
-	invite := defaultInvite
-	invite.Network.Name = name
-	inst, err := svc.BeginInstall(invite, service.NetworkOptions{})
+	inst, err := svc.BeginInstall(
+		Invitation(name, "10.43.0.1:8443"),
+		service.NetworkOptions{},
+	)
 	if err != nil {
 		t.Fatalf("seed install %q: %v", name, err)
 	}
@@ -123,7 +128,7 @@ func SeedNetworkDirect(
 	t *testing.T,
 	db *database.DB,
 	name string,
-) *service.NetworkConfig {
+) *service.Network {
 	t.Helper()
 
 	privKey, err := wireguard.GenerateKey()

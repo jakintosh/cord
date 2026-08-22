@@ -14,18 +14,18 @@ func seedNetworkForAssoc(t *testing.T, db *database.DB) {
 
 	name := "assocnet"
 	if err := db.BootstrapNetwork(
-		&service.NetworkConfig{
+		&service.Network{
 			Name:       name,
 			PrivateKey: "priv-" + name,
 			PublicKey:  "pub-" + name,
 			ExternalIP: "1.1.1.1",
-			Main: service.PlaneConfig{
+			Main: service.Plane{
 				Name:          name,
 				Cidr:          "10.0.0.0/16",
 				WireguardPort: 51820,
 				ApiPort:       8080,
 			},
-			Invite: service.PlaneConfig{
+			Invite: service.Plane{
 				Name:          name + "-i",
 				Cidr:          "10.1.0.0/24",
 				WireguardPort: 51821,

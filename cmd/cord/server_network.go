@@ -214,15 +214,17 @@ var serverNetworkEnable = &args.Command{
 			return err
 		}
 
-		if err := client.EnableNetwork(i.Context(), name); err != nil {
+		status, err := client.EnableNetwork(i.Context(), name)
+		if err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return nil
+			return printJSON(status)
 		}
 
 		fmt.Printf("network %q enabled\n", name)
+		printNetworkRuntime(status)
 		return nil
 	},
 }
@@ -244,17 +246,34 @@ var serverNetworkDisable = &args.Command{
 			return err
 		}
 
-		if err := client.DisableNetwork(i.Context(), name); err != nil {
+		status, err := client.DisableNetwork(i.Context(), name)
+		if err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return nil
+			return printJSON(status)
 		}
 
 		fmt.Printf("network %q disabled\n", name)
+		printNetworkRuntime(status)
 		return nil
 	},
+}
+
+// printNetworkRuntime reports what the daemon is actually doing with a
+// network when that differs from the intent just recorded.
+func printNetworkRuntime(
+	status admin.NetworkStatus,
+) {
+	if status.Enabled == status.Running {
+		return
+	}
+	if status.Reason == "" {
+		fmt.Printf("running: %t\n", status.Running)
+		return
+	}
+	fmt.Printf("running: %t (%s)\n", status.Running, status.Reason)
 }
 
 func toUint16Ptr(v *int) *uint16 {

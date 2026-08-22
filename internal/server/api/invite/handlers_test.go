@@ -1,4 +1,4 @@
-package invite
+package invite_test
 
 import (
 	"net/http"
@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/server/api/invite"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
@@ -19,7 +20,7 @@ func TestHandleRedeemInvite_Success(t *testing.T) {
 	r := httptest.NewRequest("POST", "/redeem", strings.NewReader(body))
 	r.RemoteAddr = "10.1.0.2:12345"
 
-	api.Router().ServeHTTP(w, r)
+	api.Router("testnet").ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
@@ -33,7 +34,7 @@ func TestHandleRedeemInvite_InvalidJSON(t *testing.T) {
 	r := httptest.NewRequest("POST", "/redeem", strings.NewReader(`{`))
 	r.RemoteAddr = "10.1.0.2:12345"
 
-	api.Router().ServeHTTP(w, r)
+	api.Router("testnet").ServeHTTP(w, r)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -47,7 +48,7 @@ func TestHandleRedeemInvite_IdentityFails(t *testing.T) {
 	r := httptest.NewRequest("POST", "/redeem", strings.NewReader(`{"perm_pubkey": "y"}`))
 	r.RemoteAddr = "10.1.0.99:12345"
 
-	api.Router().ServeHTTP(w, r)
+	api.Router("testnet").ServeHTTP(w, r)
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
@@ -56,7 +57,7 @@ func TestHandleRedeemInvite_IdentityFails(t *testing.T) {
 
 // --- Test helpers ---
 
-func setupInviteTest(t *testing.T) (*testutil.ServiceEnv, *API) {
+func setupInviteTest(t *testing.T) (*testutil.ServiceEnv, *invite.API) {
 	t.Helper()
 
 	env := testutil.SetupService(t)
@@ -73,7 +74,7 @@ func setupInviteTest(t *testing.T) (*testutil.ServiceEnv, *API) {
 		t.Fatalf("create registration: %v", err)
 	}
 
-	api := New(env.Service, "testnet", nil)
+	api := invite.New(env.Service, nil)
 
 	return env, api
 }

@@ -7,15 +7,14 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
-	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
-	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
 
+// ServiceEnv is a domain-only environment: a service over an in-memory
+// database, with the wake channel the service writes to.
 type ServiceEnv struct {
 	Database *database.DB
-	Manager  *wireguard.Manager
-	Backend  *wireguardtest.MockBackend
 	Service  *service.Service
+	Wake     chan string
 }
 
 func SetupService(
@@ -32,14 +31,13 @@ func SetupServiceWithClock(
 	t.Helper()
 
 	db := SetupDB(t)
-	backend := wireguardtest.NewMockBackend()
-	mgr := wireguard.NewManagerWithBackend(backend)
+	wake := make(chan string, 16)
 
 	svc, err := service.New(service.Options{
-		Store:     db,
-		WireGuard: mgr,
-		Clock:     clock,
-		Logger:    logging.Discard(),
+		Store:  db,
+		Clock:  clock,
+		Logger: logging.Discard(),
+		Wake:   wake,
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -47,33 +45,7 @@ func SetupServiceWithClock(
 
 	return &ServiceEnv{
 		Database: db,
-		Manager:  mgr,
-		Backend:  backend,
 		Service:  svc,
-	}
-}
-
-func SetupServiceWithManager(
-	t *testing.T,
-	mgr *wireguard.Manager,
-) *ServiceEnv {
-	t.Helper()
-
-	db := SetupDB(t)
-
-	svc, err := service.New(service.Options{
-		Store:     db,
-		WireGuard: mgr,
-		Clock:     func() time.Time { return FixedTime },
-		Logger:    logging.Discard(),
-	})
-	if err != nil {
-		t.Fatalf("new service: %v", err)
-	}
-
-	return &ServiceEnv{
-		Database: db,
-		Manager:  mgr,
-		Service:  svc,
+		Wake:     wake,
 	}
 }

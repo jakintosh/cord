@@ -8,7 +8,6 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
-	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 func TestCreateRegistration_Success(t *testing.T) {
@@ -79,40 +78,6 @@ func TestCreateRegistration_MissingIP(t *testing.T) {
 	}
 }
 
-func TestCreateRegistration_ReconcilesRunningInviteDeviceWithHostRoute(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-
-	if err := env.Service.EnableNetwork("testnet"); err != nil {
-		t.Fatalf("enable network: %v", err)
-	}
-
-	ip := net.ParseIP("10.0.0.5")
-	inv, err := env.Service.CreateRegistration("testnet", "live-reg", service.RegistrationOptions{PeerIP: ip})
-	if err != nil {
-		t.Fatalf("create registration: %v", err)
-	}
-
-	if env.Backend.Device("testnet-i") == nil {
-		t.Fatal("expected invite device")
-	}
-	peers := env.Backend.LastAppliedOpsFor("testnet-i")
-	if len(peers) != 1 {
-		t.Fatalf("invite peers = %d, want 1", len(peers))
-	}
-	expectedPub, err := wireguard.PublicKey(inv.Peer.PrivateKey)
-	if err != nil {
-		t.Fatalf("derive expected pub key: %v", err)
-	}
-	if peers[0].Target.PublicKey.String() != expectedPub {
-		t.Fatalf("public key = %q, want temp registration public key %q",
-			peers[0].Target.PublicKey.String(), expectedPub)
-	}
-	if got := peers[0].Target.AllowedIPs; len(got) != 1 || got[0].String() != "10.1.0.2/32" {
-		t.Fatalf("allowed IPs = %v, want [10.1.0.2/32]", got)
-	}
-}
-
 func TestCreateRegistration_EmptyName(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
@@ -152,12 +117,12 @@ func TestCreateRegistration_AddressExhausted(t *testing.T) {
 	if _, err := env.Service.CreateNetwork(
 		"small",
 		"192.168.1.1",
-		service.PlaneConfig{
+		service.Plane{
 			Cidr:          "10.0.0.0/24",
 			WireguardPort: 51820,
 			ApiPort:       8080,
 		},
-		service.PlaneConfig{
+		service.Plane{
 			Cidr:          "10.1.0.0/30",
 			WireguardPort: 51821,
 			ApiPort:       8080,
@@ -382,50 +347,6 @@ func TestRedeemRegistration_MultipleRegistrations(t *testing.T) {
 	}
 	if len(peers) != 3 {
 		t.Fatalf("expected 3 peers (cord-server + peer-a + peer-b), got %d", len(peers))
-	}
-}
-
-func TestRedeemRegistration_ReconcilesRunningDevices(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-
-	if err := env.Service.EnableNetwork("testnet"); err != nil {
-		t.Fatalf("enable network: %v", err)
-	}
-	ip := net.ParseIP("10.0.0.5")
-	_, err := env.Service.CreateRegistration("testnet", "live-redeem", service.RegistrationOptions{PeerIP: ip})
-	if err != nil {
-		t.Fatalf("create registration: %v", err)
-	}
-
-	tempKey := lastTempKey(t, env.Service, "testnet")
-	permKey := mustGenKey(t)
-	_, err = env.Service.RedeemRegistration("testnet", tempKey, permKey)
-	if err != nil {
-		t.Fatalf("redeem: %v", err)
-	}
-
-	if env.Backend.Device("testnet-i") == nil {
-		t.Fatal("expected invite device")
-	}
-	if peers := env.Backend.LastAppliedOpsFor("testnet-i"); len(peers) != 1 {
-		t.Fatalf("invite peers after redeem = %d, want 1 (temp peer still active)", len(peers))
-	}
-
-	if env.Backend.Device("testnet") == nil {
-		t.Fatal("expected main device")
-	}
-	var found bool
-	for _, op := range env.Backend.LastAppliedOpsFor("testnet") {
-		if op.Target.PublicKey.String() == permKey {
-			found = true
-			if got := op.Target.AllowedIPs; len(got) != 1 || got[0].String() != "10.0.0.5/32" {
-				t.Fatalf("redeemed peer allowed IPs = %v, want [10.0.0.5/32]", got)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("main device missing redeemed peer")
 	}
 }
 
@@ -733,9 +654,6 @@ func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
 	clock := &mutableClock{t: testutil.FixedTime}
 	env := testutil.SetupServiceWithClock(t, clock.now)
 	testutil.SeedNetwork(t, env.Service)
-	if err := env.Service.EnableNetwork("testnet"); err != nil {
-		t.Fatalf("enable network: %v", err)
-	}
 
 	shortIP := net.ParseIP("10.0.0.7")
 	shortExpiry := time.Hour
@@ -756,12 +674,8 @@ func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
 	}
 
 	clock.t = clock.t.Add(2 * time.Hour)
-	if _, err := env.Service.CreateRegistration(
-		"testnet",
-		"reconcile-trigger",
-		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.250")},
-	); err != nil {
-		t.Fatalf("trigger reconcile: %v", err)
+	if err := env.Service.PruneNetwork("testnet"); err != nil {
+		t.Fatalf("prune: %v", err)
 	}
 
 	if _, err := env.Service.GetPeer("testnet", "short-lived"); !errors.Is(err, service.ErrNotFound) {
@@ -773,8 +687,14 @@ func TestPruneExpiredRegistrations_RemovesExpiredProvisionalPeer(t *testing.T) {
 	if _, err := env.Database.GetCidr("testnet", "short-lived"); !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("CIDR after expiry: err = %v, want ErrNotFound", err)
 	}
-	if hasPeerOp(env.Backend.LastAppliedOpsFor("testnet"), shortKey) {
-		t.Error("main device should not have expired provisional peer")
+	peers, err := env.Service.ListMainPeers("testnet")
+	if err != nil {
+		t.Fatalf("main peers: %v", err)
+	}
+	for _, peer := range peers {
+		if peer.PublicKey == shortKey {
+			t.Error("main peer set should not include the expired provisional peer")
+		}
 	}
 	if _, err := env.Service.CreateRegistration("testnet", "short-lived", service.RegistrationOptions{PeerIP: shortIP}); err != nil {
 		t.Fatalf("reuse expired registration name and IP: %v", err)
@@ -842,12 +762,8 @@ func TestPruneExpiredRegistrations_RetainsConfirmedRegistrationAsAudit(t *testin
 	}
 
 	clock.t = clock.t.Add(2 * time.Hour)
-	if _, err := env.Service.CreateRegistration(
-		"testnet",
-		"reconcile-trigger",
-		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.250")},
-	); err != nil {
-		t.Fatalf("trigger reconcile: %v", err)
+	if err := env.Service.PruneNetwork("testnet"); err != nil {
+		t.Fatalf("prune: %v", err)
 	}
 	reg, err := env.Database.GetRegistration("testnet", "audited")
 	if err != nil {

@@ -29,9 +29,7 @@ func writeServiceError(
 		wire.WriteError(w, http.StatusGone, err.Error())
 	case errors.Is(err, service.ErrRegistrationRedeemed):
 		wire.WriteError(w, http.StatusGone, err.Error())
-	case errors.Is(err, service.ErrNetworkRunning):
-		wire.WriteError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, service.ErrNetworkNotRunning):
+	case errors.Is(err, service.ErrNetworkEnabled):
 		wire.WriteError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, service.ErrNotImplemented):
 		wire.WriteError(w, http.StatusNotImplemented, err.Error())

@@ -72,7 +72,7 @@ type Store interface {
 	//     network was already completed with that identity.
 	//
 	// Atomic effects:
-	//   - A NetworkConfig is created from the authoritative install fields.
+	//   - A Network is created from the authoritative install fields.
 	//   - The transient install is deleted.
 	//
 	// Retry:
@@ -88,7 +88,7 @@ type Store interface {
 		mainPrivateKey string,
 		confirmedAt time.Time,
 	) (
-		*NetworkConfig,
+		*Network,
 		error,
 	)
 
@@ -97,15 +97,11 @@ type Store interface {
 	GetNetwork(
 		name string,
 	) (
-		*NetworkConfig,
-		error,
-	)
-	ListNetworkNames() (
-		[]string,
+		*Network,
 		error,
 	)
 	ListNetworks() (
-		[]*NetworkConfig,
+		[]*Network,
 		error,
 	)
 

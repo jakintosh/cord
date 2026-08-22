@@ -133,7 +133,7 @@ var clientNetworkInstall = &args.Command{
 			}
 		}
 
-		invitation, err := protocol.Parse(bytes.NewReader(invite))
+		invitation, err := protocol.ParseInvitation(bytes.NewReader(invite))
 		if err != nil {
 			return fmt.Errorf("parse invite: %w", err)
 		}
@@ -310,14 +310,17 @@ var clientNetworkEnable = &args.Command{
 			return err
 		}
 
-		if err := client.EnableNetwork(i.Context(), network); err != nil {
+		status, err := client.EnableNetwork(i.Context(), network)
+		if err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return nil
+			return printJSON(status)
 		}
+
 		fmt.Printf("network %q enabled\n", network)
+		printClientNetworkRuntime(status)
 		return nil
 	},
 }
@@ -339,14 +342,17 @@ var clientNetworkDisable = &args.Command{
 			return err
 		}
 
-		if err := client.DisableNetwork(i.Context(), network); err != nil {
+		status, err := client.DisableNetwork(i.Context(), network)
+		if err != nil {
 			return err
 		}
 
 		if i.GetFlag("json") {
-			return nil
+			return printJSON(status)
 		}
+
 		fmt.Printf("network %q disabled\n", network)
+		printClientNetworkRuntime(status)
 		return nil
 	},
 }
@@ -379,6 +385,21 @@ var clientNetworkSync = &args.Command{
 		fmt.Printf("network %q synced\n", network)
 		return nil
 	},
+}
+
+// printClientNetworkRuntime reports what the daemon is actually doing
+// with a network when that differs from the intent just recorded.
+func printClientNetworkRuntime(
+	status api.NetworkStatus,
+) {
+	if status.Enabled == status.Running {
+		return
+	}
+	if status.Reason == "" {
+		fmt.Printf("running: %t\n", status.Running)
+		return
+	}
+	fmt.Printf("running: %t (%s)\n", status.Running, status.Reason)
 }
 
 // printClientNetworkDetail prints the key: value detail view for a single

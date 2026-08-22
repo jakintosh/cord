@@ -41,11 +41,11 @@ vet: generate
 
 lint: fmt vet
 
-install: generate
-	GOBIN=/usr/local/bin $(GO) install $(CMD)
+install:
+	install -Dm755 $(BIN) /usr/local/bin/$(APP)
 
 run: build
-	$(BIN) daemon
+	$(BIN) server daemon
 
 clean:
 	rm -rf $(BIN_DIR)

@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
-	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 // PeerEndpoint is a single endpoint observation for a peer. Each row
@@ -35,28 +34,11 @@ func endpointsFromProtocol(
 
 // EndpointSighting is a locally observed peer endpoint, reported to
 // the server for gossip distribution. It is stored in and read back from
-// the local database as domain state; the report path converts it to the
+// the local database as domain state; the runtime converts it to the
 // protocol wire shape at the network boundary.
 type EndpointSighting struct {
 	PeerKey  string
 	Endpoint string
-}
-
-func (es *EndpointSighting) toProtocol() protocol.EndpointSighting {
-	return protocol.EndpointSighting{
-		PeerKey:  es.PeerKey,
-		Endpoint: es.Endpoint,
-	}
-}
-
-func sightingsToProtocol(
-	sightings []EndpointSighting,
-) []protocol.EndpointSighting {
-	protoSightings := make([]protocol.EndpointSighting, len(sightings))
-	for i, s := range sightings {
-		protoSightings[i] = s.toProtocol()
-	}
-	return protoSightings
 }
 
 // Peer is a cached peer record stored in the client's local database.
@@ -96,18 +78,8 @@ func peersFromProtocol(
 	return peers
 }
 
-// PeerStatus is a cached peer joined with its live WireGuard device
-// state, for operator-facing display. Runtime fields are zero-valued
-// when the network isn't currently running.
-type PeerStatus struct {
-	Name          string
-	Route         string
-	Endpoint      string
-	LastHandshake time.Time
-	Connected     bool
-}
-
-// ListPeers returns all cached peers for the named network.
+// ListPeers returns all cached peers for the named network, each with
+// the best endpoint currently known for it.
 func (s *Service) ListPeers(
 	network string,
 ) (
@@ -117,53 +89,49 @@ func (s *Service) ListPeers(
 	return s.store.ListPeers(network)
 }
 
-// ListPeerStatus returns the cached peers for the named network joined
-// with live device state (endpoint, last handshake, connected). If the
-// network exists but isn't running, cached peers are returned with
-// zero-valued runtime fields rather than an error. Returns
-// ErrNotFound if the network doesn't exist at all, consistent with
-// GetNetwork.
-func (s *Service) ListPeerStatus(
+// ListPeerEndpoints returns every known endpoint for one peer, in
+// best-first catalog order. The runtime rotates through them when a peer
+// goes stale.
+func (s *Service) ListPeerEndpoints(
 	network string,
+	pubKey string,
 ) (
-	[]PeerStatus,
+	[]PeerEndpoint,
 	error,
 ) {
-	peers, err := s.store.ListPeers(network)
-	if err != nil {
-		return nil, err
-	}
+	return s.store.ListPeerEndpoints(network, pubKey)
+}
 
-	live := make(map[string]wireguard.PeerStatus)
-	s.mu.Lock()
-	n, running := s.running[network]
-	s.mu.Unlock()
-	if running {
-		devicePeers, err := n.tunnel.device.Peers()
-		if err != nil {
-			return nil, err
-		}
-		for _, dp := range devicePeers {
-			live[dp.PublicKey.String()] = dp
-		}
-	}
+// ListLocalEndpoints returns the endpoints this client observed itself
+// at or after since, across every peer of the network.
+func (s *Service) ListLocalEndpoints(
+	network string,
+	since time.Time,
+) (
+	[]EndpointSighting,
+	error,
+) {
+	return s.store.ListLocalEndpointsSince(network, since)
+}
 
-	now := s.clock()
-	statuses := make([]PeerStatus, len(peers))
-	for i, p := range peers {
-		status := PeerStatus{
-			Name:  p.Name,
-			Route: p.Route,
-		}
-		if dp, ok := live[p.PublicKey]; ok {
-			if dp.Endpoint != nil {
-				status.Endpoint = dp.Endpoint.String()
-			}
-			status.LastHandshake = dp.LastHandshake
-			status.Connected = !dp.LastHandshake.IsZero() &&
-				now.Sub(dp.LastHandshake) < StaleThreshold
-		}
-		statuses[i] = status
-	}
-	return statuses, nil
+// RecordLocalEndpoint records an endpoint this client saw a peer use.
+func (s *Service) RecordLocalEndpoint(
+	network string,
+	pubKey string,
+	endpoint string,
+	observedAt time.Time,
+) error {
+	return s.store.RecordLocalEndpoint(network, pubKey, endpoint, observedAt)
+}
+
+// RecordEndpointAttempt records that a peer's device endpoint was
+// pointed at a candidate, so rotation resumes where it left off across
+// daemon restarts.
+func (s *Service) RecordEndpointAttempt(
+	network string,
+	pubKey string,
+	endpoint string,
+	attemptedAt time.Time,
+) error {
+	return s.store.RecordEndpointAttempt(network, pubKey, endpoint, attemptedAt)
 }

@@ -1,4 +1,4 @@
-package service
+package runtime
 
 import (
 	"context"
@@ -10,58 +10,29 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
+	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-// PlaneConfig is the persisted configuration for one WireGuard plane
-// (main or invite) within a network. It describes the interface name,
-// address space, and port assignments.
-type PlaneConfig struct {
-	Name          string // WireGuard interface name
-	Cidr          string // e.g. "10.42.0.0/16"
-	WireguardPort uint16
-	ApiPort       uint16
-}
-
-// normalize validates a plane config and canonicalizes its network CIDR.
-func (pc *PlaneConfig) normalize() error {
-	if err := wireguard.ValidateDeviceName(pc.Name); err != nil {
-		return fmt.Errorf("%w: invalid device name: %v", ErrInvalidInput, err)
-	}
-	cidr, err := netaddr.ParseNetworkCIDR(pc.Cidr)
-	if err != nil {
-		return fmt.Errorf("%w: invalid CIDR %q: %v", ErrInvalidInput, pc.Cidr, err)
-	}
-	pc.Cidr = cidr.String()
-	return nil
-}
+// shutdownTimeout bounds the graceful shutdown of a plane's API server.
+const shutdownTimeout = 5 * time.Second
 
 // Plane is a running WireGuard plane: one WG device plus an optional
 // HTTP API server served over the tunnel.
 type Plane struct {
 	device     *wireguard.Device
 	server     *http.Server
-	config     *PlaneConfig
+	config     service.Plane
 	privateKey string
 	log        *slog.Logger
 }
 
-func newPlane(
-	config PlaneConfig,
-	privateKey string,
-	log *slog.Logger,
-) *Plane {
-	return &Plane{
-		config:     &config,
-		privateKey: privateKey,
-		log:        log,
-	}
-}
-
-// start creates the WireGuard device, then synchronously starts the
-// HTTP API listener (if handler is non-nil). Bind failures now fail
-// startup instead of being logged asynchronously.
+// start creates the WireGuard device, then synchronously starts the HTTP
+// API listener (if handler is non-nil), so a bind failure fails the
+// start instead of surfacing asynchronously. Requests served by the
+// listener inherit ctx.
 func (p *Plane) start(
+	ctx context.Context,
 	wg *wireguard.Manager,
 	handler http.Handler,
 ) error {
@@ -92,8 +63,9 @@ func (p *Plane) start(
 	if handler != nil {
 		apiEndpoint := netaddr.Endpoint(ifaceRoute.IP, p.config.ApiPort)
 		p.server = &http.Server{
-			Addr:    apiEndpoint,
-			Handler: handler,
+			Addr:        apiEndpoint,
+			Handler:     handler,
+			BaseContext: func(net.Listener) context.Context { return ctx },
 		}
 		ln, err := net.Listen("tcp", apiEndpoint)
 		if err != nil {
@@ -112,23 +84,40 @@ func (p *Plane) start(
 	return nil
 }
 
-// stop shuts down the API server (with a 5s timeout) then closes the
-// WireGuard device. Errors are joined.
+// stop shuts down the API server (with a bounded timeout) then closes
+// the WireGuard device. Errors are joined.
 func (p *Plane) stop() error {
 	var errs []error
 
 	if p.server != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := p.server.Shutdown(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("server shutdown %q: %w", p.config.Name, err))
-		}
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		err := p.server.Shutdown(ctx)
 		cancel()
+		if err != nil {
+			errs = append(errs, fmt.Errorf(
+				"server shutdown %q: %w",
+				p.config.Name,
+				err,
+			))
+			if err := p.server.Close(); err != nil {
+				errs = append(errs, fmt.Errorf(
+					"server force close %q: %w",
+					p.config.Name,
+					err,
+				))
+			}
+		}
 	}
 
 	if p.device != nil {
 		if err := p.device.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("device close %q: %w", p.config.Name, err))
+			errs = append(errs, fmt.Errorf(
+				"device close %q: %w",
+				p.config.Name,
+				err,
+			))
 		}
+		p.device = nil
 	}
 
 	return errors.Join(errs...)

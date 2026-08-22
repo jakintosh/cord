@@ -7,8 +7,6 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
-	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
-	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
 
 type createCidrStoreSpy struct {
@@ -18,7 +16,7 @@ type createCidrStoreSpy struct {
 	createdCidr     *service.Cidr
 }
 
-func (s *createCidrStoreSpy) GetNetwork(string) (*service.NetworkConfig, error) {
+func (s *createCidrStoreSpy) GetNetwork(string) (*service.Network, error) {
 	s.getNetworkCalls++
 	return nil, errors.New("unexpected GetNetwork call")
 }
@@ -31,8 +29,7 @@ func (s *createCidrStoreSpy) CreateCidr(network string, cidr *service.Cidr) erro
 
 func TestCreateCidr_DelegatesPersistedContainmentToStore(t *testing.T) {
 	store := &createCidrStoreSpy{}
-	mgr := wireguard.NewManagerWithBackend(wireguardtest.NewMockBackend())
-	svc, err := service.New(service.Options{Store: store, WireGuard: mgr})
+	svc, err := service.New(service.Options{Store: store})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
@@ -101,8 +98,7 @@ func TestAddCidr_InvalidFormat(t *testing.T) {
 
 func TestAddCidr_HostBitsSet(t *testing.T) {
 	store := &createCidrStoreSpy{}
-	mgr := wireguard.NewManagerWithBackend(wireguardtest.NewMockBackend())
-	svc, err := service.New(service.Options{Store: store, WireGuard: mgr})
+	svc, err := service.New(service.Options{Store: store})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
@@ -121,8 +117,7 @@ func TestAddCidr_HostBitsSet(t *testing.T) {
 
 func TestAddCidr_CanonicalizesBeforePersistence(t *testing.T) {
 	store := &createCidrStoreSpy{}
-	mgr := wireguard.NewManagerWithBackend(wireguardtest.NewMockBackend())
-	svc, err := service.New(service.Options{Store: store, WireGuard: mgr})
+	svc, err := service.New(service.Options{Store: store})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}

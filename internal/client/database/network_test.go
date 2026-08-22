@@ -87,36 +87,6 @@ func TestListNetworks_OrderedWithFields(t *testing.T) {
 	}
 }
 
-func TestListNetworkNames_Empty(t *testing.T) {
-	db := testutil.SetupDB(t)
-
-	names, err := db.ListNetworkNames()
-	if err != nil {
-		t.Fatalf("list empty: %v", err)
-	}
-	if len(names) != 0 {
-		t.Fatalf("names = %d, want 0", len(names))
-	}
-}
-
-func TestListNetworkNames_Ordered(t *testing.T) {
-	db := testutil.SetupDB(t)
-	testutil.SeedNetworkDirect(t, db, "beta")
-	testutil.SeedNetworkDirect(t, db, "alpha")
-	testutil.SeedNetworkDirect(t, db, "gamma")
-
-	names, err := db.ListNetworkNames()
-	if err != nil {
-		t.Fatalf("list network names: %v", err)
-	}
-	if len(names) != 3 {
-		t.Fatalf("names = %d, want 3", len(names))
-	}
-	if names[0] != "alpha" || names[1] != "beta" || names[2] != "gamma" {
-		t.Fatalf("unexpected order: %v", names)
-	}
-}
-
 func TestDeleteNetworkState_CascadesPeersAndEndpoints(t *testing.T) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "cascadenet")

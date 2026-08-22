@@ -106,12 +106,17 @@ func printServerStatus(
 
 	rows := make([][]string, len(s.Networks))
 	for idx, n := range s.Networks {
+		reason := n.Reason
+		if reason == "" {
+			reason = "-"
+		}
 		rows[idx] = []string{
 			n.Name,
 			strconv.FormatBool(n.Enabled),
 			strconv.FormatBool(n.Running),
 			humanizeOptionalTime(n.Reconcile.LastRunAt),
+			reason,
 		}
 	}
-	printTable([]string{"NAME", "ENABLED", "RUNNING", "LAST RECONCILE"}, rows)
+	printTable([]string{"NAME", "ENABLED", "RUNNING", "LAST RECONCILE", "REASON"}, rows)
 }

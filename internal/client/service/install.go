@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
@@ -20,8 +19,8 @@ const (
 const inviteSuffix = "-i"
 
 // ServerInfo describes how to reach the coordination server over one
-// WireGuard network (invite or main). Shared by Install and
-// NetworkConfig as persisted domain state.
+// WireGuard network (invite or main). Shared by Install and Network as
+// persisted domain state.
 type ServerInfo struct {
 	PublicKey   string
 	Endpoint    string // public WG endpoint, host:port
@@ -106,39 +105,6 @@ func (s *Service) ListInstalls() (
 	return s.store.ListInstalls()
 }
 
-// InstallNetwork runs the full onboarding flow: BeginInstall → RedeemInstall →
-// ConfirmInstall. It is a convenience driver for callers that want to complete
-// onboarding in a single call. For retry-safe onboarding, call each step
-// individually — the permanent key is persisted at BeginInstall and
-// reused across retries.
-//
-// If the install already exists (from a previous partial run),
-// InstallNetwork resumes from whatever phase it is at.
-func (s *Service) InstallNetwork(
-	invitation protocol.Invitation,
-	options NetworkOptions,
-) (
-	*NetworkConfig,
-	error,
-) {
-	install, err := s.BeginInstall(invitation, options)
-	if err != nil {
-		return nil, err
-	}
-
-	installName := install.Name
-
-	if _, err := s.RedeemInstall(installName); err != nil {
-		return nil, err
-	}
-
-	if err := s.ConfirmInstall(installName); err != nil {
-		return nil, err
-	}
-
-	return s.store.GetNetwork(installName)
-}
-
 // BeginInstall validates an invite, generates a permanent keypair, and
 // persists an Install record at phase "invited". No WireGuard devices
 // are brought up. Idempotent: if a completed network already exists,
@@ -201,19 +167,61 @@ func (s *Service) BeginInstall(
 	if err != nil {
 		return nil, err
 	}
-	s.log.Info("install started", "network", networkName)
+
+	s.log.Info(
+		"install started",
+		"network",
+		networkName,
+	)
+
 	return install, nil
 }
 
-// RedeemInstall brings up the temporary invite WireGuard interface, calls
-// /redeem with the stored permanent public key, records the main
-// network parameters, and tears down the invite interface. Idempotent:
-// an already-redeemed install is returned unchanged without contacting
-// the server again.
+// RedeemInstall validates the invitation a redemption returned and
+// records the main-network identity it assigns, moving the install to
+// phase "redeemed". The redemption itself is a network call the runtime
+// makes; this is the durable half of it. Idempotent: repeating the same
+// redemption returns the existing record unchanged.
 func (s *Service) RedeemInstall(
 	name string,
+	invitation protocol.Invitation,
 ) (
 	*Install,
+	error,
+) {
+	// The assignment is the server's answer, not user input, so an
+	// incomplete one is a protocol failure reported as invalid input.
+	if err := invitation.Validate(false); err != nil {
+		return nil, fmt.Errorf("%w: redeem result invalid: %v", ErrInvalidInput, err)
+	}
+
+	install, err := s.store.RedeemInstall(
+		name,
+		networkAssignmentFromInvitation(invitation),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	s.log.Info(
+		"invite redeemed",
+		"network",
+		name,
+		"route",
+		invitation.Peer.Route,
+	)
+
+	return install, nil
+}
+
+// ConfirmInstall consumes a redeemed install: the permanent membership
+// record is created enabled and the transient install row is deleted in
+// one transaction. The runtime brings the network up when it converges
+// toward the newly recorded intent.
+func (s *Service) ConfirmInstall(
+	name string,
+) (
+	*Network,
 	error,
 ) {
 	install, err := s.store.GetInstall(name)
@@ -221,84 +229,10 @@ func (s *Service) RedeemInstall(
 		return nil, err
 	}
 
-	if install.Phase == PhaseRedeemed {
-		return install, nil
-	} else if install.Phase != PhaseInvited {
+	switch install.Phase {
+	case PhaseRedeemed:
+	default:
 		return nil, fmt.Errorf(
-			"%w: install %q is in phase %q",
-			ErrInstallState,
-			name,
-			install.Phase,
-		)
-	}
-
-	permPubKey, err := wireguard.PublicKey(install.MainPrivateKey)
-	if err != nil {
-		return nil, err
-	}
-
-	inviteHostRoute, err := netaddr.HostRouteFromCidr(install.InviteAssignedRoute)
-	if err != nil {
-		return nil, fmt.Errorf("%w: invalid invite route %q", ErrInvalidInput, install.InviteAssignedRoute)
-	}
-
-	tunnel, err := newTunnel(
-		s.wireguard,
-		install.InviteIfaceName,
-		install.InvitePrivateKey,
-		inviteHostRoute.String(),
-		install.InviteServer,
-		install.ListenPort,
-		0,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("create invite tunnel: %w", err)
-	}
-	defer func() { _ = tunnel.stop() }()
-
-	inviteClient, err := s.newInviteClient(tunnel)
-	if err != nil {
-		return nil, fmt.Errorf("create invite client: %w", err)
-	}
-
-	result, err := inviteClient.RedeemInvitation(permPubKey)
-	if err != nil {
-		return nil, fmt.Errorf("redeem invite: %w", err)
-	}
-
-	if err := result.Validate(false); err != nil {
-		return nil, fmt.Errorf("redeem invite: result invalid: %w", err)
-	}
-	assignment := networkAssignmentFromInvitation(*result)
-
-	install, err = s.store.RedeemInstall(name, assignment)
-	if err != nil {
-		return nil, err
-	}
-
-	s.log.Info("invite redeemed", "network", name, "route", result.Peer.Route)
-	return install, nil
-}
-
-// ConfirmInstall brings up the main WireGuard interface, calls /confirm to
-// prove reachability, and transitions the install into a permanent
-// membership. On success the install row is consumed: the NetworkConfig
-// is inserted and the Install row deleted in one transaction. Then a
-// runtime Network is constructed adopting the live tunnel, registered,
-// and an initial sync runs. Install ends with the network up and enabled.
-//
-// If the confirm call or store transaction fails, the tunnel comes down
-// and the install row remains at "redeemed" — retryable.
-func (s *Service) ConfirmInstall(
-	name string,
-) error {
-	install, err := s.store.GetInstall(name)
-	if err != nil {
-		return err
-	}
-
-	if install.Phase != PhaseRedeemed {
-		return fmt.Errorf(
 			"%w: install %q is in phase %q, expected redeemed",
 			ErrInstallState,
 			name,
@@ -306,72 +240,41 @@ func (s *Service) ConfirmInstall(
 		)
 	}
 
-	tunnel, err := newTunnel(
-		s.wireguard,
-		install.MainIfaceName,
-		install.MainPrivateKey,
-		install.MainAssignedRoute,
-		install.MainServer,
-		install.ListenPort,
-		PersistentKeepaliveInterval,
-	)
+	network, err := s.store.ConfirmInstall(name, install.MainPrivateKey, s.clock())
 	if err != nil {
-		return fmt.Errorf("create main tunnel: %w", err)
+		return nil, err
 	}
 
-	peerClient, err := s.newPeerClient(tunnel)
-	if err != nil {
-		_ = tunnel.stop()
-		return fmt.Errorf("create peer client: %w", err)
-	}
+	s.requestReconcile(name)
 
-	if err := peerClient.ConfirmPeer(); err != nil {
-		_ = tunnel.stop()
-		return fmt.Errorf("confirm peer: %w", err)
-	}
-
-	nc, err := s.store.ConfirmInstall(
+	s.log.Info(
+		"network confirmed",
+		"network",
 		name,
-		install.MainPrivateKey,
-		s.clock(),
+		"interface",
+		install.MainIfaceName,
 	)
-	if err != nil {
-		_ = tunnel.stop()
-		return err
-	}
 
-	// Adopt the live tunnel into a runtime Network and register it.
-	network := s.newNetwork(nc, tunnel, peerClient)
-	if err := network.start(); err != nil {
-		_ = tunnel.stop()
-		return err
-	}
-
-	s.mu.Lock()
-	s.running[name] = network
-	s.mu.Unlock()
-
-	s.log.Info("network confirmed", "network", name, "interface", install.MainIfaceName)
-	return nil
+	return network, nil
 }
 
-// UninstallNetwork stops a running network and removes all of its local
-// state, whether onboarding is complete or still in progress.
+// UninstallNetwork removes all local state for a network, whether
+// onboarding is complete or still in progress. The runtime takes the
+// network's device down when it converges toward the absent record.
 func (s *Service) UninstallNetwork(
-	networkName string,
+	name string,
 ) error {
-	s.mu.Lock()
-	network, running := s.running[networkName]
-	if running {
-		delete(s.running, networkName)
-	}
-	s.mu.Unlock()
-
-	if running {
-		if err := network.stop(); err != nil {
-			s.log.Warn("uninstall: stop network failed", "network", networkName, "err", err)
-		}
+	if err := s.store.DeleteNetworkState(name); err != nil {
+		return err
 	}
 
-	return s.store.DeleteNetworkState(networkName)
+	s.requestReconcile(name)
+
+	s.log.Info(
+		"network uninstalled",
+		"network",
+		name,
+	)
+
+	return nil
 }

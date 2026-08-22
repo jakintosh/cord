@@ -49,8 +49,8 @@ type Invitation struct {
 	Peer    PeerIdentity `json:"peer"`
 }
 
-// Parse reads an Invitation from a JSON reader.
-func Parse(
+// ParseInvitation reads an Invitation from a JSON reader.
+func ParseInvitation(
 	r io.Reader,
 ) (
 	*Invitation,
@@ -157,6 +157,12 @@ type TopologyAssociation struct {
 type EndpointWitness struct {
 	Endpoint  string    `json:"endpoint"`
 	Timestamp time.Time `json:"timestamp"`
+}
+
+// StatusResponse is the generic acknowledgement body for peer API
+// mutations such as POST /confirm and POST /endpoints.
+type StatusResponse struct {
+	Status string `json:"status"`
 }
 
 // EndpointSighting reports a locally-observed peer endpoint to the

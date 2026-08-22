@@ -31,17 +31,17 @@ type Network struct {
 	ServerEndpoint string `json:"server_endpoint,omitempty"`
 }
 
-func networkFromConfig(
-	nc service.NetworkConfig,
+func networkFromService(
+	n service.Network,
 ) Network {
 	return Network{
-		Name:           nc.Name,
+		Name:           n.Name,
 		State:          "installed",
-		Enabled:        nc.Enabled,
-		Address:        nc.AssignedRoute,
-		Interface:      nc.InterfaceName,
-		ListenPort:     nc.ListenPort,
-		ServerEndpoint: nc.Server.Endpoint,
+		Enabled:        n.Enabled,
+		Address:        n.AssignedRoute,
+		Interface:      n.InterfaceName,
+		ListenPort:     n.ListenPort,
+		ServerEndpoint: n.Server.Endpoint,
 	}
 }
 
@@ -59,13 +59,15 @@ func (a *API) handleListNetworks(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	names, err := a.service.ListNetworks()
+	networks, err := a.service.ListNetworks()
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	if names == nil {
-		names = []string{}
+
+	names := make([]string, len(networks))
+	for i, network := range networks {
+		names[i] = network.Name
 	}
 
 	wire.WriteData(w, http.StatusOK, names)
@@ -77,9 +79,9 @@ func (a *API) handleGetNetwork(
 ) {
 	name := r.PathValue("name")
 
-	nc, err := a.service.GetNetwork(name)
+	network, err := a.service.GetNetwork(name)
 	if err == nil {
-		wire.WriteData(w, http.StatusOK, networkFromConfig(*nc))
+		wire.WriteData(w, http.StatusOK, networkFromService(*network))
 		return
 	}
 
@@ -102,15 +104,18 @@ func (a *API) handlePostNetwork(
 		return
 	}
 
-	network, err := a.service.InstallNetwork(request.Invitation, service.NetworkOptions{
-		ListenPort: request.ListenPort,
-	})
+	network, err := a.runtime.Install(
+		request.Invitation,
+		service.NetworkOptions{
+			ListenPort: request.ListenPort,
+		},
+	)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	networkDTO := networkFromConfig(*network)
+	networkDTO := networkFromService(*network)
 	wire.WriteData(w, http.StatusCreated, networkDTO)
 }
 
@@ -126,20 +131,19 @@ func (a *API) handlePatchNetwork(
 		return
 	}
 
-	if err := a.service.UpdateNetwork(name, service.NetworkOptions{
-		ListenPort: request.ListenPort,
-	}); err != nil {
-		writeServiceError(w, err)
-		return
-	}
-
-	network, err := a.service.GetNetwork(name)
+	network, err := a.runtime.UpdateNetwork(
+		name,
+		service.NetworkOptions{
+			ListenPort: request.ListenPort,
+		},
+	)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, networkFromConfig(*network))
+	networkDTO := networkFromService(*network)
+	wire.WriteData(w, http.StatusOK, networkDTO)
 }
 
 func (a *API) handlePostNetworkRedeem(
@@ -148,7 +152,7 @@ func (a *API) handlePostNetworkRedeem(
 ) {
 	name := r.PathValue("name")
 
-	inst, err := a.service.RedeemInstall(name)
+	inst, err := a.runtime.RedeemInstall(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -163,7 +167,7 @@ func (a *API) handlePostNetworkConfirm(
 ) {
 	name := r.PathValue("name")
 
-	if err := a.service.ConfirmInstall(name); err != nil {
+	if _, err := a.runtime.ConfirmInstall(name); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -177,7 +181,7 @@ func (a *API) handleDeleteNetwork(
 ) {
 	name := r.PathValue("name")
 
-	if err := a.service.UninstallNetwork(name); err != nil {
+	if err := a.runtime.UninstallNetwork(name); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -191,12 +195,14 @@ func (a *API) handlePostNetworkEnable(
 ) {
 	name := r.PathValue("name")
 
-	if err := a.service.EnableNetwork(name); err != nil {
+	status, err := a.runtime.SetNetworkEnabled(name, true)
+	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, nil)
+	statusDTO := networkStatusFromRuntime(status)
+	wire.WriteData(w, http.StatusOK, statusDTO)
 }
 
 func (a *API) handlePostNetworkDisable(
@@ -205,12 +211,14 @@ func (a *API) handlePostNetworkDisable(
 ) {
 	name := r.PathValue("name")
 
-	if err := a.service.DisableNetwork(name); err != nil {
+	status, err := a.runtime.SetNetworkEnabled(name, false)
+	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, nil)
+	statusDTO := networkStatusFromRuntime(status)
+	wire.WriteData(w, http.StatusOK, statusDTO)
 }
 
 func (a *API) handPostNetworkSync(
@@ -219,18 +227,14 @@ func (a *API) handPostNetworkSync(
 ) {
 	name := r.PathValue("name")
 
-	if err := a.service.SyncNetwork(name); err != nil {
-		writeServiceError(w, err)
-		return
-	}
-
-	nc, err := a.service.GetNetwork(name)
+	network, err := a.runtime.Sync(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, networkFromConfig(*nc))
+	networkDTO := networkFromService(*network)
+	wire.WriteData(w, http.StatusOK, networkDTO)
 }
 
 func (c *Client) ListNetworks(
@@ -322,15 +326,23 @@ func (c *Client) UninstallNetwork(
 func (c *Client) EnableNetwork(
 	ctx context.Context,
 	name string,
-) error {
-	return c.wire.Post(ctx, "/networks/"+name+"/enable", nil, nil)
+) (
+	NetworkStatus,
+	error,
+) {
+	var result NetworkStatus
+	return result, c.wire.Post(ctx, "/networks/"+name+"/enable", nil, &result)
 }
 
 func (c *Client) DisableNetwork(
 	ctx context.Context,
 	name string,
-) error {
-	return c.wire.Post(ctx, "/networks/"+name+"/disable", nil, nil)
+) (
+	NetworkStatus,
+	error,
+) {
+	var result NetworkStatus
+	return result, c.wire.Post(ctx, "/networks/"+name+"/disable", nil, &result)
 }
 
 func (c *Client) SyncNetwork(

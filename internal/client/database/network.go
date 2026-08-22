@@ -11,7 +11,7 @@ import (
 func (db *DB) GetNetwork(
 	name string,
 ) (
-	*service.NetworkConfig,
+	*service.Network,
 	error,
 ) {
 	row := db.Conn.QueryRow(`
@@ -33,7 +33,7 @@ func (db *DB) GetNetwork(
 		name,
 	)
 
-	var nc service.NetworkConfig
+	var nc service.Network
 	if err := scanNetworkRow(row, &nc); err != nil {
 		return nil, CheckSqliteErr("scan network", err)
 	}
@@ -41,7 +41,7 @@ func (db *DB) GetNetwork(
 }
 
 func (db *DB) ListNetworks() (
-	[]*service.NetworkConfig,
+	[]*service.Network,
 	error,
 ) {
 	rows, err := db.Conn.Query(`
@@ -66,9 +66,9 @@ func (db *DB) ListNetworks() (
 	}
 	defer rows.Close()
 
-	var networks []*service.NetworkConfig
+	var networks []*service.Network
 	for rows.Next() {
-		var nc service.NetworkConfig
+		var nc service.Network
 		if err := scanNetworkRow(rows, &nc); err != nil {
 			return nil, fmt.Errorf("scan network: %w", err)
 		}
@@ -80,36 +80,6 @@ func (db *DB) ListNetworks() (
 	}
 
 	return networks, nil
-}
-
-func (db *DB) ListNetworkNames() (
-	[]string,
-	error,
-) {
-	rows, err := db.Conn.Query(`
-		SELECT name
-		FROM network
-		ORDER BY name ASC`,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list network names: %w", err)
-	}
-	defer rows.Close()
-
-	var names []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("scan network name: %w", err)
-		}
-		names = append(names, name)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate network names: %w", err)
-	}
-
-	return names, nil
 }
 
 func (db *DB) SetNetworkEnabled(
@@ -196,7 +166,7 @@ func sqlGetNetworkTx(
 	tx *sql.Tx,
 	name string,
 ) (
-	*service.NetworkConfig,
+	*service.Network,
 	error,
 ) {
 	row := tx.QueryRow(`
@@ -218,7 +188,7 @@ func sqlGetNetworkTx(
 		name,
 	)
 
-	var network service.NetworkConfig
+	var network service.Network
 	if err := scanNetworkRow(row, &network); err != nil {
 		return nil, CheckSqliteErr("get network", err)
 	}
@@ -243,7 +213,7 @@ func sqlRequireNetworkTx(
 
 func sqlInsertNetworkTx(
 	tx *sql.Tx,
-	nc *service.NetworkConfig,
+	nc *service.Network,
 ) error {
 	_, err := tx.Exec(`
 		INSERT INTO network (
@@ -302,7 +272,7 @@ func sqlDeleteNetworkTx(
 
 func scanNetworkRow(
 	scanner Scanner,
-	nc *service.NetworkConfig,
+	nc *service.Network,
 ) error {
 	var enabledInt int64
 	var createdUnix int64

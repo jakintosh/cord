@@ -42,7 +42,7 @@ func TestParse_Success(t *testing.T) {
 		}
 	}`
 
-	inv, err := protocol.Parse(bytes.NewReader([]byte(input)))
+	inv, err := protocol.ParseInvitation(bytes.NewReader([]byte(input)))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestParse_Success(t *testing.T) {
 func TestParse_InvalidJSON(t *testing.T) {
 	input := `{not valid json`
 
-	_, err := protocol.Parse(bytes.NewReader([]byte(input)))
+	_, err := protocol.ParseInvitation(bytes.NewReader([]byte(input)))
 	if !errors.Is(err, protocol.ErrInvalid) {
 		t.Errorf("err = %v, want ErrInvalid", err)
 	}

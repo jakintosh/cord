@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -11,13 +10,25 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
+	"git.studiopollinator.com/pollinator/cord/internal/client/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-// Options configures the client daemon composition root. Both fields are
-// required for full operation.
+// DefaultSocketPath is the default Unix socket path used when none is
+// provided.
+const DefaultSocketPath = "/tmp/cord-client.sock"
+
+// DefaultDBPath is the default database path used when none is provided.
+const DefaultDBPath = "data/client.db"
+
+// wakeBuffer is the depth of the channel the service uses to tell the
+// runtime that a network changed. Sends are dropped when it is full;
+// the runtime's periodic pass catches up.
+const wakeBuffer = 16
+
+// Options configures the client daemon composition root.
 type Options struct {
 	// SocketPath is the Unix socket path for the daemon control API.
 	SocketPath string
@@ -37,16 +48,10 @@ type Options struct {
 	Debug bool
 }
 
-// DefaultSocketPath is the default Unix socket path used when none is
-// provided.
-const DefaultSocketPath = "/tmp/cord-client.sock"
-
-// DefaultDBPath is the default database path used when none is provided.
-const DefaultDBPath = "data/client.db"
-
 // Serve is the production composition root for the cord client daemon.
-// It opens dependencies, constructs the service and API, starts the
-// daemon on a Unix socket, and blocks until the context is cancelled.
+// It opens dependencies, wires them database → service → runtime → API,
+// starts the daemon on a Unix socket, and blocks until the context is
+// cancelled.
 func Serve(
 	ctx context.Context,
 	opts Options,
@@ -60,11 +65,65 @@ func Serve(
 
 	log := logging.New(opts.Debug)
 
-	deps, err := initDependencies(opts, log)
+	backend, err := wireguard.ParseBackendType(opts.Backend)
 	if err != nil {
-		return err
+		return fmt.Errorf("client: %w", err)
 	}
-	defer deps.close()
+
+	wg, err := wireguard.NewManager(wireguard.Options{
+		Backend: backend,
+		Logger:  log,
+	})
+	if err != nil {
+		return fmt.Errorf("client: new wireguard: %w", err)
+	}
+
+	db, err := database.Open(database.Options{
+		Path: opts.DBPath,
+		WAL:  true,
+	})
+	if err != nil {
+		return fmt.Errorf("client: open database: %w", err)
+	}
+	defer db.Close()
+
+	wake := make(chan string, wakeBuffer)
+
+	svc, err := service.New(service.Options{
+		Store:  db,
+		Clock:  time.Now,
+		Logger: log,
+		Wake:   wake,
+	})
+	if err != nil {
+		return fmt.Errorf("client: new service: %w", err)
+	}
+
+	rt, err := runtime.New(runtime.Options{
+		Service:   svc,
+		WireGuard: wg,
+		Wake:      wake,
+		Clock:     time.Now,
+		Logger:    log,
+	})
+	if err != nil {
+		return fmt.Errorf("client: new runtime: %w", err)
+	}
+
+	apiServer, err := api.New(api.Options{
+		Service: svc,
+		Runtime: rt,
+		Logger:  log.With("api", "control"),
+		Version: opts.Version,
+	})
+	if err != nil {
+		return fmt.Errorf("client: new api: %w", err)
+	}
+
+	if err := rt.Start(ctx); err != nil {
+		return fmt.Errorf("client: start runtime: %w", err)
+	}
+	defer rt.Stop()
 
 	ln, err := listenUnix(opts.SocketPath)
 	if err != nil {
@@ -73,89 +132,7 @@ func Serve(
 	defer ln.Close()
 
 	log.Info("daemon listening", "socket", opts.SocketPath, "version", opts.Version)
-	return serveHTTP(ctx, ln, deps.api.Router())
-}
-
-// daemonDeps holds the constructed dependencies for the daemon's lifetime.
-type daemonDeps struct {
-	db  *database.DB
-	svc *service.Service
-	api *api.API
-}
-
-func (d *daemonDeps) close() {
-	d.svc.Close()
-	d.db.Close()
-}
-
-// initDependencies constructs and wires the database, WireGuard manager,
-// service, and API server. The caller must call close() on the returned
-// deps to shut down cleanly.
-func initDependencies(
-	opts Options,
-	log *slog.Logger,
-) (
-	*daemonDeps,
-	error,
-) {
-	dbOpts := database.Options{
-		Path: opts.DBPath,
-		WAL:  true,
-	}
-	db, err := database.Open(dbOpts)
-	if err != nil {
-		return nil, fmt.Errorf("client: open database: %w", err)
-	}
-
-	backend, err := wireguard.ParseBackendType(opts.Backend)
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("client: %w", err)
-	}
-	wgOpts := wireguard.Options{
-		Backend: backend,
-		Logger:  log,
-	}
-	wg, err := wireguard.NewManager(wgOpts)
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("client: new wireguard: %w", err)
-	}
-
-	svcOpts := service.Options{
-		Store:     db,
-		WireGuard: wg,
-		Clock:     time.Now,
-		Logger:    log,
-	}
-	svc, err := service.New(svcOpts)
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("client: new service: %w", err)
-	}
-
-	if err := svc.Start(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("client: start service: %w", err)
-	}
-
-	apiOpts := api.Options{
-		Service: svc,
-		Logger:  log.With("api", "control"),
-		Version: opts.Version,
-	}
-	apiServer, err := api.New(apiOpts)
-	if err != nil {
-		svc.Close()
-		db.Close()
-		return nil, fmt.Errorf("client: new api: %w", err)
-	}
-
-	return &daemonDeps{
-		db:  db,
-		svc: svc,
-		api: apiServer,
-	}, nil
+	return serveHTTP(ctx, ln, apiServer.Router())
 }
 
 // listenUnix removes any stale socket at path, creates a new Unix
@@ -184,14 +161,16 @@ func listenUnix(
 }
 
 // serveHTTP starts an HTTP server on ln, blocks until ctx is cancelled,
-// then gracefully shuts down with a 5-second timeout.
+// then gracefully shuts down with a 5-second timeout. Requests inherit
+// ctx, so in-flight work sees the shutdown.
 func serveHTTP(
 	ctx context.Context,
 	ln net.Listener,
 	handler http.Handler,
 ) error {
 	srv := &http.Server{
-		Handler: handler,
+		Handler:     handler,
+		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
 
 	errCh := make(chan error, 1)

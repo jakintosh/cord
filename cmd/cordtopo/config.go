@@ -158,18 +158,18 @@ func seedDB(
 		Confirmed: true,
 	}
 
-	netCfg := &service.NetworkConfig{
+	netCfg := &service.Network{
 		Name:       cfg.Network,
 		PrivateKey: key,
 		PublicKey:  pubKey,
 		ExternalIP: "127.0.0.1",
-		Main: service.PlaneConfig{
+		Main: service.Plane{
 			Name:          cfg.Network,
 			Cidr:          cfg.Cidrs[0].Cidr,
 			WireguardPort: 51820,
 			ApiPort:       8080,
 		},
-		Invite: service.PlaneConfig{
+		Invite: service.Plane{
 			Name:          cfg.Network + "-i",
 			Cidr:          "172.16.10.0/24",
 			WireguardPort: 51821,

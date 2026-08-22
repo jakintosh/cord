@@ -93,7 +93,7 @@ func (c *PeerClient) GetSnapshot() (
 
 // ConfirmPeer calls POST /confirm, proving WireGuard reachability.
 func (c *PeerClient) ConfirmPeer() error {
-	var result map[string]string
+	var result protocol.StatusResponse
 	return withRetry(func() error {
 		// TODO: at some point we should figure out a real context to use here
 		return c.client.Post(context.Background(), "/confirm", nil, &result)
@@ -110,7 +110,7 @@ func (c *PeerClient) ReportEndpoints(
 		return err
 	}
 
-	var result map[string]string
+	var result protocol.StatusResponse
 	return withRetry(func() error {
 		return c.client.Post(context.Background(), "/endpoints", body, &result)
 	})

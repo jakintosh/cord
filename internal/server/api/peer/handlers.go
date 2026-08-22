@@ -12,63 +12,72 @@ import (
 )
 
 func (a *API) handleVisibleSnapshot(
-	w http.ResponseWriter,
-	r *http.Request,
-) {
-	caller := identity.Caller(r.Context())
+	network string,
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		caller := identity.Caller(r.Context())
 
-	snapshot, err := a.service.GetVisibleNetworkSnapshot(a.network, caller.Name)
-	if err != nil {
-		wire.WriteError(w, http.StatusInternalServerError, err.Error())
-		return
+		snapshot, err := a.service.GetVisibleNetworkSnapshot(network, caller.Name)
+		if err != nil {
+			wire.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		wire.WriteData(w, http.StatusOK, toVisibleNetworkSnapshot(snapshot))
 	}
-
-	wire.WriteData(w, http.StatusOK, toVisibleNetworkSnapshot(snapshot))
 }
 
 func (a *API) handleReportEndpoints(
-	w http.ResponseWriter,
-	r *http.Request,
-) {
-	caller := identity.Caller(r.Context())
+	network string,
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		caller := identity.Caller(r.Context())
 
-	var sightings []protocol.EndpointSighting
-	if err := json.NewDecoder(r.Body).Decode(&sightings); err != nil {
-		wire.WriteError(w, http.StatusBadRequest, "invalid JSON")
-		return
-	}
-
-	// Witness attribution is server-internal: the caller reports which
-	// peer it saw and where, and the server stamps its own identity
-	// (resolved from the tunnel source IP) and a receipt timestamp.
-	svcSightings := make([]service.EndpointSighting, len(sightings))
-	for i, s := range sightings {
-		svcSightings[i] = service.EndpointSighting{
-			WitnessKey: caller.PublicKey,
-			PeerKey:    s.PeerKey,
-			Endpoint:   s.Endpoint,
-			Timestamp:  time.Now(),
+		var sightings []protocol.EndpointSighting
+		if err := json.NewDecoder(r.Body).Decode(&sightings); err != nil {
+			wire.WriteError(w, http.StatusBadRequest, "invalid JSON")
+			return
 		}
-	}
 
-	if err := a.service.ReportEndpoints(a.network, svcSightings); err != nil {
-		wire.WriteError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+		// Witness attribution is server-internal: the caller reports which
+		// peer it saw and where, and the server stamps its own identity
+		// (resolved from the tunnel source IP) and a receipt timestamp.
+		svcSightings := make([]service.EndpointSighting, len(sightings))
+		for i, s := range sightings {
+			svcSightings[i] = service.EndpointSighting{
+				WitnessKey: caller.PublicKey,
+				PeerKey:    s.PeerKey,
+				Endpoint:   s.Endpoint,
+				Timestamp:  time.Now(),
+			}
+		}
 
-	wire.WriteData(w, http.StatusOK, map[string]string{"status": "ok"})
+		if err := a.service.ReportEndpoints(network, svcSightings); err != nil {
+			wire.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		response := protocol.StatusResponse{
+			Status: "ok",
+		}
+		wire.WriteData(w, http.StatusOK, response)
+	}
 }
 
 func (a *API) handleConfirmPeer(
-	w http.ResponseWriter,
-	r *http.Request,
-) {
-	caller := identity.Caller(r.Context())
+	network string,
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		caller := identity.Caller(r.Context())
 
-	if err := a.service.ConfirmPeer(a.network, caller.Name); err != nil {
-		wire.WriteError(w, http.StatusInternalServerError, err.Error())
-		return
+		if err := a.service.ConfirmPeer(network, caller.Name); err != nil {
+			wire.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		response := protocol.StatusResponse{
+			Status: "confirmed",
+		}
+		wire.WriteData(w, http.StatusOK, response)
 	}
-
-	wire.WriteData(w, http.StatusOK, map[string]string{"status": "confirmed"})
 }

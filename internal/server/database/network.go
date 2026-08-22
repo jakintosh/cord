@@ -13,7 +13,7 @@ import (
 func (db *DB) GetNetwork(
 	name string,
 ) (
-	*service.NetworkConfig,
+	*service.Network,
 	error,
 ) {
 	row := db.Conn.QueryRow(`
@@ -37,15 +37,15 @@ func (db *DB) GetNetwork(
 		name,
 	)
 
-	var nc service.NetworkConfig
-	if err := scanNetwork(row, &nc); err != nil {
+	var network service.Network
+	if err := scanNetwork(row, &network); err != nil {
 		return nil, CheckSqliteErr("get network", err)
 	}
-	return &nc, nil
+	return &network, nil
 }
 
 func (db *DB) ListNetworks() (
-	[]*service.NetworkConfig,
+	[]*service.Network,
 	error,
 ) {
 	rows, err := db.Conn.Query(`
@@ -72,13 +72,13 @@ func (db *DB) ListNetworks() (
 	}
 	defer rows.Close()
 
-	var networks []*service.NetworkConfig
+	var networks []*service.Network
 	for rows.Next() {
-		var nc service.NetworkConfig
-		if err := scanNetwork(rows, &nc); err != nil {
+		var network service.Network
+		if err := scanNetwork(rows, &network); err != nil {
 			return nil, fmt.Errorf("scan network: %w", err)
 		}
-		networks = append(networks, &nc)
+		networks = append(networks, &network)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -88,38 +88,8 @@ func (db *DB) ListNetworks() (
 	return networks, nil
 }
 
-func (db *DB) ListNetworkNames() (
-	[]string,
-	error,
-) {
-	rows, err := db.Conn.Query(`
-		SELECT name
-		FROM network
-		ORDER BY name ASC`,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list network names: %w", err)
-	}
-	defer rows.Close()
-
-	var names []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("scan network name: %w", err)
-		}
-		names = append(names, name)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate network names: %w", err)
-	}
-
-	return names, nil
-}
-
 func (db *DB) BootstrapNetwork(
-	network *service.NetworkConfig,
+	network *service.Network,
 	rootCidr *service.Cidr,
 	serverCidr *service.Cidr,
 	serverPeer *service.Peer,
@@ -216,27 +186,65 @@ func (db *DB) SetNetworkEnabled(
 func (db *DB) DeleteNetwork(
 	name string,
 ) error {
-	result, err := db.Conn.Exec(`
-		DELETE FROM network
-		WHERE name = ?1`,
-		name,
-	)
+	tx, err := db.Conn.Begin()
 	if err != nil {
-		return CheckSqliteErr("delete network", err)
+		return fmt.Errorf("begin delete network tx: %w", err)
 	}
-	affected, err := result.RowsAffected()
+	defer tx.Rollback()
+
+	enabled, err := sqlGetNetworkEnabledTx(tx, name)
 	if err != nil {
-		return fmt.Errorf("delete network: %w", err)
+		return err
 	}
-	if affected == 0 {
-		return fmt.Errorf("%w: network %q not found", service.ErrNotFound, name)
+
+	if enabled {
+		return fmt.Errorf("%w: network %q", service.ErrNetworkEnabled, name)
+	}
+
+	if err := sqlDeleteNetworkTx(tx, name); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete network tx: %w", err)
 	}
 	return nil
 }
 
+func sqlGetNetworkEnabledTx(
+	tx *sql.Tx,
+	name string,
+) (
+	bool,
+	error,
+) {
+	var enabled bool
+	if err := tx.QueryRow(`
+		SELECT enabled
+		FROM network
+		WHERE name = ?1`,
+		name,
+	).Scan(&enabled); err != nil {
+		return false, CheckSqliteErr("get network to delete", err)
+	}
+	return enabled, nil
+}
+
+func sqlDeleteNetworkTx(
+	tx *sql.Tx,
+	name string,
+) error {
+	_, err := tx.Exec(`
+		DELETE FROM network
+		WHERE name = ?1`,
+		name,
+	)
+	return CheckSqliteErr("delete network", err)
+}
+
 func sqlInsertNetworkTx(
 	tx *sql.Tx,
-	network *service.NetworkConfig,
+	network *service.Network,
 ) error {
 	_, err := tx.Exec(`
 		INSERT INTO network (
@@ -371,28 +379,28 @@ func sqlValidateRegistrationMainRouteTx(
 
 func scanNetwork(
 	scanner Scanner,
-	nc *service.NetworkConfig,
+	network *service.Network,
 ) error {
 	var createdUnix int64
 	if err := scanner.Scan(
-		&nc.Name,
-		&nc.PrivateKey,
-		&nc.PublicKey,
-		&nc.ExternalIP,
-		&nc.Main.Name,
-		&nc.Main.Cidr,
-		&nc.Main.WireguardPort,
-		&nc.Main.ApiPort,
-		&nc.Invite.Name,
-		&nc.Invite.Cidr,
-		&nc.Invite.WireguardPort,
-		&nc.Invite.ApiPort,
-		&nc.Enabled,
+		&network.Name,
+		&network.PrivateKey,
+		&network.PublicKey,
+		&network.ExternalIP,
+		&network.Main.Name,
+		&network.Main.Cidr,
+		&network.Main.WireguardPort,
+		&network.Main.ApiPort,
+		&network.Invite.Name,
+		&network.Invite.Cidr,
+		&network.Invite.WireguardPort,
+		&network.Invite.ApiPort,
+		&network.Enabled,
 		&createdUnix,
 	); err != nil {
 		return err
 	}
 
-	nc.CreatedAt = time.Unix(createdUnix, 0)
+	network.CreatedAt = time.Unix(createdUnix, 0)
 	return nil
 }

@@ -9,18 +9,18 @@ import (
 func SeedNetwork(
 	t *testing.T,
 	svc *service.Service,
-) *service.NetworkConfig {
+) *service.Network {
 	t.Helper()
 
 	nw, err := svc.CreateNetwork(
 		"testnet",
 		"192.168.1.1",
-		service.PlaneConfig{
+		service.Plane{
 			Cidr:          "10.0.0.0/16",
 			WireguardPort: 51820,
 			ApiPort:       8080,
 		},
-		service.PlaneConfig{
+		service.Plane{
 			Cidr:          "10.1.0.0/24",
 			WireguardPort: 51821,
 			ApiPort:       8080,

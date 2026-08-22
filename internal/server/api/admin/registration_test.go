@@ -70,8 +70,8 @@ func TestAPICreateRegistration_AddressExhausted(t *testing.T) {
 	if _, err := env.Service.CreateNetwork(
 		"small",
 		"192.168.1.1",
-		service.PlaneConfig{Cidr: "10.0.0.0/24", WireguardPort: 51820, ApiPort: 8080},
-		service.PlaneConfig{Cidr: "10.1.0.0/30", WireguardPort: 51821, ApiPort: 8080},
+		service.Plane{Cidr: "10.0.0.0/24", WireguardPort: 51820, ApiPort: 8080},
+		service.Plane{Cidr: "10.1.0.0/30", WireguardPort: 51821, ApiPort: 8080},
 	); err != nil {
 		t.Fatalf("create network: %v", err)
 	}

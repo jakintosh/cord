@@ -1,41 +1,26 @@
 package service_test
 
 import (
-	"encoding/json"
 	"errors"
-	"net"
-	"net/http"
-	"strconv"
 	"testing"
 
-	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-func mustGenKey(t *testing.T) string {
-	t.Helper()
-	k, err := wireguard.GenerateKey()
-	if err != nil {
-		t.Fatalf("generate key: %v", err)
-	}
-	return k
-}
-
 func installOptions() service.NetworkOptions {
 	return service.NetworkOptions{}
 }
 
-// TestBeginInstall_PersistsPermanentKey verifies that BeginInstall
-// generates a permanent keypair and persists it in the network record.
-func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
-	env := testutil.SetupService(t)
-
-	inst, err := env.Service.BeginInstall(protocol.Invitation{
+// invitation returns a complete invite for the named network.
+func invitation(
+	name string,
+) protocol.Invitation {
+	return protocol.Invitation{
 		Network: protocol.NetworkInfo{
-			Name:        "keytest",
+			Name:        name,
 			PublicKey:   "srv-pub",
 			Endpoint:    "1.2.3.4:51821",
 			ServerRoute: "10.43.0.1/32",
@@ -46,7 +31,35 @@ func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
 			Route:      "10.43.0.2/24",
 			PrivateKey: "temp-key",
 		},
-	}, installOptions())
+	}
+}
+
+// assignment returns the invitation a redemption answers with: the main
+// network's identity, without a peer private key.
+func assignment(
+	name string,
+) protocol.Invitation {
+	return protocol.Invitation{
+		Network: protocol.NetworkInfo{
+			Name:        name,
+			PublicKey:   "main-srv-pub",
+			Endpoint:    "1.2.3.4:51820",
+			ServerRoute: "10.42.0.1/32",
+			NetworkCidr: "10.42.0.0/16",
+			APIPort:     8443,
+		},
+		Peer: protocol.PeerIdentity{
+			Route: "10.42.0.5/32",
+		},
+	}
+}
+
+// TestBeginInstall_PersistsPermanentKey verifies that BeginInstall
+// generates a permanent keypair and persists it in the install record.
+func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
+	env := testutil.SetupService(t)
+
+	inst, err := env.Service.BeginInstall(invitation("keytest"), installOptions())
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
@@ -70,22 +83,8 @@ func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
 
 func TestBeginInstall_ListenPortOptions(t *testing.T) {
 	env := testutil.SetupService(t)
-	invitation := protocol.Invitation{
-		Network: protocol.NetworkInfo{
-			Name:        "listen-port",
-			PublicKey:   "srv-pub",
-			Endpoint:    "1.2.3.4:51821",
-			ServerRoute: "10.43.0.1/32",
-			NetworkCidr: "10.0.0.0/16",
-			APIPort:     8443,
-		},
-		Peer: protocol.PeerIdentity{
-			Route:      "10.43.0.2/24",
-			PrivateKey: "temp-key",
-		},
-	}
 
-	inst, err := env.Service.BeginInstall(invitation, service.NetworkOptions{})
+	inst, err := env.Service.BeginInstall(invitation("listen-port"), service.NetworkOptions{})
 	if err != nil {
 		t.Fatalf("begin install with default options: %v", err)
 	}
@@ -94,8 +93,10 @@ func TestBeginInstall_ListenPortOptions(t *testing.T) {
 	}
 
 	port := uint16(51820)
-	invitation.Network.Name = "port-explicit"
-	inst, err = env.Service.BeginInstall(invitation, service.NetworkOptions{ListenPort: &port})
+	inst, err = env.Service.BeginInstall(
+		invitation("port-explicit"),
+		service.NetworkOptions{ListenPort: &port},
+	)
 	if err != nil {
 		t.Fatalf("begin install with explicit port: %v", err)
 	}
@@ -105,41 +106,21 @@ func TestBeginInstall_ListenPortOptions(t *testing.T) {
 }
 
 // TestBeginInstall_Idempotent verifies that calling BeginInstall twice
-// with the same invite returns the same network record with the same
+// with the same invite returns the same install record with the same
 // permanent key — the key is never regenerated.
 func TestBeginInstall_Idempotent(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	invite := protocol.Invitation{
-		Network: protocol.NetworkInfo{
-			Name:        "idempotent",
-			PublicKey:   "srv-pub",
-			Endpoint:    "1.2.3.4:51821",
-			ServerRoute: "10.43.0.1/32",
-			NetworkCidr: "10.0.0.0/16",
-			APIPort:     8443,
-		},
-		Peer: protocol.PeerIdentity{
-			Route:      "10.43.0.2/24",
-			PrivateKey: "temp-key",
-		},
-	}
-
-	inst1, err := env.Service.BeginInstall(invite, installOptions())
+	inst1, err := env.Service.BeginInstall(invitation("idempotent"), installOptions())
 	if err != nil {
 		t.Fatalf("first begin: %v", err)
 	}
 
-	inst2, err := env.Service.BeginInstall(invite, installOptions())
+	inst2, err := env.Service.BeginInstall(invitation("idempotent"), installOptions())
 	if err != nil {
 		t.Fatalf("second begin: %v", err)
 	}
 
-	pub1, _ := wireguard.PublicKey(inst1.MainPrivateKey)
-	pub2, _ := wireguard.PublicKey(inst2.MainPrivateKey)
-	if pub1 != pub2 {
-		t.Errorf("public key changed: %q vs %q", pub1, pub2)
-	}
 	if inst1.MainPrivateKey != inst2.MainPrivateKey {
 		t.Errorf("private key changed: %q vs %q", inst1.MainPrivateKey, inst2.MainPrivateKey)
 	}
@@ -147,24 +128,15 @@ func TestBeginInstall_Idempotent(t *testing.T) {
 
 func TestBeginInstall_IncompatibleRetryConflicts(t *testing.T) {
 	env := testutil.SetupService(t)
-	invite := protocol.Invitation{
-		Network: protocol.NetworkInfo{
-			Name:        "incompatible",
-			PublicKey:   "srv-pub",
-			Endpoint:    "1.2.3.4:51821",
-			ServerRoute: "10.43.0.1/32",
-			NetworkCidr: "10.0.0.0/16",
-			APIPort:     8443,
-		},
-		Peer: protocol.PeerIdentity{
-			Route:      "10.43.0.2/24",
-			PrivateKey: "temp-key",
-		},
-	}
-	if _, err := env.Service.BeginInstall(invite, installOptions()); err != nil {
+
+	if _, err := env.Service.BeginInstall(
+		invitation("incompatible"),
+		installOptions(),
+	); err != nil {
 		t.Fatalf("first begin: %v", err)
 	}
 
+	invite := invitation("incompatible")
 	invite.Peer.Route = "10.43.0.3/24"
 	_, err := env.Service.BeginInstall(invite, installOptions())
 	if !errors.Is(err, service.ErrConflict) {
@@ -178,353 +150,126 @@ func TestBeginInstall_ExistingConfirmedNetwork(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "already-here")
 
-	_, err := env.Service.BeginInstall(protocol.Invitation{
-		Network: protocol.NetworkInfo{
-			Name:        "already-here",
-			PublicKey:   "srv-pub",
-			Endpoint:    "1.2.3.4:51821",
-			ServerRoute: "10.43.0.1/32",
-			NetworkCidr: "10.0.0.0/16",
-			APIPort:     8443,
-		},
-		Peer: protocol.PeerIdentity{
-			Route:      "10.43.0.2/24",
-			PrivateKey: "temp-key",
-		},
-	}, installOptions())
+	_, err := env.Service.BeginInstall(invitation("already-here"), installOptions())
 	if err == nil {
 		t.Fatal("expected error for existing network")
 	}
 }
 
-// TestInstall_ResumesFromInvited verifies that if BeginInstall
-// succeeds but RedeemInstall has not yet run, calling Install resumes from
-// the invited state and reuses the persisted permanent key.
-func TestInstall_ResumesFromInvited(t *testing.T) {
-	mux := http.NewServeMux()
-	var redeemPubKey string
-	srvPubKey := mustGenKey(t)
-	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
-		var req protocol.RedeemRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			wire.WriteError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		redeemPubKey = req.PermPubKey
-		srvHost, srvPortStr, _ := net.SplitHostPort(r.Host)
-		srvPort, _ := strconv.Atoi(srvPortStr)
-		wire.WriteData(w, http.StatusOK, protocol.Invitation{
-			Network: protocol.NetworkInfo{
-				Name:        "testnet",
-				PublicKey:   srvPubKey,
-				Endpoint:    "1.2.3.4:51820",
-				ServerRoute: srvHost + "/32",
-				NetworkCidr: "10.0.0.0/16",
-				APIPort:     uint16(srvPort),
-			},
-			Peer: protocol.PeerIdentity{
-				Route: "10.42.0.5/32",
-			},
+// TestBeginInstall_RejectsIncompleteInvitation verifies that every field
+// a peer needs is required before an install record is created.
+func TestBeginInstall_RejectsIncompleteInvitation(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*protocol.Invitation)
+		missing string
+	}{
+		{"network name", func(i *protocol.Invitation) { i.Network.Name = "" }, "name"},
+		{"peer private key", func(i *protocol.Invitation) { i.Peer.PrivateKey = "" }, "private key"},
+		{"peer route", func(i *protocol.Invitation) { i.Peer.Route = "" }, "route"},
+		{"server public key", func(i *protocol.Invitation) { i.Network.PublicKey = "" }, "public key"},
+		{"server endpoint", func(i *protocol.Invitation) { i.Network.Endpoint = "" }, "endpoint"},
+		{"server route", func(i *protocol.Invitation) { i.Network.ServerRoute = "" }, "server route"},
+		{"network cidr", func(i *protocol.Invitation) { i.Network.NetworkCidr = "" }, "cidr"},
+		{"api port", func(i *protocol.Invitation) { i.Network.APIPort = 0 }, "api port"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := testutil.SetupService(t)
+
+			invite := invitation("incomplete")
+			tt.mutate(&invite)
+
+			_, err := env.Service.BeginInstall(invite, installOptions())
+			if !errors.Is(err, service.ErrInvalidInput) {
+				t.Errorf("err = %v, want ErrInvalidInput", err)
+			}
 		})
-	})
-	mux.HandleFunc("POST /confirm", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, map[string]string{"status": "confirmed"})
-	})
-	mux.HandleFunc("GET /snapshot", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, testutil.NetworkSnapshot())
-	})
-
-	env := testutil.SetupServiceWithServer(t, mux)
-
-	srvHost, srvPortStr, _ := net.SplitHostPort(env.Server.Listener.Addr().String())
-	srvPort, _ := strconv.Atoi(srvPortStr)
-
-	invite := protocol.Invitation{
-		Network: protocol.NetworkInfo{
-			Name:        "resume-test",
-			PublicKey:   srvPubKey,
-			Endpoint:    "5.6.7.8:51821",
-			ServerRoute: srvHost + "/32",
-			NetworkCidr: "10.0.0.0/16",
-			APIPort:     uint16(srvPort),
-		},
-		Peer: protocol.PeerIdentity{
-			Route:      "10.43.0.2/24",
-			PrivateKey: mustGenKey(t),
-		},
-	}
-
-	inst, err := env.Service.BeginInstall(invite, installOptions())
-	if err != nil {
-		t.Fatalf("begin install: %v", err)
-	}
-
-	nc, err := env.Service.InstallNetwork(invite, installOptions())
-	if err != nil {
-		t.Fatalf("install (resume): %v", err)
-	}
-	if nc.Name != "resume-test" {
-		t.Fatalf("name = %q, want resume-test", nc.Name)
-	}
-
-	pub1, _ := wireguard.PublicKey(inst.MainPrivateKey)
-	pub2, _ := wireguard.PublicKey(nc.PrivateKey)
-	if pub1 != pub2 {
-		t.Errorf("public key changed: %q vs %q", pub1, pub2)
-	}
-
-	if redeemPubKey != pub1 {
-		t.Errorf("redeem was called with %q, expected %q (persisted key)",
-			redeemPubKey, pub1)
 	}
 }
 
-// TestInstall_ResumesFromRedeemed verifies that if RedeemInstall succeeds but
-// ConfirmInstall has not yet run, calling Install resumes from the redeemed
-// state and completes confirmation.
-func TestInstall_ResumesFromRedeemed(t *testing.T) {
-	mux := http.NewServeMux()
-	confirmCalled := false
-	redeemCalls := 0
-	srvPubKey := mustGenKey(t)
-	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
-		redeemCalls++
-		srvHost, srvPortStr, _ := net.SplitHostPort(r.Host)
-		srvPort, _ := strconv.Atoi(srvPortStr)
-		wire.WriteData(w, http.StatusOK, protocol.Invitation{
-			Network: protocol.NetworkInfo{
-				Name:        "testnet",
-				PublicKey:   srvPubKey,
-				Endpoint:    "1.2.3.4:51820",
-				ServerRoute: srvHost + "/32",
-				NetworkCidr: "10.0.0.0/16",
-				APIPort:     uint16(srvPort),
-			},
-			Peer: protocol.PeerIdentity{
-				Route: "10.42.0.5/32",
-			},
-		})
-	})
-	mux.HandleFunc("POST /confirm", func(w http.ResponseWriter, r *http.Request) {
-		confirmCalled = true
-		wire.WriteData(w, http.StatusOK, map[string]string{"status": "confirmed"})
-	})
-	mux.HandleFunc("GET /snapshot", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, testutil.NetworkSnapshot())
-	})
-
-	env := testutil.SetupServiceWithServer(t, mux)
-
-	srvHost, srvPortStr, _ := net.SplitHostPort(env.Server.Listener.Addr().String())
-	srvPort, _ := strconv.Atoi(srvPortStr)
-
-	invite := protocol.Invitation{
-		Network: protocol.NetworkInfo{
-			Name:        "res-redeemed",
-			PublicKey:   srvPubKey,
-			Endpoint:    "5.6.7.8:51821",
-			ServerRoute: srvHost + "/32",
-			NetworkCidr: "10.0.0.0/16",
-			APIPort:     uint16(srvPort),
-		},
-		Peer: protocol.PeerIdentity{
-			Route:      "10.43.0.2/24",
-			PrivateKey: mustGenKey(t),
-		},
-	}
-
-	inst, err := env.Service.BeginInstall(invite, installOptions())
-	if err != nil {
-		t.Fatalf("begin install: %v", err)
-	}
-
-	if _, err := env.Service.RedeemInstall(inst.Name); err != nil {
-		t.Fatalf("manual redeem: %v", err)
-	}
-
-	nc, err := env.Service.InstallNetwork(invite, installOptions())
-	if err != nil {
-		t.Fatalf("install (resume from redeemed): %v", err)
-	}
-	if nc.Name != "res-redeemed" {
-		t.Fatalf("name = %q, want res-redeemed", nc.Name)
-	}
-
-	if !confirmCalled {
-		t.Error("confirm was not called during resume")
-	}
-	if redeemCalls != 1 {
-		t.Errorf("redeem calls = %d, want 1", redeemCalls)
-	}
-	pub1, _ := wireguard.PublicKey(inst.MainPrivateKey)
-	pub2, _ := wireguard.PublicKey(nc.PrivateKey)
-	if pub1 != pub2 {
-		t.Errorf("public key changed: %q vs %q", pub1, pub2)
-	}
-}
-
-// TestBeginInstall_IdempotentRedeemed verifies that calling BeginInstall
-// on an install already at the redeemed phase returns the existing
-// record unchanged rather than erroring.
-func TestBeginInstall_IdempotentRedeemed(t *testing.T) {
-	mux := http.NewServeMux()
-	srvPubKey := mustGenKey(t)
-	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
-		srvHost, srvPortStr, _ := net.SplitHostPort(r.Host)
-		srvPort, _ := strconv.Atoi(srvPortStr)
-		wire.WriteData(w, http.StatusOK, protocol.Invitation{
-			Network: protocol.NetworkInfo{
-				Name:        "testnet",
-				PublicKey:   srvPubKey,
-				Endpoint:    "1.2.3.4:51820",
-				ServerRoute: srvHost + "/32",
-				NetworkCidr: "10.0.0.0/16",
-				APIPort:     uint16(srvPort),
-			},
-			Peer: protocol.PeerIdentity{
-				Route: "10.42.0.5/32",
-			},
-		})
-	})
-
-	env := testutil.SetupServiceWithServer(t, mux)
-
-	srvHost, srvPortStr, _ := net.SplitHostPort(env.Server.Listener.Addr().String())
-	srvPort, _ := strconv.Atoi(srvPortStr)
-
-	invite := protocol.Invitation{
-		Network: protocol.NetworkInfo{
-			Name:        "redeemed-idem",
-			PublicKey:   srvPubKey,
-			Endpoint:    "5.6.7.8:51821",
-			ServerRoute: srvHost + "/32",
-			NetworkCidr: "10.0.0.0/16",
-			APIPort:     uint16(srvPort),
-		},
-		Peer: protocol.PeerIdentity{
-			Route:      "10.43.0.2/24",
-			PrivateKey: mustGenKey(t),
-		},
-	}
-
-	inst, err := env.Service.BeginInstall(invite, installOptions())
-	if err != nil {
-		t.Fatalf("begin install: %v", err)
-	}
-	if _, err := env.Service.RedeemInstall(inst.Name); err != nil {
-		t.Fatalf("redeem: %v", err)
-	}
-
-	again, err := env.Service.BeginInstall(invite, installOptions())
-	if err != nil {
-		t.Fatalf("begin install on redeemed: %v", err)
-	}
-	if again.Phase != service.PhaseRedeemed {
-		t.Errorf("phase = %q, want %q", again.Phase, service.PhaseRedeemed)
-	}
-	if again.MainPrivateKey != inst.MainPrivateKey {
-		t.Error("permanent key should be unchanged")
-	}
-}
-
-// TestConfirmInstall_ClearsInstallFields verifies that after ConfirmInstall, the
-// temporary install scratch fields are cleared.
-func TestConfirmInstall_ClearsInstallFields(t *testing.T) {
-	mux := http.NewServeMux()
-	srvPubKey := mustGenKey(t)
-	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
-		srvHost, srvPortStr, _ := net.SplitHostPort(r.Host)
-		srvPort, _ := strconv.Atoi(srvPortStr)
-		wire.WriteData(w, http.StatusOK, protocol.Invitation{
-			Network: protocol.NetworkInfo{
-				Name:        "testnet",
-				PublicKey:   srvPubKey,
-				Endpoint:    "1.2.3.4:51820",
-				ServerRoute: srvHost + "/32",
-				NetworkCidr: "10.0.0.0/16",
-				APIPort:     uint16(srvPort),
-			},
-			Peer: protocol.PeerIdentity{
-				Route: "10.42.0.5/32",
-			},
-		})
-	})
-	mux.HandleFunc("POST /confirm", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, map[string]string{"status": "confirmed"})
-	})
-	mux.HandleFunc("GET /snapshot", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, testutil.NetworkSnapshot())
-	})
-
-	env := testutil.SetupServiceWithServer(t, mux)
-
-	srvHost, srvPortStr, _ := net.SplitHostPort(env.Server.Listener.Addr().String())
-	srvPort, _ := strconv.Atoi(srvPortStr)
-
-	invite := protocol.Invitation{
-		Network: protocol.NetworkInfo{
-			Name:        "clear-test",
-			PublicKey:   srvPubKey,
-			Endpoint:    "5.6.7.8:51821",
-			ServerRoute: srvHost + "/32",
-			NetworkCidr: "10.0.0.0/16",
-			APIPort:     uint16(srvPort),
-		},
-		Peer: protocol.PeerIdentity{
-			Route:      "10.43.0.2/24",
-			PrivateKey: mustGenKey(t),
-		},
-	}
-
-	nc, err := env.Service.InstallNetwork(invite, installOptions())
-	if err != nil {
-		t.Fatalf("install: %v", err)
-	}
-	if nc.Name != "clear-test" {
-		t.Fatalf("name = %q, want clear-test", nc.Name)
-	}
-	if nc.AssignedRoute == "" {
-		t.Error("assigned_cidr should not be empty after confirm")
-	}
-	if nc.Server.PublicKey == "" {
-		t.Error("server pubkey should not be empty after confirm")
-	}
-	if nc.Server.Endpoint == "" {
-		t.Error("server endpoint should not be empty after confirm")
-	}
-	if nc.Server.Route == "" {
-		t.Error("server route should not be empty after confirm")
-	}
-	if nc.Server.APIPort == 0 {
-		t.Error("server api_port should not be zero after confirm")
-	}
-}
-
-// TestEnableNetwork_RefusesUnconfirmed verifies that EnableNetwork
-// refuses to bring up a network that has not completed onboarding.
-func TestEnableNetwork_RefusesUnconfirmed(t *testing.T) {
+// TestRedeemInstall_PersistsAssignment verifies that the main-network
+// identity a redemption returns is what moves the install forward.
+func TestRedeemInstall_PersistsAssignment(t *testing.T) {
 	env := testutil.SetupService(t)
 
-	_, err := env.Service.BeginInstall(protocol.Invitation{
-		Network: protocol.NetworkInfo{
-			Name:        "not-confirmed",
-			PublicKey:   "srv-pub",
-			Endpoint:    "1.2.3.4:51821",
-			ServerRoute: "10.43.0.1/32",
-			NetworkCidr: "10.0.0.0/16",
-			APIPort:     8443,
-		},
-		Peer: protocol.PeerIdentity{
-			Route:      "10.43.0.2/24",
-			PrivateKey: "temp-key",
-		},
-	}, installOptions())
-	if err != nil {
+	if _, err := env.Service.BeginInstall(invitation("redeem-me"), installOptions()); err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
 
-	err = env.Service.EnableNetwork("not-confirmed")
-	if err == nil {
-		t.Fatal("expected error enabling unconfirmed network")
+	inst, err := env.Service.RedeemInstall("redeem-me", assignment("redeem-me"))
+	if err != nil {
+		t.Fatalf("redeem install: %v", err)
+	}
+	if inst.Phase != service.PhaseRedeemed {
+		t.Errorf("phase = %q, want %q", inst.Phase, service.PhaseRedeemed)
+	}
+	if inst.MainAssignedRoute != "10.42.0.5/32" {
+		t.Errorf("assigned route = %q, want 10.42.0.5/32", inst.MainAssignedRoute)
+	}
+	if inst.MainServer.Endpoint != "1.2.3.4:51820" {
+		t.Errorf("server endpoint = %q, want 1.2.3.4:51820", inst.MainServer.Endpoint)
+	}
+}
+
+func TestRedeemInstall_RejectsIncompleteResult(t *testing.T) {
+	env := testutil.SetupService(t)
+
+	if _, err := env.Service.BeginInstall(invitation("bad-redeem"), installOptions()); err != nil {
+		t.Fatalf("begin install: %v", err)
+	}
+
+	result := assignment("bad-redeem")
+	result.Network.ServerRoute = ""
+
+	_, err := env.Service.RedeemInstall("bad-redeem", result)
+	if !errors.Is(err, service.ErrInvalidInput) {
+		t.Errorf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+// TestConfirmInstall_CreatesEnabledNetwork verifies that confirmation
+// consumes the install into a membership the runtime is told to bring up.
+func TestConfirmInstall_CreatesEnabledNetwork(t *testing.T) {
+	env := testutil.SetupService(t)
+
+	if _, err := env.Service.BeginInstall(invitation("confirm-me"), installOptions()); err != nil {
+		t.Fatalf("begin install: %v", err)
+	}
+	if _, err := env.Service.RedeemInstall("confirm-me", assignment("confirm-me")); err != nil {
+		t.Fatalf("redeem install: %v", err)
+	}
+
+	network, err := env.Service.ConfirmInstall("confirm-me")
+	if err != nil {
+		t.Fatalf("confirm install: %v", err)
+	}
+	if !network.Enabled {
+		t.Error("a confirmed network should be enabled")
+	}
+	if network.AssignedRoute != "10.42.0.5/32" {
+		t.Errorf("assigned route = %q, want 10.42.0.5/32", network.AssignedRoute)
+	}
+	if network.Server.PublicKey == "" {
+		t.Error("server public key should not be empty after confirm")
+	}
+	expectWake(t, env, "confirm-me")
+
+	if _, err := env.Service.GetInstall("confirm-me"); !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("install after confirm: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestConfirmInstall_RequiresRedeemedPhase(t *testing.T) {
+	env := testutil.SetupService(t)
+
+	if _, err := env.Service.BeginInstall(invitation("still-invited"), installOptions()); err != nil {
+		t.Fatalf("begin install: %v", err)
+	}
+
+	_, err := env.Service.ConfirmInstall("still-invited")
+	if !errors.Is(err, service.ErrInstallState) {
+		t.Errorf("err = %v, want ErrInstallState", err)
 	}
 }

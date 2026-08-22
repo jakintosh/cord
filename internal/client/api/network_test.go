@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"strconv"
@@ -130,11 +131,11 @@ func TestAPIShowNetwork_MidInstall(
 	// setup env with a server that answers /redeem
 	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
 
-	inst, err := env.Service.BeginInstall(installInvite(t, env, "mid-install"), service.NetworkOptions{})
+	inst, err := env.Service.BeginInstall(installInvite(env, "mid-install"), service.NetworkOptions{})
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
-	if _, err := env.Service.RedeemInstall(inst.Name); err != nil {
+	if _, err := env.Runtime.RedeemInstall(inst.Name); err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
@@ -168,10 +169,7 @@ func TestAPIInstallNetwork_Success(
 		t.Fatalf("generate server pub key: %v", err)
 	}
 
-	handler := func(apiAddr string) http.Handler {
-		return newInstallServer(apiAddr, srvPub)
-	}
-	env := testutil.SetupWithServer(t, handler)
+	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
 	apiAddr := env.Server.Listener.Addr().String()
 	apiHost, apiPortStr, _ := net.SplitHostPort(apiAddr)
 	apiPort, _ := strconv.Atoi(apiPortStr)
@@ -214,8 +212,10 @@ func TestAPIInstallNetwork_Success(
 	if nw.Name != "mynet" {
 		t.Fatalf("name = %q, want mynet", nw.Name)
 	}
-	if nw.Server.PublicKey != srvPub {
-		t.Fatalf("server public_key = %q, want %q", nw.Server.PublicKey, srvPub)
+	// The main network's identity comes from the redemption, not from
+	// the invite the install started with.
+	if nw.Server.PublicKey == "" {
+		t.Fatal("server public_key should not be empty")
 	}
 	if nw.Server.Endpoint != "1.2.3.4:51820" {
 		t.Fatalf("server endpoint = %q, want 1.2.3.4:51820", nw.Server.Endpoint)
@@ -353,7 +353,7 @@ func TestAPIRedeemNetwork_IncludesAssignedAddress(
 	// setup env with a server that answers /redeem
 	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
 
-	inst, err := env.Service.BeginInstall(installInvite(t, env, "mid-install"), service.NetworkOptions{})
+	inst, err := env.Service.BeginInstall(installInvite(env, "mid-install"), service.NetworkOptions{})
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
@@ -383,45 +383,18 @@ func TestAPIRedeemNetwork_IncludesAssignedAddress(
 func TestAPIConfirmNetwork_Success(
 	t *testing.T,
 ) {
-	// setup env with a server that answers /redeem and /confirm using a
-	// real wireguard key, since Confirm configures a live tunnel peer
-	srvPub, err := wireguard.GenerateKey()
-	if err != nil {
-		t.Fatalf("generate server pub key: %v", err)
-	}
-	handler := func(apiAddr string) http.Handler {
-		return newInstallServer(apiAddr, srvPub)
-	}
-	env := testutil.SetupWithServer(t, handler)
+	// the install server answers /redeem and /confirm with a real
+	// wireguard key, since confirm configures a live tunnel peer
+	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
 
-	tempKey, err := wireguard.GenerateKey()
-	if err != nil {
-		t.Fatalf("generate temp key: %v", err)
-	}
-	apiAddr := env.Server.Listener.Addr().String()
-	apiHost, apiPortStr, _ := net.SplitHostPort(apiAddr)
-	apiPort, _ := strconv.Atoi(apiPortStr)
-
-	invite := protocol.Invitation{
-		Network: protocol.NetworkInfo{
-			Name:        "mid-install",
-			PublicKey:   srvPub,
-			Endpoint:    "1.2.3.4:51820",
-			ServerRoute: apiHost + "/32",
-			NetworkCidr: "10.0.0.0/16",
-			APIPort:     uint16(apiPort),
-		},
-		Peer: protocol.PeerIdentity{
-			Route:      "10.42.0.5/16",
-			PrivateKey: tempKey,
-		},
-	}
-
-	inst, err := env.Service.BeginInstall(invite, service.NetworkOptions{})
+	inst, err := env.Service.BeginInstall(
+		installInvite(env, "mid-install"),
+		service.NetworkOptions{},
+	)
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
-	if _, err := env.Service.RedeemInstall(inst.Name); err != nil {
+	if _, err := env.Runtime.RedeemInstall(inst.Name); err != nil {
 		t.Fatalf("redeem: %v", err)
 	}
 
@@ -448,7 +421,7 @@ func TestAPIConfirmNetwork_InvitedReturnsConflict(
 	// setup invited install
 	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
 	inst, err := env.Service.BeginInstall(
-		installInvite(t, env, "still-invited"),
+		installInvite(env, "still-invited"),
 		service.NetworkOptions{},
 	)
 	if err != nil {
@@ -515,10 +488,16 @@ func TestAPIEnableNetwork_Success(
 
 	// enable network
 	url := "/networks/enable-me/enable"
-	result := wire.TestPost[any](env.Router, url, "")
+	result := wire.TestPost[api.NetworkStatus](env.Router, url, "")
 
-	// verify result — status-only mutation, no response body
-	result.ExpectOK(t)
+	// verify result — the recorded intent and what the daemon is doing
+	data := result.ExpectOK(t)
+	if !data.Enabled || !data.Running {
+		t.Fatalf("status = %+v, want enabled and running", data)
+	}
+	if data.Reason != "" {
+		t.Fatalf("reason = %q, want empty", data.Reason)
+	}
 
 	// verify network is enabled in store
 	nw, err := env.Service.GetNetwork("enable-me")
@@ -527,6 +506,36 @@ func TestAPIEnableNetwork_Success(
 	}
 	if !nw.Enabled {
 		t.Fatal("expected network to be enabled in store")
+	}
+}
+
+// TestAPIEnableNetwork_ReportsDivergence verifies that a network that
+// cannot be brought up stays enabled and explains itself, rather than
+// failing the request and reverting the operator's intent.
+func TestAPIEnableNetwork_ReportsDivergence(
+	t *testing.T,
+) {
+	env := testutil.Setup(t)
+	env.SeedNetwork(t, "wont-start")
+	env.Backend.CreateErr = errors.New("no such device")
+
+	url := "/networks/wont-start/enable"
+	result := wire.TestPost[api.NetworkStatus](env.Router, url, "")
+
+	data := result.ExpectOK(t)
+	if !data.Enabled || data.Running {
+		t.Fatalf("status = %+v, want enabled and not running", data)
+	}
+	if data.Reason == "" {
+		t.Fatal("status reason should explain the divergence")
+	}
+
+	nw, err := env.Service.GetNetwork("wont-start")
+	if err != nil {
+		t.Fatalf("get network: %v", err)
+	}
+	if !nw.Enabled {
+		t.Fatal("a failed start must not un-set the enabled flag")
 	}
 }
 
@@ -581,10 +590,13 @@ func TestAPIDisableNetwork_Success(
 
 	// disable network
 	url := "/networks/disable-me/disable"
-	result := wire.TestPost[any](env.Router, url, "")
+	result := wire.TestPost[api.NetworkStatus](env.Router, url, "")
 
-	// verify result — status-only mutation, no response body
-	result.ExpectOK(t)
+	// verify result — the recorded intent and what the daemon is doing
+	data := result.ExpectOK(t)
+	if data.Enabled || data.Running {
+		t.Fatalf("status = %+v, want disabled and stopped", data)
+	}
 
 	// verify network is disabled in store
 	nw, err := env.Service.GetNetwork("disable-me")
@@ -629,71 +641,14 @@ func TestAPIDisableNetwork_AlreadyDisabled(
 // helpers
 //
 
-func newInstallServer(
-	apiAddr string,
-	serverPubKey string,
-) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /redeem", func(w http.ResponseWriter, r *http.Request) {
-		srvHost, srvPortStr, _ := net.SplitHostPort(apiAddr)
-		srvPort, _ := strconv.Atoi(srvPortStr)
-		wire.WriteData(w, http.StatusOK, protocol.Invitation{
-			Network: protocol.NetworkInfo{
-				Name:        "testnet",
-				PublicKey:   serverPubKey,
-				Endpoint:    "1.2.3.4:51820",
-				ServerRoute: srvHost + "/32",
-				NetworkCidr: "10.0.0.0/16",
-				APIPort:     uint16(srvPort),
-			},
-			Peer: protocol.PeerIdentity{
-				Route: "10.42.0.5/32",
-			},
-		})
-	})
-	mux.HandleFunc("POST /confirm", func(w http.ResponseWriter, r *http.Request) {
-		wire.WriteData(w, http.StatusOK, map[string]string{"status": "confirmed"})
-	})
-	return mux
-}
-
 // installInvite builds a valid invite whose invite-server route points at
 // env's httptest server, so the invite tunnel's /redeem call actually
 // reaches testutil.NewInstallServer.
 func installInvite(
-	t *testing.T,
 	env *testutil.APIEnv,
 	networkName string,
 ) protocol.Invitation {
-	t.Helper()
-
-	tempKey, err := wireguard.GenerateKey()
-	if err != nil {
-		t.Fatalf("generate temp key: %v", err)
-	}
-	srvPub, err := wireguard.GenerateKey()
-	if err != nil {
-		t.Fatalf("generate server pub key: %v", err)
-	}
-
-	apiAddr := env.Server.Listener.Addr().String()
-	apiHost, apiPortStr, _ := net.SplitHostPort(apiAddr)
-	apiPort, _ := strconv.Atoi(apiPortStr)
-
-	return protocol.Invitation{
-		Network: protocol.NetworkInfo{
-			Name:        networkName,
-			PublicKey:   srvPub,
-			Endpoint:    "1.2.3.4:51820",
-			ServerRoute: apiHost + "/32",
-			NetworkCidr: "10.0.0.0/16",
-			APIPort:     uint16(apiPort),
-		},
-		Peer: protocol.PeerIdentity{
-			Route:      "10.42.0.5/16",
-			PrivateKey: tempKey,
-		},
-	}
+	return testutil.Invitation(networkName, env.Server.Listener.Addr().String())
 }
 
 //

@@ -231,7 +231,7 @@ func (db *DB) ConfirmInstall(
 	mainPrivateKey string,
 	confirmedAt time.Time,
 ) (
-	*service.NetworkConfig,
+	*service.Network,
 	error,
 ) {
 	tx, err := db.Conn.Begin()
@@ -283,7 +283,7 @@ func (db *DB) ConfirmInstall(
 		)
 	}
 
-	network = &service.NetworkConfig{
+	network = &service.Network{
 		Name:          install.Name,
 		PrivateKey:    install.MainPrivateKey,
 		InterfaceName: install.MainIfaceName,

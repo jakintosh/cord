@@ -46,6 +46,32 @@ func networkReconciliationFromProtocol(
 	}, nil
 }
 
+// ApplyNetworkSnapshot validates one complete server view and persists
+// it as the network's cached peers and topology. It is the durable half
+// of a sync: the runtime fetches the snapshot over the tunnel and
+// applies the resulting peer set to the device, but every conversion
+// from the wire shape and every store write happens here.
+func (s *Service) ApplyNetworkSnapshot(
+	network string,
+	snapshot protocol.VisibleNetworkSnapshot,
+) error {
+	now := s.clock()
+
+	reconciliation, err := networkReconciliationFromProtocol(
+		snapshot,
+		now,
+		now.Add(-EndpointTTL),
+	)
+	if err != nil {
+		return fmt.Errorf("%w: validate network snapshot: %v", ErrInvalidInput, err)
+	}
+
+	if err := s.store.ApplyNetworkReconciliation(network, reconciliation); err != nil {
+		return fmt.Errorf("apply network reconciliation: %w", err)
+	}
+	return nil
+}
+
 func topologyFromProtocol(
 	view protocol.TopologyView,
 ) (

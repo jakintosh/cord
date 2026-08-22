@@ -1,6 +1,10 @@
-package service
+package runtime
 
-import "time"
+import (
+	"time"
+
+	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+)
 
 // Endpoint rotation is the recovery path for a peer whose handshake
 // has gone stale: cycle through the peer's known endpoints until one
@@ -23,7 +27,7 @@ func (n *Network) rotate(
 	pubKey string,
 	now time.Time,
 ) {
-	endpoints, err := n.store.ListPeerEndpoints(n.cfg.Name, pubKey)
+	endpoints, err := n.service.ListPeerEndpoints(n.record.Name, pubKey)
 	if err != nil {
 		n.log.Warn("rotate: list endpoints failed", "peer", pubKey, "err", err)
 		return
@@ -34,19 +38,40 @@ func (n *Network) rotate(
 		return
 	}
 
-	n.log.Debug("rotating endpoint", "peer", pubKey, "endpoint", candidate)
+	n.log.Debug(
+		"rotating endpoint",
+		"peer",
+		pubKey,
+		"endpoint",
+		candidate,
+	)
+
 	if err := n.tunnel.device.SetPeerEndpoint(pubKey, candidate); err != nil {
-		n.log.Warn("rotate: set endpoint failed", "peer", pubKey, "endpoint", candidate, "err", err)
+		n.log.Warn(
+			"rotate: set endpoint failed",
+			"peer",
+			pubKey,
+			"endpoint",
+			candidate,
+			"err",
+			err,
+		)
 		return
 	}
 
-	if err := n.store.RecordEndpointAttempt(
-		n.cfg.Name,
+	if err := n.service.RecordEndpointAttempt(
+		n.record.Name,
 		pubKey,
 		candidate,
 		now,
 	); err != nil {
-		n.log.Warn("rotate: mark attempt failed", "peer", pubKey, "err", err)
+		n.log.Warn(
+			"rotate: mark attempt failed",
+			"peer",
+			pubKey,
+			"err",
+			err,
+		)
 	}
 }
 
@@ -54,7 +79,7 @@ func (n *Network) rotate(
 // reports false while the most recent attempt across the peer's
 // endpoints is still within RotateInterval. Ties keep catalog order.
 func nextCandidate(
-	endpoints []PeerEndpoint,
+	endpoints []service.PeerEndpoint,
 	now time.Time,
 ) (
 	string,
@@ -78,5 +103,6 @@ func nextCandidate(
 	if !newest.IsZero() && now.Sub(newest) < RotateInterval {
 		return "", false
 	}
+
 	return oldest.Endpoint, true
 }

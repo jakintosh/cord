@@ -1,63 +1,43 @@
 package testutil
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
-	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
-	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
 
+// ServiceEnv is a domain-only environment: a service over an in-memory
+// database, with the wake channel the service writes to.
 type ServiceEnv struct {
 	Database *database.DB
-	Manager  *wireguard.Manager
-	Backend  *wireguardtest.MockBackend
 	Service  *service.Service
-	Server   *httptest.Server
+	Wake     chan string
 }
 
 func SetupService(
 	t *testing.T,
 ) *ServiceEnv {
 	t.Helper()
-	return SetupServiceWithServer(t, nil)
+	return SetupServiceWithClock(t, func() time.Time { return FixedTime })
 }
 
-func SetupServiceWithServer(
+func SetupServiceWithClock(
 	t *testing.T,
-	handler http.Handler,
+	clock func() time.Time,
 ) *ServiceEnv {
 	t.Helper()
 
 	db := SetupDB(t)
-	backend := wireguardtest.NewMockBackend()
-	mgr := wireguard.NewManagerWithBackend(backend)
-
-	var server *httptest.Server
-	// The sync timer fires immediately on start; when no test server
-	// backs the tunnel address the call must fail fast instead of
-	// waiting out the default dial timeout.
-	httpClient := &http.Client{Timeout: 100 * time.Millisecond}
-	if handler != nil {
-		server = httptest.NewServer(handler)
-		httpClient = server.Client()
-	}
+	wake := make(chan string, 16)
 
 	svc, err := service.New(service.Options{
-		Store:      db,
-		WireGuard:  mgr,
-		Clock:      func() time.Time { return FixedTime },
-		Logger:     logging.Discard(),
-		HTTPClient: httpClient,
-
-		SyncInterval:   30 * time.Second,
-		ScanInterval:   30 * time.Second,
-		ReportInterval: 30 * time.Second,
+		Store:  db,
+		Clock:  clock,
+		Logger: logging.Discard(),
+		Wake:   wake,
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -65,39 +45,7 @@ func SetupServiceWithServer(
 
 	return &ServiceEnv{
 		Database: db,
-		Manager:  mgr,
-		Backend:  backend,
 		Service:  svc,
-		Server:   server,
-	}
-}
-
-func SetupServiceWithManager(
-	t *testing.T,
-	mgr *wireguard.Manager,
-) *ServiceEnv {
-	t.Helper()
-
-	db := SetupDB(t)
-
-	svc, err := service.New(service.Options{
-		Store:      db,
-		WireGuard:  mgr,
-		Clock:      func() time.Time { return FixedTime },
-		Logger:     logging.Discard(),
-		HTTPClient: &http.Client{Timeout: 100 * time.Millisecond},
-
-		SyncInterval:   30 * time.Second,
-		ScanInterval:   30 * time.Second,
-		ReportInterval: 30 * time.Second,
-	})
-	if err != nil {
-		t.Fatalf("new service: %v", err)
-	}
-
-	return &ServiceEnv{
-		Database: db,
-		Manager:  mgr,
-		Service:  svc,
+		Wake:     wake,
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/client/runtime"
 )
 
 // Peer is a cached peer joined with live WireGuard device state, for
@@ -19,8 +19,8 @@ type Peer struct {
 	Connected     bool    `json:"connected"`
 }
 
-func peerFromStatus(
-	p service.PeerStatus,
+func peerFromRuntime(
+	p runtime.PeerStatus,
 ) Peer {
 	dto := Peer{
 		Name:      p.Name,
@@ -35,12 +35,12 @@ func peerFromStatus(
 	return dto
 }
 
-func peersFromStatuses(
-	statuses []service.PeerStatus,
+func peersFromRuntime(
+	statuses []runtime.PeerStatus,
 ) []Peer {
 	dtos := make([]Peer, len(statuses))
-	for i, s := range statuses {
-		dtos[i] = peerFromStatus(s)
+	for i, status := range statuses {
+		dtos[i] = peerFromRuntime(status)
 	}
 	return dtos
 }
@@ -51,13 +51,13 @@ func (a *API) handleListPeers(
 ) {
 	name := r.PathValue("name")
 
-	statuses, err := a.service.ListPeerStatus(name)
+	statuses, err := a.runtime.PeerStatus(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, peersFromStatuses(statuses))
+	wire.WriteData(w, http.StatusOK, peersFromRuntime(statuses))
 }
 
 func (c *Client) ListPeers(

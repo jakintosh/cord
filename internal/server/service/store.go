@@ -11,23 +11,19 @@ import (
 type Store interface {
 	// Network records.
 
-	// GetNetwork returns the persisted network config by name.
+	// GetNetwork returns the persisted network record by name.
 	// Returns ErrNotFound when no matching row exists.
-	GetNetwork(name string) (*NetworkConfig, error)
+	GetNetwork(name string) (*Network, error)
 
-	// ListNetworks returns all persisted server network configs,
+	// ListNetworks returns all persisted server network records,
 	// ordered by name ascending.
-	ListNetworks() ([]*NetworkConfig, error)
-
-	// ListNetworkNames returns the names of all server networks,
-	// ordered by name ascending.
-	ListNetworkNames() ([]string, error)
+	ListNetworks() ([]*Network, error)
 
 	// BootstrapNetwork atomically creates a new network together
 	// with its root CIDR record, server CIDR, and initial server
 	// peer. All are persisted in a single transaction. Returns
 	// ErrConflict when a network with this name already exists.
-	BootstrapNetwork(network *NetworkConfig, rootCidr *Cidr, serverCidr *Cidr, serverPeer *Peer) error
+	BootstrapNetwork(network *Network, rootCidr *Cidr, serverCidr *Cidr, serverPeer *Peer) error
 
 	// SetNetworkEnabled updates the enabled flag for a network.
 	// When enabled, the daemon starts the network's WireGuard devices
@@ -35,7 +31,10 @@ type Store interface {
 	SetNetworkEnabled(name string, enabled bool) error
 
 	// DeleteNetwork removes the named network and all of its
-	// resources via foreign-key cascades.
+	// resources via foreign-key cascades. The enabled guard is
+	// enforced atomically with the delete: it returns
+	// ErrNetworkEnabled when the network is still enabled and
+	// ErrNotFound when the network does not exist.
 	DeleteNetwork(name string) error
 
 	// Peer records within a network.

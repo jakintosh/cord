@@ -1,6 +1,7 @@
 package database_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -43,18 +44,18 @@ func TestInsertAndGetNetwork(t *testing.T) {
 	db := testutil.SetupDB(t)
 
 	createdAt := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
-	net := &service.NetworkConfig{
+	net := &service.Network{
 		Name:       "homenet",
 		PrivateKey: "priv-key-123",
 		PublicKey:  "pub-key-123",
 		ExternalIP: "192.168.1.1",
-		Main: service.PlaneConfig{
+		Main: service.Plane{
 			Name:          "homenet",
 			Cidr:          "10.0.0.0/16",
 			WireguardPort: 51820,
 			ApiPort:       8080,
 		},
-		Invite: service.PlaneConfig{
+		Invite: service.Plane{
 			Name:          "homenet-i",
 			Cidr:          "10.1.0.0/24",
 			WireguardPort: 51821,
@@ -120,18 +121,18 @@ func TestInsertAndGetNetwork(t *testing.T) {
 func TestInsertNetwork_Duplicate(t *testing.T) {
 	db := testutil.SetupDB(t)
 
-	net := &service.NetworkConfig{
+	net := &service.Network{
 		Name:       "homenet",
 		PrivateKey: "priv-a",
 		PublicKey:  "pub-a",
 		ExternalIP: "1.1.1.1",
-		Main: service.PlaneConfig{
+		Main: service.Plane{
 			Name:          "homenet",
 			Cidr:          "10.0.0.0/16",
 			WireguardPort: 51820,
 			ApiPort:       8080,
 		},
-		Invite: service.PlaneConfig{
+		Invite: service.Plane{
 			Name:          "homenet-i",
 			Cidr:          "10.1.0.0/24",
 			WireguardPort: 51821,
@@ -170,33 +171,33 @@ func TestInsertNetwork_Duplicate(t *testing.T) {
 	}
 }
 
-func TestListNetworkNames(t *testing.T) {
+func TestListNetworks(t *testing.T) {
 	db := testutil.SetupDB(t)
 
-	names, err := db.ListNetworkNames()
+	networks, err := db.ListNetworks()
 	if err != nil {
 		t.Fatalf("list empty: %v", err)
 	}
-	if len(names) != 0 {
-		t.Fatalf("expected 0 names, got %d", len(names))
+	if len(networks) != 0 {
+		t.Fatalf("expected 0 networks, got %d", len(networks))
 	}
 
 	now := time.Now()
 	mustInsert := func(name string) {
 		t.Helper()
 		err := db.BootstrapNetwork(
-			&service.NetworkConfig{
+			&service.Network{
 				Name:       name,
 				PrivateKey: "priv-" + name,
 				PublicKey:  "pub-" + name,
 				ExternalIP: "1.1.1.1",
-				Main: service.PlaneConfig{
+				Main: service.Plane{
 					Name:          name,
 					Cidr:          "10.0.0.0/16",
 					WireguardPort: 51820,
 					ApiPort:       8080,
 				},
-				Invite: service.PlaneConfig{
+				Invite: service.Plane{
 					Name:          "homenet-i",
 					Cidr:          "10.1.0.0/24",
 					WireguardPort: 51821,
@@ -222,18 +223,7 @@ func TestListNetworkNames(t *testing.T) {
 	mustInsert("beta")
 	mustInsert("gamma")
 
-	names, err = db.ListNetworkNames()
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(names) != 3 {
-		t.Fatalf("expected 3 names, got %d", len(names))
-	}
-	if names[0] != "alpha" || names[1] != "beta" || names[2] != "gamma" {
-		t.Fatalf("unexpected order: %v", names)
-	}
-
-	networks, err := db.ListNetworks()
+	networks, err = db.ListNetworks()
 	if err != nil {
 		t.Fatalf("list networks: %v", err)
 	}
@@ -250,18 +240,18 @@ func TestDeleteNetwork(t *testing.T) {
 
 	now := time.Now()
 	if err := db.BootstrapNetwork(
-		&service.NetworkConfig{
+		&service.Network{
 			Name:       "deleteme",
 			PrivateKey: "priv",
 			PublicKey:  "pub",
 			ExternalIP: "1.1.1.1",
-			Main: service.PlaneConfig{
+			Main: service.Plane{
 				Name:          "deleteme",
 				Cidr:          "10.0.0.0/16",
 				WireguardPort: 51820,
 				ApiPort:       8080,
 			},
-			Invite: service.PlaneConfig{
+			Invite: service.Plane{
 				Name:          "deleteme-i",
 				Cidr:          "10.1.0.0/24",
 				WireguardPort: 51821,
@@ -300,23 +290,73 @@ func TestDeleteNetwork_NotFound(t *testing.T) {
 	}
 }
 
+func TestDeleteNetwork_RefusesEnabled(t *testing.T) {
+	db := testutil.SetupDB(t)
+
+	now := time.Now()
+	if err := db.BootstrapNetwork(
+		&service.Network{
+			Name:       "enablednet",
+			PrivateKey: "priv",
+			PublicKey:  "pub",
+			ExternalIP: "1.1.1.1",
+			Main: service.Plane{
+				Name:          "enablednet",
+				Cidr:          "10.0.0.0/16",
+				WireguardPort: 51820,
+				ApiPort:       8080,
+			},
+			Invite: service.Plane{
+				Name:          "enablednet-i",
+				Cidr:          "10.1.0.0/24",
+				WireguardPort: 51821,
+				ApiPort:       8080,
+			},
+			CreatedAt: now,
+		},
+		&service.Cidr{
+			Name:   "enablednet",
+			Cidr:   "10.0.0.0/16",
+			Prefix: 16,
+			Bits:   32,
+		},
+		serverCidr(),
+		serverPeer("pub"),
+	); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	if err := db.SetNetworkEnabled("enablednet", true); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+
+	err := db.DeleteNetwork("enablednet")
+	if !errors.Is(err, service.ErrNetworkEnabled) {
+		t.Fatalf("err = %v, want ErrNetworkEnabled", err)
+	}
+
+	if _, err := db.GetNetwork("enablednet"); err != nil {
+		t.Fatalf("network should survive a refused delete: %v", err)
+	}
+}
+
 func TestDeleteNetwork_Cascade(t *testing.T) {
 	db := testutil.SetupDB(t)
 
 	now := time.Now()
 	if err := db.BootstrapNetwork(
-		&service.NetworkConfig{
+		&service.Network{
 			Name:       "cascadenet",
 			PrivateKey: "priv",
 			PublicKey:  "pub",
 			ExternalIP: "1.1.1.1",
-			Main: service.PlaneConfig{
+			Main: service.Plane{
 				Name:          "cascadenet",
 				Cidr:          "10.0.0.0/16",
 				WireguardPort: 51820,
 				ApiPort:       8080,
 			},
-			Invite: service.PlaneConfig{
+			Invite: service.Plane{
 				Name:          "cascadenet-i",
 				Cidr:          "10.1.0.0/24",
 				WireguardPort: 51821,

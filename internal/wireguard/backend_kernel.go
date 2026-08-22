@@ -126,11 +126,20 @@ func (h *kernelDeviceHandle) Close() error {
 		}
 		return fmt.Errorf("wireguard: get link %s: %w", h.name, err)
 	}
-	_ = netlink.LinkSetDown(link)
-	if err := netlink.LinkDel(link); err != nil {
-		return fmt.Errorf("wireguard: delete %s: %w", h.name, err)
+	downErr := netlink.LinkSetDown(link)
+	deleteErr := netlink.LinkDel(link)
+	if deleteErr == nil {
+		return nil
 	}
-	return nil
+
+	deleteErr = fmt.Errorf("wireguard: delete %s: %w", h.name, deleteErr)
+	if downErr == nil {
+		return deleteErr
+	}
+	return errors.Join(
+		fmt.Errorf("wireguard: bring down %s: %w", h.name, downErr),
+		deleteErr,
+	)
 }
 
 func kernelApplyPeerOperations(
