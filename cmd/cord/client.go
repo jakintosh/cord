@@ -11,6 +11,7 @@ import (
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/client"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
+	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 )
 
 var clientCmd = &args.Command{
@@ -50,10 +51,21 @@ var clientDaemonCmd = &args.Command{
 			Type: args.OptionTypeFlag,
 			Help: "enable verbose debug logging",
 		},
+		{
+			Long: "socket-mode",
+			Type: args.OptionTypeParameter,
+			Help: "control socket permissions: 0600, 0660, or 0666",
+		},
 	},
 	Handler: func(i *args.Input) error {
 		socketPath := clientSocket(i)
 		backend := i.GetParameterOr("backend", "auto")
+		socketModeStr := i.GetParameterOr("socket-mode", "0666")
+
+		socketMode, err := daemon.ParseSocketMode(socketModeStr)
+		if err != nil {
+			return err
+		}
 
 		ctx, cancel := signal.NotifyContext(
 			context.Background(), os.Interrupt, syscall.SIGTERM,
@@ -62,6 +74,7 @@ var clientDaemonCmd = &args.Command{
 
 		opts := client.Options{
 			SocketPath: socketPath,
+			SocketMode: socketMode,
 			Backend:    backend,
 			Version:    VersionInfo.Version,
 			Debug:      i.GetFlag("debug"),

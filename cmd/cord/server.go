@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
+	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 	"git.studiopollinator.com/pollinator/cord/internal/server"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 )
@@ -54,11 +55,22 @@ var serverDaemonCmd = &args.Command{
 			Type: args.OptionTypeFlag,
 			Help: "enable verbose debug logging",
 		},
+		{
+			Long: "socket-mode",
+			Type: args.OptionTypeParameter,
+			Help: "control socket permissions: 0600, 0660, or 0666",
+		},
 	},
 	Handler: func(i *args.Input) error {
+		debug := i.GetFlag("debug")
 		socketPath := serverSocket(i)
 		backend := i.GetParameterOr("backend", "auto")
-		debug := i.GetFlag("debug")
+		socketModeStr := i.GetParameterOr("socket-mode", "0666")
+
+		socketMode, err := daemon.ParseSocketMode(socketModeStr)
+		if err != nil {
+			return err
+		}
 
 		ctx, cancel := signal.NotifyContext(
 			context.Background(), os.Interrupt, syscall.SIGTERM,
@@ -67,6 +79,7 @@ var serverDaemonCmd = &args.Command{
 
 		opts := server.Options{
 			SocketPath: socketPath,
+			SocketMode: socketMode,
 			Backend:    backend,
 			Version:    VersionInfo.Version,
 			Debug:      debug,

@@ -3,22 +3,21 @@ package client
 import (
 	"context"
 	"fmt"
-	"net"
-	"net/http"
-	"os"
+	"io/fs"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 	"git.studiopollinator.com/pollinator/cord/internal/client/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
 // DefaultSocketPath is the default Unix socket path used when none is
 // provided.
-const DefaultSocketPath = "/tmp/cord-client.sock"
+const DefaultSocketPath = "/var/run/cord/client.sock"
 
 // DefaultDBPath is the default database path used when none is provided.
 const DefaultDBPath = "data/client.db"
@@ -32,6 +31,10 @@ const wakeBuffer = 16
 type Options struct {
 	// SocketPath is the Unix socket path for the daemon control API.
 	SocketPath string
+
+	// SocketMode controls which local users may connect to the control API.
+	// Zero uses daemon.DefaultSocketMode.
+	SocketMode fs.FileMode
 
 	// DBPath is the filesystem path to the SQLite database file.
 	DBPath string
@@ -50,8 +53,8 @@ type Options struct {
 
 // Serve is the production composition root for the cord client daemon.
 // It opens dependencies, wires them database → service → runtime → API,
-// starts the daemon on a Unix socket, and blocks until the context is
-// cancelled.
+// starts the daemon on a Unix socket, and blocks until cancellation or
+// control-endpoint failure.
 func Serve(
 	ctx context.Context,
 	opts Options,
@@ -59,11 +62,18 @@ func Serve(
 	if opts.DBPath == "" {
 		opts.DBPath = DefaultDBPath
 	}
+
 	if opts.SocketPath == "" {
 		return fmt.Errorf("client: socket path required")
 	}
 
 	log := logging.New(opts.Debug)
+
+	ln, err := daemon.ListenUnix(opts.SocketPath, opts.SocketMode)
+	if err != nil {
+		return fmt.Errorf("client: control socket: %w", err)
+	}
+	defer ln.Close()
 
 	backend, err := wireguard.ParseBackendType(opts.Backend)
 	if err != nil {
@@ -125,62 +135,13 @@ func Serve(
 	}
 	defer rt.Stop()
 
-	ln, err := listenUnix(opts.SocketPath)
-	if err != nil {
-		return err
-	}
-	defer ln.Close()
+	log.Info(
+		"daemon listening",
+		"socket",
+		opts.SocketPath,
+		"version",
+		opts.Version,
+	)
 
-	log.Info("daemon listening", "socket", opts.SocketPath, "version", opts.Version)
-	return serveHTTP(ctx, ln, apiServer.Router())
-}
-
-// listenUnix removes any stale socket at path, creates a new Unix
-// listener, sets permissive permissions, and returns it.
-func listenUnix(
-	path string,
-) (
-	net.Listener,
-	error,
-) {
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("client: remove socket: %w", err)
-	}
-
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		return nil, fmt.Errorf("client: listen: %w", err)
-	}
-
-	if err := os.Chmod(path, 0666); err != nil {
-		ln.Close()
-		return nil, fmt.Errorf("client: chmod socket: %w", err)
-	}
-
-	return ln, nil
-}
-
-// serveHTTP starts an HTTP server on ln, blocks until ctx is cancelled,
-// then gracefully shuts down with a 5-second timeout. Requests inherit
-// ctx, so in-flight work sees the shutdown.
-func serveHTTP(
-	ctx context.Context,
-	ln net.Listener,
-	handler http.Handler,
-) error {
-	srv := &http.Server{
-		Handler:     handler,
-		BaseContext: func(net.Listener) context.Context { return ctx },
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.Serve(ln)
-	}()
-
-	<-ctx.Done()
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	return daemon.ServeHTTP(ctx, ln, apiServer.Router())
 }

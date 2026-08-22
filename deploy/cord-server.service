@@ -1,5 +1,7 @@
 # Example systemd unit for the cord server daemon.
 #
+#   sudo groupadd --system cord
+#   sudo usermod --append --groups cord <admin-user>
 #   sudo cp deploy/cord-server.service /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now cord-server
@@ -20,11 +22,16 @@ Type=simple
 # /dev/net/tun with the userspace backend), so it must run as root
 # or with an equivalent set of network capabilities.
 User=root
-ExecStart=/usr/local/bin/cord server daemon
+Group=cord
+ExecStart=/usr/local/bin/cord server daemon --socket-mode 0660
 Restart=on-failure
 RestartSec=2s
 # The daemon shuts down gracefully within 5s of SIGTERM.
 TimeoutStopSec=30s
+# The control socket is /var/run/cord/server.sock (/run/cord/server.sock
+# on systemd hosts). Members of the cord group can connect.
+RuntimeDirectory=cord
+RuntimeDirectoryMode=0750
 # The SQLite database is opened at data/server.db relative to the
 # working directory, so pin the working directory to a durable,
 # systemd-managed state directory.
