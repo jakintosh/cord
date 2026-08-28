@@ -17,6 +17,7 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
+	"git.studiopollinator.com/pollinator/cord/internal/topology"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -140,6 +141,18 @@ type PeerStatus struct {
 	Endpoint      string
 	LastHandshake time.Time
 	Connected     bool
+}
+
+// NetworkTopology is the network's cached topology joined with live peer
+// connectivity for display. Connected maps a peer name to its live
+// state; peers absent from the map have no known connectivity. The
+// subject peer is always present: its connectivity is whether the
+// network is running.
+type NetworkTopology struct {
+	View        topology.View
+	GeneratedAt time.Time
+	SyncedAt    time.Time
+	Connected   map[string]bool
 }
 
 // New returns a runtime that is not yet running. Call Start to converge
@@ -411,9 +424,9 @@ func (r *Runtime) Sync(
 	return r.service.GetNetwork(name)
 }
 
-// Status joins the persisted intent with what this process is actually
+// GetStatus joins the persisted intent with what this process is actually
 // doing. It is the single source of operator-facing network state.
-func (r *Runtime) Status() (
+func (r *Runtime) GetStatus() (
 	Status,
 	error,
 ) {
@@ -436,10 +449,10 @@ func (r *Runtime) Status() (
 	}, nil
 }
 
-// PeerStatus returns the network's cached peers joined with live device
+// GetPeerStatus returns the network's cached peers joined with live device
 // state. A network that is installed but not running reports its cached
 // peers with zero-valued device fields rather than an error.
-func (r *Runtime) PeerStatus(
+func (r *Runtime) GetPeerStatus(
 	network string,
 ) (
 	[]PeerStatus,
@@ -482,6 +495,47 @@ func (r *Runtime) PeerStatus(
 		statuses[i] = status
 	}
 	return statuses, nil
+}
+
+// GetNetworkTopology returns the last synchronized topology joined with
+// live peer connectivity. It remains available while the network is
+// disabled or offline.
+func (r *Runtime) GetNetworkTopology(
+	name string,
+) (
+	NetworkTopology,
+	error,
+) {
+	cached, err := r.service.GetNetworkTopology(name)
+	if err != nil {
+		return NetworkTopology{}, err
+	}
+
+	statuses, err := r.GetPeerStatus(name)
+	if err != nil {
+		return NetworkTopology{}, err
+	}
+
+	r.mu.Lock()
+	_, running := r.running[name]
+	r.mu.Unlock()
+
+	connected := make(map[string]bool, len(statuses)+1)
+	for _, status := range statuses {
+		connected[status.Name] = status.Connected
+	}
+	if cached.View.SubjectPeer != "" {
+		if _, ok := connected[cached.View.SubjectPeer]; !ok {
+			connected[cached.View.SubjectPeer] = running
+		}
+	}
+
+	return NetworkTopology{
+		View:        cached.View,
+		GeneratedAt: cached.GeneratedAt,
+		SyncedAt:    cached.SyncedAt,
+		Connected:   connected,
+	}, nil
 }
 
 // run is the periodic pass: it converges on every wake and every tick

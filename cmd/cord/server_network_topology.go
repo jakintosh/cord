@@ -38,8 +38,16 @@ var serverNetworkTopology = &args.Command{
 			return err
 		}
 
+		connected := make(map[string]bool, len(result.Nodes))
+		for _, node := range result.Nodes {
+			if node.Connected != nil {
+				connected[node.Name] = *node.Connected
+			}
+		}
 		return topotext.Render(os.Stdout, view, topotext.Options{
-			Heading: "topology",
+			Heading:   "topology",
+			Color:     terminalStyleEnabled(os.Stdout),
+			Connected: connected,
 		})
 	},
 }

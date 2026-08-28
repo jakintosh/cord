@@ -192,7 +192,7 @@ func TestConverge_StopsUninstalledNetwork(t *testing.T) {
 	if device := env.Backend.Device("testnet"); device == nil || device.CloseCalls != 1 {
 		t.Fatalf("device close calls = %+v, want 1", device)
 	}
-	status, err := env.Runtime.Status()
+	status, err := env.Runtime.GetStatus()
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -334,7 +334,7 @@ func networkStatus(
 ) runtime.NetworkStatus {
 	t.Helper()
 
-	status, err := rt.Status()
+	status, err := rt.GetStatus()
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}

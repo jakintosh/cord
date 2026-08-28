@@ -93,7 +93,7 @@ func (a *API) handleGetStatus(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	status, err := a.runtime.Status()
+	status, err := a.runtime.GetStatus()
 	if err != nil {
 		writeServiceError(w, err)
 		return

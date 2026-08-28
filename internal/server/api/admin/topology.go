@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
+	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/topology"
 )
 
@@ -23,6 +24,7 @@ type TopologyNode struct {
 	Groups        []string `json:"groups"`
 	PeerName      string   `json:"peer_name,omitempty"`
 	Subject       bool     `json:"subject"`
+	Connected     *bool    `json:"connected,omitempty"`
 }
 
 type TopologyAssociation struct {
@@ -30,11 +32,11 @@ type TopologyAssociation struct {
 	Group2 string `json:"group2"`
 }
 
-func topologyFromService(
-	view topology.View,
+func topologyFromRuntime(
+	t runtime.NetworkTopology,
 ) NetworkTopology {
-	nodes := make([]TopologyNode, len(view.Nodes))
-	for i, node := range view.Nodes {
+	nodes := make([]TopologyNode, len(t.View.Nodes))
+	for i, node := range t.View.Nodes {
 		nodes[i] = TopologyNode{
 			Name:          node.Cidr.Name,
 			CIDR:          node.Cidr.Cidr,
@@ -44,19 +46,26 @@ func topologyFromService(
 			PeerName:      node.PeerName,
 			Subject:       node.Subject,
 		}
+		if node.PeerName != "" {
+			if state, ok := t.Connected[node.PeerName]; ok {
+				nodes[i].Connected = &state
+			}
+		}
 	}
-	associations := make([]TopologyAssociation, len(view.Associations))
-	for i, association := range view.Associations {
+
+	associations := make([]TopologyAssociation, len(t.View.Associations))
+	for i, association := range t.View.Associations {
 		associations[i] = TopologyAssociation{
 			Group1: association.Group1,
 			Group2: association.Group2,
 		}
 	}
+
 	return NetworkTopology{
 		Nodes:           nodes,
 		Associations:    associations,
-		EffectiveGroups: view.EffectiveGroups,
-		SubjectPeer:     view.SubjectPeer,
+		EffectiveGroups: t.View.EffectiveGroups,
+		SubjectPeer:     t.View.SubjectPeer,
 	}
 }
 
@@ -97,12 +106,16 @@ func (a *API) handleGetNetworkTopology(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	view, err := a.service.GetNetworkTopology(r.PathValue("name"))
+	name := r.PathValue("name")
+
+	result, err := a.runtime.GetNetworkTopology(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	wire.WriteData(w, http.StatusOK, topologyFromService(view))
+
+	topology := topologyFromRuntime(result)
+	wire.WriteData(w, http.StatusOK, topology)
 }
 
 func (c *Client) GetNetworkTopology(

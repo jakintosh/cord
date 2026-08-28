@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
-	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/client/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/topology"
 )
 
@@ -27,6 +27,7 @@ type TopologyNode struct {
 	Groups        []string `json:"groups"`
 	PeerName      string   `json:"peer_name,omitempty"`
 	Subject       bool     `json:"subject"`
+	Connected     *bool    `json:"connected,omitempty"`
 }
 
 type TopologyAssociation struct {
@@ -34,11 +35,11 @@ type TopologyAssociation struct {
 	Group2 string `json:"group2"`
 }
 
-func topologyFromService(
-	cached *service.CachedTopology,
+func topologyFromRuntime(
+	t runtime.NetworkTopology,
 ) NetworkTopology {
-	nodes := make([]TopologyNode, len(cached.View.Nodes))
-	for i, node := range cached.View.Nodes {
+	nodes := make([]TopologyNode, len(t.View.Nodes))
+	for i, node := range t.View.Nodes {
 		nodes[i] = TopologyNode{
 			Name:          node.Cidr.Name,
 			CIDR:          node.Cidr.Cidr,
@@ -48,10 +49,15 @@ func topologyFromService(
 			PeerName:      node.PeerName,
 			Subject:       node.Subject,
 		}
+		if node.PeerName != "" {
+			if state, ok := t.Connected[node.PeerName]; ok {
+				nodes[i].Connected = &state
+			}
+		}
 	}
 
-	associations := make([]TopologyAssociation, len(cached.View.Associations))
-	for i, association := range cached.View.Associations {
+	associations := make([]TopologyAssociation, len(t.View.Associations))
+	for i, association := range t.View.Associations {
 		associations[i] = TopologyAssociation{
 			Group1: association.Group1,
 			Group2: association.Group2,
@@ -59,12 +65,12 @@ func topologyFromService(
 	}
 
 	return NetworkTopology{
-		GeneratedAt:     cached.GeneratedAt,
-		SyncedAt:        cached.SyncedAt,
+		GeneratedAt:     t.GeneratedAt,
+		SyncedAt:        t.SyncedAt,
 		Nodes:           nodes,
 		Associations:    associations,
-		EffectiveGroups: cached.View.EffectiveGroups,
-		SubjectPeer:     cached.View.SubjectPeer,
+		EffectiveGroups: t.View.EffectiveGroups,
+		SubjectPeer:     t.View.SubjectPeer,
 	}
 }
 
@@ -105,15 +111,16 @@ func (a *API) handleGetNetworkTopology(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	networkName := r.PathValue("name")
+	name := r.PathValue("name")
 
-	cached, err := a.service.GetNetworkTopology(networkName)
+	result, err := a.runtime.GetNetworkTopology(name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, topologyFromService(cached))
+	topology := topologyFromRuntime(result)
+	wire.WriteData(w, http.StatusOK, topology)
 }
 
 func (c *Client) GetNetworkTopology(

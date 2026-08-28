@@ -177,7 +177,7 @@ func TestConverge_RecordsFailureAndRecovery(t *testing.T) {
 	if !status.Reconcile.LastSuccessAt.Equal(testutil.FixedTime) {
 		t.Fatalf("last success = %v, want %v", status.Reconcile.LastSuccessAt, testutil.FixedTime)
 	}
-	overall, err := env.Runtime.Status()
+	overall, err := env.Runtime.GetStatus()
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestConverge_RecordsFailureAndRecovery(t *testing.T) {
 	if !status.Reconcile.LastSuccessAt.Equal(now) {
 		t.Fatalf("last success = %v, want %v", status.Reconcile.LastSuccessAt, now)
 	}
-	overall, err = env.Runtime.Status()
+	overall, err = env.Runtime.GetStatus()
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -367,7 +367,7 @@ func networkStatus(
 ) runtime.NetworkStatus {
 	t.Helper()
 
-	status, err := rt.Status()
+	status, err := rt.GetStatus()
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}

@@ -203,7 +203,7 @@ func TestSync_RecordsFailureAndRecovery(t *testing.T) {
 	if !status.Sync.LastSuccessAt.Equal(testutil.FixedTime) {
 		t.Fatalf("last success = %v, want %v", status.Sync.LastSuccessAt, testutil.FixedTime)
 	}
-	overall, err := rt.Status()
+	overall, err := rt.GetStatus()
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestSync_RecordsFailureAndRecovery(t *testing.T) {
 	if !status.Sync.LastSuccessAt.Equal(now) {
 		t.Fatalf("last success = %v, want %v", status.Sync.LastSuccessAt, now)
 	}
-	overall, err = rt.Status()
+	overall, err = rt.GetStatus()
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestPeerStatus_NotRunning(t *testing.T) {
 		Route:     "10.42.0.9/32",
 	})
 
-	statuses, err := env.Runtime.PeerStatus("testnet")
+	statuses, err := env.Runtime.GetPeerStatus("testnet")
 	if err != nil {
 		t.Fatalf("peer status: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestPeerStatus_JoinsLiveDeviceState(t *testing.T) {
 				LastHandshake: tt.lastHandshake,
 			})
 
-			statuses, err := env.Runtime.PeerStatus("testnet")
+			statuses, err := env.Runtime.GetPeerStatus("testnet")
 			if err != nil {
 				t.Fatalf("peer status: %v", err)
 			}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"git.studiopollinator.com/pollinator/cord/internal/topology"
 )
@@ -13,6 +14,8 @@ type Options struct {
 	Heading     string
 	Metadata    string
 	BoldSubject bool
+	Color       bool
+	Connected   map[string]bool
 }
 
 // Render writes a deterministic topology tree followed by effective groups
@@ -53,11 +56,14 @@ func Render(
 		}
 	}
 
+	rows := make([]renderRow, 0, len(view.Nodes))
 	for index, root := range roots {
 		last := index == len(roots)-1
-		if err := renderNode(w, root, children, "", last, true, opts.BoldSubject); err != nil {
-			return err
-		}
+		renderNode(&rows, root, children, "", last, true, opts.Connected)
+	}
+
+	if err := writeTable(w, rows, opts); err != nil {
+		return err
 	}
 
 	if len(view.EffectiveGroups) > 0 {
@@ -88,14 +94,23 @@ func Render(
 	return nil
 }
 
+type renderRow struct {
+	cidr      string
+	name      string
+	groups    string
+	peer      bool
+	connected bool
+	subject   bool
+}
+
 func renderNode(
-	w io.Writer,
+	rows *[]renderRow,
 	node topology.ViewNode,
 	children map[string][]topology.ViewNode,
 	prefix string,
 	last bool,
 	root bool,
-	boldSubject bool,
+	connected map[string]bool,
 ) error {
 	connector := ""
 	nextPrefix := prefix
@@ -109,36 +124,108 @@ func renderNode(
 		}
 	}
 
-	line := fmt.Sprintf("%s => %s", node.Cidr.Cidr, node.Cidr.Name)
+	name := node.Cidr.Name
 	if node.PeerName != "" && node.PeerName != node.Cidr.Name {
-		line += " (peer: " + node.PeerName + ")"
-	}
-	if len(node.Groups) > 0 {
-		line += " [" + strings.Join(node.Groups, ", ") + "]"
+		name += " (peer: " + node.PeerName + ")"
 	}
 	if node.Subject {
-		line += " (you)"
-		if boldSubject {
-			line = "\x1b[1m" + line + "\x1b[0m"
-		}
+		name += " (you)"
 	}
-	if _, err := fmt.Fprintf(w, "%s%s%s\n", prefix, connector, line); err != nil {
-		return err
+	groupText := ""
+	if len(node.Groups) > 0 {
+		groupText = "[" + strings.Join(node.Groups, ", ") + "]"
 	}
+	peer := node.PeerName != ""
+	peerConnected := false
+	if peer {
+		peerConnected = connected[node.Cidr.Name]
+	}
+	*rows = append(*rows, renderRow{
+		cidr:      prefix + connector + node.Cidr.Cidr,
+		name:      name,
+		groups:    groupText,
+		peer:      peer,
+		connected: peerConnected,
+		subject:   node.Subject,
+	})
 
 	childNodes := children[node.Cidr.Name]
 	for index, child := range childNodes {
 		if err := renderNode(
-			w,
+			rows,
 			child,
 			children,
 			nextPrefix,
 			index == len(childNodes)-1,
 			false,
-			boldSubject,
+			connected,
 		); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func writeTable(
+	w io.Writer,
+	rows []renderRow,
+	opts Options,
+) error {
+	widths := [3]int{utf8.RuneCountInString("CIDR"), utf8.RuneCountInString("NAME"), utf8.RuneCountInString("GROUPS")}
+	for _, row := range rows {
+		cells := [3]string{row.cidr, row.name, row.groups}
+		for index, cell := range cells {
+			if width := utf8.RuneCountInString(cell); width > widths[index] {
+				widths[index] = width
+			}
+		}
+	}
+
+	header := [3]string{"CIDR", "NAME", "GROUPS"}
+	headerLine := formatCells(header, " ", widths)
+	if opts.Color {
+		headerLine = "\x1b[1m" + headerLine + "\x1b[0m"
+	}
+	if _, err := fmt.Fprintln(w, headerLine); err != nil {
+		return err
+	}
+
+	for _, row := range rows {
+		status := " "
+		if row.peer {
+			status = "◯"
+			if row.connected {
+				status = "◉"
+			}
+		}
+		line := formatCells([3]string{row.cidr, row.name, row.groups}, status, widths)
+		if opts.Color {
+			if row.peer && row.connected {
+				line = strings.Replace(line, "◉", "\x1b[32m◉\x1b[0m", 1)
+			}
+		}
+		if row.subject && opts.BoldSubject {
+			line = "\x1b[1m" + line + "\x1b[0m"
+		}
+		if _, err := fmt.Fprintln(w, line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func formatCells(
+	cells [3]string,
+	status string,
+	widths [3]int,
+) string {
+	line := padRight(cells[0], widths[0]) + "  " + status + " " + padRight(cells[1], widths[1])
+	if cells[2] != "" {
+		line += "  " + cells[2]
+	}
+	return line
+}
+
+func padRight(value string, width int) string {
+	return value + strings.Repeat(" ", width-utf8.RuneCountInString(value))
 }

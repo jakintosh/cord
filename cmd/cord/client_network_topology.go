@@ -41,10 +41,19 @@ var clientNetworkTopology = &args.Command{
 		}
 
 		syncTime := result.SyncedAt.Format(time.RFC3339)
+		connected := make(map[string]bool, len(result.Nodes))
+		for _, node := range result.Nodes {
+			if node.Connected != nil {
+				connected[node.Name] = *node.Connected
+			}
+		}
+		styled := terminalStyleEnabled(os.Stdout)
 		return topotext.Render(os.Stdout, view, topotext.Options{
 			Heading:     "topology (projected)",
 			Metadata:    fmt.Sprintf("synced: %s", humanizeSince(syncTime)),
-			BoldSubject: terminalStyleEnabled(os.Stdout),
+			BoldSubject: styled,
+			Color:       styled,
+			Connected:   connected,
 		})
 	},
 }

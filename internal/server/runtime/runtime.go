@@ -18,6 +18,7 @@ import (
 	inviteapi "git.studiopollinator.com/pollinator/cord/internal/server/api/invite"
 	peerapi "git.studiopollinator.com/pollinator/cord/internal/server/api/peer"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"git.studiopollinator.com/pollinator/cord/internal/topology"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -99,6 +100,21 @@ type NetworkStatus struct {
 	Reconcile ActivityStatus
 	MainAPI   ActivityStatus
 	InviteAPI ActivityStatus
+}
+
+// PeerStatus is a server network peer joined with live WireGuard state.
+// The server's own peer is considered connected while its network is running.
+type PeerStatus struct {
+	Name      string
+	Route     string
+	Connected bool
+}
+
+// NetworkTopology is the network's full topology joined with live peer
+// connectivity for display.
+type NetworkTopology struct {
+	View      topology.View
+	Connected map[string]bool
 }
 
 // ActivityStatus describes the latest result of one runtime activity.
@@ -291,9 +307,9 @@ func (r *Runtime) SetNetworkEnabled(
 	return r.getNetworkStatus(name)
 }
 
-// Status joins the persisted intent with what this process is actually
+// GetStatus joins the persisted intent with what this process is actually
 // doing. It is the single source of operator-facing state.
-func (r *Runtime) Status() (
+func (r *Runtime) GetStatus() (
 	Status,
 	error,
 ) {
@@ -314,6 +330,81 @@ func (r *Runtime) Status() (
 		Health:   statusHealth(statuses),
 		Networks: statuses,
 	}, nil
+}
+
+// GetPeerStatus returns configured peers joined with live WireGuard state. A
+// network that is not running reports its peers as disconnected.
+func (r *Runtime) GetPeerStatus(
+	name string,
+) (
+	[]PeerStatus,
+	error,
+) {
+	record, err := r.service.GetNetwork(name)
+	if err != nil {
+		return nil, err
+	}
+	peers, err := r.service.ListPeers(name)
+	if err != nil {
+		return nil, err
+	}
+
+	r.mu.Lock()
+	running := r.running[name]
+	r.mu.Unlock()
+
+	live := make(map[string]wireguard.PeerStatus)
+	if running != nil {
+		statuses, err := running.main.device.Peers()
+		if err != nil {
+			return nil, err
+		}
+		for _, status := range statuses {
+			live[status.PublicKey.String()] = status
+		}
+	}
+
+	now := r.clock()
+	result := make([]PeerStatus, len(peers))
+	for index, peer := range peers {
+		connected := running != nil && peer.PublicKey == record.PublicKey
+		if status, ok := live[peer.PublicKey]; ok {
+			connected = peerHealthy(status, now)
+		}
+		result[index] = PeerStatus{
+			Name:      peer.Name,
+			Route:     peer.Route,
+			Connected: connected,
+		}
+	}
+	return result, nil
+}
+
+// GetNetworkTopology returns the complete topology joined with live peer
+// connectivity. A network that is not running reports its peers as
+// disconnected.
+func (r *Runtime) GetNetworkTopology(
+	name string,
+) (
+	NetworkTopology,
+	error,
+) {
+	view, err := r.service.GetNetworkTopology(name)
+	if err != nil {
+		return NetworkTopology{}, err
+	}
+
+	statuses, err := r.GetPeerStatus(name)
+	if err != nil {
+		return NetworkTopology{}, err
+	}
+
+	connected := make(map[string]bool, len(statuses))
+	for _, status := range statuses {
+		connected[status.Name] = status.Connected
+	}
+
+	return NetworkTopology{View: view, Connected: connected}, nil
 }
 
 // run is the periodic pass: it converges on every wake and every tick
