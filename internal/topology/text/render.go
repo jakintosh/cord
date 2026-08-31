@@ -198,9 +198,14 @@ func writeTable(
 				status = "◉"
 			}
 		}
+		if row.subject {
+			status = "◆"
+		}
 		line := formatCells([3]string{row.cidr, row.name, row.groups}, status, widths)
 		if opts.Color {
-			if row.peer && row.connected {
+			if row.subject {
+				line = strings.Replace(line, "◆", "\x1b[36m◆\x1b[0m", 1)
+			} else if row.peer && row.connected {
 				line = strings.Replace(line, "◉", "\x1b[32m◉\x1b[0m", 1)
 			}
 		}

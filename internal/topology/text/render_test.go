@@ -54,8 +54,40 @@ func TestRender_SortsAndHighlightsSubjectInPlace(
 	if strings.Index(text, "early") > strings.Index(text, "self") {
 		t.Fatalf("subject moved ahead of ascending sibling:\n%s", text)
 	}
-	if !strings.Contains(text, "\x1b[1m└─ 10.2.0.1/32    self (you)") {
+	if !strings.Contains(text, "\x1b[1m└─ 10.2.0.1/32  ◆ self (you)") {
 		t.Fatalf("subject not highlighted in place:\n%s", text)
+	}
+}
+
+func TestRender_SubjectRendersFilledCyanDiamond(t *testing.T) {
+	view := topology.View{Nodes: []topology.ViewNode{
+		{
+			Cidr:     renderCidr(t, "self", "10.0.0.1/32"),
+			PeerName: "self",
+			Subject:  true,
+		},
+		{
+			Cidr:     renderCidr(t, "peer", "10.0.0.2/32"),
+			PeerName: "peer",
+		},
+	}}
+
+	var output bytes.Buffer
+	if err := topotext.Render(&output, view, topotext.Options{
+		Color: true,
+		Connected: map[string]bool{
+			"self": true,
+			"peer": true,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	text := output.String()
+	if !strings.Contains(text, "10.0.0.1/32  \x1b[36m◆\x1b[0m self (you)") {
+		t.Fatalf("subject diamond with cyan color not rendered:\n%s", text)
+	}
+	if !strings.Contains(text, "10.0.0.2/32  \x1b[32m◉\x1b[0m peer") {
+		t.Fatalf("peer green status not rendered:\n%s", text)
 	}
 }
 

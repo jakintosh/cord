@@ -11,6 +11,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
+	"git.studiopollinator.com/pollinator/cord/internal/topology"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
@@ -346,6 +347,109 @@ func TestPeerStatus_JoinsLiveDeviceState(t *testing.T) {
 				t.Errorf("connected = %t, want %t", got.Connected, tt.wantConnected)
 			}
 		})
+	}
+}
+
+func TestNetworkTopology_ServerConnectivityUsesHandshake(t *testing.T) {
+	tests := []struct {
+		name          string
+		includePeer   bool
+		lastHandshake time.Time
+		wantConnected bool
+	}{
+		{
+			name:          "fresh handshake",
+			includePeer:   true,
+			lastHandshake: testutil.FixedTime,
+			wantConnected: true,
+		},
+		{
+			name:          "stale handshake",
+			includePeer:   true,
+			lastHandshake: testutil.FixedTime.Add(-2 * runtime.StaleThreshold),
+			wantConnected: false,
+		},
+		{
+			name:          "no handshake",
+			includePeer:   true,
+			wantConnected: false,
+		},
+		{
+			name:          "missing peer",
+			wantConnected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := testutil.SetupRuntime(t)
+			network := testutil.SeedNetworkDirect(t, env.Database, "testnet")
+			seedTopologyWithServer(t, env, "testnet")
+			env.Enable(t, "testnet")
+
+			if tt.includePeer {
+				key, err := wgtypes.ParseKey(network.Server.PublicKey)
+				if err != nil {
+					t.Fatalf("parse server key: %v", err)
+				}
+				env.Backend.Device("testnet").SetPeers(wireguard.PeerStatus{
+					PublicKey:     key,
+					LastHandshake: tt.lastHandshake,
+				})
+			} else {
+				env.Backend.Device("testnet").SetPeers()
+			}
+
+			result, err := env.Runtime.GetNetworkTopology("testnet")
+			if err != nil {
+				t.Fatalf("network topology: %v", err)
+			}
+			got, ok := result.Connected["cord-server"]
+			if !ok {
+				t.Fatal("server connectivity missing from topology")
+			}
+			if got != tt.wantConnected {
+				t.Errorf("server connected = %t, want %t", got, tt.wantConnected)
+			}
+		})
+	}
+}
+
+func seedTopologyWithServer(
+	t *testing.T,
+	env *testutil.RuntimeEnv,
+	network string,
+) {
+	t.Helper()
+
+	server, err := topology.CidrFromString(
+		"cord-server",
+		"10.42.0.1/32",
+		true,
+	)
+	if err != nil {
+		t.Fatalf("build server CIDR: %v", err)
+	}
+	self, err := topology.CidrFromString("self", "10.42.0.5/32", true)
+	if err != nil {
+		t.Fatalf("build subject CIDR: %v", err)
+	}
+	if err := env.Database.ApplyNetworkReconciliation(
+		network,
+		service.NetworkReconciliation{
+			Topology: topology.View{
+				SubjectPeer: "self",
+				Nodes: []topology.ViewNode{
+					{Cidr: server, PeerName: "cord-server"},
+					{Cidr: self, PeerName: "self", Subject: true},
+				},
+			},
+			GeneratedAt: testutil.FixedTime,
+			ReceivedAt:  testutil.FixedTime,
+			PruneBefore: testutil.FixedTime.Add(-service.EndpointTTL),
+		},
+	); err != nil {
+		t.Fatalf("seed topology: %v", err)
 	}
 }
 

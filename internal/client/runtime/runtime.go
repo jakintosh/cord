@@ -30,6 +30,8 @@ const (
 	HealthInactive = "inactive"
 	HealthHealthy  = "healthy"
 	HealthDegraded = "degraded"
+
+	serverPeerName = "cord-server"
 )
 
 // Options configures the runtime.
@@ -147,7 +149,8 @@ type PeerStatus struct {
 // connectivity for display. Connected maps a peer name to its live
 // state; peers absent from the map have no known connectivity. The
 // subject peer is always present: its connectivity is whether the
-// network is running.
+// network is running. The pinned server peer is evaluated from its
+// live WireGuard handshake.
 type NetworkTopology struct {
 	View        topology.View
 	GeneratedAt time.Time
@@ -463,38 +466,12 @@ func (r *Runtime) GetPeerStatus(
 		return nil, err
 	}
 
-	r.mu.Lock()
-	running, isRunning := r.running[network]
-	r.mu.Unlock()
-
-	livePeerStatuses := make(map[string]wireguard.PeerStatus)
-	if isRunning {
-		peerStatuses, err := running.getPeerStatuses()
-		if err != nil {
-			return nil, err
-		}
-		for _, peer := range peerStatuses {
-			livePeerStatuses[peer.PublicKey.String()] = peer
-		}
+	livePeerStatuses, err := r.getLivePeerStatuses(network)
+	if err != nil {
+		return nil, err
 	}
 
-	now := r.clock()
-	statuses := make([]PeerStatus, len(peers))
-	for i, peer := range peers {
-		status := PeerStatus{
-			Name:  peer.Name,
-			Route: peer.Route,
-		}
-		if devicePeerStatus, ok := livePeerStatuses[peer.PublicKey]; ok {
-			if devicePeerStatus.Endpoint != nil {
-				status.Endpoint = devicePeerStatus.Endpoint.String()
-			}
-			status.LastHandshake = devicePeerStatus.LastHandshake
-			status.Connected = peerHealthy(devicePeerStatus, now)
-		}
-		statuses[i] = status
-	}
-	return statuses, nil
+	return joinPeerStatuses(peers, livePeerStatuses, r.clock()), nil
 }
 
 // GetNetworkTopology returns the last synchronized topology joined with
@@ -511,19 +488,38 @@ func (r *Runtime) GetNetworkTopology(
 		return NetworkTopology{}, err
 	}
 
-	statuses, err := r.GetPeerStatus(name)
+	record, err := r.service.GetNetwork(name)
 	if err != nil {
 		return NetworkTopology{}, err
 	}
+
+	peers, err := r.service.ListPeers(name)
+	if err != nil {
+		return NetworkTopology{}, err
+	}
+
+	livePeerStatuses, err := r.getLivePeerStatuses(name)
+	if err != nil {
+		return NetworkTopology{}, err
+	}
+
+	now := r.clock()
+	statuses := joinPeerStatuses(peers, livePeerStatuses, now)
 
 	r.mu.Lock()
 	_, running := r.running[name]
 	r.mu.Unlock()
 
-	connected := make(map[string]bool, len(statuses)+1)
+	connected := make(map[string]bool, len(statuses)+2)
 	for _, status := range statuses {
 		connected[status.Name] = status.Connected
 	}
+	serverConnected := false
+	if devicePeerStatus, ok := livePeerStatuses[record.Server.PublicKey]; ok {
+		serverConnected = peerHealthy(devicePeerStatus, now)
+	}
+	connected[serverPeerName] = serverConnected
+
 	if cached.View.SubjectPeer != "" {
 		if _, ok := connected[cached.View.SubjectPeer]; !ok {
 			connected[cached.View.SubjectPeer] = running
@@ -536,6 +532,34 @@ func (r *Runtime) GetNetworkTopology(
 		SyncedAt:    cached.SyncedAt,
 		Connected:   connected,
 	}, nil
+}
+
+// getLivePeerStatuses returns the running network's live WireGuard peers
+// indexed by public key. An installed network that is not running has no
+// live device state and returns an empty map without an error.
+func (r *Runtime) getLivePeerStatuses(
+	network string,
+) (
+	map[string]wireguard.PeerStatus,
+	error,
+) {
+	r.mu.Lock()
+	running, isRunning := r.running[network]
+	r.mu.Unlock()
+
+	if !isRunning {
+		return nil, nil
+	}
+
+	peerStatuses, err := running.getPeerStatuses()
+	if err != nil {
+		return nil, err
+	}
+	livePeerStatuses := make(map[string]wireguard.PeerStatus, len(peerStatuses))
+	for _, peer := range peerStatuses {
+		livePeerStatuses[peer.PublicKey.String()] = peer
+	}
+	return livePeerStatuses, nil
 }
 
 // run is the periodic pass: it converges on every wake and every tick
@@ -763,6 +787,31 @@ func (r *Runtime) parseStatusOf(
 	}
 	status.Health = networkHealth(status)
 	return status
+}
+
+// joinPeerStatuses combines cached peer records with one live device
+// snapshot.
+func joinPeerStatuses(
+	peers []*service.Peer,
+	livePeerStatuses map[string]wireguard.PeerStatus,
+	now time.Time,
+) []PeerStatus {
+	statuses := make([]PeerStatus, len(peers))
+	for i, peer := range peers {
+		status := PeerStatus{
+			Name:  peer.Name,
+			Route: peer.Route,
+		}
+		if devicePeerStatus, ok := livePeerStatuses[peer.PublicKey]; ok {
+			if devicePeerStatus.Endpoint != nil {
+				status.Endpoint = devicePeerStatus.Endpoint.String()
+			}
+			status.LastHandshake = devicePeerStatus.LastHandshake
+			status.Connected = peerHealthy(devicePeerStatus, now)
+		}
+		statuses[i] = status
+	}
+	return statuses
 }
 
 func networkHealth(
