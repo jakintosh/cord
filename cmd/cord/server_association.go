@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
+	adminserver "git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
 
 var serverAssociationCmd = &args.Command{
@@ -143,7 +143,7 @@ var serverAssociationList = &args.Command{
 
 // printAssociations prints a one-row-per-association summary table.
 func printAssociations(
-	associations []admin.Association,
+	associations []adminserver.Association,
 ) {
 	rows := make([][]string, len(associations))
 	for idx, a := range associations {

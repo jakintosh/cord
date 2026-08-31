@@ -11,8 +11,8 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/client"
-	"git.studiopollinator.com/pollinator/cord/internal/client/api"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
+	adminclient "git.studiopollinator.com/pollinator/cord/pkg/admin/client"
 )
 
 var clientCmd = &args.Command{
@@ -61,7 +61,7 @@ var clientDaemonCmd = &args.Command{
 	Handler: func(i *args.Input) error {
 		socketPath := clientSocket(i)
 		backend := i.GetParameterOr("backend", "auto")
-		socketModeStr := i.GetParameterOr("socket-mode", "0666")
+		socketModeStr := i.GetParameterOr("socket-mode", "0660")
 
 		socketMode, err := daemon.ParseSocketMode(socketModeStr)
 		if err != nil {
@@ -106,10 +106,29 @@ var clientStatusCmd = &args.Command{
 	},
 }
 
+// clientClient resolves the socket path and returns an API client for the
+// client daemon.
+func clientClient(
+	i *args.Input,
+) (
+	*adminclient.Client,
+	error,
+) {
+	return adminclient.New(clientSocket(i))
+}
+
+// clientSocket resolves the client daemon socket path from the CLI input,
+// falling back to the client package's default.
+func clientSocket(
+	i *args.Input,
+) string {
+	return i.GetParameterOr("socket-path", adminclient.DefaultSocketPath)
+}
+
 // printClientStatus prints daemon and network health followed, when
 // present, by a table of in-progress installs.
 func printClientStatus(
-	s api.Status,
+	s adminclient.Status,
 ) {
 	fmt.Printf(
 		"client daemon ok (%s), managed networks %s\n\n",
@@ -162,14 +181,14 @@ func printClientStatus(
 }
 
 func clientStatusDetail(
-	status api.NetworkStatus,
+	status adminclient.NetworkStatus,
 ) string {
 	if status.Reason != "" {
 		return status.Reason
 	}
 	activities := []struct {
 		name   string
-		status api.ActivityStatus
+		status adminclient.ActivityStatus
 	}{
 		{name: "reconcile", status: status.Reconcile},
 		{name: "sync", status: status.Sync},

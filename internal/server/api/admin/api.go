@@ -8,7 +8,30 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
+
+type ActivityStatus = server.ActivityStatus
+type Association = server.Association
+type Cidr = server.Cidr
+type CidrGroupRequest = server.CidrGroupRequest
+type CreateAssociationRequest = server.CreateAssociationRequest
+type CreateCidrRequest = server.CreateCidrRequest
+type CreateGroupRequest = server.CreateGroupRequest
+type CreateNetworkRequest = server.CreateNetworkRequest
+type CreateRegistrationRequest = server.CreateRegistrationRequest
+type Group = server.Group
+type Network = server.Network
+type NetworkStatus = server.NetworkStatus
+type NetworkTopology = server.NetworkTopology
+type Peer = server.Peer
+type Registration = server.Registration
+type RegistrationGroupRequest = server.RegistrationGroupRequest
+type Status = server.Status
+type TopologyAssociation = server.TopologyAssociation
+type TopologyNode = server.TopologyNode
+type UpdateCidrRequest = server.UpdateCidrRequest
+type UpdatePeerRequest = server.UpdatePeerRequest
 
 type Options struct {
 	Service *service.Service

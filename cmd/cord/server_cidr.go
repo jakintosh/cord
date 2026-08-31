@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
+	adminserver "git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
 
 var serverCidrCmd = &args.Command{
@@ -310,7 +310,7 @@ var serverCidrGroupList = &args.Command{
 
 // printCidrs prints a one-row-per-CIDR summary table.
 func printCidrs(
-	cidrs []admin.Cidr,
+	cidrs []adminserver.Cidr,
 ) {
 	rows := make([][]string, len(cidrs))
 	for idx, c := range cidrs {

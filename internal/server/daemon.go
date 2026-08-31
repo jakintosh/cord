@@ -8,18 +8,19 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
+	adminapi "git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	inviteapi "git.studiopollinator.com/pollinator/cord/internal/server/api/invite"
 	peerapi "git.studiopollinator.com/pollinator/cord/internal/server/api/peer"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
+	adminclient "git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
 
 // DefaultSocketPath is the default Unix socket path used when none is
 // provided.
-const DefaultSocketPath = "/var/run/cord/server.sock"
+const DefaultSocketPath = adminclient.DefaultSocketPath
 
 // DefaultDBPath is the default database path used when none is provided.
 const DefaultDBPath = "data/server.db"
@@ -64,6 +65,7 @@ func Serve(
 	if opts.DBPath == "" {
 		opts.DBPath = DefaultDBPath
 	}
+
 	if opts.SocketPath == "" {
 		return fmt.Errorf("server: socket path required")
 	}
@@ -126,7 +128,7 @@ func Serve(
 		return fmt.Errorf("server: new runtime: %w", err)
 	}
 
-	api, err := admin.New(admin.Options{
+	api, err := adminapi.New(adminapi.Options{
 		Service: svc,
 		Runtime: rt,
 		Logger:  log.With("api", "admin"),

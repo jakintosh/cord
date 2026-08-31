@@ -10,6 +10,12 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 )
 
+func TestDefaultSocketMode(t *testing.T) {
+	if daemon.DefaultSocketMode != 0660 {
+		t.Fatalf("default socket mode = %#o, want %#o", daemon.DefaultSocketMode, 0660)
+	}
+}
+
 func TestListenUnix_RejectsActiveDaemon(t *testing.T) {
 	path := tempSocketPath(t)
 	first, err := daemon.ListenUnix(path, daemon.DefaultSocketMode)

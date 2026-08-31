@@ -1,58 +1,12 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
-
-type Network struct {
-	Name          string `json:"name"`
-	ExternalIP    string `json:"external_ip"`
-	MainName      string `json:"main_name"`
-	MainCidr      string `json:"main_cidr"`
-	MainWgPort    uint16 `json:"main_wg_port"`
-	MainApiPort   uint16 `json:"main_api_port"`
-	InviteName    string `json:"invite_name"`
-	InviteCidr    string `json:"invite_cidr"`
-	InviteWgPort  uint16 `json:"invite_wg_port"`
-	InviteApiPort uint16 `json:"invite_api_port"`
-	Enabled       bool   `json:"enabled"`
-}
-
-type CreateNetworkRequest struct {
-	Name          string  `json:"name"`
-	ExternalIP    string  `json:"external_ip"`
-	MainName      *string `json:"main_name,omitempty"`
-	MainCidr      string  `json:"main_cidr"`
-	MainWgPort    *uint16 `json:"main_wg_port,omitempty"`
-	MainApiPort   *uint16 `json:"main_api_port,omitempty"`
-	InviteName    *string `json:"invite_name,omitempty"`
-	InviteCidr    *string `json:"invite_cidr,omitempty"`
-	InviteWgPort  *uint16 `json:"invite_wg_port,omitempty"`
-	InviteApiPort *uint16 `json:"invite_api_port,omitempty"`
-}
-
-func networkFromService(
-	n service.Network,
-) Network {
-	return Network{
-		Name:          n.Name,
-		ExternalIP:    n.ExternalIP,
-		MainName:      n.Main.Name,
-		MainCidr:      n.Main.Cidr,
-		MainWgPort:    n.Main.WireguardPort,
-		MainApiPort:   n.Main.ApiPort,
-		InviteName:    n.Invite.Name,
-		InviteCidr:    n.Invite.Cidr,
-		InviteWgPort:  n.Invite.WireguardPort,
-		InviteApiPort: n.Invite.ApiPort,
-		Enabled:       n.Enabled,
-	}
-}
 
 func (a *API) handleListNetworks(
 	w http.ResponseWriter,
@@ -184,67 +138,20 @@ func (a *API) handlePostNetworkDisable(
 	wire.WriteData(w, http.StatusOK, statusDTO)
 }
 
-func (c *Client) ListNetworks(
-	ctx context.Context,
-) (
-	[]string,
-	error,
-) {
-	var result []string
-	return result, c.wire.Get(ctx, "/networks", &result)
-}
-
-func (c *Client) ShowNetwork(
-	ctx context.Context,
-	name string,
-) (
-	Network,
-	error,
-) {
-	var result Network
-	return result, c.wire.Get(ctx, "/networks/"+name, &result)
-}
-
-func (c *Client) AddNetwork(
-	ctx context.Context,
-	req CreateNetworkRequest,
-) (
-	Network,
-	error,
-) {
-	body, err := marshalJSON(req)
-	if err != nil {
-		return Network{}, err
+func networkFromService(
+	n service.Network,
+) Network {
+	return Network{
+		Name:          n.Name,
+		ExternalIP:    n.ExternalIP,
+		MainName:      n.Main.Name,
+		MainCidr:      n.Main.Cidr,
+		MainWgPort:    n.Main.WireguardPort,
+		MainApiPort:   n.Main.ApiPort,
+		InviteName:    n.Invite.Name,
+		InviteCidr:    n.Invite.Cidr,
+		InviteWgPort:  n.Invite.WireguardPort,
+		InviteApiPort: n.Invite.ApiPort,
+		Enabled:       n.Enabled,
 	}
-	var result Network
-	return result, c.wire.Post(ctx, "/networks", body, &result)
-}
-
-func (c *Client) DeleteNetwork(
-	ctx context.Context,
-	name string,
-) error {
-	return c.wire.Delete(ctx, "/networks/"+name, nil)
-}
-
-func (c *Client) EnableNetwork(
-	ctx context.Context,
-	name string,
-) (
-	NetworkStatus,
-	error,
-) {
-	var result NetworkStatus
-	return result, c.wire.Post(ctx, "/networks/"+name+"/enable", nil, &result)
-}
-
-func (c *Client) DisableNetwork(
-	ctx context.Context,
-	name string,
-) (
-	NetworkStatus,
-	error,
-) {
-	var result NetworkStatus
-	return result, c.wire.Post(ctx, "/networks/"+name+"/disable", nil, &result)
 }

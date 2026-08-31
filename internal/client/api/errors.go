@@ -8,23 +8,6 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 )
 
-type Client struct {
-	wire wire.Client
-}
-
-func NewClient(
-	socketPath string,
-) (
-	*Client,
-	error,
-) {
-	w, err := wire.NewClient("unix:///"+socketPath, wire.ClientOptions{})
-	if err != nil {
-		return nil, err
-	}
-	return &Client{wire: w}, nil
-}
-
 func writeServiceError(
 	w http.ResponseWriter,
 	err error,

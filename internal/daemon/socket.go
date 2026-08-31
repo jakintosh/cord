@@ -16,8 +16,9 @@ import (
 var ErrAlreadyRunning = errors.New("daemon already running")
 
 const (
-	// DefaultSocketMode trusts local users to administer the daemon.
-	DefaultSocketMode os.FileMode = 0666
+	// DefaultSocketMode grants administration access to the daemon user and
+	// members of the socket's owning group.
+	DefaultSocketMode os.FileMode = 0660
 
 	socketProbeTimeout = 250 * time.Millisecond
 )

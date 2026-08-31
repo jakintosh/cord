@@ -13,11 +13,12 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
+	adminclient "git.studiopollinator.com/pollinator/cord/pkg/admin/client"
 )
 
 // DefaultSocketPath is the default Unix socket path used when none is
 // provided.
-const DefaultSocketPath = "/var/run/cord/client.sock"
+const DefaultSocketPath = adminclient.DefaultSocketPath
 
 // DefaultDBPath is the default database path used when none is provided.
 const DefaultDBPath = "data/client.db"

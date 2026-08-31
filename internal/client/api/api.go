@@ -8,7 +8,20 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
+	admin "git.studiopollinator.com/pollinator/cord/pkg/admin/client"
 )
+
+type ActivityStatus = admin.ActivityStatus
+type InstallRequest = admin.InstallRequest
+type InstallStatus = admin.InstallStatus
+type Network = admin.Network
+type NetworkStatus = admin.NetworkStatus
+type NetworkTopology = admin.NetworkTopology
+type Peer = admin.Peer
+type Status = admin.Status
+type TopologyAssociation = admin.TopologyAssociation
+type TopologyNode = admin.TopologyNode
+type UpdateNetworkRequest = admin.UpdateNetworkRequest
 
 type Options struct {
 	Service *service.Service

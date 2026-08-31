@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
+	adminserver "git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
 
 var serverNetworkCmd = &args.Command{
@@ -76,7 +76,7 @@ var serverNetworkAdd = &args.Command{
 		},
 	},
 	Handler: func(i *args.Input) error {
-		req := admin.CreateNetworkRequest{
+		req := adminserver.CreateNetworkRequest{
 			Name:          i.GetOperand("name"),
 			ExternalIP:    i.GetOperand("external-ip"),
 			MainName:      i.GetParameter("main-name"),
@@ -264,7 +264,7 @@ var serverNetworkDisable = &args.Command{
 // printNetworkRuntime reports what the daemon is actually doing with a
 // network when that differs from the intent just recorded.
 func printNetworkRuntime(
-	status admin.NetworkStatus,
+	status adminserver.NetworkStatus,
 ) {
 	if status.Enabled == status.Running {
 		return
@@ -287,7 +287,7 @@ func toUint16Ptr(v *int) *uint16 {
 // printServerNetworkDetail prints the key: value detail view for a single
 // network, as shown by `server network show`.
 func printServerNetworkDetail(
-	n admin.Network,
+	n adminserver.Network,
 ) {
 	fmt.Printf("name: %s\n", n.Name)
 	fmt.Printf("external_ip: %s\n", n.ExternalIP)

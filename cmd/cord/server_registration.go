@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
+	adminserver "git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
 
 var serverRegistrationCmd = &args.Command{
@@ -292,7 +292,7 @@ var serverRegistrationGroupList = &args.Command{
 
 // printRegistrations prints a one-row-per-registration summary table.
 func printRegistrations(
-	registrations []admin.Registration,
+	registrations []adminserver.Registration,
 ) {
 	rows := make([][]string, len(registrations))
 	for idx, reg := range registrations {

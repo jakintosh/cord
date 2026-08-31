@@ -1,53 +1,12 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
-
-type Cidr struct {
-	Name string `json:"name"`
-	Cidr string `json:"cidr"`
-}
-
-type CreateCidrRequest struct {
-	Name string `json:"name"`
-	Cidr string `json:"cidr"`
-}
-
-type UpdateCidrRequest struct {
-	Name string `json:"name"`
-}
-
-type CidrGroupRequest struct {
-	Group string `json:"group"`
-}
-
-func cidrFromService(
-	c service.Cidr,
-) Cidr {
-	return Cidr{
-		Name: c.Name,
-		Cidr: c.Cidr,
-	}
-}
-
-func cidrsFromService(
-	cidrs []*service.Cidr,
-) []Cidr {
-	if cidrs == nil {
-		return []Cidr{}
-	}
-	result := make([]Cidr, len(cidrs))
-	for i, c := range cidrs {
-		result[i] = cidrFromService(*c)
-	}
-	return result
-}
 
 func (a *API) handleListCidrs(
 	w http.ResponseWriter,
@@ -169,88 +128,24 @@ func (a *API) handleDeleteCidrGroup(
 	wire.WriteData(w, http.StatusOK, nil)
 }
 
-func (c *Client) ListCidrs(
-	ctx context.Context,
-	network string,
-) (
-	[]Cidr,
-	error,
-) {
-	var result []Cidr
-	return result, c.wire.Get(ctx, "/networks/"+network+"/cidrs", &result)
-}
-
-func (c *Client) AddCidr(
-	ctx context.Context,
-	network string,
-	name string,
-	cidr string,
-) error {
-	body, err := marshalJSON(CreateCidrRequest{
-		Name: name,
-		Cidr: cidr,
-	})
-	if err != nil {
-		return err
+func cidrFromService(
+	c service.Cidr,
+) Cidr {
+	return Cidr{
+		Name: c.Name,
+		Cidr: c.Cidr,
 	}
-	return c.wire.Post(ctx, "/networks/"+network+"/cidrs", body, nil)
 }
 
-func (c *Client) RenameCidr(
-	ctx context.Context,
-	network string,
-	cidr string,
-	newName string,
-) error {
-	req := UpdateCidrRequest{Name: newName}
-	body, err := marshalJSON(req)
-	if err != nil {
-		return err
+func cidrsFromService(
+	cidrs []*service.Cidr,
+) []Cidr {
+	if cidrs == nil {
+		return []Cidr{}
 	}
-	return c.wire.Patch(ctx, "/networks/"+network+"/cidrs/"+cidr, body, nil)
-}
-
-func (c *Client) DeleteCidr(
-	ctx context.Context,
-	network string,
-	cidr string,
-) error {
-	return c.wire.Delete(ctx, "/networks/"+network+"/cidrs/"+cidr, nil)
-}
-
-func (c *Client) ListCidrGroups(
-	ctx context.Context,
-	network string,
-	cidr string,
-) (
-	[]Group,
-	error,
-) {
-	var result []Group
-	path := "/networks/" + network + "/cidrs/" + cidr + "/groups"
-	return result, c.wire.Get(ctx, path, &result)
-}
-
-func (c *Client) AssignCidrGroup(
-	ctx context.Context,
-	network string,
-	cidr string,
-	group string,
-) error {
-	body, err := marshalJSON(CidrGroupRequest{Group: group})
-	if err != nil {
-		return err
+	result := make([]Cidr, len(cidrs))
+	for i, c := range cidrs {
+		result[i] = cidrFromService(*c)
 	}
-	path := "/networks/" + network + "/cidrs/" + cidr + "/groups"
-	return c.wire.Post(ctx, path, body, nil)
-}
-
-func (c *Client) RemoveCidrGroup(
-	ctx context.Context,
-	network string,
-	cidr string,
-	group string,
-) error {
-	path := "/networks/" + network + "/cidrs/" + cidr + "/groups/" + group
-	return c.wire.Delete(ctx, path, nil)
+	return result
 }

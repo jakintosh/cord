@@ -1,51 +1,12 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
-
-type Peer struct {
-	Name      string `json:"name"`
-	PublicKey string `json:"public_key"`
-	Route     string `json:"route"`
-	Admin     bool   `json:"admin"`
-	Enabled   bool   `json:"enabled"`
-}
-
-type UpdatePeerRequest struct {
-	Name    *string `json:"name,omitempty"`
-	Enabled *bool   `json:"enabled,omitempty"`
-}
-
-func peerFromService(
-	p service.Peer,
-) Peer {
-	return Peer{
-		Name:      p.Name,
-		PublicKey: p.PublicKey,
-		Route:     p.Route,
-		Admin:     p.Admin,
-		Enabled:   p.Enabled,
-	}
-}
-
-func peersFromService(
-	peers []*service.Peer,
-) []Peer {
-	if peers == nil {
-		return []Peer{}
-	}
-	result := make([]Peer, len(peers))
-	for i, p := range peers {
-		result[i] = peerFromService(*p)
-	}
-	return result
-}
 
 func (a *API) handleListPeers(
 	w http.ResponseWriter,
@@ -103,43 +64,27 @@ func (a *API) handleDeletePeer(
 	wire.WriteData(w, http.StatusOK, nil)
 }
 
-func (c *Client) ListPeers(
-	ctx context.Context,
-	network string,
-) (
-	[]Peer,
-	error,
-) {
-	var result []Peer
-	return result, c.wire.Get(ctx, "/networks/"+network+"/peers", &result)
+func peerFromService(
+	p service.Peer,
+) Peer {
+	return Peer{
+		Name:      p.Name,
+		PublicKey: p.PublicKey,
+		Route:     p.Route,
+		Admin:     p.Admin,
+		Enabled:   p.Enabled,
+	}
 }
 
-func (c *Client) UpdatePeer(
-	ctx context.Context,
-	network string,
-	peer string,
-	newName *string,
-	enabled *bool,
-) (
-	Peer,
-	error,
-) {
-	req := UpdatePeerRequest{
-		Name:    newName,
-		Enabled: enabled,
+func peersFromService(
+	peers []*service.Peer,
+) []Peer {
+	if peers == nil {
+		return []Peer{}
 	}
-	body, err := marshalJSON(req)
-	if err != nil {
-		return Peer{}, err
+	result := make([]Peer, len(peers))
+	for i, p := range peers {
+		result[i] = peerFromService(*p)
 	}
-	var result Peer
-	return result, c.wire.Patch(ctx, "/networks/"+network+"/peers/"+peer, body, &result)
-}
-
-func (c *Client) DeletePeer(
-	ctx context.Context,
-	network string,
-	peer string,
-) error {
-	return c.wire.Delete(ctx, "/networks/"+network+"/peers/"+peer, nil)
+	return result
 }

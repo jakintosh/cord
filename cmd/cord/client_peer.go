@@ -4,7 +4,7 @@ import (
 	"strconv"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/client/api"
+	api "git.studiopollinator.com/pollinator/cord/pkg/admin/client"
 )
 
 var clientPeerCmd = &args.Command{

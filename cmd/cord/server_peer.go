@@ -5,7 +5,7 @@ import (
 	"strconv"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
+	adminserver "git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
 
 var serverPeerCmd = &args.Command{
@@ -223,7 +223,7 @@ var serverPeerList = &args.Command{
 
 // printServerPeers prints a one-row-per-peer summary table.
 func printServerPeers(
-	peers []admin.Peer,
+	peers []adminserver.Peer,
 ) {
 	rows := make([][]string, len(peers))
 	for idx, p := range peers {

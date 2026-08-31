@@ -1,42 +1,12 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
-
-type CreateGroupRequest struct {
-	Name string `json:"name"`
-}
-
-type Group struct {
-	Name string `json:"name"`
-}
-
-func groupFromService(
-	g service.Group,
-) Group {
-	return Group{
-		Name: g.Name,
-	}
-}
-
-func groupsFromService(
-	groups []*service.Group,
-) []Group {
-	if groups == nil {
-		return []Group{}
-	}
-	result := make([]Group, len(groups))
-	for i, g := range groups {
-		result[i] = groupFromService(*g)
-	}
-	return result
-}
 
 func (a *API) handleListGroups(
 	w http.ResponseWriter,
@@ -94,36 +64,23 @@ func (a *API) handleDeleteGroup(
 	wire.WriteData(w, http.StatusOK, nil)
 }
 
-func (c *Client) ListGroups(
-	ctx context.Context,
-	network string,
-) (
-	[]Group,
-	error,
-) {
-	var result []Group
-	return result, c.wire.Get(ctx, "/networks/"+network+"/groups", &result)
+func groupFromService(
+	g service.Group,
+) Group {
+	return Group{
+		Name: g.Name,
+	}
 }
 
-func (c *Client) CreateGroup(
-	ctx context.Context,
-	network string,
-	name string,
-) error {
-	req := CreateGroupRequest{
-		Name: name,
+func groupsFromService(
+	groups []*service.Group,
+) []Group {
+	if groups == nil {
+		return []Group{}
 	}
-	body, err := marshalJSON(req)
-	if err != nil {
-		return err
+	result := make([]Group, len(groups))
+	for i, g := range groups {
+		result[i] = groupFromService(*g)
 	}
-	return c.wire.Post(ctx, "/networks/"+network+"/groups", body, nil)
-}
-
-func (c *Client) DeleteGroup(
-	ctx context.Context,
-	network string,
-	name string,
-) error {
-	return c.wire.Delete(ctx, "/networks/"+network+"/groups/"+name, nil)
+	return result
 }

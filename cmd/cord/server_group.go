@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
+	adminserver "git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
 
 var serverGroupCmd = &args.Command{
@@ -130,7 +130,7 @@ var serverGroupDelete = &args.Command{
 }
 
 func printGroups(
-	groups []admin.Group,
+	groups []adminserver.Group,
 ) {
 	rows := make([][]string, len(groups))
 	for idx, g := range groups {

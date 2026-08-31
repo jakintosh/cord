@@ -12,7 +12,7 @@ import (
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
 	"git.studiopollinator.com/pollinator/cord/internal/server"
-	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
+	adminserver "git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
 
 var serverCmd = &args.Command{
@@ -64,7 +64,7 @@ var serverDaemonCmd = &args.Command{
 	},
 	Handler: func(i *args.Input) error {
 		socketPath := serverSocket(i)
-		socketModeStr := i.GetParameterOr("socket-mode", "0666")
+		socketModeStr := i.GetParameterOr("socket-mode", "0660") // TODO: eventually this 0660 default should live some where more obvious
 		backend := i.GetParameterOr("backend", "auto")
 		debug := i.GetFlag("debug")
 
@@ -111,9 +111,28 @@ var serverStatusCmd = &args.Command{
 	},
 }
 
+// serverClient resolves the socket path and returns an admin API client
+// for the server daemon.
+func serverClient(
+	i *args.Input,
+) (
+	*adminserver.Client,
+	error,
+) {
+	return adminserver.New(serverSocket(i))
+}
+
+// serverSocket resolves the server daemon socket path from the CLI input,
+// falling back to the server package's default.
+func serverSocket(
+	i *args.Input,
+) string {
+	return i.GetParameterOr("socket-path", adminserver.DefaultSocketPath)
+}
+
 // printServerStatus prints daemon and per-network health.
 func printServerStatus(
-	s admin.Status,
+	s adminserver.Status,
 ) {
 	fmt.Printf(
 		"server daemon ok (version %s), managed networks %s\n",
@@ -143,14 +162,14 @@ func printServerStatus(
 }
 
 func serverStatusDetail(
-	status admin.NetworkStatus,
+	status adminserver.NetworkStatus,
 ) string {
 	if status.Reason != "" {
 		return status.Reason
 	}
 	activities := []struct {
 		name   string
-		status admin.ActivityStatus
+		status adminserver.ActivityStatus
 	}{
 		{name: "reconcile", status: status.Reconcile},
 		{name: "main api", status: status.MainAPI},

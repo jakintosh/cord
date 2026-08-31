@@ -8,8 +8,8 @@ import (
 	"strconv"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	"git.studiopollinator.com/pollinator/cord/internal/client/api"
-	"git.studiopollinator.com/pollinator/cord/internal/protocol"
+	adminclient "git.studiopollinator.com/pollinator/cord/pkg/admin/client"
+	"git.studiopollinator.com/pollinator/cord/pkg/invite"
 )
 
 var clientNetworkCmd = &args.Command{
@@ -106,13 +106,13 @@ var clientNetworkInstall = &args.Command{
 		listenPortStr := i.GetParameter("listen-port")
 
 		var (
-			invite []byte
-			err    error
+			inviteBytes []byte
+			err         error
 		)
 		if invitePath == "-" {
-			invite, err = io.ReadAll(os.Stdin)
+			inviteBytes, err = io.ReadAll(os.Stdin)
 		} else {
-			invite, err = os.ReadFile(invitePath)
+			inviteBytes, err = os.ReadFile(invitePath)
 		}
 		if err != nil {
 			return fmt.Errorf("read invite: %w", err)
@@ -133,7 +133,7 @@ var clientNetworkInstall = &args.Command{
 			}
 		}
 
-		invitation, err := protocol.ParseInvitation(bytes.NewReader(invite))
+		invitation, err := invite.Parse(bytes.NewReader(inviteBytes))
 		if err != nil {
 			return fmt.Errorf("parse invite: %w", err)
 		}
@@ -390,7 +390,7 @@ var clientNetworkSync = &args.Command{
 // printClientNetworkRuntime reports what the daemon is actually doing
 // with a network when that differs from the intent just recorded.
 func printClientNetworkRuntime(
-	status api.NetworkStatus,
+	status adminclient.NetworkStatus,
 ) {
 	if status.Enabled == status.Running {
 		return
@@ -405,7 +405,7 @@ func printClientNetworkRuntime(
 // printClientNetworkDetail prints the key: value detail view for a single
 // network, as shown by `client network show`.
 func printClientNetworkDetail(
-	n api.Network,
+	n adminclient.Network,
 ) {
 	fmt.Printf("name: %s\n", n.Name)
 	fmt.Printf("state: %s\n", n.State)
