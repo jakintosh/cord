@@ -11,6 +11,12 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
+type mutableClock struct {
+	t time.Time
+}
+
+func (m *mutableClock) now() time.Time { return m.t }
+
 func TestCreateRegistration_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
@@ -848,12 +854,6 @@ func TestPruneExpiredRegistrations_RetainsConfirmedRegistrationAsAudit(t *testin
 	}
 }
 
-type mutableClock struct {
-	t time.Time
-}
-
-func (m *mutableClock) now() time.Time { return m.t }
-
 func assertRegistrationGroups(t *testing.T, svc *service.Service, registration string, want []string) {
 	t.Helper()
 	groups, err := svc.ListRegistrationGroups("testnet", registration)
@@ -883,5 +883,81 @@ func assertTransferredCidrGroups(t *testing.T, svc *service.Service, cidr string
 		if group.Name != want[i] {
 			t.Fatalf("CIDR %q group %d = %q, want %q", cidr, i, group.Name, want[i])
 		}
+	}
+}
+
+func TestRedeemRegistration_InvalidatesCompiledModel(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.CreateRegistration("testnet", "carol", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if peerByCidr := topologyPeerByCidr(t, env.Service, "testnet"); peerByCidr["carol"] != "" {
+		t.Fatalf("peer for CIDR before redemption = %q, want none", peerByCidr["carol"])
+	}
+
+	if _, err := env.Service.RedeemRegistration("testnet", lastTempKey(t, env.Service, "testnet"), mustGenKey(t)); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	if peerByCidr := topologyPeerByCidr(t, env.Service, "testnet"); peerByCidr["carol"] != "carol" {
+		t.Fatalf("peer for CIDR after redemption = %q, want carol", peerByCidr["carol"])
+	}
+}
+
+func TestRevokeRegistration_InvalidatesCompiledModel(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.CreateRegistration("testnet", "carol", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if _, err := env.Service.RedeemRegistration("testnet", lastTempKey(t, env.Service, "testnet"), mustGenKey(t)); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	if peerByCidr := topologyPeerByCidr(t, env.Service, "testnet"); peerByCidr["carol"] != "carol" {
+		t.Fatalf("peer for CIDR before revoke = %q, want carol", peerByCidr["carol"])
+	}
+
+	if err := env.Service.RevokeRegistration("testnet", "carol"); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	if peerByCidr := topologyPeerByCidr(t, env.Service, "testnet"); peerByCidr["carol"] != "" {
+		t.Fatalf("peer for CIDR after revoke = %q, want none", peerByCidr["carol"])
+	}
+}
+
+func TestPruneNetwork_InvalidatesCompiledModel(t *testing.T) {
+	clock := &mutableClock{t: testutil.FixedTime}
+	env := testutil.SetupServiceWithClock(t, clock.now)
+	testutil.SeedNetwork(t, env.Service)
+
+	expiresIn := time.Hour
+	if _, err := env.Service.CreateRegistration(
+		"testnet",
+		"expiring",
+		service.RegistrationOptions{
+			PeerIP:    net.ParseIP("10.0.0.5"),
+			ExpiresIn: &expiresIn,
+		},
+	); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if _, err := env.Service.RedeemRegistration("testnet", lastTempKey(t, env.Service, "testnet"), mustGenKey(t)); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	if peerByCidr := topologyPeerByCidr(t, env.Service, "testnet"); peerByCidr["expiring"] != "expiring" {
+		t.Fatalf("peer for CIDR before prune = %q, want expiring", peerByCidr["expiring"])
+	}
+
+	clock.t = clock.t.Add(2 * time.Hour)
+	if err := env.Service.PruneNetwork("testnet"); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+
+	if peerByCidr := topologyPeerByCidr(t, env.Service, "testnet"); peerByCidr["expiring"] != "" {
+		t.Fatalf("peer for CIDR after prune = %q, want none", peerByCidr["expiring"])
 	}
 }

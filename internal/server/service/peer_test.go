@@ -248,6 +248,56 @@ func TestUpdatePeer_RenameValidation(t *testing.T) {
 	}
 }
 
+func TestUpdatePeer_RenameReflectsInCompiledModel(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.CreateRegistration("testnet", "old-name", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.30")}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if _, err := env.Service.RedeemRegistration("testnet", lastTempKey(t, env.Service, "testnet"), mustGenKey(t)); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	peerByCidr := topologyPeerByCidr(t, env.Service, "testnet")
+	if peerByCidr["old-name"] != "old-name" {
+		t.Fatalf("peer for CIDR before rename = %q, want old-name", peerByCidr["old-name"])
+	}
+
+	newName := "new-name"
+	if _, err := env.Service.UpdatePeer("testnet", "old-name", service.PeerDiff{Name: &newName}); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+
+	peerByCidr = topologyPeerByCidr(t, env.Service, "testnet")
+	if peerByCidr["old-name"] != "new-name" {
+		t.Fatalf("peer for CIDR after rename = %q, want new-name", peerByCidr["old-name"])
+	}
+}
+
+func TestRemovePeer_InvalidatesCompiledModel(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.CreateRegistration("testnet", "bob", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.31")}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if _, err := env.Service.RedeemRegistration("testnet", lastTempKey(t, env.Service, "testnet"), mustGenKey(t)); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	if peerByCidr := topologyPeerByCidr(t, env.Service, "testnet"); peerByCidr["bob"] != "bob" {
+		t.Fatalf("peer for CIDR before removal = %q, want bob", peerByCidr["bob"])
+	}
+	if err := env.Service.RemovePeer("testnet", "bob"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	if peerByCidr := topologyPeerByCidr(t, env.Service, "testnet"); peerByCidr["bob"] != "" {
+		t.Fatalf("peer for CIDR after removal = %q, want none", peerByCidr["bob"])
+	}
+}
+
 func TestUpdatePeer_ToggleAdmin(t *testing.T) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)

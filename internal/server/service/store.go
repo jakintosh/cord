@@ -42,11 +42,6 @@ type Store interface {
 	// GetPeer returns a peer by name within the given network.
 	GetPeer(network, name string) (*Peer, error)
 
-	// GetPeerByIP returns the confirmed, enabled peer at the given IP
-	// address within the network. Used for authenticating ordinary
-	// peer API calls (peers, endpoints).
-	GetPeerByIP(network string, ip net.IP) (*Peer, error)
-
 	// GetProvisionalPeerByIP returns the unconfirmed, enabled peer at
 	// the given IP address within the network. Used for authenticating
 	// the /confirm endpoint, which is called by peers that have

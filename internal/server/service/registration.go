@@ -297,6 +297,7 @@ func (s *Service) RedeemRegistration(
 		return nil, fmt.Errorf("redeem registration: %w", mapStoreError(err))
 	}
 
+	s.invalidateModel(networkName)
 	s.requestReconcile(networkName)
 
 	s.log.Info("registration redeemed",
@@ -322,6 +323,7 @@ func (s *Service) RevokeRegistration(
 		return fmt.Errorf("delete registration %q: %w", regName, mapStoreError(err))
 	}
 
+	s.invalidateModel(networkName)
 	s.requestReconcile(networkName)
 
 	s.log.Info(

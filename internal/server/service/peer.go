@@ -153,6 +153,8 @@ func (s *Service) UpdatePeer(
 	if err != nil {
 		return nil, fmt.Errorf("update peer %q: %w", name, mapStoreError(err))
 	}
+
+	s.invalidateModel(network)
 	s.requestReconcile(network)
 
 	return p, nil
@@ -181,6 +183,8 @@ func (s *Service) ConfirmPeer(
 		return fmt.Errorf("confirm peer %q: %w", name, mapStoreError(err))
 	}
 
+	s.invalidateModel(network)
+
 	s.log.Info(
 		"peer confirmed",
 		"network",
@@ -205,6 +209,8 @@ func (s *Service) RemovePeer(
 	); err != nil {
 		return fmt.Errorf("delete peer %q: %w", name, mapStoreError(err))
 	}
+
+	s.invalidateModel(network)
 	s.requestReconcile(network)
 
 	return nil

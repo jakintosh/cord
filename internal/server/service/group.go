@@ -46,6 +46,8 @@ func (s *Service) CreateGroup(
 		return nil, fmt.Errorf("insert group: %w", mapStoreError(err))
 	}
 
+	s.invalidateModel(network)
+
 	return g, nil
 }
 
@@ -57,6 +59,8 @@ func (s *Service) DeleteGroup(
 	if err := s.store.DeleteGroup(network, name); err != nil {
 		return fmt.Errorf("delete group: %w", mapStoreError(err))
 	}
+
+	s.invalidateModel(network)
 
 	return nil
 }

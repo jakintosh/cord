@@ -2,7 +2,6 @@ package database_test
 
 import (
 	"errors"
-	"net"
 	"testing"
 	"time"
 
@@ -102,33 +101,6 @@ func TestGetPeer_WrongNetwork(t *testing.T) {
 	_, err := db.GetPeer("othernet", "alice")
 	if err == nil {
 		t.Fatal("expected error for wrong network")
-	}
-}
-
-func TestGetPeerByIP(t *testing.T) {
-	db := testutil.SetupDB(t)
-	seedNetwork(t, db)
-
-	testutil.SeedPeerDB(t, db, "testnet", "bob", "10.0.5.2/32", "bob-key", false, true, true)
-
-	got, err := db.GetPeerByIP("testnet", net.IPv4(10, 0, 5, 2))
-	if err != nil {
-		t.Fatalf("get peer by IP: %v", err)
-	}
-	if got.Name != "bob" {
-		t.Errorf("name = %q, want bob", got.Name)
-	}
-}
-
-func TestGetPeerByIP_NotConfirmed(t *testing.T) {
-	db := testutil.SetupDB(t)
-	seedNetwork(t, db)
-
-	testutil.SeedPeerDB(t, db, "testnet", "unconfirmed", "10.0.5.3/32", "unc-key", false, true, false)
-
-	_, err := db.GetPeerByIP("testnet", net.IPv4(10, 0, 5, 3))
-	if err == nil {
-		t.Fatal("expected error for unconfirmed peer")
 	}
 }
 

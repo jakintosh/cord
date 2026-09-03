@@ -232,6 +232,8 @@ func (s *Service) CreateNetwork(
 		return nil, fmt.Errorf("bootstrap network: %w", mapStoreError(err))
 	}
 
+	s.invalidateModel(name)
+
 	return network, nil
 }
 
@@ -244,6 +246,8 @@ func (s *Service) DeleteNetwork(
 	if err := s.store.DeleteNetwork(name); err != nil {
 		return fmt.Errorf("delete network %q: %w", name, mapStoreError(err))
 	}
+
+	s.invalidateModel(name)
 
 	return nil
 }
@@ -293,6 +297,8 @@ func (s *Service) PruneNetwork(
 	); err != nil {
 		return fmt.Errorf("prune expired registrations: %w", mapStoreError(err))
 	}
+
+	s.invalidateModel(network)
 
 	if err := s.store.DeleteEndpointsBefore(
 		network,

@@ -507,3 +507,19 @@ func TestDeleteNetwork_CascadesResources(t *testing.T) {
 		t.Errorf("expected 0 peers after cascade, got %d", len(peers))
 	}
 }
+
+func TestDeleteNetwork_InvalidatesCompiledModel(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.GetNetworkTopology("testnet"); err != nil {
+		t.Fatalf("get topology before delete: %v", err)
+	}
+	if err := env.Service.DeleteNetwork("testnet"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	if _, err := env.Service.GetNetworkTopology("testnet"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("topology after delete: err = %v, want ErrNotFound", err)
+	}
+}

@@ -38,36 +38,6 @@ func (db *DB) GetPeer(
 	return scanPeer(row)
 }
 
-func (db *DB) GetPeerByIP(
-	network string,
-	ip net.IP,
-) (
-	*service.Peer,
-	error,
-) {
-	route := netaddr.HostRoute(netaddr.Normalize(ip))
-	row := db.Conn.QueryRow(`
-		SELECT
-			p.name,
-			p.public_key,
-			c.name,
-			c.cidr,
-			p.admin,
-			p.enabled,
-			p.confirmed
-		FROM peer p
-		JOIN cidr c ON c.id = p.cidr_id
-		WHERE p.network_name = ?1
-			AND c.cidr = ?2
-			AND p.confirmed = 1
-			AND p.enabled = 1`,
-		network,
-		route.String(),
-	)
-
-	return scanPeer(row)
-}
-
 func (db *DB) GetProvisionalPeerByIP(
 	network string,
 	ip net.IP,

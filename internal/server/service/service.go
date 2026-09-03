@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sync"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
+	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 )
 
 // defaultEndpointTTL is how long an endpoint sighting is considered current.
@@ -39,6 +41,14 @@ type Service struct {
 	clock func() time.Time
 	log   *slog.Logger
 	wake  chan<- string
+
+	// models caches one compiled network model per network. Published
+	// models are immutable and safe for concurrent readers. Each
+	// network's generation advances on every invalidation so an
+	// in-flight load cannot publish stale state over it.
+	mu          sync.Mutex
+	models      map[string]*networkModel
+	generations map[string]uint64
 }
 
 // New returns a ready-to-use Service.
@@ -63,10 +73,12 @@ func New(
 	}
 
 	return &Service{
-		store: opts.Store,
-		clock: clock,
-		log:   log,
-		wake:  opts.Wake,
+		store:       opts.Store,
+		clock:       clock,
+		log:         log,
+		wake:        opts.Wake,
+		models:      make(map[string]*networkModel),
+		generations: make(map[string]uint64),
 	}, nil
 }
 
@@ -95,10 +107,16 @@ func (s *Service) ResolvePeerIdentity(
 	*Peer,
 	error,
 ) {
-	p, err := s.store.GetPeerByIP(network, ip)
+	model, err := s.getNetworkModel(network)
 	if err != nil {
-		return nil, fmt.Errorf("resolve peer identity: %w", mapStoreError(err))
+		return nil, fmt.Errorf("resolve peer identity: %w", err)
 	}
+
+	p, ok := model.activeByIP[peerIPKey(ip)]
+	if !ok {
+		return nil, fmt.Errorf("resolve peer identity: %w", ErrNotFound)
+	}
+
 	return p, nil
 }
 
@@ -132,4 +150,13 @@ func (s *Service) requestReconcile(
 	case s.wake <- network:
 	default:
 	}
+}
+
+// peerIPKey renders a source IP as the active topology's IP index key:
+// the canonical terminal host route string for the address.
+func peerIPKey(
+	ip net.IP,
+) string {
+	route := netaddr.HostRoute(netaddr.Normalize(ip))
+	return route.String()
 }

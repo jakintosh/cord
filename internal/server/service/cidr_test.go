@@ -344,3 +344,152 @@ func TestCidrGroups_MissingCidr(t *testing.T) {
 		t.Fatalf("remove group from missing CIDR: err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestCreateCidr_InvalidatesCompiledModel(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.GetNetworkTopology("testnet"); err != nil {
+		t.Fatalf("get topology: %v", err)
+	}
+	if err := env.Service.CreateCidr("testnet", "east", "10.0.1.0/24"); err != nil {
+		t.Fatalf("create CIDR: %v", err)
+	}
+
+	view, err := env.Service.GetNetworkTopology("testnet")
+	if err != nil {
+		t.Fatalf("get topology after create: %v", err)
+	}
+	names := make(map[string]bool, len(view.Nodes))
+	for _, node := range view.Nodes {
+		names[node.Cidr.Name] = true
+	}
+	if !names["east"] {
+		t.Fatalf("created CIDR missing from compiled topology: %v", names)
+	}
+}
+
+func TestUpdateCidr_InvalidatesCompiledModel(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+	if err := env.Service.CreateCidr("testnet", "east", "10.0.1.0/24"); err != nil {
+		t.Fatalf("create CIDR: %v", err)
+	}
+
+	if _, err := env.Service.GetNetworkTopology("testnet"); err != nil {
+		t.Fatalf("get topology: %v", err)
+	}
+	if err := env.Service.UpdateCidr("testnet", "east", "west"); err != nil {
+		t.Fatalf("rename CIDR: %v", err)
+	}
+
+	view, err := env.Service.GetNetworkTopology("testnet")
+	if err != nil {
+		t.Fatalf("get topology after rename: %v", err)
+	}
+	names := make(map[string]bool, len(view.Nodes))
+	for _, node := range view.Nodes {
+		names[node.Cidr.Name] = true
+	}
+	if !names["west"] || names["east"] {
+		t.Fatalf("renamed CIDR = %v, want west without east", names)
+	}
+}
+
+func TestDeleteCidr_InvalidatesCompiledModel(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+	if err := env.Service.CreateCidr("testnet", "east", "10.0.1.0/24"); err != nil {
+		t.Fatalf("create CIDR: %v", err)
+	}
+
+	if _, err := env.Service.GetNetworkTopology("testnet"); err != nil {
+		t.Fatalf("get topology: %v", err)
+	}
+	if err := env.Service.DeleteCidr("testnet", "east"); err != nil {
+		t.Fatalf("delete CIDR: %v", err)
+	}
+
+	view, err := env.Service.GetNetworkTopology("testnet")
+	if err != nil {
+		t.Fatalf("get topology after delete: %v", err)
+	}
+	for _, node := range view.Nodes {
+		if node.Cidr.Name == "east" {
+			t.Fatal("deleted CIDR still present in compiled topology")
+		}
+	}
+}
+
+func TestAssignCidrGroup_InvalidatesCompiledModel(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+	if err := env.Service.CreateCidr("testnet", "east", "10.0.1.0/24"); err != nil {
+		t.Fatalf("create CIDR: %v", err)
+	}
+	if _, err := env.Service.CreateGroup("testnet", "riders"); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+
+	if _, err := env.Service.GetNetworkTopology("testnet"); err != nil {
+		t.Fatalf("get topology: %v", err)
+	}
+	if err := env.Service.AssignCidrGroup("testnet", "east", "riders"); err != nil {
+		t.Fatalf("assign group: %v", err)
+	}
+
+	view, err := env.Service.GetNetworkTopology("testnet")
+	if err != nil {
+		t.Fatalf("get topology after assign: %v", err)
+	}
+	found := false
+	for _, node := range view.Nodes {
+		if node.Cidr.Name != "east" {
+			continue
+		}
+		for _, group := range node.Groups {
+			if group == "riders" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("assigned group missing from compiled topology")
+	}
+}
+
+func TestRemoveCidrGroup_InvalidatesCompiledModel(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+	if err := env.Service.CreateCidr("testnet", "east", "10.0.1.0/24"); err != nil {
+		t.Fatalf("create CIDR: %v", err)
+	}
+	if _, err := env.Service.CreateGroup("testnet", "riders"); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if err := env.Service.AssignCidrGroup("testnet", "east", "riders"); err != nil {
+		t.Fatalf("assign group: %v", err)
+	}
+
+	if _, err := env.Service.GetNetworkTopology("testnet"); err != nil {
+		t.Fatalf("get topology: %v", err)
+	}
+	if err := env.Service.RemoveCidrGroup("testnet", "east", "riders"); err != nil {
+		t.Fatalf("remove group: %v", err)
+	}
+
+	view, err := env.Service.GetNetworkTopology("testnet")
+	if err != nil {
+		t.Fatalf("get topology after remove: %v", err)
+	}
+	for _, node := range view.Nodes {
+		if node.Cidr.Name != "east" {
+			continue
+		}
+		for _, group := range node.Groups {
+			if group == "riders" {
+				t.Fatal("removed group still present in compiled topology")
+			}
+		}
+	}
+}

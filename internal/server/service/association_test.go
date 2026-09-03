@@ -120,3 +120,99 @@ func TestRemoveAssociation_NotFound(t *testing.T) {
 		t.Fatalf("remove nonexistent: %v", err)
 	}
 }
+
+func TestCreateAssociation_InvalidatesCompiledModel(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+	if _, err := env.Service.CreateGroup("testnet", "group-a"); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if _, err := env.Service.CreateGroup("testnet", "group-b"); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+
+	if _, err := env.Service.GetNetworkTopology("testnet"); err != nil {
+		t.Fatalf("get topology: %v", err)
+	}
+	if err := env.Service.CreateAssociation("testnet", "group-a", "group-b"); err != nil {
+		t.Fatalf("create association: %v", err)
+	}
+
+	view, err := env.Service.GetNetworkTopology("testnet")
+	if err != nil {
+		t.Fatalf("get topology after create: %v", err)
+	}
+	for _, association := range view.Associations {
+		if association.Group1 == "group-a" && association.Group2 == "group-b" {
+			return
+		}
+	}
+	t.Fatal("created association missing from compiled topology")
+}
+
+func TestDeleteAssociation_InvalidatesCompiledModel(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+	if _, err := env.Service.CreateGroup("testnet", "group-a"); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if _, err := env.Service.CreateGroup("testnet", "group-b"); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if err := env.Service.CreateAssociation("testnet", "group-a", "group-b"); err != nil {
+		t.Fatalf("create association: %v", err)
+	}
+
+	if _, err := env.Service.GetNetworkTopology("testnet"); err != nil {
+		t.Fatalf("get topology: %v", err)
+	}
+	if err := env.Service.DeleteAssociation("testnet", "group-a", "group-b"); err != nil {
+		t.Fatalf("delete association: %v", err)
+	}
+
+	view, err := env.Service.GetNetworkTopology("testnet")
+	if err != nil {
+		t.Fatalf("get topology after delete: %v", err)
+	}
+	for _, association := range view.Associations {
+		if association.Group1 == "group-a" && association.Group2 == "group-b" {
+			t.Fatal("deleted association still present in compiled topology")
+		}
+	}
+}
+
+func TestDeleteGroup_InvalidatesCompiledModel(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+	if err := env.Service.CreateCidr("testnet", "east", "10.0.1.0/24"); err != nil {
+		t.Fatalf("create CIDR: %v", err)
+	}
+	if _, err := env.Service.CreateGroup("testnet", "riders"); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if err := env.Service.AssignCidrGroup("testnet", "east", "riders"); err != nil {
+		t.Fatalf("assign group: %v", err)
+	}
+
+	if _, err := env.Service.GetNetworkTopology("testnet"); err != nil {
+		t.Fatalf("get topology: %v", err)
+	}
+	if err := env.Service.DeleteGroup("testnet", "riders"); err != nil {
+		t.Fatalf("delete group: %v", err)
+	}
+
+	view, err := env.Service.GetNetworkTopology("testnet")
+	if err != nil {
+		t.Fatalf("get topology after delete: %v", err)
+	}
+	for _, node := range view.Nodes {
+		if node.Cidr.Name != "east" {
+			continue
+		}
+		for _, group := range node.Groups {
+			if group == "riders" {
+				t.Fatal("deleted group still present in compiled topology")
+			}
+		}
+	}
+}

@@ -1,9 +1,14 @@
 package service_test
 
 import (
+	"net"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 	"git.studiopollinator.com/pollinator/cord/internal/topology"
@@ -167,5 +172,93 @@ func TestGetNetworkTopology_NotFound(
 	env := testutil.SetupService(t)
 	if _, err := env.Service.GetNetworkTopology("missing"); err == nil {
 		t.Fatal("expected missing network error")
+	}
+}
+
+// blockingStore wraps a real store and holds the first
+// LoadTopologyState caller until released, so a test can mutate the
+// network while a model load is in flight. Later loads pass through.
+type blockingStore struct {
+	service.Store
+
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingStore) LoadTopologyState(
+	network string,
+) (
+	*service.TopologyState,
+	error,
+) {
+	s.once.Do(func() {
+		s.entered <- struct{}{}
+		<-s.release
+	})
+	return s.Store.LoadTopologyState(network)
+}
+
+func TestNetworkModel_PreventsStalePublicationDuringInvalidation(t *testing.T) {
+	db := testutil.SetupDB(t)
+	setup, err := service.New(service.Options{
+		Store:  db,
+		Clock:  func() time.Time { return testutil.FixedTime },
+		Logger: logging.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("new setup service: %v", err)
+	}
+	testutil.SeedNetwork(t, setup)
+
+	ip := net.ParseIP("10.0.0.5")
+	if _, err := setup.CreateRegistration("testnet", "alice", service.RegistrationOptions{PeerIP: ip}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if _, err := setup.RedeemRegistration("testnet", lastTempKey(t, setup, "testnet"), mustGenKey(t)); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	if err := setup.ConfirmPeer("testnet", "alice"); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+
+	blocked := &blockingStore{
+		Store:   db,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc, err := service.New(service.Options{
+		Store:  blocked,
+		Clock:  func() time.Time { return testutil.FixedTime },
+		Logger: logging.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("new service under test: %v", err)
+	}
+
+	type snapshotResult struct {
+		err error
+	}
+	results := make(chan snapshotResult, 1)
+	go func() {
+		_, err := svc.GetVisibleNetworkSnapshot("testnet", "alice")
+		results <- snapshotResult{err: err}
+	}()
+	<-blocked.entered
+
+	// Invalidate the model while the load is in flight. A stale
+	// publication would let the disabled peer keep her subject view.
+	disabled := false
+	if _, err := svc.UpdatePeer("testnet", "alice", service.PeerDiff{Enabled: &disabled}); err != nil {
+		t.Fatalf("disable peer mid-load: %v", err)
+	}
+	blocked.release <- struct{}{}
+
+	res := <-results
+	if res.err == nil {
+		t.Fatal("stale model was published; disabled peer kept her subject view")
+	}
+	if !strings.Contains(res.err.Error(), "not found") {
+		t.Fatalf("snapshot error = %v, want the subject to be missing from the fresh model", res.err)
 	}
 }
