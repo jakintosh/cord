@@ -3,6 +3,7 @@ package service_test
 import (
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,6 +87,79 @@ func TestCreateRegistration_EmptyName(t *testing.T) {
 	_, err := env.Service.CreateRegistration("testnet", "", service.RegistrationOptions{PeerIP: ip})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestCreateRegistration_NameValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		wantErr string
+	}{
+		{"carol", ""},
+		{"a", ""},
+		{"peer-1", ""},
+		{strings.Repeat("a", 63), ""},
+		{"", "peer name is empty"},
+		{"cord-server", "reserved"},
+		{"Carol", "only lowercase"},
+		{"peer.name", "only lowercase"},
+		{"peer_name", "only lowercase"},
+		{"-peer", "start with a hyphen"},
+		{"peer-", "end with a hyphen"},
+		{strings.Repeat("a", 64), "DNS label"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testutil.SetupService(t)
+			testutil.SeedNetwork(t, env.Service)
+
+			_, err := env.Service.CreateRegistration(
+				"testnet",
+				tc.name,
+				service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")},
+			)
+			if tc.wantErr != "" {
+				wantInvalidInput(t, err, tc.wantErr)
+				regs, err := env.Service.ListRegistrations("testnet")
+				if err != nil {
+					t.Fatalf("list registrations: %v", err)
+				}
+				if len(regs) != 0 {
+					t.Fatalf("registration %q should not persist after rejection", tc.name)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("create registration %q: %v", tc.name, err)
+			}
+			regs, err := env.Service.ListRegistrations("testnet")
+			if err != nil {
+				t.Fatalf("list registrations: %v", err)
+			}
+			if len(regs) != 1 || regs[0].Name != tc.name {
+				t.Fatalf("registrations = %+v, want exactly %q", regs, tc.name)
+			}
+		})
+	}
+}
+
+// TestCreateRegistration_ReservedPeerNameIsExact pins that the
+// cord-server reservation is an exact match: DNS query names are
+// matched case-insensitively, but stored names are always lowercase,
+// so a case variation can only ever fail the label rules.
+func TestCreateRegistration_ReservedPeerNameIsExact(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	_, err := env.Service.CreateRegistration(
+		"testnet",
+		"Cord-Server",
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")},
+	)
+	wantInvalidInput(t, err, "only lowercase")
+	if strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("case variation must not trigger the reservation: %v", err)
 	}
 }
 

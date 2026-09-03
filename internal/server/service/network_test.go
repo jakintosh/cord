@@ -3,6 +3,7 @@ package service_test
 import (
 	"errors"
 	"net"
+	"strings"
 	"testing"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
@@ -126,6 +127,55 @@ func TestCreateNetwork_EmptyName(t *testing.T) {
 	)
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestCreateNetwork_NameValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		wantErr string
+	}{
+		{"mynet", ""},
+		{"a", ""},
+		{"0net", ""},
+		{"my-net-2", ""},
+		{"", "invalid network name"},
+		{"Mynet", "only lowercase"},
+		{"my.net", "only lowercase"},
+		{"my_net", "only lowercase"},
+		{"my net", "only lowercase"},
+		{"naïve", "only lowercase"},
+		{"-net", "start with a hyphen"},
+		{"net-", "end with a hyphen"},
+		{"sixteencharname1", "device name"},
+		{strings.Repeat("a", 63), "device name"},
+		{strings.Repeat("a", 64), "DNS label"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testutil.SetupService(t)
+
+			network, err := env.Service.CreateNetwork(
+				tc.name,
+				"1.2.3.4",
+				service.Plane{Cidr: "10.0.0.0/16"},
+				service.Plane{Cidr: "10.1.0.0/24"},
+			)
+			if tc.wantErr != "" {
+				wantInvalidInput(t, err, tc.wantErr)
+				if _, err := env.Service.GetNetwork(tc.name); !errors.Is(err, service.ErrNotFound) {
+					t.Fatalf("network %q should not persist after rejection: %v", tc.name, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("create network %q: %v", tc.name, err)
+			}
+			if network.Name != tc.name {
+				t.Errorf("name = %q, want %q", network.Name, tc.name)
+			}
+		})
 	}
 }
 

@@ -175,8 +175,8 @@ func (s *Service) CreateRegistration(
 		return nil, fmt.Errorf("%w: network name required", ErrInvalidInput)
 	}
 
-	if regName == "" {
-		return nil, fmt.Errorf("%w: registration name required", ErrInvalidInput)
+	if err := validatePeerName(regName); err != nil {
+		return nil, err
 	}
 
 	if opts.PeerIP == nil {

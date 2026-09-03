@@ -8,6 +8,10 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
+// reservedPeerName is the built-in server peer's name. Ordinary peers
+// cannot take it.
+const reservedPeerName = "cord-server"
+
 // Peer is the canonical server-side record of a network participant.
 // It includes the identity, assigned address, and management flags.
 type Peer struct {
@@ -139,6 +143,12 @@ func (s *Service) UpdatePeer(
 		return nil, ErrInvalidInput
 	}
 
+	if diff.Name != nil {
+		if err := validatePeerName(*diff.Name); err != nil {
+			return nil, err
+		}
+	}
+
 	p, err := s.store.UpdatePeer(network, name, diff)
 	if err != nil {
 		return nil, fmt.Errorf("update peer %q: %w", name, mapStoreError(err))
@@ -254,6 +264,26 @@ func (s *Service) ObserveEndpoints(
 	}
 
 	return s.ReportEndpoints(network, observed)
+}
+
+// validatePeerName checks that a peer name is a valid DNS label and
+// does not collide with the reserved server peer name.
+func validatePeerName(
+	name string,
+) error {
+	if name == "" {
+		return fmt.Errorf("%w: peer name is empty", ErrInvalidInput)
+	}
+
+	if name == reservedPeerName {
+		return fmt.Errorf("%w: peer name %q is reserved", ErrInvalidInput, name)
+	}
+
+	if err := validateDNSName(name); err != nil {
+		return fmt.Errorf("%w: invalid peer name: %v", ErrInvalidInput, err)
+	}
+
+	return nil
 }
 
 func peersToWireGuardPeers(

@@ -3,6 +3,7 @@ package service_test
 import (
 	"errors"
 	"net"
+	"strings"
 	"testing"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
@@ -61,6 +62,23 @@ func TestResolvePeerIdentity_TransitionsOnConfirmation(t *testing.T) {
 	}
 	if _, err := env.Service.ResolveProvisionalIdentity("testnet", ip); !errors.Is(err, service.ErrNotFound) {
 		t.Fatalf("resolve provisional identity after confirmation: err = %v, want ErrNotFound", err)
+	}
+}
+
+// wantInvalidInput asserts that err rejects the operation as invalid
+// input and that the rejection names the rule the caller expects.
+func wantInvalidInput(
+	t *testing.T,
+	err error,
+	fragment string,
+) {
+	t.Helper()
+
+	if !errors.Is(err, service.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+	if !strings.Contains(err.Error(), fragment) {
+		t.Fatalf("err = %q, want it to contain %q", err, fragment)
 	}
 }
 

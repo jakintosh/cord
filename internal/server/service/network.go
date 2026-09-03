@@ -162,6 +162,10 @@ func (s *Service) CreateNetwork(
 	*Network,
 	error,
 ) {
+	if err := validateNetworkName(name); err != nil {
+		return nil, err
+	}
+
 	privKey, err := wireguard.GenerateKey()
 	if err != nil {
 		return nil, fmt.Errorf("generate key: %w", err)
@@ -295,6 +299,23 @@ func (s *Service) PruneNetwork(
 		now.Add(-defaultEndpointTTL),
 	); err != nil {
 		return fmt.Errorf("prune endpoints: %w", mapStoreError(err))
+	}
+
+	return nil
+}
+
+// validateNetworkName checks that a network name is a valid DNS label
+// that also satisfies the WireGuard interface-name limit, because the
+// name doubles as the main plane's interface name.
+func validateNetworkName(
+	name string,
+) error {
+	if err := validateDNSName(name); err != nil {
+		return fmt.Errorf("%w: invalid network name: %v", ErrInvalidInput, err)
+	}
+
+	if err := wireguard.ValidateDeviceName(name); err != nil {
+		return fmt.Errorf("%w: invalid network name: %v", ErrInvalidInput, err)
 	}
 
 	return nil

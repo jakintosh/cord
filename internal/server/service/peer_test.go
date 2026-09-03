@@ -3,6 +3,7 @@ package service_test
 import (
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -203,6 +204,47 @@ func TestUpdatePeer_Rename(t *testing.T) {
 	}
 	if peer.Name != "new-name" {
 		t.Errorf("name = %q, want new-name", peer.Name)
+	}
+}
+
+func TestUpdatePeer_RenameValidation(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.CreateRegistration("testnet", "renamable", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	if _, err := env.Service.RedeemRegistration("testnet", tempKey, "rename-key"); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	invalid := []struct {
+		name    string
+		wantErr string
+	}{
+		{"", "peer name is empty"},
+		{"cord-server", "reserved"},
+		{"Bad-Name", "only lowercase"},
+		{"peer.name", "only lowercase"},
+		{"-peer", "start with a hyphen"},
+		{"peer-", "end with a hyphen"},
+		{strings.Repeat("a", 64), "DNS label"},
+	}
+	for _, tc := range invalid {
+		if _, err := env.Service.UpdatePeer("testnet", "renamable", service.PeerDiff{Name: &tc.name}); err != nil {
+			wantInvalidInput(t, err, tc.wantErr)
+		} else {
+			t.Errorf("rename to %q: err = nil, want ErrInvalidInput", tc.name)
+		}
+	}
+
+	peer, err := env.Service.GetPeer("testnet", "renamable")
+	if err != nil {
+		t.Fatalf("get peer after rejected renames: %v", err)
+	}
+	if peer.Name != "renamable" {
+		t.Errorf("peer name = %q, want renamable", peer.Name)
 	}
 }
 
