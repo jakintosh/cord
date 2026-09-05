@@ -63,15 +63,20 @@ func (p *Plane) start(
 	// start API server if handler is provided
 	if handler != nil {
 		apiEndpoint := netaddr.Endpoint(ifaceRoute.IP, p.config.ApiPort)
+		ln, err := net.Listen("tcp", apiEndpoint)
+		if err != nil {
+			// A failed start leaves the plane holding nothing: the
+			// device is closed and forgotten, so the plane reads as
+			// never started and a later stop or retry is a no-op.
+			_ = p.device.Close()
+			p.device = nil
+			return fmt.Errorf("listen %q on %s: %w", p.config.Name, apiEndpoint, err)
+		}
+
 		p.server = &http.Server{
 			Addr:        apiEndpoint,
 			Handler:     handler,
 			BaseContext: func(net.Listener) context.Context { return ctx },
-		}
-		ln, err := net.Listen("tcp", apiEndpoint)
-		if err != nil {
-			_ = p.device.Close()
-			return fmt.Errorf("listen %q on %s: %w", p.config.Name, apiEndpoint, err)
 		}
 		p.log.Debug("api listening", "addr", apiEndpoint)
 		p.serve(ln, apiEndpoint)
@@ -129,6 +134,9 @@ func (p *Plane) stop() error {
 				))
 			}
 		}
+
+		// Forget the server either way, so a later stop is a no-op.
+		p.server = nil
 	}
 
 	if p.device != nil {

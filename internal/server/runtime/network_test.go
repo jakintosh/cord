@@ -2,14 +2,18 @@ package runtime_test
 
 import (
 	"net"
+	"strings"
 	"testing"
 	"time"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
+	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
 
 func TestConverge_AppliesNewRegistrationToInviteDevice(t *testing.T) {
@@ -200,6 +204,93 @@ func TestConverge_ObservesOnlyActiveMainPeerEndpoints(t *testing.T) {
 	}
 }
 
+func TestNetwork_DNS_StartsNetworkHealthy(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	port := freeDNSPort(t)
+	rt := newDNSRuntime(t, env, port)
+	createLoopbackNetwork(t, env, "dnstest")
+
+	if err := env.Service.SetNetworkEnabled("dnstest", true); err != nil {
+		t.Fatalf("enable network: %v", err)
+	}
+	if err := rt.Converge("dnstest"); err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+
+	status := networkStatus(t, rt, "dnstest")
+	if !status.Running {
+		t.Fatalf("status = %+v, want running", status)
+	}
+	if status.Health != runtime.HealthHealthy {
+		t.Fatalf("health = %q, want healthy", status.Health)
+	}
+	if status.Reason != "" {
+		t.Fatalf("reason = %q, want empty", status.Reason)
+	}
+	if status.DNS.Error != "" {
+		t.Fatalf("dns status error = %q, want empty", status.DNS.Error)
+	}
+	if !status.DNS.LastAttemptAt.Equal(testutil.FixedTime) {
+		t.Fatalf("dns last attempt = %v, want %v", status.DNS.LastAttemptAt, testutil.FixedTime)
+	}
+	if !status.DNS.LastSuccessAt.Equal(testutil.FixedTime) {
+		t.Fatalf("dns last success = %v, want %v", status.DNS.LastSuccessAt, testutil.FixedTime)
+	}
+}
+
+func TestNetwork_DNS_StartFailureRecordsReasonAndRecovers(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+
+	// The test itself holds the DNS port, so the network's DNS bind
+	// fails and the start rolls back.
+	blocker, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("hold dns port: %v", err)
+	}
+	port := uint16(blocker.Addr().(*net.TCPAddr).Port)
+
+	rt := newDNSRuntime(t, env, port)
+	createLoopbackNetwork(t, env, "dnstest")
+
+	if err := env.Service.SetNetworkEnabled("dnstest", true); err != nil {
+		t.Fatalf("enable network: %v", err)
+	}
+	if err := rt.Converge("dnstest"); err == nil {
+		t.Fatal("converge should fail while the dns port is held")
+	}
+
+	status := networkStatus(t, rt, "dnstest")
+	if status.Running {
+		t.Fatalf("status = %+v, want the failed start to roll back", status)
+	}
+	if !strings.Contains(status.Reason, "dns:") {
+		t.Fatalf("reason = %q, want a dns: failure", status.Reason)
+	}
+	if status.Health != runtime.HealthDegraded {
+		t.Fatalf("health = %q, want degraded", status.Health)
+	}
+
+	// Releasing the port makes the next convergence start the network.
+	if err := blocker.Close(); err != nil {
+		t.Fatalf("release dns port: %v", err)
+	}
+	if err := rt.Converge("dnstest"); err != nil {
+		t.Fatalf("converge after release: %v", err)
+	}
+
+	status = networkStatus(t, rt, "dnstest")
+	if !status.Running || status.Health != runtime.HealthHealthy {
+		t.Fatalf("status = %+v, want running and healthy", status)
+	}
+	if status.DNS.Error != "" {
+		t.Fatalf("dns status error = %q, want empty", status.DNS.Error)
+	}
+}
+
 func mustGenKey(t *testing.T) string {
 	t.Helper()
 	k, err := wireguard.GenerateKey()
@@ -239,4 +330,70 @@ func hasPeerOp(
 		}
 	}
 	return false
+}
+
+// freeDNSPort reserves an ephemeral TCP port and releases it, so a test
+// can hand a specific bindable port to the DNS runtime.
+func freeDNSPort(
+	t *testing.T,
+) uint16 {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if err := ln.Close(); err != nil {
+		t.Fatalf("release reserved port: %v", err)
+	}
+
+	return uint16(port)
+}
+
+// newDNSRuntime builds a runtime with DNS serving enabled on the given
+// port, over a loopback network the test creates itself.
+func newDNSRuntime(
+	t *testing.T,
+	env *testutil.ServiceEnv,
+	port uint16,
+) *runtime.Runtime {
+	t.Helper()
+
+	rt, err := runtime.New(runtime.Options{
+		Service:   env.Service,
+		WireGuard: wireguard.NewManagerWithBackend(wireguardtest.NewMockBackend()),
+		Wake:      env.Wake,
+		Clock:     func() time.Time { return testutil.FixedTime },
+		Logger:    logging.Discard(),
+		DNSPort:   port,
+	})
+	if err != nil {
+		t.Fatalf("new runtime: %v", err)
+	}
+	t.Cleanup(rt.Stop)
+
+	return rt
+}
+
+// createLoopbackNetwork persists a network whose server address is
+// 127.0.0.1, the one address the test host can always bind.
+func createLoopbackNetwork(
+	t *testing.T,
+	env *testutil.ServiceEnv,
+	name string,
+) *service.Network {
+	t.Helper()
+
+	network, err := env.Service.CreateNetwork(
+		name,
+		"192.168.1.1",
+		service.Plane{Cidr: "127.0.0.0/24", WireguardPort: 51830, ApiPort: 8080},
+		service.Plane{Cidr: "172.16.10.0/24", WireguardPort: 51831, ApiPort: 8080},
+	)
+	if err != nil {
+		t.Fatalf("create network %s: %v", name, err)
+	}
+
+	return network
 }

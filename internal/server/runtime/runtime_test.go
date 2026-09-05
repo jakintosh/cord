@@ -344,12 +344,13 @@ func newRuntime(
 	t.Helper()
 
 	rt, err := runtime.New(runtime.Options{
-		Service:   env.Service,
-		WireGuard: wireguard.NewManagerWithBackend(backend),
-		Wake:      env.Wake,
-		Interval:  interval,
-		Clock:     func() time.Time { return testutil.FixedTime },
-		Logger:    logging.Discard(),
+		Service:     env.Service,
+		WireGuard:   wireguard.NewManagerWithBackend(backend),
+		Wake:        env.Wake,
+		Interval:    interval,
+		Clock:       func() time.Time { return testutil.FixedTime },
+		Logger:      logging.Discard(),
+		DNSDisabled: true,
 	})
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)

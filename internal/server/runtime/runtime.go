@@ -47,6 +47,14 @@ type Options struct {
 	// Invite serves each running network's invite plane.
 	Invite *inviteapi.API
 
+	// DNSPort is the port each network's authoritative DNS server
+	// binds alongside its main plane. Zero means the default port 53.
+	DNSPort uint16
+
+	// DNSDisabled turns DNS serving off for every network. Zero value
+	// keeps DNS on, which is production behavior.
+	DNSDisabled bool
+
 	// Wake carries the names of networks whose state changed, so the
 	// runtime can converge them without waiting for the next tick.
 	Wake <-chan string
@@ -65,14 +73,16 @@ type Options struct {
 // Runtime reconciles the running networks toward the persisted desired
 // state. It is safe for concurrent use.
 type Runtime struct {
-	service   *service.Service
-	wireguard *wireguard.Manager
-	peer      *peerapi.API
-	invite    *inviteapi.API
-	wake      <-chan string
-	interval  time.Duration
-	clock     func() time.Time
-	log       *slog.Logger
+	service     *service.Service
+	wireguard   *wireguard.Manager
+	peer        *peerapi.API
+	invite      *inviteapi.API
+	dnsPort     uint16
+	dnsDisabled bool
+	wake        <-chan string
+	interval    time.Duration
+	clock       func() time.Time
+	log         *slog.Logger
 
 	mu      sync.Mutex
 	running map[string]*Network
@@ -100,6 +110,7 @@ type NetworkStatus struct {
 	Reconcile ActivityStatus
 	MainAPI   ActivityStatus
 	InviteAPI ActivityStatus
+	DNS       ActivityStatus
 }
 
 // PeerStatus is a server network peer joined with live WireGuard state.
@@ -171,16 +182,18 @@ func New(
 	}
 
 	return &Runtime{
-		service:   opts.Service,
-		wireguard: opts.WireGuard,
-		peer:      opts.Peer,
-		invite:    opts.Invite,
-		wake:      opts.Wake,
-		interval:  interval,
-		clock:     clock,
-		log:       log,
-		running:   make(map[string]*Network),
-		reasons:   make(map[string]string),
+		service:     opts.Service,
+		wireguard:   opts.WireGuard,
+		peer:        opts.Peer,
+		invite:      opts.Invite,
+		dnsPort:     opts.DNSPort,
+		dnsDisabled: opts.DNSDisabled,
+		wake:        opts.Wake,
+		interval:    interval,
+		clock:       clock,
+		log:         log,
+		running:     make(map[string]*Network),
+		reasons:     make(map[string]string),
 	}, nil
 }
 
@@ -496,6 +509,8 @@ func (r *Runtime) startNetwork(
 		service:         r.service,
 		clock:           r.clock,
 		log:             r.log.With("network", record.Name),
+		dnsPort:         r.dnsPort,
+		dnsDisabled:     r.dnsDisabled,
 		reconcileStatus: ActivityStatus{Interval: reconcileCap},
 	}
 
@@ -577,7 +592,7 @@ func (r *Runtime) parseStatusOf(
 		Reconcile: ActivityStatus{Interval: reconcileCap},
 	}
 	if isRunning {
-		status.Reconcile, status.MainAPI, status.InviteAPI = running.getActivityStatuses()
+		status.Reconcile, status.MainAPI, status.InviteAPI, status.DNS = running.getActivityStatuses()
 	}
 	status.Health = networkHealth(status)
 	return status
@@ -596,6 +611,7 @@ func networkHealth(
 		status.Reconcile,
 		status.MainAPI,
 		status.InviteAPI,
+		status.DNS,
 	}
 	for _, activity := range activities {
 		if activity.Error != "" {

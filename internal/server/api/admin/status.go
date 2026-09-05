@@ -43,6 +43,7 @@ func networkStatusFromRuntime(
 		Reconcile: activityStatusFromRuntime(status.Reconcile),
 		MainAPI:   activityStatusFromRuntime(status.MainAPI),
 		InviteAPI: activityStatusFromRuntime(status.InviteAPI),
+		DNS:       activityStatusFromRuntime(status.DNS),
 	}
 }
 

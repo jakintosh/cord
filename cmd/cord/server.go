@@ -174,6 +174,7 @@ func serverStatusDetail(
 		{name: "reconcile", status: status.Reconcile},
 		{name: "main api", status: status.MainAPI},
 		{name: "invite api", status: status.InviteAPI},
+		{name: "dns", status: status.DNS},
 	}
 	var details []string
 	for _, activity := range activities {

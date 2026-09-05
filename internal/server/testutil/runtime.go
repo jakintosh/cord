@@ -45,11 +45,12 @@ func SetupRuntimeWithClock(
 	mgr := wireguard.NewManagerWithBackend(backend)
 
 	rt, err := runtime.New(runtime.Options{
-		Service:   env.Service,
-		WireGuard: mgr,
-		Wake:      env.Wake,
-		Clock:     clock,
-		Logger:    logging.Discard(),
+		Service:     env.Service,
+		WireGuard:   mgr,
+		Wake:        env.Wake,
+		Clock:       clock,
+		Logger:      logging.Discard(),
+		DNSDisabled: true,
 	})
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)

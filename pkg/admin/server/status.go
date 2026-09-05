@@ -20,6 +20,7 @@ type NetworkStatus struct {
 	Reconcile ActivityStatus `json:"reconcile"`
 	MainAPI   ActivityStatus `json:"main_api"`
 	InviteAPI ActivityStatus `json:"invite_api"`
+	DNS       ActivityStatus `json:"dns"`
 }
 
 // ActivityStatus describes one periodic daemon activity.
