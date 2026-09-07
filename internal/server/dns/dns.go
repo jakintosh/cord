@@ -8,6 +8,7 @@ package dns
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -17,10 +18,9 @@ import (
 	"syscall"
 	"time"
 
-	"codeberg.org/miekg/dns"
-	"codeberg.org/miekg/dns/dnsutil"
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"github.com/miekg/dns"
 )
 
 // Options configures one authoritative DNS server.
@@ -114,8 +114,8 @@ func New(
 		return nil, fmt.Errorf("dns: invalid address %q: %v", opts.Address, err)
 	}
 
-	zone := strings.ToLower(dnsutil.Fqdn(opts.Zone))
-	if !dnsutil.IsName(zone) {
+	zone := strings.ToLower(dns.Fqdn(opts.Zone))
+	if _, ok := dns.IsDomainName(zone); !ok {
 		return nil, fmt.Errorf("dns: invalid zone %q", opts.Zone)
 	}
 
@@ -158,14 +158,14 @@ func (s *Server) Start(
 	}
 
 	if err := ctx.Err(); err != nil {
-		udp.Shutdown(context.Background())
+		_ = udp.Shutdown()
 		s.endStart(nil, nil, err)
 		return err
 	}
 
 	tcp, err := s.startTCP(handler, address)
 	if err != nil {
-		udp.Shutdown(context.Background())
+		_ = udp.Shutdown()
 		s.endStart(nil, nil, err)
 		return err
 	}
@@ -176,11 +176,9 @@ func (s *Server) Start(
 }
 
 // Stop shuts down both servers and releases the sockets, bounded by
-// ctx. Each library Shutdown joins its own serving loop, so no
-// separate wait is needed. If ctx expires first, the sockets are
-// force-closed and ctx's error is returned; the loops finish
-// shutting down in the background. Stop is safe to call twice and
-// before Start.
+// ctx. ShutdownContext stops accepting new requests before waiting for
+// active requests, and returns ctx's error if those requests do not
+// finish in time. Stop is safe to call twice and before Start.
 func (s *Server) Stop(
 	ctx context.Context,
 ) error {
@@ -191,37 +189,27 @@ func (s *Server) Stop(
 	}
 	s.serving = false
 	udp, tcp := s.udp, s.tcp
-	udpConn, tcpLn := s.sockets()
 	s.mu.Unlock()
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		// Shutdown blocks until its serving loop has exited, so
-		// both loops are joined once it returns.
-		if udp != nil {
-			udp.Shutdown(ctx)
+	var errs []error
+	if udp != nil {
+		if err := udp.ShutdownContext(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("udp: %w", err))
 		}
-		if tcp != nil {
-			tcp.Shutdown(ctx)
+	}
+	if tcp != nil {
+		if err := tcp.ShutdownContext(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("tcp: %w", err))
 		}
-	}()
-
-	select {
-	case <-done:
-	case <-ctx.Done():
-		if udpConn != nil {
-			_ = udpConn.Close()
-		}
-		if tcpLn != nil {
-			_ = tcpLn.Close()
-		}
-		return fmt.Errorf("dns: stop %s: %w", s.address, ctx.Err())
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.udp, s.tcp = nil, nil
+	s.mu.Unlock()
+
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("dns: stop %s: %w", s.address, err)
+	}
 
 	return nil
 }
@@ -328,7 +316,7 @@ func (s *Server) startUDP(
 	}
 
 	live := make(chan struct{})
-	srv.NotifyStartedFunc = func(context.Context) {
+	srv.NotifyStartedFunc = func() {
 		close(live)
 	}
 
@@ -353,7 +341,7 @@ func (s *Server) startUDP(
 // actually bound, so both protocols answer on one port, and launches
 // its serving loop. Binding here, not through the library, makes a
 // port conflict a plain synchronous error. The listener is already
-// bound when the loop starts, so ListenAndServe cannot fail before
+// bound when the loop starts, so ActivateAndServe cannot fail before
 // notifying; the liveness wait only ensures the loop's internal
 // state is initialized before Start reports success and Stop could
 // race it.
@@ -376,12 +364,12 @@ func (s *Server) startTCP(
 	}
 
 	live := make(chan struct{})
-	srv.NotifyStartedFunc = func(context.Context) {
+	srv.NotifyStartedFunc = func() {
 		close(live)
 	}
 
 	go func() {
-		_ = srv.ListenAndServe()
+		_ = srv.ActivateAndServe()
 	}()
 
 	<-live

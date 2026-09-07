@@ -4,10 +4,10 @@ import (
 	"net"
 	"testing"
 
-	"codeberg.org/miekg/dns"
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"github.com/miekg/dns"
 )
 
 // The signed-off TTL policy, asserted as literals so accidental drift
@@ -210,11 +210,11 @@ func TestRespond_ARecordForVisiblePeer(
 	if !ok {
 		t.Fatalf("answer type = %T, want *dns.A", resp.Answer[0])
 	}
-	if a.A.Addr.String() != "10.0.1.1" {
-		t.Fatalf("address = %s, want 10.0.1.1", a.A.Addr)
+	if a.A.String() != "10.0.1.1" {
+		t.Fatalf("address = %s, want 10.0.1.1", a.A)
 	}
-	if a.Hdr.TTL != positiveTTLSeconds {
-		t.Fatalf("ttl = %d, want %d", a.Hdr.TTL, positiveTTLSeconds)
+	if a.Hdr.Ttl != positiveTTLSeconds {
+		t.Fatalf("ttl = %d, want %d", a.Hdr.Ttl, positiveTTLSeconds)
 	}
 	if a.Hdr.Name != "api-1.testnet.internal." {
 		t.Fatalf("owner = %q, want the canonical query name", a.Hdr.Name)
@@ -241,11 +241,11 @@ func TestRespond_AAAAForIPv6Peer(
 	if !ok {
 		t.Fatalf("answer type = %T, want *dns.AAAA", resp.Answer[0])
 	}
-	if aaaa.AAAA.Addr.String() != "fd00:0:0:1::1" {
-		t.Fatalf("address = %s, want fd00:0:0:1::1", aaaa.AAAA.Addr)
+	if aaaa.AAAA.String() != "fd00:0:0:1::1" {
+		t.Fatalf("address = %s, want fd00:0:0:1::1", aaaa.AAAA)
 	}
-	if aaaa.Hdr.TTL != positiveTTLSeconds {
-		t.Fatalf("ttl = %d, want %d", aaaa.Hdr.TTL, positiveTTLSeconds)
+	if aaaa.Hdr.Ttl != positiveTTLSeconds {
+		t.Fatalf("ttl = %d, want %d", aaaa.Hdr.Ttl, positiveTTLSeconds)
 	}
 	assertAuthoritative(t, resp)
 }
@@ -304,20 +304,20 @@ func TestRespond_ApexSOA(
 	if soa.Hdr.Name != "testnet.internal." {
 		t.Fatalf("owner = %q, want the zone apex", soa.Hdr.Name)
 	}
-	if soa.Hdr.TTL != positiveTTLSeconds {
-		t.Fatalf("ttl = %d, want %d", soa.Hdr.TTL, positiveTTLSeconds)
+	if soa.Hdr.Ttl != positiveTTLSeconds {
+		t.Fatalf("ttl = %d, want %d", soa.Hdr.Ttl, positiveTTLSeconds)
 	}
-	if soa.SOA.Ns != "cord-server.testnet.internal." {
-		t.Fatalf("mname = %q, want cord-server.testnet.internal.", soa.SOA.Ns)
+	if soa.Ns != "cord-server.testnet.internal." {
+		t.Fatalf("mname = %q, want cord-server.testnet.internal.", soa.Ns)
 	}
-	if soa.SOA.Mbox != "hostmaster.testnet.internal." {
-		t.Fatalf("rname = %q, want hostmaster.testnet.internal.", soa.SOA.Mbox)
+	if soa.Mbox != "hostmaster.testnet.internal." {
+		t.Fatalf("rname = %q, want hostmaster.testnet.internal.", soa.Mbox)
 	}
-	if soa.SOA.Serial != 1 {
-		t.Fatalf("serial = %d, want 1", soa.SOA.Serial)
+	if soa.Serial != 1 {
+		t.Fatalf("serial = %d, want 1", soa.Serial)
 	}
-	if soa.SOA.Minttl != negativeTTLSeconds {
-		t.Fatalf("minimum = %d, want %d", soa.SOA.Minttl, negativeTTLSeconds)
+	if soa.Minttl != negativeTTLSeconds {
+		t.Fatalf("minimum = %d, want %d", soa.Minttl, negativeTTLSeconds)
 	}
 	assertAuthoritative(t, resp)
 }
@@ -341,11 +341,11 @@ func TestRespond_ApexNS(
 	if !ok {
 		t.Fatalf("answer type = %T, want *dns.NS", resp.Answer[0])
 	}
-	if ns.NS.Ns != "cord-server.testnet.internal." {
-		t.Fatalf("nameserver = %q, want cord-server.testnet.internal.", ns.NS.Ns)
+	if ns.Ns != "cord-server.testnet.internal." {
+		t.Fatalf("nameserver = %q, want cord-server.testnet.internal.", ns.Ns)
 	}
-	if ns.Hdr.TTL != positiveTTLSeconds {
-		t.Fatalf("ttl = %d, want %d", ns.Hdr.TTL, positiveTTLSeconds)
+	if ns.Hdr.Ttl != positiveTTLSeconds {
+		t.Fatalf("ttl = %d, want %d", ns.Hdr.Ttl, positiveTTLSeconds)
 	}
 	assertAuthoritative(t, resp)
 }
@@ -391,11 +391,11 @@ func TestRespond_NXDOMAINCarriesNegativeSOA(
 	if !ok {
 		t.Fatalf("authority type = %T, want *dns.SOA", resp.Ns[0])
 	}
-	if soa.Hdr.TTL != negativeTTLSeconds {
-		t.Fatalf("soa ttl = %d, want %d", soa.Hdr.TTL, negativeTTLSeconds)
+	if soa.Hdr.Ttl != negativeTTLSeconds {
+		t.Fatalf("soa ttl = %d, want %d", soa.Hdr.Ttl, negativeTTLSeconds)
 	}
-	if soa.SOA.Minttl != negativeTTLSeconds {
-		t.Fatalf("soa minimum = %d, want %d", soa.SOA.Minttl, negativeTTLSeconds)
+	if soa.Minttl != negativeTTLSeconds {
+		t.Fatalf("soa minimum = %d, want %d", soa.Minttl, negativeTTLSeconds)
 	}
 	assertAuthoritative(t, resp)
 }
@@ -436,8 +436,8 @@ func TestRespond_CordServerAlwaysAddressable(
 		t.Fatalf("answers = %d, want 1", len(resp.Answer))
 	}
 	a := resp.Answer[0].(*dns.A)
-	if a.A.Addr.String() != "10.0.0.1" {
-		t.Fatalf("address = %s, want 10.0.0.1", a.A.Addr)
+	if a.A.String() != "10.0.0.1" {
+		t.Fatalf("address = %s, want 10.0.0.1", a.A)
 	}
 }
 
@@ -457,8 +457,8 @@ func TestRespond_SelfResolution(
 		t.Fatalf("answers = %d, want 1", len(resp.Answer))
 	}
 	a := resp.Answer[0].(*dns.A)
-	if a.A.Addr.String() != "10.0.32.5" {
-		t.Fatalf("address = %s, want 10.0.32.5", a.A.Addr)
+	if a.A.String() != "10.0.32.5" {
+		t.Fatalf("address = %s, want 10.0.32.5", a.A)
 	}
 }
 
@@ -523,8 +523,8 @@ func TestRespond_CaseInsensitive(
 		t.Fatalf("answers = %d, want 1", len(resp.Answer))
 	}
 	a := resp.Answer[0].(*dns.A)
-	if a.A.Addr.String() != "10.0.1.1" {
-		t.Fatalf("address = %s, want 10.0.1.1", a.A.Addr)
+	if a.A.String() != "10.0.1.1" {
+		t.Fatalf("address = %s, want 10.0.1.1", a.A)
 	}
 }
 
@@ -682,29 +682,17 @@ func newTestServerFor(
 	return srv
 }
 
-// query builds a query message for name and qtype. The library encodes
-// the qtype as the type of the question RR.
+// query builds a query message for name and qtype.
 func query(
 	name string,
 	qtype uint16,
 ) *dns.Msg {
 	q := &dns.Msg{}
-	var rr dns.RR
-	switch qtype {
-	case dns.TypeA:
-		rr = &dns.A{}
-	case dns.TypeAAAA:
-		rr = &dns.AAAA{}
-	case dns.TypeSOA:
-		rr = &dns.SOA{}
-	case dns.TypeNS:
-		rr = &dns.NS{}
-	default:
-		rr = &dns.TXT{}
-	}
-	rr.Header().Name = name
-	rr.Header().Class = dns.ClassINET
-	q.Question = []dns.RR{rr}
+	q.Question = []dns.Question{{
+		Name:   name,
+		Qtype:  qtype,
+		Qclass: dns.ClassINET,
+	}}
 
 	return q
 }

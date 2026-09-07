@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"codeberg.org/miekg/dns"
 	serverdns "git.studiopollinator.com/pollinator/cord/internal/server/dns"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
+	"github.com/miekg/dns"
 )
 
 // startLoopbackDNS starts a real server for a loopback network whose
@@ -74,15 +74,16 @@ func TestServer_UDPRoundTrip(
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	resp, err := dns.Exchange(ctx, apexQuery("cord-server.looptest.internal."), "udp", srv.Address())
+	client := &dns.Client{Net: "udp"}
+	resp, _, err := client.ExchangeContext(ctx, apexQuery("cord-server.looptest.internal."), srv.Address())
 	if err != nil {
 		t.Fatalf("udp exchange: %v", err)
 	}
 	if resp.Rcode != dns.RcodeSuccess || len(resp.Answer) != 1 {
 		t.Fatalf("rcode = %d, answers = %d, want one A answer", resp.Rcode, len(resp.Answer))
 	}
-	if a := resp.Answer[0].(*dns.A); a.A.Addr.String() != "127.0.0.1" {
-		t.Fatalf("address = %s, want 127.0.0.1", a.A.Addr)
+	if a := resp.Answer[0].(*dns.A); a.A.String() != "127.0.0.1" {
+		t.Fatalf("address = %s, want 127.0.0.1", a.A)
 	}
 }
 
@@ -94,15 +95,16 @@ func TestServer_TCPRoundTrip(
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	resp, err := dns.Exchange(ctx, apexQuery("cord-server.looptest.internal."), "tcp", srv.Address())
+	client := &dns.Client{Net: "tcp"}
+	resp, _, err := client.ExchangeContext(ctx, apexQuery("cord-server.looptest.internal."), srv.Address())
 	if err != nil {
 		t.Fatalf("tcp exchange: %v", err)
 	}
 	if resp.Rcode != dns.RcodeSuccess || len(resp.Answer) != 1 {
 		t.Fatalf("rcode = %d, answers = %d, want one A answer", resp.Rcode, len(resp.Answer))
 	}
-	if a := resp.Answer[0].(*dns.A); a.A.Addr.String() != "127.0.0.1" {
-		t.Fatalf("address = %s, want 127.0.0.1", a.A.Addr)
+	if a := resp.Answer[0].(*dns.A); a.A.String() != "127.0.0.1" {
+		t.Fatalf("address = %s, want 127.0.0.1", a.A)
 	}
 }
 
@@ -222,10 +224,11 @@ func apexQuery(
 	name string,
 ) *dns.Msg {
 	q := &dns.Msg{}
-	q.Question = []dns.RR{&dns.A{Hdr: dns.Header{
-		Name:  name,
-		Class: dns.ClassINET,
-	}}}
+	q.Question = []dns.Question{{
+		Name:   name,
+		Qtype:  dns.TypeA,
+		Qclass: dns.ClassINET,
+	}}
 
 	return q
 }

@@ -1,16 +1,12 @@
 package dns
 
 import (
-	"context"
-	"io"
 	"net"
-	"net/netip"
 	"time"
 
-	"codeberg.org/miekg/dns"
-	"codeberg.org/miekg/dns/dnsutil"
-	"codeberg.org/miekg/dns/rdata"
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
+	"github.com/miekg/dns"
+	"github.com/miekg/dns/dnsutil"
 )
 
 const (
@@ -39,7 +35,6 @@ const (
 // a request: it extracts the source address, delegates the response
 // logic to the pure respond function, and writes the result.
 func (s *Server) serveDNS(
-	ctx context.Context,
 	w dns.ResponseWriter,
 	query *dns.Msg,
 ) {
@@ -56,7 +51,7 @@ func (s *Server) serveDNS(
 		resp.Rcode,
 	)
 
-	if _, err := io.Copy(w, resp); err != nil {
+	if err := w.WriteMsg(resp); err != nil {
 		s.log.Debug(
 			"dns write failed",
 			"err",
@@ -83,8 +78,8 @@ func (s *Server) respond(
 		return malformed()
 	}
 
-	qname := dnsutil.Canonical(questionName(query))
-	if source == nil || !dnsutil.IsBelow(s.zone, qname) {
+	qname := dns.CanonicalName(questionName(query))
+	if source == nil || !dns.IsSubDomain(s.zone, qname) {
 		return refused(query)
 	}
 
@@ -93,24 +88,23 @@ func (s *Server) respond(
 		return refused(query)
 	}
 
-	_, qtype := dnsutil.Question(query)
 	reply := &dns.Msg{}
-	dnsutil.SetReply(reply, query)
+	reply.SetReply(query)
 
-	if dns.EqualName(qname, s.zone) {
-		return s.apexReply(reply, qtype)
+	if qname == s.zone {
+		return s.apexReply(reply, query.Question[0].Qtype)
 	}
 
 	host, err := s.service.ResolveDNSHost(
 		s.network,
 		peer.Name,
-		dnsutil.Trim(qname, s.zone),
+		dnsutil.TrimDomainName(qname, s.zone),
 	)
 	if err != nil {
 		return nxdomain(reply, s.soaRecord(negativeTTL))
 	}
 
-	return s.hostReply(reply, qname, qtype, host.Route)
+	return s.hostReply(reply, qname, query.Question[0].Qtype, host.Route)
 }
 
 // apexReply answers a query at the zone apex: SOA and NS for their own
@@ -126,14 +120,13 @@ func (s *Server) apexReply(
 		reply.Answer = []dns.RR{s.soaRecord(positiveTTL)}
 	case dns.TypeNS:
 		reply.Answer = []dns.RR{&dns.NS{
-			Hdr: dns.Header{
-				Name:  s.zone,
-				TTL:   seconds(positiveTTL),
-				Class: dns.ClassINET,
+			Hdr: dns.RR_Header{
+				Name:   s.zone,
+				Rrtype: dns.TypeNS,
+				Class:  dns.ClassINET,
+				Ttl:    seconds(positiveTTL),
 			},
-			NS: rdata.NS{
-				Ns: "cord-server." + s.zone,
-			},
+			Ns: "cord-server." + s.zone,
 		}}
 	}
 
@@ -159,33 +152,27 @@ func (s *Server) hostReply(
 	switch qtype {
 	case dns.TypeA:
 		if v4 := r.IP.To4(); v4 != nil {
-			if addr, ok := netip.AddrFromSlice(v4); ok {
-				reply.Answer = []dns.RR{&dns.A{
-					Hdr: dns.Header{
-						Name:  qname,
-						TTL:   seconds(positiveTTL),
-						Class: dns.ClassINET,
-					},
-					A: rdata.A{
-						Addr: addr,
-					},
-				}}
-			}
+			reply.Answer = []dns.RR{&dns.A{
+				Hdr: dns.RR_Header{
+					Name:   qname,
+					Rrtype: dns.TypeA,
+					Class:  dns.ClassINET,
+					Ttl:    seconds(positiveTTL),
+				},
+				A: v4,
+			}}
 		}
 	case dns.TypeAAAA:
 		if r.IP.To4() == nil {
-			if addr, ok := netip.AddrFromSlice(r.IP.To16()); ok {
-				reply.Answer = []dns.RR{&dns.AAAA{
-					Hdr: dns.Header{
-						Name:  qname,
-						TTL:   seconds(positiveTTL),
-						Class: dns.ClassINET,
-					},
-					AAAA: rdata.AAAA{
-						Addr: addr,
-					},
-				}}
-			}
+			reply.Answer = []dns.RR{&dns.AAAA{
+				Hdr: dns.RR_Header{
+					Name:   qname,
+					Rrtype: dns.TypeAAAA,
+					Class:  dns.ClassINET,
+					Ttl:    seconds(positiveTTL),
+				},
+				AAAA: r.IP.To16(),
+			}}
 		}
 	}
 
@@ -199,20 +186,19 @@ func (s *Server) soaRecord(
 	ttl time.Duration,
 ) *dns.SOA {
 	return &dns.SOA{
-		Hdr: dns.Header{
-			Name:  s.zone,
-			TTL:   seconds(ttl),
-			Class: dns.ClassINET,
+		Hdr: dns.RR_Header{
+			Name:   s.zone,
+			Rrtype: dns.TypeSOA,
+			Class:  dns.ClassINET,
+			Ttl:    seconds(ttl),
 		},
-		SOA: rdata.SOA{
-			Ns:      "cord-server." + s.zone,
-			Mbox:    "hostmaster." + s.zone,
-			Serial:  soaSerial,
-			Refresh: seconds(soaRefresh),
-			Retry:   seconds(soaRetry),
-			Expire:  seconds(soaExpire),
-			Minttl:  seconds(negativeTTL),
-		},
+		Ns:      "cord-server." + s.zone,
+		Mbox:    "hostmaster." + s.zone,
+		Serial:  soaSerial,
+		Refresh: seconds(soaRefresh),
+		Retry:   seconds(soaRetry),
+		Expire:  seconds(soaExpire),
+		Minttl:  seconds(negativeTTL),
 	}
 }
 
@@ -232,7 +218,7 @@ func refused(
 	query *dns.Msg,
 ) *dns.Msg {
 	reply := &dns.Msg{}
-	dnsutil.SetReply(reply, query)
+	reply.SetReply(query)
 	reply.Rcode = dns.RcodeRefused
 
 	return reply
@@ -260,8 +246,7 @@ func questionName(
 		return ""
 	}
 
-	name, _ := dnsutil.Question(query)
-	return name
+	return query.Question[0].Name
 }
 
 // remoteIP extracts the query's source IP. Unknown address types yield
