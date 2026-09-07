@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -9,53 +10,12 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
-
-func TestPlaneServeReportsUnexpectedFailure(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
-
-	results := make(chan error, 2)
-	plane := &Plane{
-		server: &http.Server{Handler: http.NotFoundHandler()},
-		log:    logging.Discard(),
-		onServeResult: func(err error) {
-			results <- err
-		},
-	}
-	plane.serve(listener, listener.Addr().String())
-
-	if err := waitForServeResult(t, results); err != nil {
-		t.Fatalf("initial serve result = %v, want nil", err)
-	}
-	if err := listener.Close(); err != nil {
-		t.Fatalf("close listener: %v", err)
-	}
-	if err := waitForServeResult(t, results); err == nil {
-		t.Fatal("unexpected listener exit was not reported")
-	}
-}
-
-func waitForServeResult(
-	t *testing.T,
-	results <-chan error,
-) error {
-	t.Helper()
-	select {
-	case err := <-results:
-		return err
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for serve result")
-		return nil
-	}
-}
 
 func TestPlaneOwnsOptionalDNS(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
@@ -73,13 +33,7 @@ func TestPlaneOwnsOptionalDNS(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			backend := wireguardtest.NewMockBackend()
-			p := &Plane{
-				config:     service.Plane{Name: "test", Cidr: "127.0.0.0/24"},
-				privateKey: key,
-				clock:      time.Now,
-				log:        logging.Discard(),
-			}
+			var config *dnsConfig
 			if enabled {
 				ln, err := net.Listen("tcp", "127.0.0.1:0")
 				if err != nil {
@@ -87,73 +41,182 @@ func TestPlaneOwnsOptionalDNS(t *testing.T) {
 				}
 				port := uint16(ln.Addr().(*net.TCPAddr).Port)
 				ln.Close()
-				p.dnsConfig = &dnsConfig{network: "test", service: svc, port: port}
+				config = &dnsConfig{network: "test", service: svc, port: port}
 			}
-			if err := p.start(context.Background(), wireguard.NewManagerWithBackend(backend), http.NotFoundHandler()); err != nil {
-				p.stop()
+			p, err := newPlane(service.Plane{Name: "test", Cidr: "127.0.0.0/24"}, config, key, http.NotFoundHandler(), logging.Discard())
+			if err != nil {
 				t.Fatal(err)
 			}
-			defer p.stop()
-
-			device, server := p.device, p.server
+			want := resource.Disabled
 			if enabled {
-				if p.dns == nil || !p.dns.Status().Serving {
-					t.Fatal("DNS is not serving")
+				want = resource.Stopped
+			}
+			if status := p.Status(); status.DNS.State != want || status.HTTP.State != resource.Stopped {
+				t.Fatalf("initial status = %+v", status)
+			}
+			backend := wireguardtest.NewMockBackend()
+			defer p.stop()
+			if err := p.start(t.Context(), wireguard.NewManagerWithBackend(backend)); err != nil {
+				t.Fatal(err)
+			}
+			device, httpWrapper, dnsWrapper := p.device, p.http, p.dns
+			if err := p.reconcile(); err != nil {
+				t.Fatal(err)
+			}
+			if enabled {
+				if p.Status().DNS.State != resource.Running {
+					t.Fatal("DNS not running")
 				}
-				oldDNS := p.dns
-				if err := oldDNS.Stop(context.Background()); err != nil {
+				if err := p.dns.Stop(context.Background()); err != nil {
 					t.Fatal(err)
 				}
-				// A bind conflict must reach the parent as an error,
-				// while the healthy HTTP server and device stay owned.
-				blocker, err := net.Listen("tcp", oldDNS.Address())
+				for range 2 {
+					if status := p.Status(); status.DNS.State != resource.Stopped || status.HTTP.State != resource.Running {
+						t.Fatalf("status read repaired DNS or changed HTTP: %+v", status)
+					}
+				}
+				blocker, err := net.Listen("tcp", p.dns.Address())
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer blocker.Close()
-				if err := p.check(); err == nil {
-					t.Fatal("DNS bind failure was not returned")
-				} else if p.dnsStatus.Error != err.Error() {
-					t.Fatalf("status error = %q, returned %v", p.dnsStatus.Error, err)
+				repairErr := p.reconcile()
+				if repairErr == nil {
+					t.Fatal("expected failed DNS restart")
 				}
-				if p.device != device || p.server != server {
-					t.Fatal("failed DNS repair replaced a healthy sibling")
+				for range 2 {
+					status := p.Status().DNS
+					if status.State != resource.Failed || status.Error == nil {
+						t.Fatalf("failed DNS status = %+v", status)
+					}
+				}
+				if err := p.dns.Stop(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				if p.Status().DNS.Error == nil {
+					t.Fatal("cleanup discarded failed startup error")
+				}
+				// Both children are checked even when DNS cannot restart.
+				run := p.http.run
+				if err := run.server.Close(); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case <-run.done:
+				case <-time.After(time.Second):
+					t.Fatal("HTTP did not exit")
+				}
+				if err := p.reconcile(); err == nil {
+					t.Fatal("DNS failure was lost")
+				}
+				if p.Status().HTTP.State != resource.Running {
+					t.Fatal("DNS failure prevented HTTP recovery")
 				}
 				if err := blocker.Close(); err != nil {
 					t.Fatal(err)
 				}
-				if err := p.check(); err != nil {
+				if err := p.reconcile(); err != nil {
 					t.Fatal(err)
 				}
-				if p.dns == oldDNS || !p.dns.Status().Serving {
-					t.Fatal("DNS was not replaced after stopping")
-				}
-				if p.dnsStatus.Error != "" {
-					t.Fatalf("DNS repair error: %s", p.dnsStatus.Error)
-				}
-				ownedDNS := p.dns
-				defer func() {
-					if ownedDNS.Status().Serving {
-						t.Error("plane stop left DNS serving")
-					}
-				}()
-			} else {
-				if err := p.check(); err != nil {
-					t.Fatal(err)
-				}
-				if p.dns != nil {
-					t.Fatal("plane without DNS configuration started DNS")
+				if status := p.Status().DNS; status.State != resource.Running || status.Error != nil {
+					t.Fatalf("recovered DNS status = %+v", status)
 				}
 			}
-			if p.device != device || p.server != server {
-				t.Fatal("DNS maintenance replaced a healthy sibling")
+			if p.device != device || p.http != httpWrapper || p.dns != dnsWrapper {
+				t.Fatal("reconciliation replaced a persistent wrapper or healthy device")
 			}
 			if err := p.stop(); err != nil {
 				t.Fatal(err)
 			}
+			status := p.Status()
+			if status.DNS.State != want || status.HTTP.State != resource.Stopped {
+				t.Fatalf("stopped status = %+v", status)
+			}
+			if p.http != httpWrapper || p.dns != dnsWrapper {
+				t.Fatal("Stop discarded configured wrappers")
+			}
 			if backend.Device("test").CloseCalls != 1 {
-				t.Fatal("plane did not close its device exactly once")
+				t.Fatal("device was not closed exactly once")
 			}
 		})
+	}
+}
+
+// Private access is needed to kill a serving instance while leaving its owner
+// alive. Normal startup and shutdown remain covered through runtime_test.
+func TestPlaneReconcileRepairsFailedHTTP(t *testing.T) {
+	key, err := wireguard.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := newPlane(service.Plane{Name: "httptest", Cidr: "127.0.0.0/24"}, nil, key, http.NotFoundHandler(), logging.Discard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := wireguardtest.NewMockBackend()
+	t.Cleanup(func() { _ = p.stop() })
+	if err := p.start(t.Context(), wireguard.NewManagerWithBackend(backend)); err != nil {
+		t.Fatal(err)
+	}
+	wrapper, device, run := p.http, p.device, p.http.run
+	address := run.server.Addr
+	p.http.address = address // Reuse the ephemeral port for replacement attempts.
+	if err := p.reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	if p.http.run != run {
+		t.Fatal("healthy HTTP instance was replaced")
+	}
+	if err := run.server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-run.done:
+	case <-time.After(time.Second):
+		t.Fatal("HTTP did not exit")
+	}
+	for range 2 {
+		status := p.Status().HTTP
+		if status.State != resource.Failed || !errors.Is(status.Error, http.ErrServerClosed) {
+			t.Fatalf("failed status = %+v", status)
+		}
+	}
+	if p.http.run != run {
+		t.Fatal("status read repaired HTTP")
+	}
+	blocker, err := net.Listen("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Close()
+	if err := p.reconcile(); err == nil {
+		t.Fatal("expected blocked restart")
+	}
+	if status := p.Status().HTTP; status.State != resource.Failed || status.Error == nil {
+		t.Fatalf("failed restart status = %+v", status)
+	}
+	if p.http != wrapper || wrapper.run != nil {
+		t.Fatal("failed bind lost wrapper or retained a serving instance")
+	}
+	if err := blocker.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	if status := p.Status().HTTP; status.State != resource.Running || status.Error != nil {
+		t.Fatalf("recovered status = %+v", status)
+	}
+	client := &http.Client{Timeout: time.Second}
+	resp, err := client.Get("http://" + address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("handler changed: status %d", resp.StatusCode)
+	}
+	if p.http != wrapper || p.device != device || len(backend.CreateCalls) != 1 {
+		t.Fatal("repair replaced wrapper or device")
 	}
 }

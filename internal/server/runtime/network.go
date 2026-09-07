@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
@@ -40,8 +41,6 @@ type Network struct {
 	timer           *time.Timer
 	stopped         bool
 	reconcileStatus ActivityStatus
-	mainAPIStatus   ActivityStatus
-	inviteAPIStatus ActivityStatus
 }
 
 // start brings up both planes and their servers under ctx, then runs
@@ -55,36 +54,6 @@ func (n *Network) start(
 ) error {
 	ctx, n.cancel = context.WithCancel(ctx)
 
-	// Every component's data is initialized before any of them starts,
-	// so rollback can stop both planes unconditionally.
-	n.main = &Plane{
-		config:     n.record.Main,
-		clock:      n.clock,
-		privateKey: n.record.PrivateKey,
-		log:        n.log.With("plane", "main"),
-		onServeResult: func(err error) {
-			n.recordActivity(&n.mainAPIStatus, err)
-		},
-	}
-
-	if !n.dnsDisabled {
-		n.main.dnsConfig = &dnsConfig{
-			network: n.record.Name,
-			service: n.service,
-			port:    n.dnsPort,
-		}
-	}
-
-	n.invite = &Plane{
-		config:     n.record.Invite,
-		clock:      n.clock,
-		privateKey: n.record.PrivateKey,
-		log:        n.log.With("plane", "invite"),
-		onServeResult: func(err error) {
-			n.recordActivity(&n.inviteAPIStatus, err)
-		},
-	}
-
 	// rollback undoes a partially successful boot: it cancels the
 	// network context and stops every component in the same order as
 	// stop(). Every stop is safe when its component never started.
@@ -93,11 +62,43 @@ func (n *Network) start(
 		return errors.Join(cause, n.stopComponents())
 	}
 
-	if err := n.main.start(ctx, wg, mainHandler); err != nil {
+	var dnsOptions *dnsConfig
+	if !n.dnsDisabled {
+		dnsOptions = &dnsConfig{
+			network: n.record.Name,
+			service: n.service,
+			port:    n.dnsPort,
+		}
+	}
+
+	var err error
+	n.main, err = newPlane(
+		n.record.Main,
+		dnsOptions,
+		n.record.PrivateKey,
+		mainHandler,
+		n.log.With("plane", "main"),
+	)
+	if err != nil {
 		return rollback(fmt.Errorf("main plane: %w", err))
 	}
 
-	if err := n.invite.start(ctx, wg, inviteHandler); err != nil {
+	n.invite, err = newPlane(
+		n.record.Invite,
+		nil,
+		n.record.PrivateKey,
+		inviteHandler,
+		n.log.With("plane", "invite"),
+	)
+	if err != nil {
+		return rollback(fmt.Errorf("invite plane: %w", err))
+	}
+
+	if err := n.main.start(ctx, wg); err != nil {
+		return rollback(fmt.Errorf("main plane: %w", err))
+	}
+
+	if err := n.invite.start(ctx, wg); err != nil {
 		return rollback(fmt.Errorf("invite plane: %w", err))
 	}
 
@@ -125,7 +126,14 @@ func (n *Network) stop() error {
 
 // stopComponents releases both planes, including their dependent servers.
 func (n *Network) stopComponents() error {
-	return errors.Join(n.main.stop(), n.invite.stop())
+	var errs []error
+	if n.main != nil {
+		errs = append(errs, n.main.stop())
+	}
+	if n.invite != nil {
+		errs = append(errs, n.invite.stop())
+	}
+	return errors.Join(errs...)
 }
 
 // reconcile is the ONLY code path that writes peer state to devices. It
@@ -194,18 +202,18 @@ func (n *Network) reconcile() {
 		refresh(fmt.Errorf("apply invite peers: %w", err))
 	}
 
-	mainErr := n.main.check()
+	mainErr := n.main.reconcile()
 	if mainErr != nil {
 		mainErr = fmt.Errorf("main plane: %w", mainErr)
 	}
 
-	inviteErr := n.invite.check()
+	inviteErr := n.invite.reconcile()
 	if inviteErr != nil {
 		inviteErr = fmt.Errorf("invite plane: %w", inviteErr)
 	}
 
 	if err := errors.Join(mainErr, inviteErr); err != nil {
-		n.log.Warn("reconcile: plane check failed", "err", err)
+		n.log.Warn("reconcile: plane failed", "err", err)
 		refresh(err)
 	}
 
@@ -275,7 +283,8 @@ func (n *Network) rearm(
 	n.timer.Reset(delay)
 }
 
-// getActivityStatuses returns a consistent snapshot of this network's work.
+// getActivityStatuses collects reconciliation activity and adapts child
+// resource states to the existing operator-facing status fields.
 func (n *Network) getActivityStatuses() (
 	ActivityStatus,
 	ActivityStatus,
@@ -284,16 +293,9 @@ func (n *Network) getActivityStatuses() (
 ) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return n.reconcileStatus, n.mainAPIStatus, n.inviteAPIStatus, n.main.dnsStatus
-}
-
-func (n *Network) recordActivity(
-	status *ActivityStatus,
-	err error,
-) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	status.record(n.clock(), err)
+	main := n.main.Status()
+	invite := n.invite.Status()
+	return n.reconcileStatus, resourceActivity(main.HTTP), resourceActivity(invite.HTTP), resourceActivity(main.DNS)
 }
 
 // peerHealthy reports whether a peer's last handshake is recent enough
@@ -305,4 +307,18 @@ func peerHealthy(
 ) bool {
 	return !peerStatus.LastHandshake.IsZero() &&
 		now.Sub(peerStatus.LastHandshake) < wireguard.ActiveHandshakeThreshold
+}
+
+// resourceActivity adapts resource state to the existing API's activity fields
+// until network status exposes resources directly. Resources have no attempt times.
+func resourceActivity(status resource.Status) ActivityStatus {
+	switch status.State {
+	case resource.Disabled, resource.Running:
+		return ActivityStatus{}
+	default:
+		if status.Error != nil {
+			return ActivityStatus{Error: status.Error.Error()}
+		}
+		return ActivityStatus{Error: fmt.Sprintf("resource %s", status.State)}
+	}
 }

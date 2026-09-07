@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"github.com/miekg/dns"
 )
 
@@ -92,7 +93,7 @@ func TestStopForcesCleanup(
 				t.Fatalf("stop = %v, want %s cancellation", err, protocol)
 			}
 
-			if status := srv.Status(); status.Serving || status.Error == "" {
+			if status := srv.Status(); status.State == resource.Running || status.Error == nil {
 				t.Fatalf("status = %+v, want unavailable with shutdown error", status)
 			}
 			if err := srv.Stop(context.Background()); err != nil {

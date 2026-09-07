@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	serverdns "git.studiopollinator.com/pollinator/cord/internal/server/dns"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
@@ -36,7 +37,7 @@ func startLoopbackDNS(
 		t.Fatalf("new dns server: %v", err)
 	}
 
-	if err := srv.Start(t.Context()); err != nil {
+	if err := srv.Reconcile(t.Context()); err != nil {
 		t.Fatalf("start dns server: %v", err)
 	}
 	t.Cleanup(func() {
@@ -133,16 +134,16 @@ func TestServer_PartialBindRollback(
 		t.Fatalf("new dns server: %v", err)
 	}
 
-	startErr := srv.Start(t.Context())
+	startErr := srv.Reconcile(t.Context())
 	if startErr == nil || !strings.Contains(startErr.Error(), "listen tcp") {
 		t.Fatalf("start error = %v, want a tcp bind failure", startErr)
 	}
 
 	status := srv.Status()
-	if status.Serving {
+	if status.State != resource.Failed {
 		t.Fatalf("status after failed start = %+v, want not serving", status)
 	}
-	if status.Error == "" {
+	if status.Error == nil {
 		t.Fatal("status after failed start should record the error")
 	}
 
@@ -157,10 +158,10 @@ func TestServer_PartialBindRollback(
 	if err := blocker.Close(); err != nil {
 		t.Fatalf("release tcp port: %v", err)
 	}
-	if err := srv.Start(t.Context()); err != nil {
+	if err := srv.Reconcile(t.Context()); err != nil {
 		t.Fatalf("restart after failed start: %v", err)
 	}
-	if !srv.Status().Serving {
+	if srv.Status().State != resource.Running {
 		t.Fatal("restarted server should be serving")
 	}
 	if err := srv.Stop(context.Background()); err != nil {
@@ -179,8 +180,8 @@ func TestServer_BoundedShutdown(
 		t.Fatalf("stop: %v", err)
 	}
 
-	if srv.Status().Serving {
-		t.Fatal("server still serving after stop")
+	if srv.Status().State != resource.Stopped {
+		t.Fatal("server should be stopped after Stop")
 	}
 
 	// Stop is safe to call twice.
@@ -189,10 +190,10 @@ func TestServer_BoundedShutdown(
 	}
 
 	// The sockets are released and the server is restartable.
-	if err := srv.Start(t.Context()); err != nil {
+	if err := srv.Reconcile(t.Context()); err != nil {
 		t.Fatalf("start after stop: %v", err)
 	}
-	if !srv.Status().Serving {
+	if srv.Status().State != resource.Running {
 		t.Fatal("restarted server should be serving")
 	}
 	if err := srv.Stop(context.Background()); err != nil {
@@ -200,19 +201,17 @@ func TestServer_BoundedShutdown(
 	}
 }
 
-func TestServer_StatusTracksAttemptAndSuccess(
+func TestServer_StatusReportsRunning(
 	t *testing.T,
 ) {
 	srv := startLoopbackDNS(t)
 
 	status := srv.Status()
-	if !status.Serving {
+	if status.State != resource.Running {
 		t.Fatalf("status = %+v, want serving", status)
 	}
-	if status.LastAttemptAt.IsZero() || status.LastSuccessAt.IsZero() {
-		t.Fatalf("status = %+v, want attempt and success times", status)
-	}
-	if status.Error != "" {
+
+	if status.Error != nil {
 		t.Fatalf("status error = %q, want empty", status.Error)
 	}
 }
@@ -233,13 +232,20 @@ func apexQuery(
 	return q
 }
 
-func TestServer_RestartServesQueries(t *testing.T) {
+func TestServer_ReconcileServesQueries(t *testing.T) {
 	srv := startLoopbackDNS(t)
 	if err := srv.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := srv.Start(t.Context()); err != nil {
-		t.Fatalf("start after stop: %v", err)
+	if err := srv.Reconcile(t.Context()); err != nil {
+		t.Fatalf("reconcile after stop: %v", err)
+	}
+	address := srv.Address()
+	if err := srv.Reconcile(t.Context()); err != nil {
+		t.Fatalf("reconcile healthy server: %v", err)
+	}
+	if srv.Address() != address {
+		t.Fatal("healthy reconciliation changed the listening address")
 	}
 	for _, network := range []string{"udp", "tcp"} {
 		client := &dns.Client{Net: network, Timeout: time.Second}

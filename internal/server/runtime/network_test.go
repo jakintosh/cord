@@ -232,11 +232,8 @@ func TestNetwork_DNS_StartsNetworkHealthy(
 	if status.DNS.Error != "" {
 		t.Fatalf("dns status error = %q, want empty", status.DNS.Error)
 	}
-	if !status.DNS.LastAttemptAt.Equal(testutil.FixedTime) {
-		t.Fatalf("dns last attempt = %v, want %v", status.DNS.LastAttemptAt, testutil.FixedTime)
-	}
-	if !status.DNS.LastSuccessAt.Equal(testutil.FixedTime) {
-		t.Fatalf("dns last success = %v, want %v", status.DNS.LastSuccessAt, testutil.FixedTime)
+	if !status.DNS.LastAttemptAt.IsZero() || !status.DNS.LastSuccessAt.IsZero() {
+		t.Fatal("resource status should not invent activity timestamps")
 	}
 }
 

@@ -19,9 +19,12 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"github.com/miekg/dns"
 )
+
+const shutdownTimeout = 5 * time.Second
 
 // Options configures one authoritative DNS server.
 type Options struct {
@@ -47,18 +50,9 @@ type Options struct {
 	Logger *slog.Logger
 }
 
-// Status is a snapshot of one DNS server's listener state, following
-// the daemon's activity-status style.
-type Status struct {
-	Serving       bool
-	LastAttemptAt time.Time
-	LastSuccessAt time.Time
-	Error         string
-}
-
 // Server is one authoritative DNS server for a Cord network, serving
 // UDP and TCP on a single port. Constructors are synchronous and
-// launch nothing: Start binds both sockets before reporting success,
+// launch nothing: Reconcile binds both sockets before reporting success,
 // Stop releases them and permits restart, forcing socket cleanup when the
 // grace period expires. Forced cleanup does not wait for handlers.
 type Server struct {
@@ -70,12 +64,10 @@ type Server struct {
 
 	// mu serializes lifecycle operations and protects status snapshots.
 	// Non-nil handles retain ownership until Stop.
-	mu            sync.Mutex
-	udp           *dns.Server
-	tcp           *dns.Server
-	lastAttemptAt time.Time
-	lastSuccessAt time.Time
-	lastErr       error
+	mu      sync.Mutex
+	udp     *dns.Server
+	tcp     *dns.Server
+	lastErr error
 }
 
 // New validates the options and returns a server that is not yet
@@ -131,56 +123,68 @@ func New(
 	}, nil
 }
 
-// Start binds UDP and TCP on the same port. Lifecycle calls are serialized.
-// Stop permits another Start with fresh underlying servers.
-func (s *Server) Start(
-	ctx context.Context,
-) (
-	err error,
-) {
+// Status reports current listener availability without changing state or
+// repairing resources. Closed sockets are detected even before reconciliation.
+func (s *Server) Status() resource.Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.udp != nil || s.tcp != nil {
-		return fmt.Errorf("dns: server already started")
-	}
-
-	s.lastAttemptAt = time.Now()
-	defer func() {
-		s.lastErr = err
-		if err == nil {
-			s.lastSuccessAt = time.Now()
+	if s.lastErr != nil {
+		return resource.Status{
+			State: resource.Failed,
+			Error: s.lastErr,
 		}
-	}()
+	}
 
-	if err := ctx.Err(); err != nil {
+	if s.udp == nil && s.tcp == nil {
+		return resource.Status{
+			State: resource.Stopped,
+		}
+	}
+
+	if err := s.probeSockets(); err != nil {
+		return resource.Status{
+			State: resource.Failed,
+			Error: err,
+		}
+	}
+
+	return resource.Status{
+		State: resource.Running,
+	}
+}
+
+// Reconcile ensures the configured server is running. The owner serializes
+// reconciliation with other lifecycle calls.
+func (s *Server) Reconcile(
+	ctx context.Context,
+) error {
+	switch s.Status().State {
+	case resource.Running:
+		return nil
+	case resource.Stopped:
+		break
+	case resource.Failed:
+		stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		err := s.Stop(stopCtx)
+		cancel()
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := s.start(ctx); err != nil {
 		return err
 	}
 
-	handler := dns.HandlerFunc(s.serveDNS)
-	udp, address, err := s.startUDP(handler)
-	if err != nil {
-		return err
-	}
+	s.log.Info("dns recovered", "address", s.Address())
 
-	if err := ctx.Err(); err != nil {
-		_ = udp.Close()
-		return err
-	}
-
-	tcp, err := s.startTCP(handler, address)
-	if err != nil {
-		_ = udp.Close()
-		return err
-	}
-
-	s.udp, s.tcp = udp, tcp
 	return nil
 }
 
 // Stop shuts down UDP and TCP concurrently, giving each server until ctx
 // expires to finish gracefully. A failed shutdown is followed by Close.
-// Stop releases ownership and returns any shutdown and close errors. Forced
+// Stop releases the underlying servers and returns shutdown and close errors. Forced
 // socket cleanup does not wait for handlers to return. Repeated calls are no-ops.
 func (s *Server) Stop(
 	ctx context.Context,
@@ -190,6 +194,13 @@ func (s *Server) Stop(
 
 	if s.udp == nil && s.tcp == nil {
 		return nil
+	}
+
+	// Preserve an existing failure through cleanup; only a successful start
+	// establishes recovery. A normal stop of healthy listeners remains stopped.
+	priorErr := s.lastErr
+	if priorErr == nil {
+		priorErr = s.probeSockets()
 	}
 
 	var wg sync.WaitGroup
@@ -217,39 +228,54 @@ func (s *Server) Stop(
 	wg.Wait()
 
 	s.udp, s.tcp = nil, nil
-	s.lastErr = errors.Join(udpErr, tcpErr)
-	return s.lastErr
+	stopErr := errors.Join(udpErr, tcpErr)
+	s.lastErr = errors.Join(priorErr, stopErr)
+	return stopErr
 }
 
-// Status reports whether the server is serving, the most recent start
-// attempt and success, and the most recent error. Health is read from
-// the sockets themselves, so an unexpected listener exit flips Serving
-// without any background watcher.
-func (s *Server) Status() Status {
+// start binds UDP and TCP on the same port.
+// Stop permits another start with fresh underlying servers.
+func (s *Server) start(
+	ctx context.Context,
+) (
+	err error,
+) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	status := Status{
-		LastAttemptAt: s.lastAttemptAt,
-		LastSuccessAt: s.lastSuccessAt,
-	}
-	if s.lastErr != nil {
-		status.Error = s.lastErr.Error()
+	if s.udp != nil || s.tcp != nil {
+		return fmt.Errorf("dns: server already started")
 	}
 
-	if s.lastErr == nil && s.udp != nil && s.tcp != nil {
-		if err := s.probeSockets(); err != nil {
-			status.Error = err.Error()
-		} else {
-			status.Serving = true
-		}
+	defer func() { s.lastErr = err }()
+
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
-	return status
+	handler := dns.HandlerFunc(s.serveDNS)
+	udp, address, err := s.startUDP(handler)
+	if err != nil {
+		return err
+	}
+
+	if err := ctx.Err(); err != nil {
+		_ = udp.Close()
+		return err
+	}
+
+	tcp, err := s.startTCP(handler, address)
+	if err != nil {
+		_ = udp.Close()
+		return err
+	}
+
+	s.udp, s.tcp = udp, tcp
+	return nil
 }
 
 // Address returns the address both listeners are bound to: the
-// configured address before Start, and the actual bound address —
+// configured address before startup, and the actual bound address —
 // including an OS-assigned ephemeral port — afterwards.
 func (s *Server) Address() string {
 	s.mu.Lock()
@@ -311,7 +337,7 @@ func (s *Server) startUDP(
 // port conflict a plain synchronous error. The listener is already
 // bound when the loop starts, so ActivateAndServe cannot fail before
 // notifying; the liveness wait only ensures the loop's internal
-// state is initialized before Start reports success and Stop could
+// state is initialized before start reports success and Stop could
 // race it.
 func (s *Server) startTCP(
 	handler dns.Handler,
