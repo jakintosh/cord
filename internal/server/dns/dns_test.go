@@ -232,3 +232,24 @@ func apexQuery(
 
 	return q
 }
+
+func TestServer_RestartServesQueries(t *testing.T) {
+	srv := startLoopbackDNS(t)
+	if err := srv.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.Start(t.Context()); err != nil {
+		t.Fatalf("start after stop: %v", err)
+	}
+	for _, network := range []string{"udp", "tcp"} {
+		client := &dns.Client{Net: network, Timeout: time.Second}
+		query := new(dns.Msg).SetQuestion("looptest.internal.", dns.TypeSOA)
+		response, _, err := client.Exchange(query, srv.Address())
+		if err != nil {
+			t.Fatalf("%s query after restart: %v", network, err)
+		}
+		if response.Rcode != dns.RcodeSuccess || len(response.Answer) != 1 {
+			t.Fatalf("%s response after restart: %v", network, response)
+		}
+	}
+}

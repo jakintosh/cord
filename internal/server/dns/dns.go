@@ -59,7 +59,8 @@ type Status struct {
 // Server is one authoritative DNS server for a Cord network, serving
 // UDP and TCP on a single port. Constructors are synchronous and
 // launch nothing: Start binds both sockets before reporting success,
-// Stop releases them, and the server is restartable afterwards.
+// Stop releases them and permits restart, forcing socket cleanup when the
+// grace period expires. Forced cleanup does not wait for handlers.
 type Server struct {
 	network string
 	zone    string
@@ -67,12 +68,9 @@ type Server struct {
 	service *service.Service
 	log     *slog.Logger
 
-	// mu guards the serving state. The sockets behind the library's
-	// servers are the single source of health: a closed socket is
-	// observable through its raw connection without disturbing live
-	// serving.
+	// mu serializes lifecycle operations and protects status snapshots.
+	// Non-nil handles retain ownership until Stop.
 	mu            sync.Mutex
-	serving       bool
 	udp           *dns.Server
 	tcp           *dns.Server
 	lastAttemptAt time.Time
@@ -133,85 +131,94 @@ func New(
 	}, nil
 }
 
-// Start serves UDP, then TCP on the port UDP bound, and reports
-// success only once both sockets are bound and their loops are
-// serving. TCP binds whatever port UDP landed on, which may be an
-// OS-assigned ephemeral port. A failure at either step shuts down
-// whatever already started, so a returned error means a fully
-// rolled-back start. ctx is honored between the two binds; a bind
-// syscall cannot block, so there is nothing to wait on mid-bind. The
-// server refuses a second Start while serving and is restartable
-// after Stop.
+// Start binds UDP and TCP on the same port. Lifecycle calls are serialized.
+// Stop permits another Start with fresh underlying servers.
 func (s *Server) Start(
 	ctx context.Context,
-) error {
-	if err := s.beginStart(); err != nil {
+) (
+	err error,
+) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.udp != nil || s.tcp != nil {
+		return fmt.Errorf("dns: server already started")
+	}
+
+	s.lastAttemptAt = time.Now()
+	defer func() {
+		s.lastErr = err
+		if err == nil {
+			s.lastSuccessAt = time.Now()
+		}
+	}()
+
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 
 	handler := dns.HandlerFunc(s.serveDNS)
-
 	udp, address, err := s.startUDP(handler)
 	if err != nil {
-		s.endStart(nil, nil, err)
 		return err
 	}
 
 	if err := ctx.Err(); err != nil {
-		_ = udp.Shutdown()
-		s.endStart(nil, nil, err)
+		_ = udp.Close()
 		return err
 	}
 
 	tcp, err := s.startTCP(handler, address)
 	if err != nil {
-		_ = udp.Shutdown()
-		s.endStart(nil, nil, err)
+		_ = udp.Close()
 		return err
 	}
 
-	s.endStart(udp, tcp, nil)
-
+	s.udp, s.tcp = udp, tcp
 	return nil
 }
 
-// Stop shuts down both servers and releases the sockets, bounded by
-// ctx. ShutdownContext stops accepting new requests before waiting for
-// active requests, and returns ctx's error if those requests do not
-// finish in time. Stop is safe to call twice and before Start.
+// Stop shuts down UDP and TCP concurrently, giving each server until ctx
+// expires to finish gracefully. A failed shutdown is followed by Close.
+// Stop releases ownership and returns any shutdown and close errors. Forced
+// socket cleanup does not wait for handlers to return. Repeated calls are no-ops.
 func (s *Server) Stop(
 	ctx context.Context,
 ) error {
 	s.mu.Lock()
-	if !s.serving {
-		s.mu.Unlock()
+	defer s.mu.Unlock()
+
+	if s.udp == nil && s.tcp == nil {
 		return nil
 	}
-	s.serving = false
-	udp, tcp := s.udp, s.tcp
-	s.mu.Unlock()
 
-	var errs []error
-	if udp != nil {
-		if err := udp.ShutdownContext(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("udp: %w", err))
-		}
+	var wg sync.WaitGroup
+	var udpErr, tcpErr error
+	if s.udp != nil {
+		wg.Go(func() {
+			if err := s.udp.ShutdownContext(ctx); err != nil {
+				udpErr = fmt.Errorf("dns: udp shutdown: %w", err)
+				if err := s.udp.Close(); err != nil {
+					udpErr = errors.Join(udpErr, fmt.Errorf("dns: udp force close: %w", err))
+				}
+			}
+		})
 	}
-	if tcp != nil {
-		if err := tcp.ShutdownContext(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("tcp: %w", err))
-		}
+	if s.tcp != nil {
+		wg.Go(func() {
+			if err := s.tcp.ShutdownContext(ctx); err != nil {
+				tcpErr = fmt.Errorf("dns: tcp shutdown: %w", err)
+				if err := s.tcp.Close(); err != nil {
+					tcpErr = errors.Join(tcpErr, fmt.Errorf("dns: tcp force close: %w", err))
+				}
+			}
+		})
 	}
+	wg.Wait()
 
-	s.mu.Lock()
 	s.udp, s.tcp = nil, nil
-	s.mu.Unlock()
-
-	if err := errors.Join(errs...); err != nil {
-		return fmt.Errorf("dns: stop %s: %w", s.address, err)
-	}
-
-	return nil
+	s.lastErr = errors.Join(udpErr, tcpErr)
+	return s.lastErr
 }
 
 // Status reports whether the server is serving, the most recent start
@@ -230,7 +237,7 @@ func (s *Server) Status() Status {
 		status.Error = s.lastErr.Error()
 	}
 
-	if s.serving && s.udp != nil && s.tcp != nil {
+	if s.lastErr == nil && s.udp != nil && s.tcp != nil {
 		if err := s.probeSockets(); err != nil {
 			status.Error = err.Error()
 		} else {
@@ -253,45 +260,6 @@ func (s *Server) Address() string {
 	}
 
 	return s.address
-}
-
-// beginStart refuses a second Start while one is serving and records
-// the attempt time.
-func (s *Server) beginStart() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.serving {
-		return fmt.Errorf("dns: server already started")
-	}
-
-	s.serving = true
-	s.lastAttemptAt = time.Now()
-
-	return nil
-}
-
-// endStart publishes the sockets of a successful start, or unwinds
-// to not-serving so a failed attempt can be retried, and records the
-// outcome.
-func (s *Server) endStart(
-	udp *dns.Server,
-	tcp *dns.Server,
-	err error,
-) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if err != nil {
-		s.serving = false
-		s.lastErr = err
-		return
-	}
-
-	s.udp = udp
-	s.tcp = tcp
-	s.lastSuccessAt = time.Now()
-	s.lastErr = nil
 }
 
 // startUDP binds the UDP socket and launches its serving loop,
