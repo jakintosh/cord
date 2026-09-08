@@ -63,7 +63,10 @@ func TestConverge_FailedStartKeepsIntentAndReportsReason(t *testing.T) {
 
 	backend := wireguardtest.NewMockBackend()
 	backend.CreateErr = errors.New("no such device")
-	rt := newRuntime(t, env, backend, runtime.Options{Interval: time.Hour})
+	rt := newRuntime(t, env, backend, runtime.Options{
+		Interval:   time.Hour,
+		HTTPClient: testutil.NewOfflineHTTPClient(),
+	})
 
 	if err := env.Service.SetNetworkEnabled("testnet", true); err != nil {
 		t.Fatalf("enable network: %v", err)
@@ -101,7 +104,10 @@ func TestRun_RetriesFailedStartOnTick(t *testing.T) {
 
 	backend := wireguardtest.NewMockBackend()
 	backend.CreateErr = errors.New("no such device")
-	rt := newRuntime(t, env, backend, runtime.Options{Interval: 5 * time.Millisecond})
+	rt := newRuntime(t, env, backend, runtime.Options{
+		Interval:   5 * time.Millisecond,
+		HTTPClient: testutil.NewOfflineHTTPClient(),
+	})
 
 	if err := rt.Start(t.Context()); err != nil {
 		t.Fatalf("start runtime: %v", err)
@@ -239,7 +245,9 @@ func TestSetNetworkEnabled_ReportsDivergence(t *testing.T) {
 
 	backend := wireguardtest.NewMockBackend()
 	backend.CreateErr = errors.New("no such device")
-	rt := newRuntime(t, env, backend, runtime.Options{})
+	rt := newRuntime(t, env, backend, runtime.Options{
+		HTTPClient: testutil.NewOfflineHTTPClient(),
+	})
 
 	status, err := rt.SetNetworkEnabled("testnet", true)
 	if err != nil {
@@ -311,7 +319,10 @@ func newRuntime(
 	opts.Service = env.Service
 	opts.WireGuard = wireguard.NewManagerWithBackend(backend)
 	opts.Wake = env.Wake
-	opts.HTTPClient = &http.Client{Timeout: 100 * time.Millisecond}
+	if opts.HTTPClient == nil {
+		// Install and sync tests use real local HTTP servers.
+		opts.HTTPClient = &http.Client{Timeout: 100 * time.Millisecond}
+	}
 	opts.Logger = logging.Discard()
 	if opts.Clock == nil {
 		opts.Clock = func() time.Time { return testutil.FixedTime }

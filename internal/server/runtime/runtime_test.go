@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
@@ -301,6 +302,10 @@ func TestStop_StopsEverything(t *testing.T) {
 }
 
 func TestStop_RetiresReconcileTimer(t *testing.T) {
+	synctest.Test(t, testStopRetiresReconcileTimer)
+}
+
+func testStopRetiresReconcileTimer(t *testing.T) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetwork(t, env.Service)
 	env.Enable(t, "testnet")
@@ -328,7 +333,9 @@ func TestStop_RetiresReconcileTimer(t *testing.T) {
 	env.Backend.Device("testnet").SetPeers()
 	applied := len(env.Backend.AppliedOpsFor("testnet"))
 
+	// Advance virtual time beyond expiry without waiting on wall-clock time.
 	time.Sleep(expiry + 500*time.Millisecond)
+	synctest.Wait()
 
 	if got := len(env.Backend.AppliedOpsFor("testnet")); got != applied {
 		t.Fatalf("peer ops after stop = %d, want %d — the reconcile timer outlived the network", got, applied)

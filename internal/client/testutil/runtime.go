@@ -49,10 +49,9 @@ func SetupRuntimeWithServer(
 	mgr := wireguard.NewManagerWithBackend(backend)
 
 	var server *httptest.Server
-	// A running network syncs immediately on start; when no test server
-	// backs the tunnel address the call must fail fast instead of
-	// waiting out the default dial timeout.
-	httpClient := &http.Client{Timeout: 100 * time.Millisecond}
+	// A running network syncs immediately on start. Without a test server,
+	// keep that sync offline and fail without waiting for a network timeout.
+	httpClient := NewOfflineHTTPClient()
 	if handlerFactory != nil {
 		server = httptest.NewUnstartedServer(nil)
 		server.Config.Handler = handlerFactory(server.Listener.Addr().String())

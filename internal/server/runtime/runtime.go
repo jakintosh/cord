@@ -65,6 +65,10 @@ type Options struct {
 	// DefaultInterval when zero.
 	Interval time.Duration
 
+	// ShutdownTimeout bounds each HTTP or DNS server's graceful shutdown.
+	// Non-positive values use the default of five seconds.
+	ShutdownTimeout time.Duration
+
 	// Clock returns the current time. Defaults to time.Now when nil.
 	Clock func() time.Time
 
@@ -75,16 +79,17 @@ type Options struct {
 // Runtime reconciles the running networks toward the persisted desired
 // state. It is safe for concurrent use.
 type Runtime struct {
-	service     *service.Service
-	wireguard   *wireguard.Manager
-	peer        *peerapi.API
-	invite      *inviteapi.API
-	dnsPort     uint16
-	dnsDisabled bool
-	wake        <-chan string
-	interval    time.Duration
-	clock       func() time.Time
-	log         *slog.Logger
+	service         *service.Service
+	wireguard       *wireguard.Manager
+	peer            *peerapi.API
+	invite          *inviteapi.API
+	dnsPort         uint16
+	dnsDisabled     bool
+	wake            <-chan string
+	interval        time.Duration
+	shutdownTimeout time.Duration
+	clock           func() time.Time
+	log             *slog.Logger
 
 	mu      sync.Mutex
 	running map[string]*Network
@@ -181,18 +186,19 @@ func New(
 	}
 
 	return &Runtime{
-		service:     opts.Service,
-		wireguard:   opts.WireGuard,
-		peer:        opts.Peer,
-		invite:      opts.Invite,
-		dnsPort:     opts.DNSPort,
-		dnsDisabled: opts.DNSDisabled,
-		wake:        opts.Wake,
-		interval:    interval,
-		clock:       clock,
-		log:         log,
-		running:     make(map[string]*Network),
-		reasons:     make(map[string]string),
+		service:         opts.Service,
+		wireguard:       opts.WireGuard,
+		peer:            opts.Peer,
+		invite:          opts.Invite,
+		dnsPort:         opts.DNSPort,
+		dnsDisabled:     opts.DNSDisabled,
+		wake:            opts.Wake,
+		interval:        interval,
+		shutdownTimeout: opts.ShutdownTimeout,
+		clock:           clock,
+		log:             log,
+		running:         make(map[string]*Network),
+		reasons:         make(map[string]string),
 	}, nil
 }
 
@@ -514,15 +520,16 @@ func (r *Runtime) startNetwork(
 	}
 
 	network, err := newNetwork(networkOptions{
-		record:        record,
-		service:       r.service,
-		wireguard:     r.wireguard,
-		mainHandler:   mainHandler,
-		inviteHandler: inviteHandler,
-		dnsPort:       r.dnsPort,
-		dnsDisabled:   r.dnsDisabled,
-		clock:         r.clock,
-		log:           r.log.With("network", record.Name),
+		record:          record,
+		service:         r.service,
+		wireguard:       r.wireguard,
+		mainHandler:     mainHandler,
+		inviteHandler:   inviteHandler,
+		dnsPort:         r.dnsPort,
+		dnsDisabled:     r.dnsDisabled,
+		shutdownTimeout: r.shutdownTimeout,
+		clock:           r.clock,
+		log:             r.log.With("network", record.Name),
 	})
 	if err != nil {
 		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)

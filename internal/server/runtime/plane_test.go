@@ -18,7 +18,7 @@ import (
 
 func TestHTTPStartupRetriesAfterPortReleased(t *testing.T) {
 	env := testutil.SetupService(t)
-	rt, address, _ := newHTTPRuntime(t, env.Service)
+	rt, address, _ := newHTTPRuntime(t, env.Service, 0)
 	blocker, err := net.Listen("tcp", address)
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func TestHTTPStartupRetriesAfterPortReleased(t *testing.T) {
 
 func TestHTTPStopReleasesListener(t *testing.T) {
 	env := testutil.SetupService(t)
-	rt, address, _ := newHTTPRuntime(t, env.Service)
+	rt, address, _ := newHTTPRuntime(t, env.Service, 0)
 	if err := env.Service.SetNetworkEnabled("httptest", true); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,11 @@ func TestHTTPStopWithRequestInFlight(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rt, address, _ := newHTTPRuntime(t, svc)
+			var shutdownTimeout time.Duration
+			if !graceful {
+				shutdownTimeout = 50 * time.Millisecond
+			}
+			rt, address, _ := newHTTPRuntime(t, svc, shutdownTimeout)
 			var releaseOnce sync.Once
 			release := func() { releaseOnce.Do(func() { close(store.release) }) }
 			// Release before runtime/database cleanup, including on test failure.
@@ -89,8 +93,11 @@ func TestHTTPStopWithRequestInFlight(t *testing.T) {
 				t.Fatal("API request did not reach the store")
 			}
 			stopped := make(chan struct{})
+			var stopDuration time.Duration
 			go func() {
+				started := time.Now()
 				rt.Stop()
+				stopDuration = time.Since(started)
 				close(stopped)
 			}()
 			waitFor(t, func() bool {
@@ -103,7 +110,9 @@ func TestHTTPStopWithRequestInFlight(t *testing.T) {
 			}, "HTTP listener to stop accepting connections")
 			select {
 			case <-stopped:
-				t.Fatal("Stop returned without allowing the in-flight request to finish")
+				if graceful {
+					t.Fatal("Stop returned without allowing the in-flight request to finish")
+				}
 			default:
 			}
 			if graceful {
@@ -113,6 +122,9 @@ func TestHTTPStopWithRequestInFlight(t *testing.T) {
 			case <-stopped:
 			case <-time.After(8 * time.Second):
 				t.Fatal("Stop did not finish within the shutdown allowance")
+			}
+			if !graceful && stopDuration < shutdownTimeout {
+				t.Fatalf("Stop returned after %v, before the %v shutdown allowance", stopDuration, shutdownTimeout)
 			}
 			select {
 			case err := <-result:
@@ -152,7 +164,7 @@ func (s *blockedHTTPStore) GetProvisionalPeerByIP(string, net.IP) (*service.Peer
 	return nil, service.ErrNotFound
 }
 
-func newHTTPRuntime(t *testing.T, svc *service.Service) (*runtime.Runtime, string, *wireguardtest.MockBackend) {
+func newHTTPRuntime(t *testing.T, svc *service.Service, shutdownTimeout time.Duration) (*runtime.Runtime, string, *wireguardtest.MockBackend) {
 	t.Helper()
 	port := freeDNSPort(t)
 	_, err := svc.CreateNetwork("httptest", "192.168.1.1",
@@ -164,11 +176,12 @@ func newHTTPRuntime(t *testing.T, svc *service.Service) (*runtime.Runtime, strin
 	}
 	backend := wireguardtest.NewMockBackend()
 	rt, err := runtime.New(runtime.Options{
-		Service:     svc,
-		WireGuard:   wireguard.NewManagerWithBackend(backend),
-		Peer:        peerapi.New(svc, nil),
-		DNSDisabled: true,
-		Interval:    time.Hour,
+		Service:         svc,
+		WireGuard:       wireguard.NewManagerWithBackend(backend),
+		Peer:            peerapi.New(svc, nil),
+		DNSDisabled:     true,
+		Interval:        time.Hour,
+		ShutdownTimeout: shutdownTimeout,
 	})
 	if err != nil {
 		t.Fatal(err)

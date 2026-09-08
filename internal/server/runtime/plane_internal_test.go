@@ -51,6 +51,7 @@ func TestPlaneOwnsOptionalDNS(t *testing.T) {
 				key,
 				http.NotFoundHandler(),
 				wireguard.NewManagerWithBackend(backend),
+				0,
 				logging.Discard(),
 			)
 			if err != nil {
@@ -174,6 +175,7 @@ func TestPlaneReconcileRepairsFailedHTTP(t *testing.T) {
 		key,
 		http.NotFoundHandler(),
 		wireguard.NewManagerWithBackend(backend),
+		0,
 		logging.Discard(),
 	)
 	if err != nil {
@@ -260,6 +262,7 @@ func TestHTTPServerConcurrentLifecycle(
 	t *testing.T,
 ) {
 	server := &httpServer{
+		timeout: defaultShutdownTimeout,
 		address: "127.0.0.1:0",
 		handler: http.NotFoundHandler(),
 		log:     logging.Discard(),
@@ -348,6 +351,7 @@ func TestPlaneConcurrentLifecycle(
 		key,
 		http.NotFoundHandler(),
 		wireguard.NewManagerWithBackend(backend),
+		0,
 		logging.Discard(),
 	)
 	if err != nil {

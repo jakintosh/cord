@@ -18,15 +18,16 @@ import (
 const NetworkReconcileInterval = 5 * time.Minute
 
 type networkOptions struct {
-	record        *service.Network
-	service       *service.Service
-	wireguard     *wireguard.Manager
-	mainHandler   http.Handler
-	inviteHandler http.Handler
-	dnsPort       uint16
-	dnsDisabled   bool
-	clock         func() time.Time
-	log           *slog.Logger
+	record          *service.Network
+	service         *service.Service
+	wireguard       *wireguard.Manager
+	mainHandler     http.Handler
+	inviteHandler   http.Handler
+	dnsPort         uint16
+	dnsDisabled     bool
+	shutdownTimeout time.Duration
+	clock           func() time.Time
+	log             *slog.Logger
 }
 
 // NetworkStatus combines current child resource state with the latest
@@ -76,6 +77,7 @@ func newNetwork(
 		opts.record.PrivateKey,
 		opts.mainHandler,
 		opts.wireguard,
+		opts.shutdownTimeout,
 		opts.log.With("plane", "main"),
 	)
 	if err != nil {
@@ -88,6 +90,7 @@ func newNetwork(
 		opts.record.PrivateKey,
 		opts.inviteHandler,
 		opts.wireguard,
+		opts.shutdownTimeout,
 		opts.log.With("plane", "invite"),
 	)
 	if err != nil {

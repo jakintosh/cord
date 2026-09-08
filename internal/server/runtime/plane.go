@@ -17,7 +17,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-const shutdownTimeout = 5 * time.Second
+const defaultShutdownTimeout = 5 * time.Second
 
 // dnsConfig enables authoritative DNS when constructing a plane.
 type dnsConfig struct {
@@ -31,6 +31,7 @@ type httpServer struct {
 	address string
 	handler http.Handler
 	log     *slog.Logger
+	timeout time.Duration
 
 	mu      sync.Mutex
 	run     *httpRun
@@ -69,7 +70,7 @@ func (s *httpServer) Reconcile(
 		break
 
 	case resource.Failed:
-		stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		stopCtx, cancel := context.WithTimeout(context.Background(), s.timeout)
 		err := s.stopLocked(stopCtx)
 		cancel()
 		if err != nil {
@@ -224,7 +225,8 @@ type Plane struct {
 	http   *httpServer
 	dns    *dns.Server
 
-	mu sync.Mutex
+	mu      sync.Mutex
+	timeout time.Duration
 }
 
 // newPlane constructs configured wrappers without starting any resources.
@@ -234,11 +236,15 @@ func newPlane(
 	privateKey string,
 	handler http.Handler,
 	wg *wireguard.Manager,
+	timeout time.Duration,
 	log *slog.Logger,
 ) (
 	*Plane,
 	error,
 ) {
+	if timeout <= 0 {
+		timeout = defaultShutdownTimeout
+	}
 	route, err := netaddr.InterfaceRouteFromCidr(config.Cidr)
 	if err != nil {
 		return nil, fmt.Errorf("plane address: %w", err)
@@ -266,6 +272,7 @@ func newPlane(
 			address: netaddr.Endpoint(route.IP, config.ApiPort),
 			handler: handler,
 			log:     log,
+			timeout: timeout,
 		}
 	}
 
@@ -288,10 +295,11 @@ func newPlane(
 	}
 
 	return &Plane{
-		config: config,
-		device: device,
-		http:   httpSrv,
-		dns:    dnsSrv,
+		config:  config,
+		device:  device,
+		http:    httpSrv,
+		dns:     dnsSrv,
+		timeout: timeout,
 	}, nil
 }
 
@@ -351,13 +359,13 @@ func (p *Plane) Stop() error {
 	var errs []error
 
 	if p.dns != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 		errs = append(errs, p.dns.Stop(ctx))
 		cancel()
 	}
 
 	if p.http != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 		errs = append(errs, p.http.Stop(ctx))
 		cancel()
 	}
