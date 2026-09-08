@@ -64,12 +64,12 @@ func TestPlaneOwnsOptionalDNS(t *testing.T) {
 				status.DNS.State != want || status.HTTP.State != resource.Stopped {
 				t.Fatalf("initial status = %+v", status)
 			}
-			defer p.stop()
-			if err := p.start(t.Context()); err != nil {
+			defer p.Stop()
+			if err := p.Reconcile(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			device, httpWrapper, dnsWrapper := p.device, p.http, p.dns
-			if err := p.reconcile(); err != nil {
+			if err := p.Reconcile(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			if enabled {
@@ -94,7 +94,7 @@ func TestPlaneOwnsOptionalDNS(t *testing.T) {
 				}
 				deviceErr := errors.New("device unavailable")
 				backend.CreateErr = deviceErr
-				repairErr := p.reconcile()
+				repairErr := p.Reconcile(t.Context())
 				if !errors.Is(repairErr, deviceErr) {
 					t.Fatalf("device failure was lost: %v", repairErr)
 				}
@@ -120,7 +120,7 @@ func TestPlaneOwnsOptionalDNS(t *testing.T) {
 				case <-time.After(time.Second):
 					t.Fatal("HTTP did not exit")
 				}
-				if err := p.reconcile(); !errors.Is(err, deviceErr) || !errors.Is(err, p.dns.Status().Error) {
+				if err := p.Reconcile(t.Context()); !errors.Is(err, deviceErr) || !errors.Is(err, p.dns.Status().Error) {
 					t.Fatalf("resource failures were not joined: %v", err)
 				}
 				if p.Status().HTTP.State != resource.Running {
@@ -129,21 +129,21 @@ func TestPlaneOwnsOptionalDNS(t *testing.T) {
 				if err := blocker.Close(); err != nil {
 					t.Fatal(err)
 				}
-				if err := p.reconcile(); !errors.Is(err, deviceErr) {
+				if err := p.Reconcile(t.Context()); !errors.Is(err, deviceErr) {
 					t.Fatalf("device failure was lost during DNS recovery: %v", err)
 				}
 				if status := p.Status().DNS; status.State != resource.Running || status.Error != nil {
 					t.Fatalf("recovered DNS status = %+v", status)
 				}
 				backend.CreateErr = nil
-				if err := p.reconcile(); err != nil {
+				if err := p.Reconcile(t.Context()); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if p.device != device || p.http != httpWrapper || p.dns != dnsWrapper {
 				t.Fatal("reconciliation replaced a persistent wrapper or healthy device")
 			}
-			if err := p.stop(); err != nil {
+			if err := p.Stop(); err != nil {
 				t.Fatal(err)
 			}
 			status := p.Status()
@@ -179,8 +179,8 @@ func TestPlaneReconcileRepairsFailedHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = p.stop() })
-	if err := p.start(t.Context()); err != nil {
+	t.Cleanup(func() { _ = p.Stop() })
+	if err := p.Reconcile(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	wrapper, device, run := p.http, p.device, p.http.run
@@ -192,7 +192,7 @@ func TestPlaneReconcileRepairsFailedHTTP(t *testing.T) {
 	}
 	address := run.server.Addr
 	p.http.address = address // Reuse the ephemeral port for replacement attempts.
-	if err := p.reconcile(); err != nil {
+	if err := p.Reconcile(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if p.Status().WireGuard.State != resource.Running || p.device != device {
@@ -223,7 +223,7 @@ func TestPlaneReconcileRepairsFailedHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer blocker.Close()
-	if err := p.reconcile(); err == nil {
+	if err := p.Reconcile(t.Context()); err == nil {
 		t.Fatal("expected blocked restart")
 	}
 	if status := p.Status().HTTP; status.State != resource.Failed || status.Error == nil {
@@ -235,7 +235,7 @@ func TestPlaneReconcileRepairsFailedHTTP(t *testing.T) {
 	if err := blocker.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.reconcile(); err != nil {
+	if err := p.Reconcile(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if status := p.Status().HTTP; status.State != resource.Running || status.Error != nil {
@@ -332,4 +332,95 @@ func TestHTTPServerConcurrentLifecycle(
 		t.Fatalf("listener survived shutdown: %v", err)
 	}
 	listener.Close()
+}
+
+func TestPlaneConcurrentLifecycle(
+	t *testing.T,
+) {
+	key, err := wireguard.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := wireguardtest.NewMockBackend()
+	plane, err := newPlane(
+		service.Plane{Name: "concurrent", Cidr: "127.0.0.0/24"},
+		nil,
+		key,
+		http.NotFoundHandler(),
+		wireguard.NewManagerWithBackend(backend),
+		logging.Discard(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = plane.Stop() })
+	device, server := plane.device, plane.http
+
+	// Initial reconciliation attempts HTTP even if device creation fails.
+	createErr := errors.New("device unavailable")
+	backend.CreateErr = createErr
+	if err := plane.Reconcile(t.Context()); !errors.Is(err, createErr) {
+		t.Fatalf("initial reconciliation = %v", err)
+	}
+	if status := plane.Status(); status.WireGuard.State != resource.Failed || status.HTTP.State != resource.Running {
+		t.Fatalf("initial failure prevented HTTP startup: %+v", status)
+	}
+	if err := plane.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	backend.CreateErr = nil
+	if err := plane.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range 4 {
+		wg.Go(func() {
+			<-start
+			for range 10 {
+				if err := plane.Reconcile(t.Context()); err != nil {
+					t.Errorf("concurrent reconcile: %v", err)
+				}
+			}
+		})
+		wg.Go(func() {
+			<-start
+			for range 10 {
+				if err := plane.Stop(); err != nil {
+					t.Errorf("concurrent stop: %v", err)
+				}
+			}
+		})
+		wg.Go(func() {
+			<-start
+			for range 10 {
+				status := plane.Status()
+				if status.WireGuard.Error != nil || status.HTTP.Error != nil ||
+					status.WireGuard.State != status.HTTP.State ||
+					(status.HTTP.State != resource.Running && status.HTTP.State != resource.Stopped) ||
+					status.DNS.State != resource.Disabled {
+					t.Errorf("snapshot overlapped a lifecycle sequence: %+v", status)
+				}
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	if err := plane.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if status := plane.Status(); status.WireGuard.State != resource.Stopped || status.HTTP.State != resource.Stopped {
+		t.Fatalf("stopped status = %+v", status)
+	}
+	if err := plane.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if status := plane.Status(); status.WireGuard.State != resource.Running || status.HTTP.State != resource.Running {
+		t.Fatalf("restarted status = %+v", status)
+	}
+	if plane.device != device || plane.http != server {
+		t.Fatal("lifecycle calls replaced configured wrappers")
+	}
 }

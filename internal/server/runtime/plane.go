@@ -223,7 +223,8 @@ type Plane struct {
 	device *wireguard.Device
 	http   *httpServer
 	dns    *dns.Server
-	ctx    context.Context
+
+	mu sync.Mutex
 }
 
 // newPlane constructs configured wrappers without starting any resources.
@@ -294,9 +295,12 @@ func newPlane(
 	}, nil
 }
 
-// Status collects child status without changing resources. Network serializes
-// this read with plane startup, shutdown, and reconciliation.
+// Status collects child status without changing resources. The plane mutex
+// serializes the snapshot with its reconciliation and shutdown sequences.
 func (p *Plane) Status() PlaneStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	status := PlaneStatus{
 		WireGuard: p.device.Status(),
 		DNS: resource.Status{
@@ -315,34 +319,35 @@ func (p *Plane) Status() PlaneStatus {
 	return status
 }
 
-// start creates the device, then starts the configured servers. Network owns
-// rollback if any step fails, including cleanup of a partially started plane.
-func (p *Plane) start(
+// Reconcile attempts every resource, starting with the interface, and joins failures.
+func (p *Plane) Reconcile(
 	ctx context.Context,
 ) error {
-	p.ctx = ctx
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	var errs []error
 
 	if err := p.device.Reconcile(ctx); err != nil {
-		return fmt.Errorf("device %q: %w", p.config.Name, err)
-	}
-
-	if p.http != nil {
-		if err := p.http.Reconcile(ctx); err != nil {
-			return err
-		}
+		errs = append(errs, fmt.Errorf("device %q: %w", p.config.Name, err))
 	}
 
 	if p.dns != nil {
-		if err := p.dns.Reconcile(ctx); err != nil {
-			return err
-		}
+		errs = append(errs, p.dns.Reconcile(ctx))
 	}
 
-	return nil
+	if p.http != nil {
+		errs = append(errs, p.http.Reconcile(ctx))
+	}
+
+	return errors.Join(errs...)
 }
 
-// stop releases servers before the device, retaining their configured wrappers.
-func (p *Plane) stop() error {
+// Stop releases servers before the device, retaining their configured wrappers.
+func (p *Plane) Stop() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	var errs []error
 
 	if p.dns != nil {
@@ -361,25 +366,6 @@ func (p *Plane) stop() error {
 		if err := p.device.Stop(); err != nil {
 			errs = append(errs, fmt.Errorf("device close %q: %w", p.config.Name, err))
 		}
-	}
-
-	return errors.Join(errs...)
-}
-
-// reconcile attempts every resource, starting with the interface, and joins failures.
-func (p *Plane) reconcile() error {
-	var errs []error
-
-	if err := p.device.Reconcile(p.ctx); err != nil {
-		errs = append(errs, fmt.Errorf("device %q: %w", p.config.Name, err))
-	}
-
-	if p.dns != nil {
-		errs = append(errs, p.dns.Reconcile(p.ctx))
-	}
-
-	if p.http != nil {
-		errs = append(errs, p.http.Reconcile(p.ctx))
 	}
 
 	return errors.Join(errs...)

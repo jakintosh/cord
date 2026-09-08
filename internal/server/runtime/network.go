@@ -33,6 +33,7 @@ type Network struct {
 	dnsPort     uint16
 	dnsDisabled bool
 
+	ctx    context.Context
 	cancel context.CancelFunc
 
 	// mu is held for the whole of reconcile, so stop() waits for a pass
@@ -52,7 +53,7 @@ func (n *Network) start(
 	mainHandler http.Handler,
 	inviteHandler http.Handler,
 ) error {
-	ctx, n.cancel = context.WithCancel(ctx)
+	n.ctx, n.cancel = context.WithCancel(ctx)
 
 	// rollback undoes a partially successful boot: it cancels the
 	// network context and stops every component in the same order as
@@ -96,11 +97,11 @@ func (n *Network) start(
 		return rollback(fmt.Errorf("invite plane: %w", err))
 	}
 
-	if err := n.main.start(ctx); err != nil {
+	if err := n.main.Reconcile(n.ctx); err != nil {
 		return rollback(fmt.Errorf("main plane: %w", err))
 	}
 
-	if err := n.invite.start(ctx); err != nil {
+	if err := n.invite.Reconcile(n.ctx); err != nil {
 		return rollback(fmt.Errorf("invite plane: %w", err))
 	}
 
@@ -130,10 +131,10 @@ func (n *Network) stop() error {
 func (n *Network) stopComponents() error {
 	var errs []error
 	if n.main != nil {
-		errs = append(errs, n.main.stop())
+		errs = append(errs, n.main.Stop())
 	}
 	if n.invite != nil {
-		errs = append(errs, n.invite.stop())
+		errs = append(errs, n.invite.Stop())
 	}
 	return errors.Join(errs...)
 }
@@ -167,12 +168,12 @@ func (n *Network) reconcile() {
 		n.rearm(now, expiry)
 	}
 
-	mainErr := n.main.reconcile()
+	mainErr := n.main.Reconcile(n.ctx)
 	if mainErr != nil {
 		mainErr = fmt.Errorf("main plane: %w", mainErr)
 	}
 
-	inviteErr := n.invite.reconcile()
+	inviteErr := n.invite.Reconcile(n.ctx)
 	if inviteErr != nil {
 		inviteErr = fmt.Errorf("invite plane: %w", inviteErr)
 	}
