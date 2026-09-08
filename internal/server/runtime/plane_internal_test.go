@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -252,4 +253,83 @@ func TestPlaneReconcileRepairsFailedHTTP(t *testing.T) {
 	if p.http != wrapper || p.device != device || len(backend.CreateCalls) != 2 {
 		t.Fatal("repair replaced wrapper or device")
 	}
+}
+
+// The HTTP wrapper is private; calls exercise its public lifecycle methods.
+func TestHTTPServerConcurrentLifecycle(
+	t *testing.T,
+) {
+	server := &httpServer{
+		address: "127.0.0.1:0",
+		handler: http.NotFoundHandler(),
+		log:     logging.Discard(),
+	}
+	t.Cleanup(func() { _ = server.Stop(context.Background()) })
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range 8 {
+		wg.Go(func() {
+			<-start
+			if err := server.Reconcile(t.Context()); err != nil {
+				t.Errorf("concurrent reconcile: %v", err)
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	start = make(chan struct{})
+	for range 4 {
+		wg.Go(func() {
+			<-start
+			for range 10 {
+				if err := server.Reconcile(t.Context()); err != nil {
+					t.Errorf("reconcile during shutdown: %v", err)
+				}
+			}
+		})
+		wg.Go(func() {
+			<-start
+			for range 10 {
+				if err := server.Stop(t.Context()); err != nil {
+					t.Errorf("concurrent stop: %v", err)
+				}
+			}
+		})
+		wg.Go(func() {
+			<-start
+			for range 10 {
+				status := server.Status()
+				if status.Error != nil || (status.State != resource.Running && status.State != resource.Stopped) {
+					t.Errorf("concurrent status: %+v", status)
+				}
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	if err := server.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	address := server.run.server.Addr
+	client := &http.Client{Timeout: time.Second}
+	response, err := client.Get("http://" + address)
+	if err != nil {
+		t.Fatalf("request after concurrent lifecycle calls: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("response = %d, want 404", response.StatusCode)
+	}
+
+	if err := server.Stop(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		t.Fatalf("listener survived shutdown: %v", err)
+	}
+	listener.Close()
 }

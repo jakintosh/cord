@@ -5,6 +5,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -256,6 +257,75 @@ func TestServer_ReconcileServesQueries(t *testing.T) {
 		}
 		if response.Rcode != dns.RcodeSuccess || len(response.Answer) != 1 {
 			t.Fatalf("%s response after restart: %v", network, response)
+		}
+	}
+}
+
+func TestServer_ConcurrentLifecycle(
+	t *testing.T,
+) {
+	srv := startLoopbackDNS(t)
+	if err := srv.Stop(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range 8 {
+		wg.Go(func() {
+			<-start
+			if err := srv.Reconcile(t.Context()); err != nil {
+				t.Errorf("concurrent reconcile: %v", err)
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	start = make(chan struct{})
+	for range 4 {
+		wg.Go(func() {
+			<-start
+			for range 10 {
+				if err := srv.Reconcile(t.Context()); err != nil {
+					t.Errorf("reconcile during shutdown: %v", err)
+				}
+			}
+		})
+		wg.Go(func() {
+			<-start
+			for range 10 {
+				if err := srv.Stop(t.Context()); err != nil {
+					t.Errorf("concurrent stop: %v", err)
+				}
+			}
+		})
+		wg.Go(func() {
+			<-start
+			for range 10 {
+				status := srv.Status()
+				if status.Error != nil || (status.State != resource.Running && status.State != resource.Stopped) {
+					t.Errorf("concurrent status: %+v", status)
+				}
+				_ = srv.Address()
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	if err := srv.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, network := range []string{"udp", "tcp"} {
+		client := &dns.Client{Net: network, Timeout: time.Second}
+		query := new(dns.Msg).SetQuestion("looptest.internal.", dns.TypeSOA)
+		response, _, err := client.Exchange(query, srv.Address())
+		if err != nil {
+			t.Fatalf("%s query after concurrent lifecycle calls: %v", network, err)
+		}
+		if response.Rcode != dns.RcodeSuccess || len(response.Answer) != 1 {
+			t.Fatalf("%s response = %v", network, response)
 		}
 	}
 }

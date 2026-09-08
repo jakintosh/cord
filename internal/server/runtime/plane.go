@@ -50,6 +50,55 @@ func (s *httpServer) Status() resource.Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.statusLocked()
+}
+
+// Reconcile ensures the configured server is running. The mutex serializes
+// the entire check, cleanup, and start sequence with other resource calls.
+func (s *httpServer) Reconcile(
+	ctx context.Context,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	switch s.statusLocked().State {
+	case resource.Running:
+		return nil
+
+	case resource.Stopped:
+		break
+
+	case resource.Failed:
+		stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		err := s.stopLocked(stopCtx)
+		cancel()
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := s.startLocked(ctx); err != nil {
+		return err
+	}
+
+	s.log.Info("http recovered", "address", s.address)
+
+	return nil
+}
+
+// Stop releases the underlying server, joining its serving loop. A failure
+// already observed before cleanup remains available until a successful start.
+func (s *httpServer) Stop(
+	ctx context.Context,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.stopLocked(ctx)
+}
+
+// statusLocked requires mu and reads availability without changing state.
+func (s *httpServer) statusLocked() resource.Status {
 	if s.run != nil {
 		select {
 		case <-s.run.done:
@@ -76,81 +125,12 @@ func (s *httpServer) Status() resource.Status {
 	}
 }
 
-// Reconcile ensures the configured server is running. The owner serializes
-// reconciliation with other lifecycle calls.
-func (s *httpServer) Reconcile(
-	ctx context.Context,
-) error {
-	switch s.Status().State {
-	case resource.Running:
-		return nil
-	case resource.Stopped:
-		break
-	case resource.Failed:
-		stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		err := s.Stop(stopCtx)
-		cancel()
-		if err != nil {
-			return err
-		}
-	}
-
-	if err := s.start(ctx); err != nil {
-		return err
-	}
-
-	s.log.Info("http recovered", "address", s.address)
-
-	return nil
-}
-
-// Stop releases the underlying server, joining its serving loop. A failure
-// already observed before cleanup remains available until a successful start.
-func (s *httpServer) Stop(
-	ctx context.Context,
-) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.run == nil {
-		return nil
-	}
-	run := s.run
-
-	select {
-	case <-run.done:
-		s.lastErr = run.err
-	default:
-		// still running, no run.err
-	}
-
-	run.cancel()
-
-	err := run.server.Shutdown(ctx)
-	if err != nil {
-		err = fmt.Errorf("http shutdown: %w", err)
-		if closeErr := run.server.Close(); closeErr != nil {
-			err = errors.Join(err, fmt.Errorf("http force close: %w", closeErr))
-		}
-	}
-
-	<-run.done
-
-	s.run = nil
-	s.lastErr = errors.Join(s.lastErr, err)
-
-	return err
-}
-
-// start binds the configured address and starts a fresh underlying server.
-func (s *httpServer) start(
+// startLocked requires mu and starts a fresh underlying server.
+func (s *httpServer) startLocked(
 	ctx context.Context,
 ) (
 	err error,
 ) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.run != nil {
 		return fmt.Errorf("http: server already started")
 	}
@@ -194,6 +174,40 @@ func (s *httpServer) start(
 	}()
 
 	return nil
+}
+
+// stopLocked requires mu and releases the current serving attempt.
+func (s *httpServer) stopLocked(
+	ctx context.Context,
+) error {
+	if s.run == nil {
+		return nil
+	}
+	run := s.run
+
+	select {
+	case <-run.done:
+		s.lastErr = run.err
+	default:
+		// still running, no run.err
+	}
+
+	run.cancel()
+
+	err := run.server.Shutdown(ctx)
+	if err != nil {
+		err = fmt.Errorf("http shutdown: %w", err)
+		if closeErr := run.server.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("http force close: %w", closeErr))
+		}
+	}
+
+	<-run.done
+
+	s.run = nil
+	s.lastErr = errors.Join(s.lastErr, err)
+
+	return err
 }
 
 // PlaneStatus is a snapshot of the plane's configured child resources.

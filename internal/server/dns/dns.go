@@ -129,55 +129,34 @@ func (s *Server) Status() resource.Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.lastErr != nil {
-		return resource.Status{
-			State: resource.Failed,
-			Error: s.lastErr,
-		}
-	}
-
-	if s.udp == nil && s.tcp == nil {
-		return resource.Status{
-			State: resource.Stopped,
-		}
-	}
-
-	if err := s.probeSockets(); err != nil {
-		return resource.Status{
-			State: resource.Failed,
-			Error: err,
-		}
-	}
-
-	return resource.Status{
-		State: resource.Running,
-	}
+	return s.statusLocked()
 }
 
-// Reconcile ensures the configured server is running. The owner serializes
-// reconciliation with other lifecycle calls.
+// Reconcile ensures the configured server is running. The mutex serializes
+// the entire check, cleanup, and start sequence with other resource calls.
 func (s *Server) Reconcile(
 	ctx context.Context,
 ) error {
-	switch s.Status().State {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	switch s.statusLocked().State {
 	case resource.Running:
 		return nil
 	case resource.Stopped:
 		break
 	case resource.Failed:
 		stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		err := s.Stop(stopCtx)
+		err := s.stopLocked(stopCtx)
 		cancel()
 		if err != nil {
 			return err
 		}
 	}
 
-	if err := s.start(ctx); err != nil {
+	if err := s.startLocked(ctx); err != nil {
 		return err
 	}
-
-	s.log.Info("dns recovered", "address", s.Address())
 
 	return nil
 }
@@ -192,6 +171,92 @@ func (s *Server) Stop(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.stopLocked(ctx)
+}
+
+// Address returns the address both listeners are bound to: the
+// configured address before startup, and the actual bound address —
+// including an OS-assigned ephemeral port — afterwards.
+func (s *Server) Address() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.udp != nil && s.udp.PacketConn != nil {
+		return s.udp.PacketConn.LocalAddr().String()
+	}
+
+	return s.address
+}
+
+// statusLocked requires mu and reads availability without changing state.
+func (s *Server) statusLocked() resource.Status {
+	if s.lastErr != nil {
+		return resource.Status{
+			State: resource.Failed,
+			Error: s.lastErr,
+		}
+	}
+
+	if s.udp == nil && s.tcp == nil {
+		return resource.Status{
+			State: resource.Stopped,
+		}
+	}
+
+	if err := s.probeSocketsLocked(); err != nil {
+		return resource.Status{
+			State: resource.Failed,
+			Error: err,
+		}
+	}
+
+	return resource.Status{
+		State: resource.Running,
+	}
+}
+
+// startLocked requires mu and binds UDP and TCP on the same port.
+func (s *Server) startLocked(
+	ctx context.Context,
+) (
+	err error,
+) {
+	if s.udp != nil || s.tcp != nil {
+		return fmt.Errorf("dns: server already started")
+	}
+
+	defer func() { s.lastErr = err }()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	handler := dns.HandlerFunc(s.serveDNS)
+	udp, address, err := s.startUDP(handler)
+	if err != nil {
+		return err
+	}
+
+	if err := ctx.Err(); err != nil {
+		_ = udp.Close()
+		return err
+	}
+
+	tcp, err := s.startTCP(handler, address)
+	if err != nil {
+		_ = udp.Close()
+		return err
+	}
+
+	s.udp, s.tcp = udp, tcp
+	s.log.Info("dns recovered", "address", address)
+	return nil
+}
+
+// stopLocked requires mu and releases the current serving attempt.
+func (s *Server) stopLocked(
+	ctx context.Context,
+) error {
 	if s.udp == nil && s.tcp == nil {
 		return nil
 	}
@@ -200,7 +265,7 @@ func (s *Server) Stop(
 	// establishes recovery. A normal stop of healthy listeners remains stopped.
 	priorErr := s.lastErr
 	if priorErr == nil {
-		priorErr = s.probeSockets()
+		priorErr = s.probeSocketsLocked()
 	}
 
 	var wg sync.WaitGroup
@@ -233,59 +298,44 @@ func (s *Server) Stop(
 	return stopErr
 }
 
-// start binds UDP and TCP on the same port.
-// Stop permits another start with fresh underlying servers.
-func (s *Server) start(
-	ctx context.Context,
-) (
-	err error,
+// socketsLocked requires mu and returns the raw UDP and TCP sockets behind the serving
+// loops, or nils when they are not available.
+func (s *Server) socketsLocked() (
+	*net.UDPConn,
+	*net.TCPListener,
 ) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	var udpConn *net.UDPConn
+	var tcpLn *net.TCPListener
 
-	if s.udp != nil || s.tcp != nil {
-		return fmt.Errorf("dns: server already started")
+	if s.udp != nil {
+		udpConn, _ = s.udp.PacketConn.(*net.UDPConn)
+	}
+	if s.tcp != nil {
+		tcpLn, _ = s.tcp.Listener.(*net.TCPListener)
 	}
 
-	defer func() { s.lastErr = err }()
-
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	handler := dns.HandlerFunc(s.serveDNS)
-	udp, address, err := s.startUDP(handler)
-	if err != nil {
-		return err
-	}
-
-	if err := ctx.Err(); err != nil {
-		_ = udp.Close()
-		return err
-	}
-
-	tcp, err := s.startTCP(handler, address)
-	if err != nil {
-		_ = udp.Close()
-		return err
-	}
-
-	s.udp, s.tcp = udp, tcp
-	return nil
+	return udpConn, tcpLn
 }
 
-// Address returns the address both listeners are bound to: the
-// configured address before startup, and the actual bound address —
-// including an OS-assigned ephemeral port — afterwards.
-func (s *Server) Address() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// probeSocketsLocked requires mu and reports the first failure among the serving loops'
+// sockets. A closed connection fails its raw-control probe
+// immediately and without side effects on live serving.
+func (s *Server) probeSocketsLocked() error {
+	udpConn, tcpLn := s.socketsLocked()
 
-	if s.udp != nil && s.udp.PacketConn != nil {
-		return s.udp.PacketConn.LocalAddr().String()
+	if udpConn != nil {
+		if err := probeRaw(udpConn); err != nil {
+			return fmt.Errorf("udp socket: %w", err)
+		}
 	}
 
-	return s.address
+	if tcpLn != nil {
+		if err := probeRaw(tcpLn); err != nil {
+			return fmt.Errorf("tcp socket: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // startUDP binds the UDP socket and launches its serving loop,
@@ -369,46 +419,6 @@ func (s *Server) startTCP(
 	<-live
 
 	return srv, nil
-}
-
-// sockets returns the raw UDP and TCP sockets behind the serving
-// loops, or nils when they are not available.
-func (s *Server) sockets() (
-	*net.UDPConn,
-	*net.TCPListener,
-) {
-	var udpConn *net.UDPConn
-	var tcpLn *net.TCPListener
-
-	if s.udp != nil {
-		udpConn, _ = s.udp.PacketConn.(*net.UDPConn)
-	}
-	if s.tcp != nil {
-		tcpLn, _ = s.tcp.Listener.(*net.TCPListener)
-	}
-
-	return udpConn, tcpLn
-}
-
-// probeSockets reports the first failure among the serving loops'
-// sockets. A closed connection fails its raw-control probe
-// immediately and without side effects on live serving.
-func (s *Server) probeSockets() error {
-	udpConn, tcpLn := s.sockets()
-
-	if udpConn != nil {
-		if err := probeRaw(udpConn); err != nil {
-			return fmt.Errorf("udp socket: %w", err)
-		}
-	}
-
-	if tcpLn != nil {
-		if err := probeRaw(tcpLn); err != nil {
-			return fmt.Errorf("tcp socket: %w", err)
-		}
-	}
-
-	return nil
 }
 
 // probeRaw runs a no-op control operation on the socket's raw
