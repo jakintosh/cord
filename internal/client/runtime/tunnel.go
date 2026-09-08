@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -56,7 +57,7 @@ func (t *Tunnel) start(
 		ListenPort:  t.listenPort,
 	})
 	if err != nil {
-		return fmt.Errorf("create device %q: %w", t.name, err)
+		return errors.Join(fmt.Errorf("create device %q: %w", t.name, err), t.stop())
 	}
 
 	if err := t.device.SetPeers(wireguard.PeerConfig{
@@ -66,27 +67,29 @@ func (t *Tunnel) start(
 		EndpointPolicy:      wireguard.EndpointFixed,
 		PersistentKeepalive: int(t.keepalive / time.Second),
 	}); err != nil {
-		_ = t.device.Close()
+		_ = t.device.Stop()
 		return fmt.Errorf("set server peer on %q: %w", t.name, err)
 	}
 
 	t.apiAddr, err = netaddr.EndpointFromCIDR(t.server.Route, t.server.APIPort)
 	if err != nil {
-		_ = t.device.Close()
+		_ = t.device.Stop()
 		return fmt.Errorf("server api addr for %q: %w", t.name, err)
 	}
 
 	return nil
 }
 
-// stop closes the WireGuard device.
+// stop stops the WireGuard device.
 func (t *Tunnel) stop() error {
 	if t.device == nil {
 		return nil
 	}
 
-	err := t.device.Close()
-	t.device = nil
+	if err := t.device.Stop(); err != nil {
+		return err
+	}
 
-	return err
+	t.device = nil
+	return nil
 }

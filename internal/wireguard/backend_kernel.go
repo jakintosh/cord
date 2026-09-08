@@ -22,13 +22,33 @@ func (b *KernelBackend) CreateDevice(
 	WgDevice,
 	error,
 ) {
-	link, err := kernelEnsureLink(cfg.Name)
+	link, created, err := kernelEnsureLink(cfg.Name)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := kernelSyncAddress(link, cfg.Route); err != nil {
+	handle := &kernelDeviceHandle{name: cfg.Name}
+	if err := b.initializeDevice(link, cfg); err != nil {
+		// Only remove an interface allocated by this attempt.
+		if created {
+			if closeErr := handle.Close(); closeErr != nil {
+				return handle, errors.Join(err, closeErr)
+			}
+		}
 		return nil, err
+	}
+
+	return handle, nil
+}
+
+// initializeDevice configures and brings up the selected kernel interface.
+// CreateDevice decides whether a failed attempt owns the interface's cleanup.
+func (b *KernelBackend) initializeDevice(
+	link netlink.Link,
+	cfg DeviceConfig,
+) error {
+	if err := kernelSyncAddress(link, cfg.Route); err != nil {
+		return err
 	}
 
 	mtu := cfg.MTU
@@ -36,20 +56,20 @@ func (b *KernelBackend) CreateDevice(
 		mtu = defaultMTU
 	}
 	if err := netlink.LinkSetMTU(link, mtu); err != nil {
-		return nil, fmt.Errorf("wireguard: set mtu %s: %w", cfg.Name, err)
+		return fmt.Errorf("wireguard: set mtu %s: %w", cfg.Name, err)
 	}
 
 	privKey, err := parseKey(cfg.PrivateKey)
 	if err != nil {
-		return nil, fmt.Errorf("wireguard: parse key: %w", err)
+		return fmt.Errorf("wireguard: parse key: %w", err)
 	}
 
 	if err := kernelApplyDeviceConfig(cfg.Name, privKey, int(cfg.ListenPort)); err != nil {
-		return nil, err
+		return err
 	}
 
 	if err := netlink.LinkSetUp(link); err != nil {
-		return nil, fmt.Errorf("wireguard: bring %s up: %w", cfg.Name, err)
+		return fmt.Errorf("wireguard: bring %s up: %w", cfg.Name, err)
 	}
 
 	// WireGuard's kernel AllowedIPs select a peer for packets already
@@ -57,10 +77,10 @@ func (b *KernelBackend) CreateDevice(
 	// Install the overlay route so traffic to the server and other peers
 	// reaches this device, matching the userspace Linux backend.
 	if err := kernelSyncNetworkRoute(link, cfg.NetworkCIDR); err != nil {
-		return nil, err
+		return err
 	}
 
-	return &kernelDeviceHandle{name: cfg.Name}, nil
+	return nil
 }
 
 // kernelDeviceHandle is a WgDevice backed by the kernel WireGuard
@@ -73,7 +93,24 @@ func (h *kernelDeviceHandle) Name() string {
 	return h.name
 }
 
-func (h *kernelDeviceHandle) Peers() (
+func (h *kernelDeviceHandle) Check() error {
+	link, err := netlink.LinkByName(h.name)
+	if err != nil {
+		return fmt.Errorf("wireguard: get link %s: %w", h.name, err)
+	}
+
+	if link.Type() != "wireguard" {
+		return fmt.Errorf("wireguard: %s is not a WireGuard interface", h.name)
+	}
+
+	if link.Attrs().Flags&net.FlagUp == 0 {
+		return fmt.Errorf("wireguard: %s is not up", h.name)
+	}
+
+	return nil
+}
+
+func (h *kernelDeviceHandle) GetPeerStatuses() (
 	[]PeerStatus,
 	error,
 ) {
@@ -103,7 +140,7 @@ func (h *kernelDeviceHandle) Peers() (
 	return peers, nil
 }
 
-func (h *kernelDeviceHandle) ApplyPeers(
+func (h *kernelDeviceHandle) ApplyPeerOps(
 	ops []PeerOp,
 ) error {
 	link, err := netlink.LinkByName(h.name)
@@ -126,6 +163,10 @@ func (h *kernelDeviceHandle) Close() error {
 		}
 		return fmt.Errorf("wireguard: get link %s: %w", h.name, err)
 	}
+	if link.Type() != "wireguard" {
+		return fmt.Errorf("wireguard: refusing to remove non-WireGuard interface %s", h.name)
+	}
+
 	downErr := netlink.LinkSetDown(link)
 	deleteErr := netlink.LinkDel(link)
 	if deleteErr == nil {
@@ -164,32 +205,31 @@ func kernelEnsureLink(
 	name string,
 ) (
 	netlink.Link,
+	bool,
 	error,
 ) {
 	link, err := netlink.LinkByName(name)
-
-	// if link found
 	if err == nil {
-		return link, nil
+		if link.Type() != "wireguard" {
+			return nil, false, fmt.Errorf("wireguard: %s is not a WireGuard interface", name)
+		}
+		return link, false, nil
 	}
 
-	// if link errored, but not with notFound error
 	var notFound netlink.LinkNotFoundError
 	if !errors.As(err, &notFound) {
-		return nil, fmt.Errorf("wireguard: get link %s: %w", name, err)
+		return nil, false, fmt.Errorf("wireguard: get link %s: %w", name, err)
 	}
 
-	// link not found, create it
-
-	attr := netlink.NewLinkAttrs()
-	attr.Name = name
-
-	wg := &netlink.Wireguard{LinkAttrs: attr}
+	wg := &netlink.Wireguard{
+		LinkAttrs: netlink.NewLinkAttrs(),
+	}
+	wg.Name = name
 	if err := netlink.LinkAdd(wg); err != nil {
-		return nil, fmt.Errorf("wireguard: create %s: %w", name, err)
+		return nil, false, fmt.Errorf("wireguard: create %s: %w", name, err)
 	}
 
-	return wg, nil
+	return wg, true, nil
 }
 
 // kernelSyncAddress replaces the addresses on link with route. The route is
@@ -262,24 +302,4 @@ func kernelApplyDeviceConfig(
 		return fmt.Errorf("wireguard: configure %s: %w", name, err)
 	}
 	return nil
-}
-
-func (op PeerOp) toWgPeerConfig() wgtypes.PeerConfig {
-	if op.Remove {
-		return wgtypes.PeerConfig{
-			PublicKey: op.Target.PublicKey,
-			Remove:    true,
-		}
-	}
-	cfg := wgtypes.PeerConfig{
-		PublicKey:         op.Target.PublicKey,
-		ReplaceAllowedIPs: true,
-		AllowedIPs:        op.Target.AllowedIPs,
-	}
-	keepalive := op.Target.PersistentKeepalive
-	cfg.PersistentKeepaliveInterval = &keepalive
-	if op.Target.Endpoint != nil {
-		cfg.Endpoint = op.Target.Endpoint
-	}
-	return cfg
 }

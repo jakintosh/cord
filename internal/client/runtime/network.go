@@ -257,7 +257,7 @@ func (n *Network) scan() error {
 
 	now := n.clock()
 
-	devicePeerStatuses, err := n.tunnel.device.Peers()
+	devicePeerStatuses, err := n.tunnel.device.GetPeerStatuses()
 	if err != nil {
 		return refreshScan(fmt.Errorf("peers: %w", err))
 	}
@@ -438,7 +438,8 @@ func (n *Network) getPeerStatuses() (
 	if n.isStopped() {
 		return nil, nil
 	}
-	return n.tunnel.device.Peers()
+
+	return n.tunnel.device.GetPeerStatuses()
 }
 
 // peerHealthy reports whether a peer's last handshake is recent enough

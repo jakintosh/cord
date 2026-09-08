@@ -198,19 +198,18 @@ func (s *httpServer) start(
 
 // PlaneStatus is a snapshot of the plane's configured child resources.
 type PlaneStatus struct {
-	DNS  resource.Status
-	HTTP resource.Status
+	WireGuard resource.Status
+	DNS       resource.Status
+	HTTP      resource.Status
 }
 
 // Plane owns persistent resource wrappers and decides when to recover them.
 type Plane struct {
-	config     service.Plane
-	privateKey string
-	ctx        context.Context
-	log        *slog.Logger
-	device     *wireguard.Device
-	http       *httpServer
-	dns        *dns.Server
+	config service.Plane
+	device *wireguard.Device
+	http   *httpServer
+	dns    *dns.Server
+	ctx    context.Context
 }
 
 // newPlane constructs configured wrappers without starting any resources.
@@ -219,6 +218,7 @@ func newPlane(
 	dnsConfig *dnsConfig,
 	privateKey string,
 	handler http.Handler,
+	wg *wireguard.Manager,
 	log *slog.Logger,
 ) (
 	*Plane,
@@ -227,6 +227,22 @@ func newPlane(
 	route, err := netaddr.InterfaceRouteFromCidr(config.Cidr)
 	if err != nil {
 		return nil, fmt.Errorf("plane address: %w", err)
+	}
+
+	_, networkCIDR, err := net.ParseCIDR(config.Cidr)
+	if err != nil {
+		return nil, err
+	}
+
+	device, err := wg.NewDevice(wireguard.DeviceConfig{
+		Name:        config.Name,
+		PrivateKey:  privateKey,
+		Route:       route,
+		NetworkCIDR: *networkCIDR,
+		ListenPort:  config.WireguardPort,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create device %q: %w", config.Name, err)
 	}
 
 	var httpSrv *httpServer = nil
@@ -257,11 +273,10 @@ func newPlane(
 	}
 
 	return &Plane{
-		config:     config,
-		privateKey: privateKey,
-		http:       httpSrv,
-		dns:        dnsSrv,
-		log:        log,
+		config: config,
+		device: device,
+		http:   httpSrv,
+		dns:    dnsSrv,
 	}, nil
 }
 
@@ -269,6 +284,7 @@ func newPlane(
 // this read with plane startup, shutdown, and reconciliation.
 func (p *Plane) Status() PlaneStatus {
 	status := PlaneStatus{
+		WireGuard: p.device.Status(),
 		DNS: resource.Status{
 			State: resource.Disabled,
 		},
@@ -289,29 +305,11 @@ func (p *Plane) Status() PlaneStatus {
 // rollback if any step fails, including cleanup of a partially started plane.
 func (p *Plane) start(
 	ctx context.Context,
-	wg *wireguard.Manager,
 ) error {
 	p.ctx = ctx
 
-	route, err := netaddr.InterfaceRouteFromCidr(p.config.Cidr)
-	if err != nil {
-		return err
-	}
-
-	_, networkCIDR, err := net.ParseCIDR(p.config.Cidr)
-	if err != nil {
-		return err
-	}
-
-	p.device, err = wg.CreateDevice(wireguard.DeviceConfig{
-		Name:        p.config.Name,
-		PrivateKey:  p.privateKey,
-		Route:       route,
-		NetworkCIDR: *networkCIDR,
-		ListenPort:  p.config.WireguardPort,
-	})
-	if err != nil {
-		return fmt.Errorf("create device %q: %w", p.config.Name, err)
+	if err := p.device.Reconcile(ctx); err != nil {
+		return fmt.Errorf("device %q: %w", p.config.Name, err)
 	}
 
 	if p.http != nil {
@@ -346,18 +344,21 @@ func (p *Plane) stop() error {
 	}
 
 	if p.device != nil {
-		if err := p.device.Close(); err != nil {
+		if err := p.device.Stop(); err != nil {
 			errs = append(errs, fmt.Errorf("device close %q: %w", p.config.Name, err))
 		}
-		p.device = nil
 	}
 
 	return errors.Join(errs...)
 }
 
-// reconcile maintains both children even when one cannot recover.
+// reconcile attempts every resource, starting with the interface, and joins failures.
 func (p *Plane) reconcile() error {
 	var errs []error
+
+	if err := p.device.Reconcile(p.ctx); err != nil {
+		errs = append(errs, fmt.Errorf("device %q: %w", p.config.Name, err))
+	}
 
 	if p.dns != nil {
 		errs = append(errs, p.dns.Reconcile(p.ctx))

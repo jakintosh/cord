@@ -368,7 +368,7 @@ func (r *Runtime) GetPeerStatus(
 
 	live := make(map[string]wireguard.PeerStatus)
 	if running != nil {
-		statuses, err := running.main.device.Peers()
+		statuses, err := running.main.device.GetPeerStatuses()
 		if err != nil {
 			return nil, err
 		}

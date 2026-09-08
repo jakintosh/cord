@@ -77,6 +77,7 @@ func (n *Network) start(
 		dnsOptions,
 		n.record.PrivateKey,
 		mainHandler,
+		wg,
 		n.log.With("plane", "main"),
 	)
 	if err != nil {
@@ -88,17 +89,18 @@ func (n *Network) start(
 		nil,
 		n.record.PrivateKey,
 		inviteHandler,
+		wg,
 		n.log.With("plane", "invite"),
 	)
 	if err != nil {
 		return rollback(fmt.Errorf("invite plane: %w", err))
 	}
 
-	if err := n.main.start(ctx, wg); err != nil {
+	if err := n.main.start(ctx); err != nil {
 		return rollback(fmt.Errorf("main plane: %w", err))
 	}
 
-	if err := n.invite.start(ctx, wg); err != nil {
+	if err := n.invite.start(ctx); err != nil {
 		return rollback(fmt.Errorf("invite plane: %w", err))
 	}
 
@@ -136,9 +138,9 @@ func (n *Network) stopComponents() error {
 	return errors.Join(errs...)
 }
 
-// reconcile is the ONLY code path that writes peer state to devices. It
-// prunes aged-out state, applies the desired peer set to both planes,
-// records the endpoints the main device has seen, and rearms the timer.
+// reconcile recovers plane resources, prunes aged-out state, and supplies
+// the current desired peer set to both planes. It records the endpoints
+// the main device has seen and rearms the timer.
 // A stopped network reconciles no further, so the timer cannot outlive
 // the devices it configures.
 func (n *Network) reconcile() {
@@ -165,6 +167,21 @@ func (n *Network) reconcile() {
 		n.rearm(now, expiry)
 	}
 
+	mainErr := n.main.reconcile()
+	if mainErr != nil {
+		mainErr = fmt.Errorf("main plane: %w", mainErr)
+	}
+
+	inviteErr := n.invite.reconcile()
+	if inviteErr != nil {
+		inviteErr = fmt.Errorf("invite plane: %w", inviteErr)
+	}
+
+	if err := errors.Join(mainErr, inviteErr); err != nil {
+		n.log.Warn("reconcile: plane failed", "err", err)
+		refresh(err)
+	}
+
 	if err := n.service.PruneNetwork(name); err != nil {
 		n.log.Warn("reconcile: prune failed", "err", err)
 		refresh(fmt.Errorf("prune: %w", err))
@@ -182,11 +199,7 @@ func (n *Network) reconcile() {
 		n.log.Warn("reconcile: apply main peers failed", "err", err)
 		refresh(fmt.Errorf("apply main peers: %w", err))
 	} else if err := n.observe(now); err != nil {
-		n.log.Warn(
-			"reconcile: observe failed",
-			"err",
-			err,
-		)
+		n.log.Warn("reconcile: observe failed", "err", err)
 		refresh(err)
 	}
 
@@ -202,21 +215,6 @@ func (n *Network) reconcile() {
 		refresh(fmt.Errorf("apply invite peers: %w", err))
 	}
 
-	mainErr := n.main.reconcile()
-	if mainErr != nil {
-		mainErr = fmt.Errorf("main plane: %w", mainErr)
-	}
-
-	inviteErr := n.invite.reconcile()
-	if inviteErr != nil {
-		inviteErr = fmt.Errorf("invite plane: %w", inviteErr)
-	}
-
-	if err := errors.Join(mainErr, inviteErr); err != nil {
-		n.log.Warn("reconcile: plane failed", "err", err)
-		refresh(err)
-	}
-
 	n.log.Debug("reconcile", "peers", len(mainPeers), "registrations", len(invitePeers))
 
 	refresh(nil)
@@ -228,7 +226,7 @@ func (n *Network) reconcile() {
 func (n *Network) observe(
 	now time.Time,
 ) error {
-	livePeers, err := n.main.device.Peers()
+	livePeers, err := n.main.device.GetPeerStatuses()
 	if err != nil {
 		return fmt.Errorf("read main peers: %w", err)
 	}
@@ -293,9 +291,14 @@ func (n *Network) getActivityStatuses() (
 ) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+
 	main := n.main.Status()
 	invite := n.invite.Status()
-	return n.reconcileStatus, resourceActivity(main.HTTP), resourceActivity(invite.HTTP), resourceActivity(main.DNS)
+
+	return n.reconcileStatus,
+		resourceActivity(main.HTTP),
+		resourceActivity(invite.HTTP),
+		resourceActivity(main.DNS)
 }
 
 // peerHealthy reports whether a peer's last handshake is recent enough

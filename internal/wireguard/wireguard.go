@@ -5,6 +5,8 @@
 package wireguard
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -73,11 +75,8 @@ func NewManagerWithBackend(
 	}
 }
 
-// CreateDevice creates a new WireGuard device, brings it up, and
-// returns the handle. Creating a device implies bringing it up —
-// there is no separate "up" step. Call Close on the returned Device
-// to tear it down.
-func (m *Manager) CreateDevice(
+// NewDevice validates and retains configuration without creating an interface.
+func (m *Manager) NewDevice(
 	cfg DeviceConfig,
 ) (
 	*Device,
@@ -87,17 +86,33 @@ func (m *Manager) CreateDevice(
 		return nil, err
 	}
 
-	_, err := parseKey(cfg.PrivateKey)
-	if err != nil {
-		return nil, fmt.Errorf("wireguard: create device: %w", err)
+	if _, err := parseKey(cfg.PrivateKey); err != nil {
+		return nil, fmt.Errorf("wireguard: device config: %w", err)
 	}
 
-	wgDevice, err := m.backend.CreateDevice(cfg)
+	return newDevice(cfg, m.backend, m.log), nil
+}
+
+// CreateDevice constructs and immediately reconciles a device for callers that
+// need a running interface. If cleanup fails, a non-nil Device accompanies the
+// error and must be closed again by the caller.
+func (m *Manager) CreateDevice(
+	cfg DeviceConfig,
+) (
+	*Device,
+	error,
+) {
+	dev, err := m.NewDevice(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("wireguard: create device: %w", err)
+		return nil, err
 	}
 
-	dev := newDevice(cfg.Name, wgDevice, m.log)
-	dev.log.Debug("device created", "route", cfg.Route.String(), "port", cfg.ListenPort)
+	if err := dev.Reconcile(context.Background()); err != nil {
+		if stopErr := dev.Stop(); stopErr != nil {
+			return dev, errors.Join(err, stopErr)
+		}
+		return nil, err
+	}
+
 	return dev, nil
 }

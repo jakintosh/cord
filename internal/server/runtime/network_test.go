@@ -394,3 +394,45 @@ func createLoopbackNetwork(
 
 	return network
 }
+
+func TestConverge_RecoversDeviceBeforeApplyingPeers(
+	t *testing.T,
+) {
+	env := testutil.SetupRuntime(t)
+	testutil.SeedNetwork(t, env.Service)
+	env.Enable(t, "testnet")
+	original := env.Backend.Device("testnet-i")
+
+	registration, err := env.Service.CreateRegistration(
+		"testnet",
+		"recover",
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := original.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	env.Converge(t, "testnet")
+	if status := networkStatus(t, env.Runtime, "testnet"); status.Reconcile.Error != "" {
+		t.Fatalf("recovery pass reported a peer application failure: %s", status.Reconcile.Error)
+	}
+
+	replacement := env.Backend.Device("testnet-i")
+	if replacement == original {
+		t.Fatal("failed device was not replaced")
+	}
+	key, err := wireguard.PublicKey(registration.Peer.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peers, err := replacement.GetPeerStatuses()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(peers) != 1 || peers[0].PublicKey.String() != key {
+		t.Fatalf("new peer was not applied during the recovery pass: %+v", peers)
+	}
+}

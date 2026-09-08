@@ -8,14 +8,14 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-func TestPlanPeerReconciliation_EmptyBoth(t *testing.T) {
-	ops := planPeerReconciliation(nil, nil)
+func TestPlanPeerOps_EmptyBoth(t *testing.T) {
+	ops := planPeerOps(nil, nil)
 	if len(ops) != 0 {
 		t.Errorf("expected no operations, got %d", len(ops))
 	}
 }
 
-func TestPlanPeerReconciliation_AllNew(t *testing.T) {
+func TestPlanPeerOps_AllNew(t *testing.T) {
 	k1, k2, k3 := mustGenKey(t), mustGenKey(t), mustGenKey(t)
 	desired := []Peer{
 		pcfg(k1, []string{"10.0.0.1/32"}, "", EndpointDynamic, 0),
@@ -23,7 +23,7 @@ func TestPlanPeerReconciliation_AllNew(t *testing.T) {
 		pcfg(k3, []string{"10.0.0.3/32"}, "", EndpointDynamic, 0),
 	}
 
-	ops := planPeerReconciliation(desired, nil)
+	ops := planPeerOps(desired, nil)
 	if len(ops) != 3 {
 		t.Errorf("expected 3 adds, got %d ops", len(ops))
 	}
@@ -34,7 +34,7 @@ func TestPlanPeerReconciliation_AllNew(t *testing.T) {
 	}
 }
 
-func TestPlanPeerReconciliation_AllRemoved(t *testing.T) {
+func TestPlanPeerOps_AllRemoved(t *testing.T) {
 	k1, k2, k3 := mustGenKey(t), mustGenKey(t), mustGenKey(t)
 	observed := []PeerStatus{
 		pstat(k1, []string{"10.0.0.1/32"}, "", 0),
@@ -42,7 +42,7 @@ func TestPlanPeerReconciliation_AllRemoved(t *testing.T) {
 		pstat(k3, []string{"10.0.0.3/32"}, "", 0),
 	}
 
-	ops := planPeerReconciliation(nil, observed)
+	ops := planPeerOps(nil, observed)
 	if len(ops) != 3 {
 		t.Errorf("expected 3 removes, got %d", len(ops))
 	}
@@ -53,7 +53,7 @@ func TestPlanPeerReconciliation_AllRemoved(t *testing.T) {
 	}
 }
 
-func TestPlanPeerReconciliation_ExactMatch(t *testing.T) {
+func TestPlanPeerOps_ExactMatch(t *testing.T) {
 	k1, k2 := mustGenKey(t), mustGenKey(t)
 	desired := []Peer{
 		pcfg(k1, []string{"10.0.0.1/32"}, "", EndpointDynamic, 0),
@@ -64,13 +64,13 @@ func TestPlanPeerReconciliation_ExactMatch(t *testing.T) {
 		pstat(k2, []string{"10.0.0.2/32"}, "", 0),
 	}
 
-	ops := planPeerReconciliation(desired, observed)
+	ops := planPeerOps(desired, observed)
 	if len(ops) != 0 {
 		t.Errorf("expected 0 operations, got %d", len(ops))
 	}
 }
 
-func TestPlanPeerReconciliation_Mixed(t *testing.T) {
+func TestPlanPeerOps_Mixed(t *testing.T) {
 	kA, kB, kC, kD := mustGenKey(t), mustGenKey(t), mustGenKey(t), mustGenKey(t)
 	desired := []Peer{
 		pcfg(kA, []string{"10.0.0.1/32"}, "", EndpointDynamic, 0),
@@ -82,7 +82,7 @@ func TestPlanPeerReconciliation_Mixed(t *testing.T) {
 		pstat(kD, []string{"10.0.0.4/32"}, "", 0),
 	}
 
-	ops := planPeerReconciliation(desired, observed)
+	ops := planPeerOps(desired, observed)
 	if len(ops) != 3 {
 		t.Fatalf("expected 3 operations (2 adds + 1 remove), got %d", len(ops))
 	}
@@ -109,7 +109,7 @@ func TestPlanPeerReconciliation_Mixed(t *testing.T) {
 	}
 }
 
-func TestPlanPeerReconciliation_AllowedIPsChanged(t *testing.T) {
+func TestPlanPeerOps_AllowedIPsChanged(t *testing.T) {
 	k := mustGenKey(t)
 	desired := []Peer{
 		pcfg(k, []string{"10.0.1.0/24"}, "", EndpointDynamic, 0),
@@ -118,7 +118,7 @@ func TestPlanPeerReconciliation_AllowedIPsChanged(t *testing.T) {
 		pstat(k, []string{"10.0.0.0/24"}, "", 0),
 	}
 
-	ops := planPeerReconciliation(desired, observed)
+	ops := planPeerOps(desired, observed)
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 update op, got %d", len(ops))
 	}
@@ -132,7 +132,7 @@ func TestPlanPeerReconciliation_AllowedIPsChanged(t *testing.T) {
 	}
 }
 
-func TestPlanPeerReconciliation_DynamicUpdateStripsEndpoint(t *testing.T) {
+func TestPlanPeerOps_DynamicUpdateStripsEndpoint(t *testing.T) {
 	k := mustGenKey(t)
 	desired := []Peer{
 		pcfg(k, []string{"10.0.1.0/24"}, "1.2.3.4:51820", EndpointDynamic, 0),
@@ -143,7 +143,7 @@ func TestPlanPeerReconciliation_DynamicUpdateStripsEndpoint(t *testing.T) {
 		pstat(k, []string{"10.0.0.0/24"}, "5.6.7.8:51821", 0),
 	}
 
-	ops := planPeerReconciliation(desired, observed)
+	ops := planPeerOps(desired, observed)
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 update op, got %d", len(ops))
 	}
@@ -152,7 +152,7 @@ func TestPlanPeerReconciliation_DynamicUpdateStripsEndpoint(t *testing.T) {
 	}
 }
 
-func TestPlanPeerReconciliation_AllowedIPOrderIgnored(t *testing.T) {
+func TestPlanPeerOps_AllowedIPOrderIgnored(t *testing.T) {
 	k := mustGenKey(t)
 	desired := []Peer{
 		pcfg(k, []string{"10.0.1.0/24", "10.0.0.0/24"}, "", EndpointDynamic, 0),
@@ -161,13 +161,13 @@ func TestPlanPeerReconciliation_AllowedIPOrderIgnored(t *testing.T) {
 		pstat(k, []string{"10.0.0.0/24", "10.0.1.0/24"}, "", 0),
 	}
 
-	ops := planPeerReconciliation(desired, observed)
+	ops := planPeerOps(desired, observed)
 	if len(ops) != 0 {
 		t.Errorf("expected no operations for same CIDRs in different order, got %d", len(ops))
 	}
 }
 
-func TestPlanPeerReconciliation_KeepaliveChanged(t *testing.T) {
+func TestPlanPeerOps_KeepaliveChanged(t *testing.T) {
 	k := mustGenKey(t)
 	desired := []Peer{
 		pcfg(k, []string{"10.0.0.1/32"}, "", EndpointDynamic, 25*time.Second),
@@ -176,7 +176,7 @@ func TestPlanPeerReconciliation_KeepaliveChanged(t *testing.T) {
 		pstat(k, []string{"10.0.0.1/32"}, "", 0),
 	}
 
-	ops := planPeerReconciliation(desired, observed)
+	ops := planPeerOps(desired, observed)
 	if len(ops) != 1 {
 		t.Errorf("expected 1 update op, got %d", len(ops))
 	}
@@ -185,7 +185,7 @@ func TestPlanPeerReconciliation_KeepaliveChanged(t *testing.T) {
 	}
 }
 
-func TestPlanPeerReconciliation_EndpointFixedChanged(t *testing.T) {
+func TestPlanPeerOps_EndpointFixedChanged(t *testing.T) {
 	k := mustGenKey(t)
 	desired := []Peer{
 		pcfg(k, []string{"10.0.0.1/32"}, "1.2.3.4:51820", EndpointFixed, 0),
@@ -194,7 +194,7 @@ func TestPlanPeerReconciliation_EndpointFixedChanged(t *testing.T) {
 		pstat(k, []string{"10.0.0.1/32"}, "5.6.7.8:51821", 0),
 	}
 
-	ops := planPeerReconciliation(desired, observed)
+	ops := planPeerOps(desired, observed)
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 update op, got %d", len(ops))
 	}
@@ -203,7 +203,7 @@ func TestPlanPeerReconciliation_EndpointFixedChanged(t *testing.T) {
 	}
 }
 
-func TestPlanPeerReconciliation_EndpointFixedMatchingNotRewritten(t *testing.T) {
+func TestPlanPeerOps_EndpointFixedMatchingNotRewritten(t *testing.T) {
 	k := mustGenKey(t)
 	desired := []Peer{
 		pcfg(k, []string{"10.0.1.0/24"}, "1.2.3.4:51820", EndpointFixed, 0),
@@ -213,7 +213,7 @@ func TestPlanPeerReconciliation_EndpointFixedMatchingNotRewritten(t *testing.T) 
 		pstat(k, []string{"10.0.0.0/24"}, "1.2.3.4:51820", 0),
 	}
 
-	ops := planPeerReconciliation(desired, observed)
+	ops := planPeerOps(desired, observed)
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 update op, got %d", len(ops))
 	}
@@ -230,7 +230,7 @@ func TestPlanPeerReconciliation_EndpointFixedMatchingNotRewritten(t *testing.T) 
 	}
 }
 
-func TestPlanPeerReconciliation_EndpointDynamicIgnoresChange(t *testing.T) {
+func TestPlanPeerOps_EndpointDynamicIgnoresChange(t *testing.T) {
 	k := mustGenKey(t)
 	desired := []Peer{
 		pcfg(k, []string{"10.0.0.1/32"}, "1.2.3.4:51820", EndpointDynamic, 0),
@@ -239,13 +239,13 @@ func TestPlanPeerReconciliation_EndpointDynamicIgnoresChange(t *testing.T) {
 		pstat(k, []string{"10.0.0.1/32"}, "5.6.7.8:51821", 0),
 	}
 
-	ops := planPeerReconciliation(desired, observed)
+	ops := planPeerOps(desired, observed)
 	if len(ops) != 0 {
 		t.Errorf("expected no operations for EndpointDynamic, got %d", len(ops))
 	}
 }
 
-func TestPlanPeerReconciliation_EndpointBootstrapIgnoresChange(t *testing.T) {
+func TestPlanPeerOps_EndpointBootstrapIgnoresChange(t *testing.T) {
 	k := mustGenKey(t)
 	desired := []Peer{
 		pcfg(k, []string{"10.0.0.1/32"}, "1.2.3.4:51820", EndpointBootstrap, 0),
@@ -254,13 +254,13 @@ func TestPlanPeerReconciliation_EndpointBootstrapIgnoresChange(t *testing.T) {
 		pstat(k, []string{"10.0.0.1/32"}, "5.6.7.8:51821", 0),
 	}
 
-	ops := planPeerReconciliation(desired, observed)
+	ops := planPeerOps(desired, observed)
 	if len(ops) != 0 {
 		t.Errorf("expected no operations for EndpointBootstrap, got %d", len(ops))
 	}
 }
 
-func TestPlanPeerReconciliation_MultipleChanges(t *testing.T) {
+func TestPlanPeerOps_MultipleChanges(t *testing.T) {
 	k := mustGenKey(t)
 	desired := []Peer{
 		pcfg(k, []string{"10.0.1.0/24"}, "1.2.3.4:51820", EndpointFixed, 25*time.Second),
@@ -269,7 +269,7 @@ func TestPlanPeerReconciliation_MultipleChanges(t *testing.T) {
 		pstat(k, []string{"10.0.0.0/24"}, "5.6.7.8:51821", 0),
 	}
 
-	ops := planPeerReconciliation(desired, observed)
+	ops := planPeerOps(desired, observed)
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 update op, got %d", len(ops))
 	}
@@ -282,7 +282,7 @@ func TestPlanPeerReconciliation_MultipleChanges(t *testing.T) {
 	}
 }
 
-func TestPlanPeerReconciliation_OperationOrdering(t *testing.T) {
+func TestPlanPeerOps_OperationOrdering(t *testing.T) {
 	kA, kB, kC := mustGenKey(t), mustGenKey(t), mustGenKey(t)
 	desired := []Peer{
 		pcfg(kB, []string{"10.0.0.2/32"}, "", EndpointDynamic, 0),
@@ -293,7 +293,7 @@ func TestPlanPeerReconciliation_OperationOrdering(t *testing.T) {
 		pstat(kC, []string{"10.0.0.0/24"}, "", 0),
 	}
 
-	ops := planPeerReconciliation(desired, observed)
+	ops := planPeerOps(desired, observed)
 	if len(ops) != 3 {
 		t.Fatalf("expected 3 operations, got %d", len(ops))
 	}
@@ -308,13 +308,13 @@ func TestPlanPeerReconciliation_OperationOrdering(t *testing.T) {
 	}
 }
 
-func TestPlanPeerReconciliation_NoEndpointOnAddForDynamic(t *testing.T) {
+func TestPlanPeerOps_NoEndpointOnAddForDynamic(t *testing.T) {
 	k := mustGenKey(t)
 	desired := []Peer{
 		pcfg(k, []string{"10.0.0.1/32"}, "1.2.3.4:51820", EndpointDynamic, 0),
 	}
 
-	ops := planPeerReconciliation(desired, nil)
+	ops := planPeerOps(desired, nil)
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 op, got %d", len(ops))
 	}
@@ -323,13 +323,13 @@ func TestPlanPeerReconciliation_NoEndpointOnAddForDynamic(t *testing.T) {
 	}
 }
 
-func TestPlanPeerReconciliation_EndpointOnAddForFixed(t *testing.T) {
+func TestPlanPeerOps_EndpointOnAddForFixed(t *testing.T) {
 	k := mustGenKey(t)
 	desired := []Peer{
 		pcfg(k, []string{"10.0.0.1/32"}, "1.2.3.4:51820", EndpointFixed, 0),
 	}
 
-	ops := planPeerReconciliation(desired, nil)
+	ops := planPeerOps(desired, nil)
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 op, got %d", len(ops))
 	}
@@ -338,13 +338,13 @@ func TestPlanPeerReconciliation_EndpointOnAddForFixed(t *testing.T) {
 	}
 }
 
-func TestPlanPeerReconciliation_EndpointOnAddForBootstrap(t *testing.T) {
+func TestPlanPeerOps_EndpointOnAddForBootstrap(t *testing.T) {
 	k := mustGenKey(t)
 	desired := []Peer{
 		pcfg(k, []string{"10.0.0.1/32"}, "1.2.3.4:51820", EndpointBootstrap, 0),
 	}
 
-	ops := planPeerReconciliation(desired, nil)
+	ops := planPeerOps(desired, nil)
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 op, got %d", len(ops))
 	}
@@ -414,7 +414,7 @@ func TestNormalizeAllowedIPs_MasksHostBits(t *testing.T) {
 	}
 }
 
-func TestPlanPeerReconciliation_HostBitAllowedIPsNoSpuriousUpdate(t *testing.T) {
+func TestPlanPeerOps_HostBitAllowedIPsNoSpuriousUpdate(t *testing.T) {
 	k := mustGenKey(t)
 	// Desired carries host bits, as PeerConfig.Parse produces via
 	// netaddr.ParseRoute ("10.0.0.1/24" stays "10.0.0.1/24").
@@ -431,7 +431,7 @@ func TestPlanPeerReconciliation_HostBitAllowedIPsNoSpuriousUpdate(t *testing.T) 
 		AllowedIPs: []net.IPNet{mustParseCIDR(t, "10.0.0.0/24")},
 	}}
 
-	ops := planPeerReconciliation(desired, observed)
+	ops := planPeerOps(desired, observed)
 	if len(ops) != 0 {
 		t.Errorf("expected no ops for host-bit vs network-form allowed IP, got %d: %v", len(ops), ops)
 	}

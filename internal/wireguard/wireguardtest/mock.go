@@ -2,6 +2,7 @@
 package wireguardtest
 
 import (
+	"fmt"
 	"net"
 	"sort"
 	"sync"
@@ -9,7 +10,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-// applyCall records one ApplyPeers call for batch tracking.
+// applyCall records one ApplyPeerOps call for batch tracking.
 type applyCall struct {
 	Ops []wireguard.PeerOp
 }
@@ -18,20 +19,22 @@ type applyCall struct {
 // holds its own peer map, so tests can inspect per-device state
 // independently.
 //
-// ApplyPeers merges ops into peer state to match real backends:
+// ApplyPeerOps merges ops into peer state to match real backends:
 // AllowedIPs and PersistentKeepalive are always replaced, Endpoint is
 // set only when non-nil, and runtime fields (LastHandshake etc.) are
 // preserved.
 type MockDevice struct {
-	mu            sync.Mutex
-	name          string
-	peers         map[string]wireguard.PeerStatus
-	PeersCalls    int
-	ApplyCalls    []applyCall
-	CloseCalls    int
-	PeersErr      error
-	ApplyPeersErr error
-	CloseErr      error
+	mu              sync.Mutex
+	name            string
+	peers           map[string]wireguard.PeerStatus
+	PeersCalls      int
+	ApplyCalls      []applyCall
+	CloseCalls      int
+	CheckErr        error
+	closed          bool
+	PeersErr        error
+	ApplyPeerOpsErr error
+	CloseErr        error
 }
 
 func (d *MockDevice) Name() string {
@@ -40,26 +43,43 @@ func (d *MockDevice) Name() string {
 	return d.name
 }
 
-func (d *MockDevice) Peers() (
+func (d *MockDevice) Check() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.closed {
+		return fmt.Errorf("wireguard: device is closed")
+	}
+
+	return d.CheckErr
+}
+
+func (d *MockDevice) GetPeerStatuses() (
 	[]wireguard.PeerStatus,
 	error,
 ) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.PeersCalls++
+	if d.closed {
+		return nil, fmt.Errorf("wireguard: device is closed")
+	}
 	if d.PeersErr != nil {
 		return nil, d.PeersErr
 	}
 	return d.peersListLocked(), nil
 }
 
-func (d *MockDevice) ApplyPeers(
+func (d *MockDevice) ApplyPeerOps(
 	ops []wireguard.PeerOp,
 ) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.ApplyPeersErr != nil {
-		return d.ApplyPeersErr
+	if d.closed {
+		return fmt.Errorf("wireguard: device is closed")
+	}
+	if d.ApplyPeerOpsErr != nil {
+		return d.ApplyPeerOpsErr
 	}
 	call := applyCall{Ops: make([]wireguard.PeerOp, len(ops))}
 	copy(call.Ops, ops)
@@ -113,6 +133,7 @@ func (d *MockDevice) Close() error {
 	if d.CloseErr != nil {
 		return d.CloseErr
 	}
+	d.closed = true
 	return nil
 }
 
@@ -128,7 +149,7 @@ func (d *MockDevice) peersListLocked() []wireguard.PeerStatus {
 }
 
 // SetPeers replaces the mock's observed peer state for this device.
-// Unlike ApplyPeers (which merges), this is a wholesale replacement.
+// Unlike ApplyPeerOps (which merges), this is a wholesale replacement.
 func (d *MockDevice) SetPeers(
 	peers ...wireguard.PeerStatus,
 ) {
@@ -200,7 +221,7 @@ func (b *MockBackend) AppliedOpsFor(
 	return dev.AppliedOps()
 }
 
-// LastAppliedOpsFor returns peer operations from the most recent ApplyPeers
+// LastAppliedOpsFor returns peer operations from the most recent ApplyPeerOps
 // call for a specific device.
 func (b *MockBackend) LastAppliedOpsFor(
 	name string,
