@@ -1,10 +1,12 @@
 package admin
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
 )
 
@@ -32,19 +34,25 @@ func (a *API) handleGetStatus(
 }
 
 func networkStatusFromRuntime(
-	status runtime.NetworkStatus,
+	status runtime.NetworkOverview,
 ) NetworkStatus {
-	return NetworkStatus{
-		Name:      status.Name,
-		Enabled:   status.Enabled,
-		Running:   status.Running,
-		Reason:    status.Reason,
-		Health:    status.Health,
-		Reconcile: activityStatusFromRuntime(status.Reconcile),
-		MainAPI:   activityStatusFromRuntime(status.MainAPI),
-		InviteAPI: activityStatusFromRuntime(status.InviteAPI),
-		DNS:       activityStatusFromRuntime(status.DNS),
+	result := NetworkStatus{
+		Name:    status.Name,
+		Enabled: status.Enabled,
+		Running: status.Running,
+		Reason:  status.Reason,
+		Health:  status.Health,
+		Reconcile: ActivityStatus{
+			IntervalSeconds: int64(runtime.NetworkReconcileInterval / time.Second),
+		},
 	}
+	if snapshot := status.Status; snapshot != nil {
+		result.Reconcile = activityStatusFromRuntime(snapshot.Reconcile)
+		result.MainAPI = activityStatusFromResource(snapshot.Main.HTTP)
+		result.InviteAPI = activityStatusFromResource(snapshot.Invite.HTTP)
+		result.DNS = activityStatusFromResource(snapshot.Main.DNS)
+	}
+	return result
 }
 
 func activityStatusFromRuntime(
@@ -63,4 +71,18 @@ func activityStatusFromRuntime(
 		result.LastSuccessAt = &formatted
 	}
 	return result
+}
+
+// activityStatusFromResource preserves the admin API's existing activity fields
+// while the runtime reports current resource state.
+func activityStatusFromResource(
+	status resource.Status,
+) ActivityStatus {
+	if status.State == resource.Disabled || status.State == resource.Running {
+		return ActivityStatus{}
+	}
+	if status.Error != nil {
+		return ActivityStatus{Error: status.Error.Error()}
+	}
+	return ActivityStatus{Error: fmt.Sprintf("resource %s", status.State)}
 }

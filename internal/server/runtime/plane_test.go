@@ -201,7 +201,7 @@ func assertHTTPResponds(t *testing.T, address string) {
 func assertHTTPHealthy(t *testing.T, rt *runtime.Runtime) {
 	t.Helper()
 	status := networkStatus(t, rt, "httptest")
-	if !status.Running || status.Health != runtime.HealthHealthy || status.MainAPI.Error != "" {
+	if !status.Running || status.Health != runtime.HealthHealthy || status.Status == nil || status.Status.Main.HTTP.Error != nil {
 		t.Fatalf("status = %+v, want healthy HTTP", status)
 	}
 }

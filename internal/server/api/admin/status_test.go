@@ -102,8 +102,8 @@ func TestAPIStatus_ReportsDegradedRuntimeHealth(
 		"",
 	).ExpectOK(t)
 	env.Backend.Device("testnet").PeersErr = errors.New("read peers failed")
-	if err := env.Runtime.Converge("testnet"); err != nil {
-		t.Fatalf("converge: %v", err)
+	if err := env.Runtime.Converge("testnet"); !errors.Is(err, env.Backend.Device("testnet").PeersErr) {
+		t.Fatalf("converge = %v, want peer read failure", err)
 	}
 
 	// get status

@@ -8,6 +8,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	inviteapi "git.studiopollinator.com/pollinator/cord/internal/server/api/invite"
 	peerapi "git.studiopollinator.com/pollinator/cord/internal/server/api/peer"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
@@ -96,21 +98,18 @@ type Runtime struct {
 // Status is a snapshot of every network known to the server daemon.
 type Status struct {
 	Health   string
-	Networks []NetworkStatus
+	Networks []NetworkOverview
 }
 
-// NetworkStatus is the operator-facing state of a server network:
+// NetworkOverview is the operator-facing state of a server network:
 // persisted intent, actual process state, and the health of running work.
-type NetworkStatus struct {
-	Name      string
-	Enabled   bool
-	Running   bool
-	Reason    string
-	Health    string
-	Reconcile ActivityStatus
-	MainAPI   ActivityStatus
-	InviteAPI ActivityStatus
-	DNS       ActivityStatus
+type NetworkOverview struct {
+	Name    string
+	Enabled bool
+	Running bool // The runtime owns an instance; its resources may be unhealthy.
+	Reason  string
+	Health  string
+	Status  *NetworkStatus // Nil when there is no running instance.
 }
 
 // PeerStatus is a server network peer joined with live WireGuard state.
@@ -240,13 +239,11 @@ func (r *Runtime) Stop() {
 	r.mu.Unlock()
 
 	for name, network := range networks {
-		if err := network.stop(); err != nil {
+		if err := network.Stop(); err != nil {
 			r.log.Warn(
 				"stop network failed",
-				"network",
-				name,
-				"err",
-				err,
+				"network", name,
+				"err", err,
 			)
 		}
 	}
@@ -255,8 +252,8 @@ func (r *Runtime) Stop() {
 // Converge brings one network in line with its persisted intent: an
 // enabled network that is not running is started, a running network that
 // is no longer enabled is stopped, and a network already where it should
-// be has its peer sets reconciled. A start failure is recorded as the
-// network's reason and returned; the persisted intent is never touched.
+// be has its resources and peers reconciled. Failures are returned; startup
+// failures also become the network's reason. Persisted intent is never touched.
 func (r *Runtime) Converge(
 	name string,
 ) error {
@@ -280,10 +277,8 @@ func (r *Runtime) ConvergeAll() error {
 		if err := r.converge(network); err != nil {
 			r.log.Error(
 				"converge failed",
-				"network",
-				network.Name,
-				"err",
-				err,
+				"network", network.Name,
+				"err", err,
 			)
 		}
 	}
@@ -300,24 +295,22 @@ func (r *Runtime) SetNetworkEnabled(
 	name string,
 	enabled bool,
 ) (
-	NetworkStatus,
+	NetworkOverview,
 	error,
 ) {
 	if err := r.service.SetNetworkEnabled(name, enabled); err != nil {
-		return NetworkStatus{}, err
+		return NetworkOverview{}, err
 	}
 
 	if err := r.Converge(name); err != nil {
 		r.log.Error(
 			"converge network failed",
-			"network",
-			name,
-			"err",
-			err,
+			"network", name,
+			"err", err,
 		)
 	}
 
-	return r.getNetworkStatus(name)
+	return r.getNetworkOverview(name)
 }
 
 // GetStatus joins the persisted intent with what this process is actually
@@ -334,7 +327,7 @@ func (r *Runtime) GetStatus() (
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	statuses := make([]NetworkStatus, len(networks))
+	statuses := make([]NetworkOverview, len(networks))
 	for i, network := range networks {
 		statuses[i] = r.parseStatusOf(network)
 	}
@@ -465,6 +458,7 @@ func (r *Runtime) converge(
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// Leave canceled runtime resources for shutdown to clean up.
 	if r.ctx != nil && r.ctx.Err() != nil {
 		return nil
 	}
@@ -482,8 +476,13 @@ func (r *Runtime) converge(
 		delete(r.reasons, record.Name)
 
 	case record.Enabled && isRunning:
-		// Enabled and already up; converge its peer sets instead.
-		network.reconcile()
+		// Enabled and already up; maintain its resources and peers.
+		// Converge also works before Start has established a runtime context.
+		ctx := r.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		return network.Reconcile(ctx)
 
 	case record.Enabled && !isRunning:
 		// Enabled and down; bring it up.
@@ -499,19 +498,11 @@ func (r *Runtime) converge(
 func (r *Runtime) startNetwork(
 	record *service.Network,
 ) error {
+
+	// Use the runtime lifetime, or Background when Converge precedes Start.
 	ctx := r.ctx
 	if ctx == nil {
 		ctx = context.Background()
-	}
-
-	network := &Network{
-		record:          record,
-		service:         r.service,
-		clock:           r.clock,
-		log:             r.log.With("network", record.Name),
-		dnsPort:         r.dnsPort,
-		dnsDisabled:     r.dnsDisabled,
-		reconcileStatus: ActivityStatus{Interval: reconcileCap},
 	}
 
 	var mainHandler, inviteHandler http.Handler
@@ -522,7 +513,24 @@ func (r *Runtime) startNetwork(
 		inviteHandler = r.invite.Router(record.Name)
 	}
 
-	if err := network.start(ctx, r.wireguard, mainHandler, inviteHandler); err != nil {
+	network, err := newNetwork(networkOptions{
+		record:        record,
+		service:       r.service,
+		wireguard:     r.wireguard,
+		mainHandler:   mainHandler,
+		inviteHandler: inviteHandler,
+		dnsPort:       r.dnsPort,
+		dnsDisabled:   r.dnsDisabled,
+		clock:         r.clock,
+		log:           r.log.With("network", record.Name),
+	})
+	if err != nil {
+		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)
+		return err
+	}
+
+	if err := network.Reconcile(ctx); err != nil {
+		err = errors.Join(err, network.Stop())
 		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)
 		return err
 	}
@@ -547,7 +555,7 @@ func (r *Runtime) stopNetwork(
 ) error {
 	delete(r.running, name)
 	delete(r.reasons, name)
-	if err := network.stop(); err != nil {
+	if err := network.Stop(); err != nil {
 		return fmt.Errorf("stop network %q: %w", name, err)
 	}
 
@@ -560,16 +568,16 @@ func (r *Runtime) stopNetwork(
 	return nil
 }
 
-// getNetworkStatus reports the status of one network by name.
-func (r *Runtime) getNetworkStatus(
+// getNetworkOverview reports the status of one network by name.
+func (r *Runtime) getNetworkOverview(
 	name string,
 ) (
-	NetworkStatus,
+	NetworkOverview,
 	error,
 ) {
 	network, err := r.service.GetNetwork(name)
 	if err != nil {
-		return NetworkStatus{}, err
+		return NetworkOverview{}, err
 	}
 
 	r.mu.Lock()
@@ -582,24 +590,24 @@ func (r *Runtime) getNetworkStatus(
 // hold r.mu.
 func (r *Runtime) parseStatusOf(
 	network *service.Network,
-) NetworkStatus {
+) NetworkOverview {
 	running, isRunning := r.running[network.Name]
-	status := NetworkStatus{
-		Name:      network.Name,
-		Enabled:   network.Enabled,
-		Running:   isRunning,
-		Reason:    r.reasons[network.Name],
-		Reconcile: ActivityStatus{Interval: reconcileCap},
+	status := NetworkOverview{
+		Name:    network.Name,
+		Enabled: network.Enabled,
+		Running: isRunning,
+		Reason:  r.reasons[network.Name],
 	}
 	if isRunning {
-		status.Reconcile, status.MainAPI, status.InviteAPI, status.DNS = running.getActivityStatuses()
+		snapshot := running.Status()
+		status.Status = &snapshot
 	}
 	status.Health = networkHealth(status)
 	return status
 }
 
 func networkHealth(
-	status NetworkStatus,
+	status NetworkOverview,
 ) string {
 	if !status.Enabled && !status.Running {
 		return HealthInactive
@@ -607,22 +615,21 @@ func networkHealth(
 	if status.Enabled != status.Running {
 		return HealthDegraded
 	}
-	activities := []ActivityStatus{
-		status.Reconcile,
-		status.MainAPI,
-		status.InviteAPI,
-		status.DNS,
+	if status.Status == nil || status.Status.Reconcile.Error != "" {
+		return HealthDegraded
 	}
-	for _, activity := range activities {
-		if activity.Error != "" {
-			return HealthDegraded
+	for _, plane := range []PlaneStatus{status.Status.Main, status.Status.Invite} {
+		for _, child := range []resource.Status{plane.WireGuard, plane.DNS, plane.HTTP} {
+			if child.Error != nil || (child.State != resource.Running && child.State != resource.Disabled) {
+				return HealthDegraded
+			}
 		}
 	}
 	return HealthHealthy
 }
 
 func statusHealth(
-	statuses []NetworkStatus,
+	statuses []NetworkOverview,
 ) string {
 	for _, status := range statuses {
 		if status.Health == HealthDegraded {

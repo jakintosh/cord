@@ -1,6 +1,7 @@
 package runtime_test
 
 import (
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
@@ -229,11 +231,8 @@ func TestNetwork_DNS_StartsNetworkHealthy(
 	if status.Reason != "" {
 		t.Fatalf("reason = %q, want empty", status.Reason)
 	}
-	if status.DNS.Error != "" {
-		t.Fatalf("dns status error = %q, want empty", status.DNS.Error)
-	}
-	if !status.DNS.LastAttemptAt.IsZero() || !status.DNS.LastSuccessAt.IsZero() {
-		t.Fatal("resource status should not invent activity timestamps")
+	if status.Status.Main.DNS.Error != nil {
+		t.Fatalf("dns status error = %q, want empty", status.Status.Main.DNS.Error)
 	}
 }
 
@@ -283,8 +282,160 @@ func TestNetwork_DNS_StartFailureRecordsReasonAndRecovers(
 	if !status.Running || status.Health != runtime.HealthHealthy {
 		t.Fatalf("status = %+v, want running and healthy", status)
 	}
-	if status.DNS.Error != "" {
-		t.Fatalf("dns status error = %q, want empty", status.DNS.Error)
+	if status.Status.Main.DNS.Error != nil {
+		t.Fatalf("dns status error = %q, want empty", status.Status.Main.DNS.Error)
+	}
+}
+
+func TestConverge_RecoversDeviceBeforeApplyingPeers(
+	t *testing.T,
+) {
+	env := testutil.SetupRuntime(t)
+	testutil.SeedNetwork(t, env.Service)
+	env.Enable(t, "testnet")
+	original := env.Backend.Device("testnet-i")
+
+	registration, err := env.Service.CreateRegistration(
+		"testnet",
+		"recover",
+		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := original.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	env.Converge(t, "testnet")
+	if status := networkStatus(t, env.Runtime, "testnet"); status.Status.Reconcile.Error != "" {
+		t.Fatalf("recovery pass reported a peer application failure: %s", status.Status.Reconcile.Error)
+	}
+
+	replacement := env.Backend.Device("testnet-i")
+	if replacement == original {
+		t.Fatal("failed device was not replaced")
+	}
+	key, err := wireguard.PublicKey(registration.Peer.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peers, err := replacement.GetPeerStatuses()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(peers) != 1 || peers[0].PublicKey.String() != key {
+		t.Fatalf("new peer was not applied during the recovery pass: %+v", peers)
+	}
+}
+
+func TestConverge_PeerStartupFailureRollsBack(t *testing.T) {
+	for _, stage := range []string{"prune", "main peers", "invite peers"} {
+		t.Run(stage, func(t *testing.T) {
+			env := testutil.SetupService(t)
+			testutil.SeedNetwork(t, env.Service)
+			failure := errors.New("store unavailable")
+			store := &maintenanceStore{Store: env.Database}
+			switch stage {
+			case "prune":
+				store.pruneErr = failure
+			case "main peers":
+				store.mainErr = failure
+			case "invite peers":
+				store.inviteErr = failure
+			}
+			svc, err := service.New(service.Options{Store: store})
+			if err != nil {
+				t.Fatal(err)
+			}
+			env.Service = svc
+			backend := wireguardtest.NewMockBackend()
+			rt := newRuntime(t, env, backend, time.Hour)
+			if err := svc.SetNetworkEnabled("testnet", true); err != nil {
+				t.Fatal(err)
+			}
+			if err := rt.Converge("testnet"); !errors.Is(err, failure) {
+				t.Fatalf("converge = %v, want store failure", err)
+			}
+			status := networkStatus(t, rt, "testnet")
+			if !status.Enabled || status.Running || status.Status != nil || !strings.Contains(status.Reason, failure.Error()) {
+				t.Fatalf("failed startup status = %+v", status)
+			}
+			for _, name := range []string{"testnet", "testnet-i"} {
+				if device := backend.Device(name); device == nil || device.CloseCalls != 1 {
+					t.Fatalf("%s was not cleaned up: %+v", name, device)
+				}
+			}
+			store.pruneErr, store.mainErr, store.inviteErr = nil, nil, nil
+			if err := rt.Converge("testnet"); err != nil {
+				t.Fatal(err)
+			}
+			if status := networkStatus(t, rt, "testnet"); !status.Running || status.Health != runtime.HealthHealthy || status.Reason != "" {
+				t.Fatalf("recovery status = %+v", status)
+			}
+		})
+	}
+}
+
+func TestConverge_MainFailureStillUpdatesInvitePeers(t *testing.T) {
+	env := testutil.SetupRuntime(t)
+	testutil.SeedNetwork(t, env.Service)
+	env.Enable(t, "testnet")
+	registration, err := env.Service.CreateRegistration(
+		"testnet", "alice", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := env.Backend.Device("testnet")
+	invite := env.Backend.Device("testnet-i")
+	main.PeersErr = errors.New("main peer read failed")
+	invite.PeersErr = errors.New("invite peer read failed")
+	if err := env.Runtime.Converge("testnet"); !errors.Is(err, main.PeersErr) || !errors.Is(err, invite.PeersErr) {
+		t.Fatalf("converge did not return both failures: %v", err)
+	}
+	invite.PeersErr = nil
+	if err := env.Runtime.Converge("testnet"); !errors.Is(err, main.PeersErr) {
+		t.Fatalf("converge = %v, want main failure", err)
+	}
+	key, err := wireguard.PublicKey(registration.Peer.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasPeerOp(env.Backend.LastAppliedOpsFor("testnet-i"), key) {
+		t.Fatal("main failure prevented applying the invite peer")
+	}
+	status := networkStatus(t, env.Runtime, "testnet")
+	if !status.Running || status.Status == nil || status.Health != runtime.HealthDegraded {
+		t.Fatalf("failed maintenance should keep network owned: %+v", status)
+	}
+	main.PeersErr = nil
+	env.Converge(t, "testnet")
+	if env.Backend.Device("testnet") != main || env.Backend.Device("testnet-i") != invite {
+		t.Fatal("peer failure unnecessarily replaced plane devices")
+	}
+}
+
+func TestGetStatus_ReportsDeviceFailureWithoutRepairing(t *testing.T) {
+	env := testutil.SetupRuntime(t)
+	testutil.SeedNetwork(t, env.Service)
+	env.Enable(t, "testnet")
+	device := env.Backend.Device("testnet")
+	if err := device.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		status := networkStatus(t, env.Runtime, "testnet")
+		if !status.Running || status.Health != runtime.HealthDegraded || status.Status.Main.WireGuard.State != resource.Failed {
+			t.Fatalf("device failure status = %+v", status)
+		}
+		if status.Status.Reconcile.Error != "" || env.Backend.Device("testnet") != device {
+			t.Fatal("status read ran maintenance")
+		}
+	}
+	env.Converge(t, "testnet")
+	if status := networkStatus(t, env.Runtime, "testnet"); status.Health != runtime.HealthHealthy {
+		t.Fatalf("recovery status = %+v", status)
 	}
 }
 
@@ -395,44 +546,44 @@ func createLoopbackNetwork(
 	return network
 }
 
-func TestConverge_RecoversDeviceBeforeApplyingPeers(
-	t *testing.T,
+type maintenanceStore struct {
+	service.Store
+	pruneErr  error
+	mainErr   error
+	inviteErr error
+}
+
+func (s *maintenanceStore) PruneExpiredRegistrations(
+	network string,
+	now time.Time,
+) error {
+	if s.pruneErr != nil {
+		return s.pruneErr
+	}
+	return s.Store.PruneExpiredRegistrations(network, now)
+}
+
+func (s *maintenanceStore) ListPeers(
+	network string,
+) (
+	[]*service.Peer,
+	error,
 ) {
-	env := testutil.SetupRuntime(t)
-	testutil.SeedNetwork(t, env.Service)
-	env.Enable(t, "testnet")
-	original := env.Backend.Device("testnet-i")
+	if s.mainErr != nil {
+		return nil, s.mainErr
+	}
+	return s.Store.ListPeers(network)
+}
 
-	registration, err := env.Service.CreateRegistration(
-		"testnet",
-		"recover",
-		service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")},
-	)
-	if err != nil {
-		t.Fatal(err)
+func (s *maintenanceStore) ListActiveRegistrations(
+	network string,
+	now time.Time,
+) (
+	[]*service.Registration,
+	error,
+) {
+	if s.inviteErr != nil {
+		return nil, s.inviteErr
 	}
-	if err := original.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	env.Converge(t, "testnet")
-	if status := networkStatus(t, env.Runtime, "testnet"); status.Reconcile.Error != "" {
-		t.Fatalf("recovery pass reported a peer application failure: %s", status.Reconcile.Error)
-	}
-
-	replacement := env.Backend.Device("testnet-i")
-	if replacement == original {
-		t.Fatal("failed device was not replaced")
-	}
-	key, err := wireguard.PublicKey(registration.Peer.PrivateKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	peers, err := replacement.GetPeerStatuses()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(peers) != 1 || peers[0].PublicKey.String() != key {
-		t.Fatalf("new peer was not applied during the recovery pass: %+v", peers)
-	}
+	return s.Store.ListActiveRegistrations(network, now)
 }

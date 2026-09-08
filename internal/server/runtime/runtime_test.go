@@ -32,11 +32,11 @@ func TestStart_StartsEnabledNetworks(t *testing.T) {
 	if network.Reason != "" {
 		t.Fatalf("reason = %q, want empty", network.Reason)
 	}
-	if !network.Reconcile.LastAttemptAt.Equal(testutil.FixedTime) {
-		t.Fatalf("last reconcile attempt = %v, want %v", network.Reconcile.LastAttemptAt, testutil.FixedTime)
+	if !network.Status.Reconcile.LastAttemptAt.Equal(testutil.FixedTime) {
+		t.Fatalf("last reconcile attempt = %v, want %v", network.Status.Reconcile.LastAttemptAt, testutil.FixedTime)
 	}
-	if !network.Reconcile.LastSuccessAt.Equal(testutil.FixedTime) {
-		t.Fatalf("last reconcile success = %v, want %v", network.Reconcile.LastSuccessAt, testutil.FixedTime)
+	if !network.Status.Reconcile.LastSuccessAt.Equal(testutil.FixedTime) {
+		t.Fatalf("last reconcile success = %v, want %v", network.Status.Reconcile.LastSuccessAt, testutil.FixedTime)
 	}
 	if env.Backend.Device("testnet") == nil || env.Backend.Device("testnet-i") == nil {
 		t.Fatal("expected both plane devices")
@@ -162,20 +162,22 @@ func TestConverge_RecordsFailureAndRecovery(t *testing.T) {
 	main := env.Backend.Device("testnet")
 	now = now.Add(time.Minute)
 	main.PeersErr = errors.New("read peers failed")
-	env.Converge(t, "testnet")
+	if err := env.Runtime.Converge("testnet"); !errors.Is(err, main.PeersErr) {
+		t.Fatalf("converge = %v, want peer read failure", err)
+	}
 
 	status := networkStatus(t, env.Runtime, "testnet")
 	if status.Health != runtime.HealthDegraded {
 		t.Fatalf("health = %q, want degraded", status.Health)
 	}
-	if status.Reconcile.Error == "" {
+	if status.Status.Reconcile.Error == "" {
 		t.Fatal("reconcile error should describe the current failure")
 	}
-	if !status.Reconcile.LastAttemptAt.Equal(now) {
-		t.Fatalf("last attempt = %v, want %v", status.Reconcile.LastAttemptAt, now)
+	if !status.Status.Reconcile.LastAttemptAt.Equal(now) {
+		t.Fatalf("last attempt = %v, want %v", status.Status.Reconcile.LastAttemptAt, now)
 	}
-	if !status.Reconcile.LastSuccessAt.Equal(testutil.FixedTime) {
-		t.Fatalf("last success = %v, want %v", status.Reconcile.LastSuccessAt, testutil.FixedTime)
+	if !status.Status.Reconcile.LastSuccessAt.Equal(testutil.FixedTime) {
+		t.Fatalf("last success = %v, want %v", status.Status.Reconcile.LastSuccessAt, testutil.FixedTime)
 	}
 	overall, err := env.Runtime.GetStatus()
 	if err != nil {
@@ -193,11 +195,11 @@ func TestConverge_RecordsFailureAndRecovery(t *testing.T) {
 	if status.Health != runtime.HealthHealthy {
 		t.Fatalf("health = %q, want healthy", status.Health)
 	}
-	if status.Reconcile.Error != "" {
-		t.Fatalf("reconcile error = %q, want cleared", status.Reconcile.Error)
+	if status.Status.Reconcile.Error != "" {
+		t.Fatalf("reconcile error = %q, want cleared", status.Status.Reconcile.Error)
 	}
-	if !status.Reconcile.LastSuccessAt.Equal(now) {
-		t.Fatalf("last success = %v, want %v", status.Reconcile.LastSuccessAt, now)
+	if !status.Status.Reconcile.LastSuccessAt.Equal(now) {
+		t.Fatalf("last success = %v, want %v", status.Status.Reconcile.LastSuccessAt, now)
 	}
 	overall, err = env.Runtime.GetStatus()
 	if err != nil {
@@ -365,7 +367,7 @@ func networkStatus(
 	t *testing.T,
 	rt *runtime.Runtime,
 	name string,
-) runtime.NetworkStatus {
+) runtime.NetworkOverview {
 	t.Helper()
 
 	status, err := rt.GetStatus()
@@ -378,7 +380,7 @@ func networkStatus(
 		}
 	}
 	t.Fatalf("network %q missing from status", name)
-	return runtime.NetworkStatus{}
+	return runtime.NetworkOverview{}
 }
 
 // waitFor polls until done reports true, or fails the test.
