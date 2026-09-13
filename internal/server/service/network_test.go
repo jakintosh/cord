@@ -421,9 +421,6 @@ func TestSetNetworkEnabled_PersistsIntent(t *testing.T) {
 	if !network.Enabled {
 		t.Fatal("network should be enabled")
 	}
-	if woken := <-env.Wake; woken != "testnet" {
-		t.Fatalf("woke %q, want testnet", woken)
-	}
 
 	if err := env.Service.SetNetworkEnabled("testnet", false); err != nil {
 		t.Fatalf("disable: %v", err)

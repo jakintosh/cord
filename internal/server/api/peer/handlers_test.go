@@ -111,7 +111,7 @@ func TestHandleReportEndpoints_IdentityFails(t *testing.T) {
 }
 
 func TestHandleConfirmPeer_Success(t *testing.T) {
-	env := testutil.SetupService(t)
+	env := testutil.SetupRuntime(t)
 	testutil.SeedNetwork(t, env.Service)
 
 	_, err := env.Service.CreateRegistration(
@@ -130,7 +130,24 @@ func TestHandleConfirmPeer_Success(t *testing.T) {
 		t.Fatalf("redeem registration: %v", err)
 	}
 
-	api := peer.New(env.Service, nil)
+	api := peer.New(env.Runtime, nil)
+
+	// Provisional peers can confirm, but cannot use normal peer operations.
+	for _, endpoint := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/snapshot"},
+		{http.MethodPost, "/endpoints"},
+	} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(endpoint.method, endpoint.path, strings.NewReader(`[]`))
+		r.RemoteAddr = "10.0.0.5:12345"
+		api.Router("testnet").ServeHTTP(w, r)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("provisional %s: status = %d, want forbidden", endpoint.path, w.Code)
+		}
+	}
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/confirm", nil)
@@ -157,15 +174,15 @@ func TestHandleConfirmPeer_IdentityFails(t *testing.T) {
 	}
 }
 
-func setupPeerTest(t *testing.T) (*testutil.ServiceEnv, *peer.API) {
+func setupPeerTest(t *testing.T) (*testutil.RuntimeEnv, *peer.API) {
 	t.Helper()
 
-	env := testutil.SetupService(t)
+	env := testutil.SetupRuntime(t)
 	testutil.SeedNetwork(t, env.Service)
 
 	testutil.SeedPeerDB(t, env.Database, "testnet", "alice", "10.0.0.5/32", "alice-pub-key", false, true, true)
 
-	api := peer.New(env.Service, nil)
+	api := peer.New(env.Runtime, nil)
 
 	return env, api
 }

@@ -53,20 +53,21 @@ type Options struct {
 // Server is one authoritative DNS server for a Cord network, serving
 // UDP and TCP on a single port. Constructors are synchronous and
 // launch nothing: Reconcile binds both sockets before reporting success,
-// Stop releases them and permits restart, forcing socket cleanup when the
+// Close releases them and permits restart, forcing socket cleanup when the
 // grace period expires. Forced cleanup does not wait for handlers.
 type Server struct {
 	network string
 	zone    string
 	address string
+
 	service *service.Service
+	udp     *dns.Server
+	tcp     *dns.Server
 	log     *slog.Logger
 
 	// mu serializes lifecycle operations and protects status snapshots.
-	// Non-nil handles retain ownership until Stop.
+	// Non-nil handles retain ownership until Close.
 	mu      sync.Mutex
-	udp     *dns.Server
-	tcp     *dns.Server
 	lastErr error
 }
 
@@ -141,13 +142,16 @@ func (s *Server) Reconcile(
 	defer s.mu.Unlock()
 
 	switch s.statusLocked().State {
+
 	case resource.Running:
 		return nil
+
 	case resource.Stopped:
 		break
+
 	case resource.Failed:
 		stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		err := s.stopLocked(stopCtx)
+		err := s.closeLocked(stopCtx)
 		cancel()
 		if err != nil {
 			return err
@@ -161,17 +165,17 @@ func (s *Server) Reconcile(
 	return nil
 }
 
-// Stop shuts down UDP and TCP concurrently, giving each server until ctx
+// Close shuts down UDP and TCP concurrently, giving each server until ctx
 // expires to finish gracefully. A failed shutdown is followed by Close.
-// Stop releases the underlying servers and returns shutdown and close errors. Forced
+// Close releases the underlying servers and returns shutdown and close errors. Forced
 // socket cleanup does not wait for handlers to return. Repeated calls are no-ops.
-func (s *Server) Stop(
+func (s *Server) Close(
 	ctx context.Context,
 ) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.stopLocked(ctx)
+	return s.closeLocked(ctx)
 }
 
 // Address returns the address both listeners are bound to: the
@@ -253,8 +257,8 @@ func (s *Server) startLocked(
 	return nil
 }
 
-// stopLocked requires mu and releases the current serving attempt.
-func (s *Server) stopLocked(
+// closeLocked requires mu and releases the current serving attempt.
+func (s *Server) closeLocked(
 	ctx context.Context,
 ) error {
 	if s.udp == nil && s.tcp == nil {
@@ -387,7 +391,7 @@ func (s *Server) startUDP(
 // port conflict a plain synchronous error. The listener is already
 // bound when the loop starts, so ActivateAndServe cannot fail before
 // notifying; the liveness wait only ensures the loop's internal
-// state is initialized before start reports success and Stop could
+// state is initialized before start reports success and Close could
 // race it.
 func (s *Server) startTCP(
 	handler dns.Handler,

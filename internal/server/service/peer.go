@@ -155,7 +155,6 @@ func (s *Service) UpdatePeer(
 	}
 
 	s.invalidateModel(network)
-	s.requestReconcile(network)
 
 	return p, nil
 }
@@ -173,7 +172,6 @@ func (s *Service) ConfirmPeer(
 	network string,
 	name string,
 ) error {
-	defer s.requestReconcile(network)
 
 	if err := s.store.ConfirmPeer(
 		network,
@@ -211,7 +209,6 @@ func (s *Service) RemovePeer(
 	}
 
 	s.invalidateModel(network)
-	s.requestReconcile(network)
 
 	return nil
 }

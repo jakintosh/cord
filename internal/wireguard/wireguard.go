@@ -108,8 +108,8 @@ func (m *Manager) CreateDevice(
 	}
 
 	if err := dev.Reconcile(context.Background()); err != nil {
-		if stopErr := dev.Stop(); stopErr != nil {
-			return dev, errors.Join(err, stopErr)
+		if closeErr := dev.Close(); closeErr != nil {
+			return dev, errors.Join(err, closeErr)
 		}
 		return nil, err
 	}

@@ -17,7 +17,7 @@ type Peer struct {
 type contextKey struct{}
 
 // LookupFunc resolves a WireGuard-validated source IP to a caller.
-type LookupFunc func(ip net.IP) (*Peer, error)
+type LookupFunc func(ctx context.Context, ip net.IP) (*Peer, error)
 
 // Require wraps a handler with identity resolution: parse the source IP
 // from r.RemoteAddr, call lookup, write 403 "identity unknown" on any
@@ -25,9 +25,9 @@ type LookupFunc func(ip net.IP) (*Peer, error)
 // next. Rejections are logged with the reason, since the caller only
 // ever sees the opaque 403.
 func Require(
-	log *slog.Logger,
 	lookup LookupFunc,
 	next http.HandlerFunc,
+	log *slog.Logger,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -44,7 +44,7 @@ func Require(
 			return
 		}
 
-		peer, err := lookup(ip)
+		peer, err := lookup(r.Context(), ip)
 		if err != nil {
 			log.Debug("identity rejected", "remote", r.RemoteAddr, "err", err)
 			wire.WriteError(w, http.StatusForbidden, "identity unknown")

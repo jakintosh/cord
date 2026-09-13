@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,8 +64,8 @@ func TestAPIStatus_IncludesNetworks(
 		t.Fatalf("health = %q, want inactive", net.Health)
 	}
 	reconcile := net.Reconcile
-	if reconcile.IntervalSeconds != 300 {
-		t.Fatalf("reconcile interval = %d, want 300", reconcile.IntervalSeconds)
+	if reconcile.IntervalSeconds != 0 {
+		t.Fatalf("disabled reconcile interval = %d, want 0", reconcile.IntervalSeconds)
 	}
 	if reconcile.LastAttemptAt != nil || reconcile.LastSuccessAt != nil {
 		t.Fatalf("disabled reconcile = %+v, want no attempts", reconcile)
@@ -102,7 +103,7 @@ func TestAPIStatus_ReportsDegradedRuntimeHealth(
 		"",
 	).ExpectOK(t)
 	env.Backend.Device("testnet").PeersErr = errors.New("read peers failed")
-	if err := env.Runtime.Converge("testnet"); !errors.Is(err, env.Backend.Device("testnet").PeersErr) {
+	if err := testutil.ApplyNetwork(t, env.Runtime, "testnet"); err == nil || !strings.Contains(err.Error(), "read peers failed") {
 		t.Fatalf("converge = %v, want peer read failure", err)
 	}
 

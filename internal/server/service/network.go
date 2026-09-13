@@ -135,6 +135,7 @@ func (s *Service) GetNetwork(
 	if err != nil {
 		return nil, fmt.Errorf("get network %q: %w", name, mapStoreError(err))
 	}
+
 	return nc, nil
 }
 
@@ -147,6 +148,7 @@ func (s *Service) ListNetworks() (
 	if err != nil {
 		return nil, fmt.Errorf("list networks: %w", err)
 	}
+
 	return networks, nil
 }
 
@@ -268,14 +270,10 @@ func (s *Service) SetNetworkEnabled(
 		return fmt.Errorf("set network %q enabled: %w", name, mapStoreError(err))
 	}
 
-	s.requestReconcile(name)
-
 	s.log.Info(
 		"network intent recorded",
-		"network",
-		name,
-		"enabled",
-		enabled,
+		"network", name,
+		"enabled", enabled,
 	)
 
 	return nil

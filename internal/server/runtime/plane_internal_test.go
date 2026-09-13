@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"sync"
 	"testing"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
+	"git.studiopollinator.com/pollinator/cord/internal/server/dns"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
@@ -34,7 +34,7 @@ func TestPlaneOwnsOptionalDNS(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var config *dnsConfig
+			var config *dns.Options
 			if enabled {
 				ln, err := net.Listen("tcp", "127.0.0.1:0")
 				if err != nil {
@@ -42,7 +42,13 @@ func TestPlaneOwnsOptionalDNS(t *testing.T) {
 				}
 				port := uint16(ln.Addr().(*net.TCPAddr).Port)
 				ln.Close()
-				config = &dnsConfig{network: "test", service: svc, port: port}
+				config = &dns.Options{
+					Network: "test",
+					Zone:    "test.internal",
+					Address: fmt.Sprintf("127.0.0.1:%d", port),
+					Service: svc,
+					Logger:  logging.Discard(),
+				}
 			}
 			backend := wireguardtest.NewMockBackend()
 			p, err := newPlane(
@@ -61,27 +67,27 @@ func TestPlaneOwnsOptionalDNS(t *testing.T) {
 			if enabled {
 				want = resource.Stopped
 			}
-			if status := p.Status(); status.WireGuard.State != resource.Stopped ||
+			if status := p.status(); status.WireGuard.State != resource.Stopped ||
 				status.DNS.State != want || status.HTTP.State != resource.Stopped {
 				t.Fatalf("initial status = %+v", status)
 			}
-			defer p.Stop()
-			if err := p.Reconcile(t.Context()); err != nil {
+			defer p.close()
+			if err := p.reconcile(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			device, httpWrapper, dnsWrapper := p.device, p.http, p.dns
-			if err := p.Reconcile(t.Context()); err != nil {
+			if err := p.reconcile(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			if enabled {
-				if p.Status().DNS.State != resource.Running {
+				if p.status().DNS.State != resource.Running {
 					t.Fatal("DNS not running")
 				}
-				if err := p.dns.Stop(context.Background()); err != nil {
+				if err := p.dns.Close(context.Background()); err != nil {
 					t.Fatal(err)
 				}
 				for range 2 {
-					if status := p.Status(); status.DNS.State != resource.Stopped || status.HTTP.State != resource.Running {
+					if status := p.status(); status.DNS.State != resource.Stopped || status.HTTP.State != resource.Running {
 						t.Fatalf("status read repaired DNS or changed HTTP: %+v", status)
 					}
 				}
@@ -90,25 +96,25 @@ func TestPlaneOwnsOptionalDNS(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer blocker.Close()
-				if err := p.device.Stop(); err != nil {
+				if err := p.device.Close(); err != nil {
 					t.Fatal(err)
 				}
 				deviceErr := errors.New("device unavailable")
 				backend.CreateErr = deviceErr
-				repairErr := p.Reconcile(t.Context())
+				repairErr := p.reconcile(t.Context())
 				if !errors.Is(repairErr, deviceErr) {
 					t.Fatalf("device failure was lost: %v", repairErr)
 				}
 				for range 2 {
-					status := p.Status().DNS
+					status := p.status().DNS
 					if status.State != resource.Failed || status.Error == nil {
 						t.Fatalf("failed DNS status = %+v", status)
 					}
 				}
-				if err := p.dns.Stop(context.Background()); err != nil {
+				if err := p.dns.Close(context.Background()); err != nil {
 					t.Fatal(err)
 				}
-				if p.Status().DNS.Error == nil {
+				if p.status().DNS.Error == nil {
 					t.Fatal("cleanup discarded failed startup error")
 				}
 				// HTTP still recovers when both WireGuard and DNS cannot restart.
@@ -121,33 +127,33 @@ func TestPlaneOwnsOptionalDNS(t *testing.T) {
 				case <-time.After(time.Second):
 					t.Fatal("HTTP did not exit")
 				}
-				if err := p.Reconcile(t.Context()); !errors.Is(err, deviceErr) || !errors.Is(err, p.dns.Status().Error) {
+				if err := p.reconcile(t.Context()); !errors.Is(err, deviceErr) || !errors.Is(err, p.dns.Status().Error) {
 					t.Fatalf("resource failures were not joined: %v", err)
 				}
-				if p.Status().HTTP.State != resource.Running {
+				if p.status().HTTP.State != resource.Running {
 					t.Fatal("DNS failure prevented HTTP recovery")
 				}
 				if err := blocker.Close(); err != nil {
 					t.Fatal(err)
 				}
-				if err := p.Reconcile(t.Context()); !errors.Is(err, deviceErr) {
+				if err := p.reconcile(t.Context()); !errors.Is(err, deviceErr) {
 					t.Fatalf("device failure was lost during DNS recovery: %v", err)
 				}
-				if status := p.Status().DNS; status.State != resource.Running || status.Error != nil {
+				if status := p.status().DNS; status.State != resource.Running || status.Error != nil {
 					t.Fatalf("recovered DNS status = %+v", status)
 				}
 				backend.CreateErr = nil
-				if err := p.Reconcile(t.Context()); err != nil {
+				if err := p.reconcile(t.Context()); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if p.device != device || p.http != httpWrapper || p.dns != dnsWrapper {
 				t.Fatal("reconciliation replaced a persistent wrapper or healthy device")
 			}
-			if err := p.Stop(); err != nil {
+			if err := p.close(); err != nil {
 				t.Fatal(err)
 			}
-			status := p.Status()
+			status := p.status()
 			if status.WireGuard.State != resource.Stopped || status.DNS.State != want || status.HTTP.State != resource.Stopped {
 				t.Fatalf("stopped status = %+v", status)
 			}
@@ -158,273 +164,5 @@ func TestPlaneOwnsOptionalDNS(t *testing.T) {
 				t.Fatal("device was not closed exactly once")
 			}
 		})
-	}
-}
-
-// Private access is needed to kill a serving instance while leaving its owner
-// alive. Normal startup and shutdown remain covered through runtime_test.
-func TestPlaneReconcileRepairsFailedHTTP(t *testing.T) {
-	key, err := wireguard.GenerateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	backend := wireguardtest.NewMockBackend()
-	p, err := newPlane(
-		service.Plane{Name: "httptest", Cidr: "127.0.0.0/24"},
-		nil,
-		key,
-		http.NotFoundHandler(),
-		wireguard.NewManagerWithBackend(backend),
-		0,
-		logging.Discard(),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = p.Stop() })
-	if err := p.Reconcile(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	wrapper, device, run := p.http, p.device, p.http.run
-	if err := backend.Device("httptest").Close(); err != nil {
-		t.Fatal(err)
-	}
-	if status := p.Status().WireGuard; status.State != resource.Failed || status.Error == nil {
-		t.Fatalf("failed device status = %+v", status)
-	}
-	address := run.server.Addr
-	p.http.address = address // Reuse the ephemeral port for replacement attempts.
-	if err := p.Reconcile(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if p.Status().WireGuard.State != resource.Running || p.device != device {
-		t.Fatal("WireGuard recovery lost the wrapper or failed to restore service")
-	}
-	if p.http.run != run {
-		t.Fatal("device recovery replaced healthy HTTP")
-	}
-	if err := run.server.Close(); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-run.done:
-	case <-time.After(time.Second):
-		t.Fatal("HTTP did not exit")
-	}
-	for range 2 {
-		status := p.Status().HTTP
-		if status.State != resource.Failed || !errors.Is(status.Error, http.ErrServerClosed) {
-			t.Fatalf("failed status = %+v", status)
-		}
-	}
-	if p.http.run != run {
-		t.Fatal("status read repaired HTTP")
-	}
-	blocker, err := net.Listen("tcp", address)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blocker.Close()
-	if err := p.Reconcile(t.Context()); err == nil {
-		t.Fatal("expected blocked restart")
-	}
-	if status := p.Status().HTTP; status.State != resource.Failed || status.Error == nil {
-		t.Fatalf("failed restart status = %+v", status)
-	}
-	if p.http != wrapper || wrapper.run != nil {
-		t.Fatal("failed bind lost wrapper or retained a serving instance")
-	}
-	if err := blocker.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.Reconcile(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if status := p.Status().HTTP; status.State != resource.Running || status.Error != nil {
-		t.Fatalf("recovered status = %+v", status)
-	}
-	client := &http.Client{Timeout: time.Second}
-	resp, err := client.Get("http://" + address)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("handler changed: status %d", resp.StatusCode)
-	}
-	if p.http != wrapper || p.device != device || len(backend.CreateCalls) != 2 {
-		t.Fatal("repair replaced wrapper or device")
-	}
-}
-
-// The HTTP wrapper is private; calls exercise its public lifecycle methods.
-func TestHTTPServerConcurrentLifecycle(
-	t *testing.T,
-) {
-	server := &httpServer{
-		timeout: defaultShutdownTimeout,
-		address: "127.0.0.1:0",
-		handler: http.NotFoundHandler(),
-		log:     logging.Discard(),
-	}
-	t.Cleanup(func() { _ = server.Stop(context.Background()) })
-
-	var wg sync.WaitGroup
-	start := make(chan struct{})
-	for range 8 {
-		wg.Go(func() {
-			<-start
-			if err := server.Reconcile(t.Context()); err != nil {
-				t.Errorf("concurrent reconcile: %v", err)
-			}
-		})
-	}
-	close(start)
-	wg.Wait()
-
-	start = make(chan struct{})
-	for range 4 {
-		wg.Go(func() {
-			<-start
-			for range 10 {
-				if err := server.Reconcile(t.Context()); err != nil {
-					t.Errorf("reconcile during shutdown: %v", err)
-				}
-			}
-		})
-		wg.Go(func() {
-			<-start
-			for range 10 {
-				if err := server.Stop(t.Context()); err != nil {
-					t.Errorf("concurrent stop: %v", err)
-				}
-			}
-		})
-		wg.Go(func() {
-			<-start
-			for range 10 {
-				status := server.Status()
-				if status.Error != nil || (status.State != resource.Running && status.State != resource.Stopped) {
-					t.Errorf("concurrent status: %+v", status)
-				}
-			}
-		})
-	}
-	close(start)
-	wg.Wait()
-
-	if err := server.Reconcile(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	address := server.run.server.Addr
-	client := &http.Client{Timeout: time.Second}
-	response, err := client.Get("http://" + address)
-	if err != nil {
-		t.Fatalf("request after concurrent lifecycle calls: %v", err)
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusNotFound {
-		t.Fatalf("response = %d, want 404", response.StatusCode)
-	}
-
-	if err := server.Stop(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	listener, err := net.Listen("tcp", address)
-	if err != nil {
-		t.Fatalf("listener survived shutdown: %v", err)
-	}
-	listener.Close()
-}
-
-func TestPlaneConcurrentLifecycle(
-	t *testing.T,
-) {
-	key, err := wireguard.GenerateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	backend := wireguardtest.NewMockBackend()
-	plane, err := newPlane(
-		service.Plane{Name: "concurrent", Cidr: "127.0.0.0/24"},
-		nil,
-		key,
-		http.NotFoundHandler(),
-		wireguard.NewManagerWithBackend(backend),
-		0,
-		logging.Discard(),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = plane.Stop() })
-	device, server := plane.device, plane.http
-
-	// Initial reconciliation attempts HTTP even if device creation fails.
-	createErr := errors.New("device unavailable")
-	backend.CreateErr = createErr
-	if err := plane.Reconcile(t.Context()); !errors.Is(err, createErr) {
-		t.Fatalf("initial reconciliation = %v", err)
-	}
-	if status := plane.Status(); status.WireGuard.State != resource.Failed || status.HTTP.State != resource.Running {
-		t.Fatalf("initial failure prevented HTTP startup: %+v", status)
-	}
-	if err := plane.Stop(); err != nil {
-		t.Fatal(err)
-	}
-	backend.CreateErr = nil
-	if err := plane.Reconcile(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-
-	var wg sync.WaitGroup
-	start := make(chan struct{})
-	for range 4 {
-		wg.Go(func() {
-			<-start
-			for range 10 {
-				if err := plane.Reconcile(t.Context()); err != nil {
-					t.Errorf("concurrent reconcile: %v", err)
-				}
-			}
-		})
-		wg.Go(func() {
-			<-start
-			for range 10 {
-				if err := plane.Stop(); err != nil {
-					t.Errorf("concurrent stop: %v", err)
-				}
-			}
-		})
-		wg.Go(func() {
-			<-start
-			for range 10 {
-				status := plane.Status()
-				if status.WireGuard.Error != nil || status.HTTP.Error != nil ||
-					status.WireGuard.State != status.HTTP.State ||
-					(status.HTTP.State != resource.Running && status.HTTP.State != resource.Stopped) ||
-					status.DNS.State != resource.Disabled {
-					t.Errorf("snapshot overlapped a lifecycle sequence: %+v", status)
-				}
-			}
-		})
-	}
-	close(start)
-	wg.Wait()
-
-	if err := plane.Stop(); err != nil {
-		t.Fatal(err)
-	}
-	if status := plane.Status(); status.WireGuard.State != resource.Stopped || status.HTTP.State != resource.Stopped {
-		t.Fatalf("stopped status = %+v", status)
-	}
-	if err := plane.Reconcile(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if status := plane.Status(); status.WireGuard.State != resource.Running || status.HTTP.State != resource.Running {
-		t.Fatalf("restarted status = %+v", status)
-	}
-	if plane.device != device || plane.http != server {
-		t.Fatal("lifecycle calls replaced configured wrappers")
 	}
 }

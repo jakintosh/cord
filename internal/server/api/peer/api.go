@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -8,25 +9,25 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/identity"
-	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
 )
 
 // API serves the peer-facing HTTP surface over a network's main plane.
 // One API serves every network: the network name is bound per router.
 type API struct {
-	service *service.Service
+	runtime *runtime.Runtime
 	log     *slog.Logger
 }
 
 func New(
-	service *service.Service,
+	runtime *runtime.Runtime,
 	log *slog.Logger,
 ) *API {
 	if log == nil {
 		log = logging.Discard()
 	}
 	return &API{
-		service: service,
+		runtime: runtime,
 		log:     log,
 	}
 }
@@ -38,15 +39,30 @@ func (a *API) Router(
 	log := a.log.With("network", network)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /snapshot", identity.Require(
-		log, a.lookupPeer(network), a.handleVisibleSnapshot(network),
-	))
-	mux.HandleFunc("POST /endpoints", identity.Require(
-		log, a.lookupPeer(network), a.handleReportEndpoints(network),
-	))
-	mux.HandleFunc("POST /confirm", identity.Require(
-		log, a.lookupProvisional(network), a.handleConfirmPeer(network),
-	))
+	mux.HandleFunc(
+		"GET /snapshot",
+		identity.Require(
+			a.lookupPeer(network),
+			a.handleVisibleSnapshot(network),
+			log,
+		),
+	)
+	mux.HandleFunc(
+		"POST /endpoints",
+		identity.Require(
+			a.lookupPeer(network),
+			a.handleReportEndpoints(network),
+			log,
+		),
+	)
+	mux.HandleFunc(
+		"POST /confirm",
+		identity.Require(
+			a.lookupProvisional(network),
+			a.handleConfirmPeer(network),
+			log,
+		),
+	)
 	return logging.Middleware(log, mux)
 }
 
@@ -54,8 +70,8 @@ func (a *API) Router(
 func (a *API) lookupPeer(
 	network string,
 ) identity.LookupFunc {
-	return func(ip net.IP) (*identity.Peer, error) {
-		p, err := a.service.ResolvePeerIdentity(network, ip)
+	return func(ctx context.Context, ip net.IP) (*identity.Peer, error) {
+		p, err := a.runtime.ResolvePeerIdentity(ctx, network, ip)
 		if err != nil {
 			return nil, fmt.Errorf("resolve peer identity: %w", err)
 		}
@@ -70,11 +86,18 @@ func (a *API) lookupPeer(
 func (a *API) lookupProvisional(
 	network string,
 ) identity.LookupFunc {
-	return func(ip net.IP) (*identity.Peer, error) {
-		p, err := a.service.ResolveProvisionalIdentity(network, ip)
+	return func(
+		ctx context.Context,
+		ip net.IP,
+	) (
+		*identity.Peer,
+		error,
+	) {
+		p, err := a.runtime.ResolveProvisionalIdentity(ctx, network, ip)
 		if err != nil {
 			return nil, fmt.Errorf("resolve provisional identity: %w", err)
 		}
+
 		return &identity.Peer{
 			PublicKey: p.PublicKey,
 			Name:      p.Name,

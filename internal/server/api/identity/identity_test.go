@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -11,15 +12,19 @@ import (
 )
 
 func TestRequire_Success(t *testing.T) {
-	lookup := func(ip net.IP) (*Peer, error) {
+	lookup := func(ctx context.Context, ip net.IP) (*Peer, error) {
 		return &Peer{PublicKey: "test-key", Name: "alice"}, nil
 	}
 
 	var got *Peer
-	handler := Require(logging.Discard(), lookup, func(w http.ResponseWriter, r *http.Request) {
-		got = Caller(r.Context())
-		w.WriteHeader(http.StatusOK)
-	})
+	handler := Require(
+		lookup,
+		func(w http.ResponseWriter, r *http.Request) {
+			got = Caller(r.Context())
+			w.WriteHeader(http.StatusOK)
+		},
+		logging.Discard(),
+	)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)
@@ -41,14 +46,18 @@ func TestRequire_Success(t *testing.T) {
 }
 
 func TestRequire_BadRemoteAddr(t *testing.T) {
-	lookup := func(ip net.IP) (*Peer, error) {
+	lookup := func(ctx context.Context, ip net.IP) (*Peer, error) {
 		t.Fatal("lookup should not be called")
 		return nil, nil
 	}
 
-	handler := Require(logging.Discard(), lookup, func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("next should not be called")
-	})
+	handler := Require(
+		lookup,
+		func(w http.ResponseWriter, r *http.Request) {
+			t.Fatal("next should not be called")
+		},
+		logging.Discard(),
+	)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)
@@ -61,14 +70,18 @@ func TestRequire_BadRemoteAddr(t *testing.T) {
 }
 
 func TestRequire_InvalidRemoteAddr(t *testing.T) {
-	lookup := func(ip net.IP) (*Peer, error) {
+	lookup := func(ctx context.Context, ip net.IP) (*Peer, error) {
 		t.Fatal("lookup should not be called")
 		return nil, nil
 	}
 
-	handler := Require(logging.Discard(), lookup, func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("next should not be called")
-	})
+	handler := Require(
+		lookup,
+		func(w http.ResponseWriter, r *http.Request) {
+			t.Fatal("next should not be called")
+		},
+		logging.Discard(),
+	)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)
@@ -81,13 +94,17 @@ func TestRequire_InvalidRemoteAddr(t *testing.T) {
 }
 
 func TestRequire_LookupError(t *testing.T) {
-	lookup := func(ip net.IP) (*Peer, error) {
+	lookup := func(ctx context.Context, ip net.IP) (*Peer, error) {
 		return nil, errors.New("not found")
 	}
 
-	handler := Require(logging.Discard(), lookup, func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("next should not be called")
-	})
+	handler := Require(
+		lookup,
+		func(w http.ResponseWriter, r *http.Request) {
+			t.Fatal("next should not be called")
+		},
+		logging.Discard(),
+	)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)
@@ -100,13 +117,17 @@ func TestRequire_LookupError(t *testing.T) {
 }
 
 func TestRequire_BodyWritten(t *testing.T) {
-	lookup := func(ip net.IP) (*Peer, error) {
+	lookup := func(ctx context.Context, ip net.IP) (*Peer, error) {
 		return nil, errors.New("not found")
 	}
 
-	handler := Require(logging.Discard(), lookup, func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("next should not be called")
-	})
+	handler := Require(
+		lookup,
+		func(w http.ResponseWriter, r *http.Request) {
+			t.Fatal("next should not be called")
+		},
+		logging.Discard(),
+	)
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)

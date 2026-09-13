@@ -10,11 +10,10 @@ import (
 )
 
 // ServiceEnv is a domain-only environment: a service over an in-memory
-// database, with the wake channel the service writes to.
+// database. It has no runtime or live resources.
 type ServiceEnv struct {
 	Database *database.DB
 	Service  *service.Service
-	Wake     chan string
 }
 
 func SetupService(
@@ -31,13 +30,11 @@ func SetupServiceWithClock(
 	t.Helper()
 
 	db := SetupDB(t)
-	wake := make(chan string, 16)
 
 	svc, err := service.New(service.Options{
 		Store:  db,
 		Clock:  clock,
 		Logger: logging.Discard(),
-		Wake:   wake,
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -46,6 +43,5 @@ func SetupServiceWithClock(
 	return &ServiceEnv{
 		Database: db,
 		Service:  svc,
-		Wake:     wake,
 	}
 }

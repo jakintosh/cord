@@ -43,19 +43,15 @@ func (s *Server) serveDNS(
 
 	s.log.Debug(
 		"dns request",
-		"source",
-		w.RemoteAddr().String(),
-		"name",
-		questionName(query),
-		"rcode",
-		resp.Rcode,
+		"source", w.RemoteAddr().String(),
+		"name", questionName(query),
+		"rcode", resp.Rcode,
 	)
 
 	if err := w.WriteMsg(resp); err != nil {
 		s.log.Debug(
 			"dns write failed",
-			"err",
-			err,
+			"err", err,
 		)
 	}
 }
@@ -83,7 +79,10 @@ func (s *Server) respond(
 		return refused(query)
 	}
 
-	peer, err := s.service.ResolvePeerIdentity(s.network, source)
+	peer, err := s.service.ResolvePeerIdentity(
+		s.network,
+		source,
+	)
 	if err != nil {
 		return refused(query)
 	}
@@ -95,16 +94,17 @@ func (s *Server) respond(
 		return s.apexReply(reply, query.Question[0].Qtype)
 	}
 
-	host, err := s.service.ResolveDNSHost(
+	hostname := dnsutil.TrimDomainName(qname, s.zone)
+
+	if host, err := s.service.ResolveDNSHost(
 		s.network,
 		peer.Name,
-		dnsutil.TrimDomainName(qname, s.zone),
-	)
-	if err != nil {
+		hostname,
+	); err != nil {
 		return nxdomain(reply, s.soaRecord(negativeTTL))
+	} else {
+		return s.hostReply(reply, qname, query.Question[0].Qtype, host.Route)
 	}
-
-	return s.hostReply(reply, qname, query.Question[0].Qtype, host.Route)
 }
 
 // apexReply answers a query at the zone apex: SOA and NS for their own
@@ -116,8 +116,12 @@ func (s *Server) apexReply(
 	reply.Authoritative = true
 
 	switch qtype {
+
 	case dns.TypeSOA:
-		reply.Answer = []dns.RR{s.soaRecord(positiveTTL)}
+		reply.Answer = []dns.RR{
+			s.soaRecord(positiveTTL),
+		}
+
 	case dns.TypeNS:
 		reply.Answer = []dns.RR{&dns.NS{
 			Hdr: dns.RR_Header{

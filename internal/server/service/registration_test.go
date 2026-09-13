@@ -274,7 +274,8 @@ func TestRedeemRegistration_Success(t *testing.T) {
 }
 
 func TestRedeemRegistration_Idempotent_SameKey(t *testing.T) {
-	env := testutil.SetupService(t)
+	clock := &mutableClock{t: testutil.FixedTime}
+	env := testutil.SetupServiceWithClock(t, clock.now)
 	testutil.SeedNetwork(t, env.Service)
 
 	ip := net.ParseIP("10.0.0.6")
@@ -296,6 +297,19 @@ func TestRedeemRegistration_Idempotent_SameKey(t *testing.T) {
 
 	if result1.Peer.Route != result2.Peer.Route {
 		t.Errorf("results differ: %q vs %q", result1.Peer.Route, result2.Peer.Route)
+	}
+
+	// Expiry does not erase a successful redemption or extend confirmation time.
+	clock.t = clock.t.Add(24 * time.Hour)
+	result3, err := env.Service.RedeemRegistration("testnet", tempKey, "perm-key-2")
+	if err != nil {
+		t.Fatalf("repeat after expiry: %v", err)
+	}
+	if result3.Peer.Route != result1.Peer.Route {
+		t.Fatalf("repeat after expiry changed route: %q", result3.Peer.Route)
+	}
+	if err := env.Service.ConfirmPeer("testnet", "idempotent"); !errors.Is(err, service.ErrRegistrationExpired) {
+		t.Fatalf("confirm after repeated redemption: %v, want ErrRegistrationExpired", err)
 	}
 }
 

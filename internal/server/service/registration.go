@@ -131,30 +131,20 @@ func (s *Service) ListRegistrations(
 }
 
 // ListRegistrationPeers returns the WireGuard peer set the network's invite plane
-// should carry — one temporary peer per unexpired, unredeemed
-// registration — together with the earliest expiry among them. The
-// expiry is zero when no registration is pending; the runtime uses it to
-// schedule the reconciliation that retires the peer.
+// should carry: temporary peers for active, unconfirmed registrations.
 func (s *Service) ListRegistrationPeers(
 	network string,
 ) (
 	[]wireguard.PeerConfig,
-	time.Time,
 	error,
 ) {
 	regs, err := s.store.ListActiveRegistrations(network, s.clock())
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("invite peers: %w", mapStoreError(err))
+		return nil, fmt.Errorf("invite peers: %w", mapStoreError(err))
 	}
 
-	var expiry time.Time
-	for _, reg := range regs {
-		if expiry.IsZero() || reg.ExpiresAt.Before(expiry) {
-			expiry = reg.ExpiresAt
-		}
-	}
-
-	return registrationsToWireGuardPeers(regs), expiry, nil
+	wgPeers := registrationsToWireGuardPeers(regs)
+	return wgPeers, nil
 }
 
 // CreateRegistration reserves an IP on the main network, allocates a
@@ -243,8 +233,6 @@ func (s *Service) CreateRegistration(
 		return nil, fmt.Errorf("create registration: %w", mapStoreError(err))
 	}
 
-	s.requestReconcile(networkName)
-
 	s.log.Info("registration created",
 		"network", networkName,
 		"peer", regName,
@@ -298,7 +286,6 @@ func (s *Service) RedeemRegistration(
 	}
 
 	s.invalidateModel(networkName)
-	s.requestReconcile(networkName)
 
 	s.log.Info("registration redeemed",
 		"network", networkName,
@@ -324,7 +311,6 @@ func (s *Service) RevokeRegistration(
 	}
 
 	s.invalidateModel(networkName)
-	s.requestReconcile(networkName)
 
 	s.log.Info(
 		"registration revoked",

@@ -14,13 +14,15 @@ func (a *API) handleListPeers(
 ) {
 	network := r.PathValue("name")
 
-	peers, err := a.service.ListPeers(network)
-	if err != nil {
+	if peers, err := a.runtime.ListPeers(
+		r.Context(),
+		network,
+	); err != nil {
 		writeServiceError(w, err)
-		return
+	} else {
+		peersDTO := peersFromService(peers)
+		wire.WriteData(w, http.StatusOK, peersDTO)
 	}
-
-	wire.WriteData(w, http.StatusOK, peersFromService(peers))
 }
 
 func (a *API) handlePatchPeer(
@@ -40,13 +42,17 @@ func (a *API) handlePatchPeer(
 		Name:    req.Name,
 		Enabled: req.Enabled,
 	}
-	updated, err := a.service.UpdatePeer(network, peer, diff)
-	if err != nil {
+	if updated, err := a.runtime.UpdatePeer(
+		r.Context(),
+		network,
+		peer,
+		diff,
+	); err != nil {
 		writeServiceError(w, err)
-		return
+	} else {
+		peerDTO := peerFromService(*updated)
+		wire.WriteData(w, http.StatusOK, peerDTO)
 	}
-
-	wire.WriteData(w, http.StatusOK, peerFromService(*updated))
 }
 
 func (a *API) handleDeletePeer(
@@ -56,12 +62,15 @@ func (a *API) handleDeletePeer(
 	network := r.PathValue("name")
 	peer := r.PathValue("peer")
 
-	if err := a.service.RemovePeer(network, peer); err != nil {
+	if err := a.runtime.RemovePeer(
+		r.Context(),
+		network,
+		peer,
+	); err != nil {
 		writeServiceError(w, err)
-		return
+	} else {
+		wire.WriteData(w, http.StatusOK, nil)
 	}
-
-	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func peerFromService(

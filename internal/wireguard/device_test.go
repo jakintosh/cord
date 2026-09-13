@@ -99,12 +99,12 @@ func TestDevice_SetPeers_ApplyError(t *testing.T) {
 	}
 }
 
-func TestDevice_Stop(t *testing.T) {
+func TestDevice_Close(t *testing.T) {
 	backend := wireguardtest.NewMockBackend()
 	d := createTestDevice(t, "test", backend)
 
-	if err := d.Stop(); err != nil {
-		t.Fatalf("Stop: %v", err)
+	if err := d.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 
 	mdev := backend.Device("test")
@@ -212,8 +212,8 @@ func TestDevice_TwoDeviceIndependence(t *testing.T) {
 		t.Errorf("dev2: expected peer %s, got %s", peer2, mdev2.AppliedOps()[0].Target.PublicKey)
 	}
 
-	if err := d1.Stop(); err != nil {
-		t.Fatalf("d1.Stop: %v", err)
+	if err := d1.Close(); err != nil {
+		t.Fatalf("d1.Close: %v", err)
 	}
 	if err := d2.SetPeers(
 		peerConfig(peer2, []string{"10.0.1.1/32"}, "", wireguard.EndpointDynamic, 0),
@@ -334,7 +334,7 @@ func TestDevice_ReconcileRetainsPeersAcrossRecovery(
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = d.Stop() })
+	t.Cleanup(func() { _ = d.Close() })
 
 	if status := d.Status(); status.State != resource.Stopped || status.Error != nil {
 		t.Fatalf("initial status = %+v", status)
@@ -396,10 +396,10 @@ func TestDevice_ReconcileRetainsPeersAcrossRecovery(
 		t.Fatalf("restored peers = %+v", peers)
 	}
 
-	if err := d.Stop(); err != nil {
+	if err := d.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Stop(); err != nil {
+	if err := d.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if status := d.Status(); status.State != resource.Stopped || status.Error != nil {
@@ -418,7 +418,7 @@ func TestDevice_ReconcileRetriesCreationAndCleanup(
 ) {
 	backend := wireguardtest.NewMockBackend()
 	d := createTestDevice(t, "test", backend)
-	t.Cleanup(func() { _ = d.Stop() })
+	t.Cleanup(func() { _ = d.Close() })
 	original := backend.Device("test")
 	failed := errors.New("interface failed")
 	closeErr := errors.New("close failed")
@@ -438,7 +438,7 @@ func TestDevice_ReconcileRetriesCreationAndCleanup(
 	if err := d.Reconcile(t.Context()); !errors.Is(err, createErr) {
 		t.Fatalf("creation error = %v", err)
 	}
-	if err := d.Stop(); err != nil {
+	if err := d.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if status := d.Status(); status.State != resource.Failed || !errors.Is(status.Error, createErr) {
@@ -494,7 +494,7 @@ func TestDevice_ReconcileRetainsPartialHandle(
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = d.Stop() })
+	t.Cleanup(func() { _ = d.Close() })
 
 	if err := d.Reconcile(t.Context()); !errors.Is(err, backend.createErr) || !errors.Is(err, backend.closeErr) {
 		t.Fatalf("partial creation = %v", err)
@@ -531,12 +531,12 @@ func TestDevice_ReconcileRetriesPeerRestoration(
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = d.Stop() })
+	t.Cleanup(func() { _ = d.Close() })
 	key := mustGenerateKey(t)
 	if err := d.SetPeers(peerConfig(key, []string{"10.0.0.1/32"}, "", wireguard.EndpointDynamic, 0)); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Stop(); err != nil {
+	if err := d.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -575,7 +575,7 @@ func TestCreateDevice_ReturnsHandleWhenCleanupFails(
 	}
 
 	backend.Device("test").CloseErr = nil
-	if err := d.Stop(); err != nil {
+	if err := d.Close(); err != nil {
 		t.Fatalf("retry cleanup: %v", err)
 	}
 }

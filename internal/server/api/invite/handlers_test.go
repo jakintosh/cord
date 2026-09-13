@@ -57,10 +57,10 @@ func TestHandleRedeemInvite_IdentityFails(t *testing.T) {
 
 // --- Test helpers ---
 
-func setupInviteTest(t *testing.T) (*testutil.ServiceEnv, *invite.API) {
+func setupInviteTest(t *testing.T) (*testutil.RuntimeEnv, *invite.API) {
 	t.Helper()
 
-	env := testutil.SetupService(t)
+	env := testutil.SetupRuntime(t)
 	testutil.SeedNetwork(t, env.Service)
 
 	_, err := env.Database.CreateRegistration("testnet", service.CreateRegistrationParams{
@@ -74,7 +74,7 @@ func setupInviteTest(t *testing.T) (*testutil.ServiceEnv, *invite.API) {
 		t.Fatalf("create registration: %v", err)
 	}
 
-	api := invite.New(env.Service, nil)
+	api := invite.New(env.Runtime, nil)
 
 	return env, api
 }

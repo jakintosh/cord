@@ -42,7 +42,7 @@ func startLoopbackDNS(
 		t.Fatalf("start dns server: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = srv.Stop(context.Background())
+		_ = srv.Close(context.Background())
 	})
 
 	return srv
@@ -165,7 +165,7 @@ func TestServer_PartialBindRollback(
 	if srv.Status().State != resource.Running {
 		t.Fatal("restarted server should be serving")
 	}
-	if err := srv.Stop(context.Background()); err != nil {
+	if err := srv.Close(context.Background()); err != nil {
 		t.Fatalf("stop after restart: %v", err)
 	}
 }
@@ -177,16 +177,16 @@ func TestServer_BoundedShutdown(
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := srv.Stop(ctx); err != nil {
+	if err := srv.Close(ctx); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 
 	if srv.Status().State != resource.Stopped {
-		t.Fatal("server should be stopped after Stop")
+		t.Fatal("server should be stopped after Close")
 	}
 
-	// Stop is safe to call twice.
-	if err := srv.Stop(ctx); err != nil {
+	// Close is safe to call twice.
+	if err := srv.Close(ctx); err != nil {
 		t.Fatalf("second stop: %v", err)
 	}
 
@@ -197,7 +197,7 @@ func TestServer_BoundedShutdown(
 	if srv.Status().State != resource.Running {
 		t.Fatal("restarted server should be serving")
 	}
-	if err := srv.Stop(context.Background()); err != nil {
+	if err := srv.Close(context.Background()); err != nil {
 		t.Fatalf("final stop: %v", err)
 	}
 }
@@ -235,7 +235,7 @@ func apexQuery(
 
 func TestServer_ReconcileServesQueries(t *testing.T) {
 	srv := startLoopbackDNS(t)
-	if err := srv.Stop(context.Background()); err != nil {
+	if err := srv.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if err := srv.Reconcile(t.Context()); err != nil {
@@ -265,7 +265,7 @@ func TestServer_ConcurrentLifecycle(
 	t *testing.T,
 ) {
 	srv := startLoopbackDNS(t)
-	if err := srv.Stop(t.Context()); err != nil {
+	if err := srv.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -295,7 +295,7 @@ func TestServer_ConcurrentLifecycle(
 		wg.Go(func() {
 			<-start
 			for range 10 {
-				if err := srv.Stop(t.Context()); err != nil {
+				if err := srv.Close(t.Context()); err != nil {
 					t.Errorf("concurrent stop: %v", err)
 				}
 			}

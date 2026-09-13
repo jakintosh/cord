@@ -55,7 +55,7 @@ func TestStopForcesCleanup(
 				close(release)
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 				defer cancel()
-				_ = srv.Stop(ctx)
+				_ = srv.Close(ctx)
 				for range 2 {
 					select {
 					case err := <-exited:
@@ -89,22 +89,22 @@ func TestStopForcesCleanup(
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			cancel()
-			if err := srv.Stop(ctx); !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), protocol) {
+			if err := srv.Close(ctx); !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), protocol) {
 				t.Fatalf("stop = %v, want %s cancellation", err, protocol)
 			}
 
 			if status := srv.Status(); status.State == resource.Running || status.Error == nil {
 				t.Fatalf("status = %+v, want unavailable with shutdown error", status)
 			}
-			if err := srv.Stop(context.Background()); err != nil {
+			if err := srv.Close(context.Background()); err != nil {
 				t.Fatalf("repeated stop: %v", err)
 			}
 			if protocol == "tcp" {
 				conn.SetReadDeadline(time.Now().Add(time.Second))
 				if _, err := client.ReadMsg(); err == nil {
-					t.Fatal("active TCP connection survived Stop")
+					t.Fatal("active TCP connection survived Close")
 				} else if e, ok := err.(net.Error); ok && e.Timeout() {
-					t.Fatal("Stop did not disconnect the TCP client")
+					t.Fatal("Close did not disconnect the TCP client")
 				}
 			}
 			// The handler is still blocked, but both listening sockets are released.

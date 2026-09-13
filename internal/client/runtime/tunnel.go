@@ -67,13 +67,13 @@ func (t *Tunnel) start(
 		EndpointPolicy:      wireguard.EndpointFixed,
 		PersistentKeepalive: int(t.keepalive / time.Second),
 	}); err != nil {
-		_ = t.device.Stop()
+		_ = t.device.Close()
 		return fmt.Errorf("set server peer on %q: %w", t.name, err)
 	}
 
 	t.apiAddr, err = netaddr.EndpointFromCIDR(t.server.Route, t.server.APIPort)
 	if err != nil {
-		_ = t.device.Stop()
+		_ = t.device.Close()
 		return fmt.Errorf("server api addr for %q: %w", t.name, err)
 	}
 
@@ -86,7 +86,7 @@ func (t *Tunnel) stop() error {
 		return nil
 	}
 
-	if err := t.device.Stop(); err != nil {
+	if err := t.device.Close(); err != nil {
 		return err
 	}
 

@@ -6,16 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
+	"git.studiopollinator.com/pollinator/cord/internal/server/dns"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
-
-// NetworkReconcileInterval caps the time between network maintenance passes.
-// Registration expiry can schedule an earlier pass.
-const NetworkReconcileInterval = 5 * time.Minute
 
 type networkOptions struct {
 	record          *service.Network
@@ -26,6 +23,7 @@ type networkOptions struct {
 	dnsPort         uint16
 	dnsDisabled     bool
 	shutdownTimeout time.Duration
+	interval        time.Duration
 	clock           func() time.Time
 	log             *slog.Logger
 }
@@ -38,8 +36,7 @@ type NetworkStatus struct {
 	Reconcile ActivityStatus
 }
 
-// Network owns two persistent planes and schedules their maintenance.
-// Its mutex serializes snapshots, reconciliation, and shutdown.
+// Network holds two planes. Only the runtime loop operates on it.
 type Network struct {
 	record  *service.Network
 	main    *Plane
@@ -48,10 +45,7 @@ type Network struct {
 	clock   func() time.Time
 	log     *slog.Logger
 
-	mu              sync.Mutex
-	ctx             context.Context
-	cancel          context.CancelFunc
-	timer           *time.Timer
+	closing         bool // Retained only when cleanup needs another attempt.
 	reconcileStatus ActivityStatus
 }
 
@@ -62,12 +56,18 @@ func newNetwork(
 	*Network,
 	error,
 ) {
-	var dnsOptions *dnsConfig
+	var dnsOptions *dns.Options
 	if !opts.dnsDisabled {
-		dnsOptions = &dnsConfig{
-			network: opts.record.Name,
-			service: opts.service,
-			port:    opts.dnsPort,
+		route, err := netaddr.InterfaceRouteFromCidr(opts.record.Main.Cidr)
+		if err != nil {
+			return nil, fmt.Errorf("main plane: plane address: %w", err)
+		}
+		dnsOptions = &dns.Options{
+			Network: opts.record.Name,
+			Zone:    opts.record.Name + ".internal",
+			Address: netaddr.Endpoint(route.IP, opts.dnsPort),
+			Service: opts.service,
+			Logger:  opts.log.With("plane", "main"),
 		}
 	}
 
@@ -105,116 +105,58 @@ func newNetwork(
 		clock:   opts.clock,
 		log:     opts.log,
 		reconcileStatus: ActivityStatus{
-			Interval: NetworkReconcileInterval,
+			Interval: opts.interval,
 		},
 	}, nil
 }
 
-// Status collects plane snapshots and activity without changing resources.
-func (n *Network) Status() NetworkStatus {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
+// status collects plane snapshots and activity without changing resources.
+func (n *Network) status() NetworkStatus {
 	return NetworkStatus{
-		Main:      n.main.Status(),
-		Invite:    n.invite.Status(),
+		Main:      n.main.status(),
+		Invite:    n.invite.status(),
 		Reconcile: n.reconcileStatus,
 	}
 }
 
-// Reconcile maintains the network and schedules the next pass. The first call
-// after construction or Stop establishes a lifetime derived from ctx.
-func (n *Network) Reconcile(
+// reconcile repairs infrastructure before applying saved peer configuration.
+// It is called only by runtime maintenance and administrative commands.
+func (n *Network) reconcile(
 	ctx context.Context,
 ) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	// Honor caller cancellation before doing any lifecycle work.
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	// Clean up a canceled lifetime before starting a new one.
-	if n.ctx != nil && n.ctx.Err() != nil {
-		if err := n.stopLocked(); err != nil {
-			return err
-		}
-	}
+	err := errors.Join(
+		n.main.reconcile(ctx),
+		n.invite.reconcile(ctx),
+		n.applyPeers(),
+	)
 
-	// Share one context across passes, with cancellation owned by Stop.
-	if n.ctx == nil {
-		n.ctx, n.cancel = context.WithCancel(ctx)
-	}
-
-	return n.reconcileLocked()
-}
-
-// Stop cancels scheduled work and stops both planes, retaining their wrappers.
-// A subsequent explicit Reconcile can establish a new lifetime.
-func (n *Network) Stop() error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	return n.stopLocked()
-}
-
-// reconcileLocked requires mu and completes one maintenance pass.
-func (n *Network) reconcileLocked() error {
-	now := n.clock()
-	var errs []error
-
-	if err := n.main.Reconcile(n.ctx); err != nil {
-		errs = append(errs, fmt.Errorf("main plane: %w", err))
-	}
-	if err := n.invite.Reconcile(n.ctx); err != nil {
-		errs = append(errs, fmt.Errorf("invite plane: %w", err))
-	}
-
-	expiry, peerErr := n.reconcilePeersLocked(now)
-	errs = append(errs, peerErr)
-
-	err := errors.Join(errs...)
 	n.reconcileStatus.record(n.clock(), err)
 
-	n.rearmLocked(now, expiry)
 	return err
 }
 
-// stopLocked requires mu. Invalidating the context also retires callbacks
-// already queued by the old timer; they will do nothing after acquiring mu.
-func (n *Network) stopLocked() error {
-
-	// Cancel this lifetime so children and queued callbacks see shutdown.
-	if n.cancel != nil {
-		n.cancel()
-	}
-
-	if n.timer != nil {
-		n.timer.Stop()
-		n.timer = nil
-	}
-
-	// Forget this lifetime so an explicit Reconcile can start another.
-	n.ctx, n.cancel = nil, nil
-
+// close releases servers before devices. Failed cleanup is retried by runtime.
+func (n *Network) close() error {
+	n.closing = true
 	return errors.Join(
-		n.main.Stop(),
-		n.invite.Stop(),
+		n.main.close(),
+		n.invite.close(),
 	)
 }
 
-// reconcilePeersLocked requires mu. Pruning must succeed before applying peer
-// state. After that, a failure on one plane does not prevent updating the other.
-func (n *Network) reconcilePeersLocked(
-	now time.Time,
-) (
-	time.Time,
-	error,
-) {
+// applyPeers never changes the serving infrastructure. Pruning must succeed before
+// applying peer state. After that, a failure on one plane does not prevent updating
+// the other.
+func (n *Network) applyPeers() error {
+	now := n.clock()
 	name := n.record.Name
+
 	if err := n.service.PruneNetwork(name); err != nil {
-		return time.Time{}, fmt.Errorf("prune: %w", err)
+		return fmt.Errorf("prune: %w", err)
 	}
 
 	var errs []error
@@ -223,11 +165,11 @@ func (n *Network) reconcilePeersLocked(
 		errs = append(errs, fmt.Errorf("list main peers: %w", err))
 	} else if err := n.main.device.SetPeers(mainPeers...); err != nil {
 		errs = append(errs, fmt.Errorf("apply main peers: %w", err))
-	} else if err := n.observeLocked(now); err != nil {
+	} else if err := n.observe(now); err != nil {
 		errs = append(errs, err)
 	}
 
-	invitePeers, expiry, err := n.service.ListRegistrationPeers(name)
+	invitePeers, err := n.service.ListRegistrationPeers(name)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("list invite peers: %w", err))
 	} else if err := n.invite.device.SetPeers(invitePeers...); err != nil {
@@ -240,13 +182,13 @@ func (n *Network) reconcilePeersLocked(
 		"registrations", len(invitePeers),
 	)
 
-	return expiry, errors.Join(errs...)
+	return errors.Join(errs...)
 }
 
-// observeLocked reports the endpoints the main device currently sees for its
+// observe reports the endpoints the main device currently sees for its
 // peers. Only handshakes fresh enough to still be routable count; the
 // service decides which of the observed keys are peers worth recording.
-func (n *Network) observeLocked(
+func (n *Network) observe(
 	now time.Time,
 ) error {
 	livePeers, err := n.main.device.GetPeerStatuses()
@@ -259,6 +201,7 @@ func (n *Network) observeLocked(
 		if peer.Endpoint == nil || !peerHealthy(peer, now) {
 			continue
 		}
+
 		sightings = append(sightings, service.EndpointSighting{
 			WitnessKey: n.record.PublicKey,
 			PeerKey:    peer.PublicKey.String(),
@@ -281,64 +224,237 @@ func (n *Network) observeLocked(
 	return nil
 }
 
-// rearmLocked requires mu and schedules expiry or the maximum interval.
-func (n *Network) rearmLocked(
-	now time.Time,
-	expiry time.Time,
-) {
-	// A stopped or canceled lifetime must not schedule more work.
-	if n.ctx == nil || n.ctx.Err() != nil {
-		return
-	}
-
-	next := now.Add(NetworkReconcileInterval)
-	if !expiry.IsZero() && expiry.Before(next) {
-		next = expiry
-	}
-
-	delay := next.Sub(now)
-	if delay <= 0 {
-		delay = time.Second
-	}
-
-	if n.timer == nil {
-		// Capture this lifetime so the callback cannot act on a later one.
-		ctx := n.ctx
-		n.timer = time.AfterFunc(delay, func() {
-			n.reconcileScheduled(ctx)
-		})
-		return
-	}
-
-	n.timer.Reset(delay)
-}
-
-// reconcileScheduled only maintains the lifetime that scheduled it. Unlike an
-// explicit Reconcile, a timer callback cannot start or restart a network.
-func (n *Network) reconcileScheduled(
+// SetNetworkEnabled saves intent and returns the immediate application overview.
+func (r *Runtime) SetNetworkEnabled(
 	ctx context.Context,
+	name string,
+	enabled bool,
+) (
+	NetworkOverview,
+	error,
 ) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	return executeValue(r, ctx, func() (NetworkOverview, error) {
 
-	// A queued callback may acquire the lock after Stop or a restart.
-	// Reject callbacks that are not for the current lifetime.
-	if n.ctx != ctx || ctx.Err() != nil {
+		if err := r.service.SetNetworkEnabled(
+			name,
+			enabled,
+		); err != nil {
+			return NetworkOverview{}, err
+		}
+
+		record, err := r.service.GetNetwork(name)
+		if err != nil {
+			return NetworkOverview{}, err
+		}
+
+		if err := r.reconcileNetwork(record); err != nil {
+			r.reasons[name] = fmt.Sprintf("apply failed: %v", err)
+			r.log.Error(
+				"apply network intent failed",
+				"network", name,
+				"err", err,
+			)
+		}
+
+		return r.networkOverview(record), nil
+	})
+}
+
+// GetNetwork returns the persisted network record by name.
+func (r *Runtime) GetNetwork(
+	ctx context.Context,
+	name string,
+) (
+	*service.Network,
+	error,
+) {
+	return executeValue(r, ctx, func() (*service.Network, error) {
+		return r.service.GetNetwork(name)
+	})
+}
+
+// ListNetworks returns persisted network intent.
+func (r *Runtime) ListNetworks(
+	ctx context.Context,
+) (
+	[]*service.Network,
+	error,
+) {
+	return executeValue(r, ctx, func() ([]*service.Network, error) {
+		return r.service.ListNetworks()
+	})
+}
+
+// CreateNetwork defines a new server network: validates the config,
+// generates the server keypair, and persists the record. Zero-valued
+// fields in the Planes mean "use default."
+func (r *Runtime) CreateNetwork(
+	ctx context.Context,
+	name string,
+	externalIP string,
+	main service.Plane,
+	invite service.Plane,
+) (
+	*service.Network,
+	error,
+) {
+	return executeValue(r, ctx, func() (*service.Network, error) {
+		return r.service.CreateNetwork(name, externalIP, main, invite)
+	})
+}
+
+// DeleteNetwork removes the named network and all of its resources.
+// The network must be disabled first; the store enforces the guard
+// atomically with the delete.
+func (r *Runtime) DeleteNetwork(
+	ctx context.Context,
+	name string,
+) error {
+	return execute(r, ctx, func() error {
+		return r.service.DeleteNetwork(name)
+	})
+}
+
+// reconcileNetwork applies one record under the active runtime lifetime.
+func (r *Runtime) reconcileNetwork(
+	record *service.Network,
+) error {
+	network, isManaged := r.running[record.Name]
+
+	switch {
+
+	// Disabled but still managed; bring it down.
+	case !record.Enabled && isManaged:
+		delete(r.reasons, record.Name)
+		return r.closeNetwork(record.Name, network)
+
+	// Disabled and already down; forget any stale reason.
+	case !record.Enabled && !isManaged:
+		delete(r.reasons, record.Name)
+		break // nothing to do
+
+	// Enabled and managed; reconcile it.
+	case record.Enabled && isManaged:
+		if network.closing {
+			// Retry unfinished cleanup before attempting another start.
+			if err := r.closeNetwork(record.Name, network); err != nil {
+				return err
+			}
+			return r.startNetwork(record)
+		}
+
+		if err := network.reconcile(r.ctx); err != nil {
+			return err
+		}
+		//
+		// reconcile succeeded
+		delete(r.reasons, record.Name)
+		break
+
+	// Enabled and down; bring it up.
+	case record.Enabled && !isManaged:
+		return r.startNetwork(record)
+	}
+
+	return nil
+}
+
+// startNetwork brings a network up under its record and into the
+// running set, or records the failure as its reason to be retried on
+// the next pass.
+func (r *Runtime) startNetwork(
+	record *service.Network,
+) error {
+	var mainHandler, inviteHandler http.Handler
+	if r.handlers.Peer != nil {
+		mainHandler = r.handlers.Peer(record.Name)
+	}
+
+	if r.handlers.Invite != nil {
+		inviteHandler = r.handlers.Invite(record.Name)
+	}
+
+	network, err := newNetwork(networkOptions{
+		record:          record,
+		service:         r.service,
+		wireguard:       r.wireguard,
+		mainHandler:     mainHandler,
+		inviteHandler:   inviteHandler,
+		dnsPort:         r.dnsPort,
+		dnsDisabled:     r.dnsDisabled,
+		shutdownTimeout: r.shutdownTimeout,
+		interval:        r.interval,
+		clock:           r.clock,
+		log:             r.log.With("network", record.Name),
+	})
+	if err != nil {
+		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)
+		return err
+	}
+
+	if err := network.reconcile(r.ctx); err != nil {
+		if closeErr := network.close(); closeErr != nil {
+			r.running[record.Name] = network
+			err = errors.Join(err, closeErr)
+		}
+
+		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)
+		return err
+	}
+
+	r.running[record.Name] = network
+	delete(r.reasons, record.Name)
+
+	r.log.Info(
+		"network started",
+		"network", record.Name,
+	)
+
+	return nil
+}
+
+// closeNetwork takes a running network down and forgets it after cleanup.
+func (r *Runtime) closeNetwork(
+	name string,
+	network *Network,
+) error {
+	err := network.close()
+	if err != nil {
+		return fmt.Errorf("stop network %q: %w", name, err)
+	}
+
+	delete(r.running, name)
+	delete(r.reasons, name)
+
+	r.log.Info(
+		"network stopped",
+		"network", name,
+	)
+
+	return nil
+}
+
+// applyPeers is called by plane handlers. Never stop or replace a plane here:
+// HTTP draining would wait for the handler that is waiting on this command.
+// Saved command results remain valid when application fails.
+func (r *Runtime) applyPeers(
+	name string,
+) {
+	n := r.running[name]
+	if n == nil || n.closing {
 		return
 	}
 
-	if err := n.reconcileLocked(); err != nil {
-		n.log.Warn("scheduled reconciliation failed", "err", err)
+	err := n.applyPeers()
+	n.reconcileStatus.record(r.clock(), err)
+	if err != nil {
+		r.reasons[name] = fmt.Sprintf("apply failed: %v", err)
+		r.log.Error(
+			"apply network peers failed",
+			"network", name,
+			"err", err,
+		)
+	} else {
+		delete(r.reasons, name)
 	}
-}
-
-// peerHealthy reports whether a peer's last handshake is recent enough
-// to consider it connected. Peers that have never handshaken are not
-// healthy.
-func peerHealthy(
-	peerStatus wireguard.PeerStatus,
-	now time.Time,
-) bool {
-	return !peerStatus.LastHandshake.IsZero() &&
-		now.Sub(peerStatus.LastHandshake) < wireguard.ActiveHandshakeThreshold
 }

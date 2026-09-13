@@ -83,7 +83,7 @@ func (d *Device) Reconcile(
 
 	case resource.Failed:
 		d.lastErr = status.Error
-		if err := d.stopLocked(); err != nil {
+		if err := d.closeLocked(); err != nil {
 			return err
 		}
 
@@ -102,9 +102,9 @@ func (d *Device) Reconcile(
 	return d.startLocked(ctx)
 }
 
-// Stop releases the underlying interface, retaining configuration and desired
+// Close releases the underlying interface, retaining configuration and desired
 // peers. A failed close retains the handle so cleanup can be retried.
-func (d *Device) Stop() error {
+func (d *Device) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -112,7 +112,7 @@ func (d *Device) Stop() error {
 		d.lastErr = d.statusLocked().Error
 	}
 
-	return d.stopLocked()
+	return d.closeLocked()
 }
 
 // GetPeerStatuses returns the live peer state from the WireGuard device.
@@ -247,12 +247,12 @@ func (d *Device) startLocked(
 	d.backend, err = d.factory.CreateDevice(d.config)
 	if err != nil {
 		// The backend already attempted rollback. Retain any remaining handle
-		// for a later Stop or reconciliation instead of repeating cleanup here.
+		// for a later Close or reconciliation instead of repeating cleanup here.
 		return fmt.Errorf("wireguard: create device: %w", err)
 	}
 
 	if err := ctx.Err(); err != nil {
-		return errors.Join(err, d.stopLocked())
+		return errors.Join(err, d.closeLocked())
 	}
 
 	if d.desired != nil {
@@ -263,7 +263,7 @@ func (d *Device) startLocked(
 		if err := d.syncPeersLocked(peers); err != nil {
 			return errors.Join(
 				fmt.Errorf("wireguard: restore peers: %w", err),
-				d.stopLocked(),
+				d.closeLocked(),
 			)
 		}
 	}
@@ -276,8 +276,8 @@ func (d *Device) startLocked(
 	return nil
 }
 
-// stopLocked requires mu. Only successful cleanup relinquishes the handle.
-func (d *Device) stopLocked() error {
+// closeLocked requires mu. Only successful cleanup relinquishes the handle.
+func (d *Device) closeLocked() error {
 	if d.backend == nil {
 		return nil
 	}

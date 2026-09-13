@@ -14,23 +14,24 @@ func (a *API) handleGetStatus(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	status, err := a.runtime.GetStatus()
-	if err != nil {
+	if status, err := a.runtime.GetOverview(
+		r.Context(),
+	); err != nil {
 		writeServiceError(w, err)
-		return
-	}
+	} else {
+		networks := make([]NetworkStatus, len(status.Networks))
+		for i, network := range status.Networks {
+			networks[i] = networkStatusFromRuntime(network)
+		}
 
-	networks := make([]NetworkStatus, len(status.Networks))
-	for i, network := range status.Networks {
-		networks[i] = networkStatusFromRuntime(network)
+		statusDTO := Status{
+			Status:   "ok",
+			Health:   status.Health,
+			Version:  a.version,
+			Networks: networks,
+		}
+		wire.WriteData(w, http.StatusOK, statusDTO)
 	}
-
-	wire.WriteData(w, http.StatusOK, Status{
-		Status:   "ok",
-		Health:   status.Health,
-		Version:  a.version,
-		Networks: networks,
-	})
 }
 
 func networkStatusFromRuntime(
@@ -42,9 +43,6 @@ func networkStatusFromRuntime(
 		Running: status.Running,
 		Reason:  status.Reason,
 		Health:  status.Health,
-		Reconcile: ActivityStatus{
-			IntervalSeconds: int64(runtime.NetworkReconcileInterval / time.Second),
-		},
 	}
 	if snapshot := status.Status; snapshot != nil {
 		result.Reconcile = activityStatusFromRuntime(snapshot.Reconcile)
