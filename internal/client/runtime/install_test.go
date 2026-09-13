@@ -19,6 +19,96 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
 
+func TestConfirm_ClosesTemporaryTunnelBeforePublishingNetwork(t *testing.T) {
+	for _, failClose := range []bool{false, true} {
+		name := "success"
+		if failClose {
+			name = "cleanup failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			env := testutil.SetupService(t)
+			server := newInstallServer(t)
+			backend := &confirmationBackend{
+				MockBackend: wireguardtest.NewMockBackend(),
+			}
+			if failClose {
+				backend.closeErr = errors.New("main tunnel cleanup failed")
+			}
+			rt, err := runtime.New(runtime.Options{
+				Service:    env.Service,
+				WireGuard:  wireguard.NewManagerWithBackend(backend),
+				HTTPClient: server.server.Client(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(rt.Stop)
+			t.Cleanup(func() {
+				if device := backend.Device("testnet"); device != nil {
+					device.CloseErr = nil
+					_ = device.Close()
+				}
+			})
+
+			_, err = rt.Install(t.Context(), server.invitation("testnet"), service.NetworkOptions{})
+			if !failClose {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !networkStatus(t, rt, "testnet").Running {
+					t.Fatal("permanent network did not start")
+				}
+				return
+			}
+
+			if !errors.Is(err, backend.closeErr) {
+				t.Fatalf("install = %v, want cleanup failure", err)
+			}
+			if server.calls("confirm") != 1 {
+				t.Fatal("expected remote confirmation before cleanup failure")
+			}
+			if _, err := env.Service.GetNetwork("testnet"); !errors.Is(err, service.ErrNotFound) {
+				t.Fatalf("network lookup = %v, want no published network", err)
+			}
+			install, err := env.Service.GetInstall("testnet")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if install.Phase != service.PhaseRedeemed {
+				t.Fatalf("install phase = %q, want redeemed", install.Phase)
+			}
+			if len(backend.CreateCalls) != 2 {
+				t.Fatal("cleanup failure allowed permanent interface creation")
+			}
+		})
+	}
+}
+
+// confirmationBackend rejects creation while the previous interface is live.
+type confirmationBackend struct {
+	*wireguardtest.MockBackend
+	closeErr error
+}
+
+func (b *confirmationBackend) CreateDevice(
+	config wireguard.DeviceConfig,
+) (
+	wireguard.WgDevice,
+	error,
+) {
+	if previous := b.Device(config.Name); previous != nil && previous.Check() == nil {
+		return nil, errors.New("previous interface is still live")
+	}
+	device, err := b.MockBackend.CreateDevice(config)
+	if err != nil {
+		return nil, err
+	}
+	if config.Name == "testnet" {
+		b.Device(config.Name).CloseErr = b.closeErr
+	}
+	return device, nil
+}
+
 func TestInstall_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	backend := wireguardtest.NewMockBackend()

@@ -40,12 +40,28 @@ const (
 	StaleThreshold = wireguard.ActiveHandshakeThreshold
 )
 
-// Network is a client network running in this process: one Tunnel plus
+type networkOptions struct {
+	record         *service.Network
+	service        *service.Service
+	wireguard      *wireguard.Manager
+	httpClient     *http.Client
+	clock          func() time.Time
+	log            *slog.Logger
+	syncInterval   time.Duration
+	scanInterval   time.Duration
+	reportInterval time.Duration
+}
+
+// Network is a configured client network: one Tunnel plus
 // three self-rearming activity timers. It holds no durable state of its
 // own — every read and write goes through the service, and the
 // activities (sync, scan, report) are projections between the store, the
 // device, and the server.
 type Network struct {
+	// Only the runtime accesses closing, under its own mutex. Once cleanup
+	// begins, this instance must be retired before a replacement can start.
+	closing bool
+
 	record  *service.Network
 	tunnel  *Tunnel
 	service *service.Service
@@ -75,57 +91,63 @@ type Network struct {
 	reportStatus    ActivityStatus
 }
 
-// start brings up the tunnel under ctx, reconciles the device from the
-// local peer cache, then arms the activity timers. Applying the cached
-// peer set is local-only: it works offline, and its failure aborts the
-// start synchronously — the first server sync, firing immediately on its
-// own timer, is a freshness upgrade that can only be logged. The lock is
-// held so that sync cannot run against a partially armed timer set.
-//
-// The timers report to no caller, so errors are captured in logging
-// closures here.
+// newNetwork constructs the tunnel and API client without starting resources
+// or scheduling activities. Runtime supplies resolved dependencies and intervals.
+func newNetwork(
+	opts networkOptions,
+) (
+	*Network,
+	error,
+) {
+	tunnel, err := newTunnel(tunnelOptions{
+		name:       opts.record.InterfaceName,
+		privateKey: opts.record.PrivateKey,
+		route:      opts.record.AssignedRoute,
+		listenPort: opts.record.ListenPort,
+		server:     opts.record.Server,
+		keepalive:  PersistentKeepaliveInterval,
+	}, opts.wireguard)
+	if err != nil {
+		return nil, err
+	}
+
+	peerNetClient, err := client.NewPeerClient(tunnel.apiAddr, opts.httpClient)
+	if err != nil {
+		return nil, fmt.Errorf("create peer client: %w", err)
+	}
+
+	return &Network{
+		record:         opts.record,
+		tunnel:         tunnel,
+		service:        opts.service,
+		client:         peerNetClient,
+		clock:          opts.clock,
+		log:            opts.log,
+		syncInterval:   opts.syncInterval,
+		scanInterval:   opts.scanInterval,
+		reportInterval: opts.reportInterval,
+		syncStatus:     ActivityStatus{Interval: opts.syncInterval},
+		scanStatus:     ActivityStatus{Interval: opts.scanInterval},
+		reportStatus:   ActivityStatus{Interval: opts.reportInterval},
+	}, nil
+}
+
+// start reconciles the tunnel and cached peers before arming activities.
+// Startup works offline; the immediate server sync only freshens the cache.
+// Hold the lock until all timers are armed so no activity sees partial setup.
+// The runtime owns cleanup if startup fails.
 func (n *Network) start(
 	ctx context.Context,
-	wg *wireguard.Manager,
-	httpClient *http.Client,
 ) error {
 	n.ctx, n.cancel = context.WithCancel(ctx)
-
-	n.tunnel = &Tunnel{
-		name:       n.record.InterfaceName,
-		privateKey: n.record.PrivateKey,
-		route:      n.record.AssignedRoute,
-		listenPort: n.record.ListenPort,
-		server:     n.record.Server,
-		keepalive:  PersistentKeepaliveInterval,
-	}
-	if err := n.tunnel.start(wg); err != nil {
-		n.cancel()
-		return err
-	}
-
-	peerNetClient, err := client.NewPeerClient(n.tunnel.apiAddr, httpClient)
-	if err != nil {
-		n.cancel()
-		if stopErr := n.tunnel.stop(); stopErr != nil {
-			n.log.Debug("stop tunnel after failed start", "err", stopErr)
-		}
-		return fmt.Errorf("create peer client: %w", err)
-	}
-	n.client = peerNetClient
 
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	if err := n.applyPeers(); err != nil {
+	if err := n.reconcileLocked(); err != nil {
 		n.cancel()
-		if stopErr := n.tunnel.stop(); stopErr != nil {
-			n.log.Debug("stop tunnel after failed start", "err", stopErr)
-		}
 		return err
 	}
-
-	n.reconcileStatus.record(n.clock(), nil)
 
 	// Sync now: the cached peer set may be stale, so freshen it first.
 	n.syncTimer = time.AfterFunc(0, func() {
@@ -157,19 +179,27 @@ func (n *Network) start(
 // waiting on the lock sees the cancelled context and returns without
 // touching the device.
 func (n *Network) stop() error {
-	n.cancel()
+	if n.cancel != nil {
+		n.cancel()
+	}
 
 	n.mu.Lock()
-	n.syncTimer.Stop()
-	n.scanTimer.Stop()
-	n.reportTimer.Stop()
-	n.mu.Unlock()
+	defer n.mu.Unlock()
 
-	return n.tunnel.stop()
+	if n.syncTimer != nil {
+		n.syncTimer.Stop()
+	}
+	if n.scanTimer != nil {
+		n.scanTimer.Stop()
+	}
+	if n.reportTimer != nil {
+		n.reportTimer.Stop()
+	}
+
+	return n.tunnel.close()
 }
 
-// reconcile applies the current peer cache to the device. It is the
-// converge entry point for a network that is already where it should be.
+// reconcile repairs the tunnel before applying the current peer cache.
 func (n *Network) reconcile() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -178,9 +208,20 @@ func (n *Network) reconcile() error {
 		return nil
 	}
 
-	err := n.applyPeers()
-	n.reconcileStatus.record(n.clock(), err)
-	return err
+	return n.reconcileLocked()
+}
+
+// reconcileLocked shares the startup and maintenance path. Callers hold n.mu.
+func (n *Network) reconcileLocked() (err error) {
+	defer func() {
+		n.reconcileStatus.record(n.clock(), err)
+	}()
+
+	if err := n.tunnel.reconcile(n.ctx); err != nil {
+		return err
+	}
+
+	return n.applyPeers()
 }
 
 // sync fetches the visible network snapshot from the server, hands it to
@@ -397,9 +438,9 @@ func (n *Network) completeRefresh(
 	timer.Reset(cadence)
 }
 
-// isStopped reports whether this network has been isStopped.
+// isStopped reports whether activities have no active network lifetime.
 func (n *Network) isStopped() bool {
-	return n.ctx.Err() != nil
+	return n.ctx == nil || n.ctx.Err() != nil
 }
 
 // isDiverged reports whether the stored record describes a different

@@ -14,6 +14,168 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
 
+func TestCleanupRetriesOwnedNetworks(t *testing.T) {
+	for _, action := range []string{"disable", "uninstall", "shutdown"} {
+		t.Run(action, func(t *testing.T) {
+			env := testutil.SetupRuntime(t)
+			testutil.SeedNetworkDirect(t, env.Database, "testnet")
+			env.Enable(t, "testnet")
+			device := env.Backend.Device("testnet")
+			device.CloseErr = errors.New("close failed")
+			t.Cleanup(func() { device.CloseErr = nil })
+
+			switch action {
+			case "disable":
+				status, err := env.Runtime.SetNetworkEnabled("testnet", false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if status.Enabled || !status.Running || status.Reason == "" {
+					t.Fatalf("failed cleanup status = %+v", status)
+				}
+			case "uninstall":
+				if err := env.Runtime.UninstallNetwork("testnet"); err != nil {
+					t.Fatal(err)
+				}
+			case "shutdown":
+				env.Runtime.Stop()
+				status := networkStatus(t, env.Runtime, "testnet")
+				if !status.Running || status.Reason == "" {
+					t.Fatalf("failed shutdown status = %+v", status)
+				}
+			}
+
+			if device.CloseCalls != 1 {
+				t.Fatalf("close calls = %d, want 1", device.CloseCalls)
+			}
+			device.CloseErr = nil
+			if action == "shutdown" {
+				env.Runtime.Stop()
+			} else if err := env.Runtime.ConvergeAll(); err != nil {
+				t.Fatal(err)
+			}
+			if device.CloseCalls != 2 {
+				t.Fatalf("close calls = %d, want cleanup retry", device.CloseCalls)
+			}
+			if len(env.Backend.CreateCalls) != 1 {
+				t.Fatal("cleanup unexpectedly created another device")
+			}
+			if action != "uninstall" {
+				status := networkStatus(t, env.Runtime, "testnet")
+				if status.Running || status.Reason != "" {
+					t.Fatalf("completed cleanup status = %+v", status)
+				}
+			}
+		})
+	}
+}
+
+func TestReplacementWaitsForCleanupAfterConfigurationReverts(t *testing.T) {
+	env := testutil.SetupRuntime(t)
+	record := testutil.SeedNetworkDirect(t, env.Database, "testnet")
+	env.Enable(t, "testnet")
+	device := env.Backend.Device("testnet")
+	device.CloseErr = errors.New("close failed")
+	t.Cleanup(func() { device.CloseErr = nil })
+
+	port := uint16(51820)
+	if _, err := env.Runtime.UpdateNetwork("testnet", service.NetworkOptions{ListenPort: &port}); err != nil {
+		t.Fatal(err)
+	}
+	status := networkStatus(t, env.Runtime, "testnet")
+	if status.Reason == "" || status.Health != runtime.HealthDegraded {
+		t.Fatalf("failed replacement status = %+v", status)
+	}
+	if len(env.Backend.CreateCalls) != 1 {
+		t.Fatal("replacement started before cleanup succeeded")
+	}
+
+	// Returning to the original configuration must not revive an instance
+	// whose activities were already canceled by the first cleanup attempt.
+	port = record.ListenPort
+	if _, err := env.Runtime.UpdateNetwork("testnet", service.NetworkOptions{ListenPort: &port}); err != nil {
+		t.Fatal(err)
+	}
+	if device.CloseCalls != 2 || len(env.Backend.CreateCalls) != 1 {
+		t.Fatal("reverted configuration did not retry cleanup before replacement")
+	}
+	device.CloseErr = nil
+	env.Converge(t, "testnet")
+	if device.CloseCalls != 3 || len(env.Backend.CreateCalls) != 2 {
+		t.Fatal("successful cleanup did not allow replacement")
+	}
+	status = networkStatus(t, env.Runtime, "testnet")
+	if !status.Running || status.Reason != "" {
+		t.Fatalf("replacement status = %+v", status)
+	}
+}
+
+func TestFailedStartupRetainsPartialDeviceUntilCleanup(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkDirect(t, env.Database, "testnet")
+	if err := env.Service.SetNetworkEnabled("testnet", true); err != nil {
+		t.Fatal(err)
+	}
+	backend := &partialStartupBackend{MockBackend: wireguardtest.NewMockBackend()}
+	rt, err := runtime.New(runtime.Options{
+		Service:    env.Service,
+		WireGuard:  wireguard.NewManagerWithBackend(backend),
+		HTTPClient: testutil.NewOfflineHTTPClient(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Stop)
+	if err := rt.Converge("testnet"); err == nil {
+		t.Fatal("expected partial startup failure")
+	}
+	device := backend.Device("testnet")
+	t.Cleanup(func() { device.CloseErr = nil })
+	status := networkStatus(t, rt, "testnet")
+	if !status.Enabled || !status.Running || status.Reason == "" {
+		t.Fatalf("partial startup status = %+v", status)
+	}
+	if err := rt.Converge("testnet"); err == nil {
+		t.Fatal("expected cleanup failure")
+	}
+	if len(backend.CreateCalls) != 1 {
+		t.Fatal("partial device was replaced before cleanup")
+	}
+	device.CloseErr = nil
+	if err := rt.Converge("testnet"); err != nil {
+		t.Fatal(err)
+	}
+	if device.CloseCalls != 3 || len(backend.CreateCalls) != 2 {
+		t.Fatal("partial device cleanup was not retried before replacement")
+	}
+	status = networkStatus(t, rt, "testnet")
+	if !status.Running || status.Reason != "" {
+		t.Fatalf("recovered startup status = %+v", status)
+	}
+}
+
+// partialStartupBackend leaves a handle behind on the first failed creation.
+type partialStartupBackend struct {
+	*wireguardtest.MockBackend
+}
+
+func (b *partialStartupBackend) CreateDevice(
+	config wireguard.DeviceConfig,
+) (
+	wireguard.WgDevice,
+	error,
+) {
+	device, err := b.MockBackend.CreateDevice(config)
+	if err != nil {
+		return nil, err
+	}
+	if len(b.CreateCalls) == 1 {
+		b.Device(config.Name).CloseErr = errors.New("partial cleanup failed")
+		return device, errors.New("partial creation failed")
+	}
+	return device, nil
+}
+
 func TestStart_StartsEnabledNetworks(t *testing.T) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")

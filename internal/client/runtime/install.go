@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
@@ -150,18 +151,26 @@ func (r *Runtime) redeemInstall(
 	}
 
 	// create invite tunnel
-	tunnel := &Tunnel{
+	tunnel, err := newTunnel(tunnelOptions{
 		name:       install.InviteIfaceName,
 		privateKey: install.InvitePrivateKey,
 		route:      inviteHostRoute.String(),
 		listenPort: install.ListenPort,
 		server:     install.InviteServer,
-	}
-	if err := tunnel.start(r.wireguard); err != nil {
+	}, r.wireguard)
+	if err != nil {
 		return nil, fmt.Errorf("create invite tunnel: %w", err)
 	}
+
+	if err := tunnel.reconcile(ctx); err != nil {
+		return nil, errors.Join(
+			fmt.Errorf("start invite tunnel: %w", err),
+			tunnel.close(),
+		)
+	}
+
 	defer func() {
-		if err := tunnel.stop(); err != nil {
+		if err := tunnel.close(); err != nil {
 			r.log.Warn(
 				"close invite tunnel",
 				"device",
@@ -212,25 +221,31 @@ func (r *Runtime) confirmInstall(
 		return nil, err
 	}
 
-	tunnel := &Tunnel{
+	tunnel, err := newTunnel(tunnelOptions{
 		name:       install.MainIfaceName,
 		privateKey: install.MainPrivateKey,
 		route:      install.MainAssignedRoute,
 		listenPort: install.ListenPort,
 		server:     install.MainServer,
 		keepalive:  PersistentKeepaliveInterval,
-	}
-	if err := tunnel.start(r.wireguard); err != nil {
+	}, r.wireguard)
+	if err != nil {
 		return nil, fmt.Errorf("create main tunnel: %w", err)
 	}
+
+	if err := tunnel.reconcile(ctx); err != nil {
+		return nil, errors.Join(
+			fmt.Errorf("start main tunnel: %w", err),
+			tunnel.close(),
+		)
+	}
+
 	defer func() {
-		if err := tunnel.stop(); err != nil {
+		if err := tunnel.close(); err != nil {
 			r.log.Warn(
 				"close main tunnel",
-				"device",
-				install.MainIfaceName,
-				"error",
-				err,
+				"device", install.MainIfaceName,
+				"error", err,
 			)
 		}
 	}()
@@ -242,6 +257,12 @@ func (r *Runtime) confirmInstall(
 
 	if err := peerNetClient.ConfirmPeer(ctx); err != nil {
 		return nil, fmt.Errorf("confirm peer: %w", err)
+	}
+
+	// Release the temporary interface before publishing enabled intent, which
+	// can wake reconciliation and start the permanent network immediately.
+	if err := tunnel.close(); err != nil {
+		return nil, fmt.Errorf("close main tunnel: %w", err)
 	}
 
 	network, err := r.service.ConfirmInstall(install.Name)

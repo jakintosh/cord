@@ -1,6 +1,7 @@
 package runtime_test
 
 import (
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -15,6 +16,54 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
+
+func TestConverge_RepairsDeviceAndAppliesCurrentCache(t *testing.T) {
+	env := testutil.SetupRuntime(t)
+	record := testutil.SeedNetworkDirect(t, env.Database, "testnet")
+	env.Enable(t, "testnet")
+
+	// Lose the interface, then change the cache while repair is unavailable.
+	oldDevice := env.Backend.Device("testnet")
+	if err := oldDevice.Close(); err != nil {
+		t.Fatal(err)
+	}
+	peerKey := mustGenKey(t)
+	testutil.SeedPeers(t, env.Database, "testnet", service.Peer{
+		Name:      "alice",
+		PublicKey: peerKey,
+		Route:     "10.42.0.9/32",
+	})
+	env.Backend.CreateErr = errors.New("device unavailable")
+	env.Converge(t, "testnet")
+	status := networkStatus(t, env.Runtime, "testnet")
+	if !status.Enabled || !status.Running || status.Reconcile.Error == "" {
+		t.Fatalf("failed repair status = %+v", status)
+	}
+
+	env.Backend.CreateErr = nil
+	env.Converge(t, "testnet")
+	status = networkStatus(t, env.Runtime, "testnet")
+	if status.Reconcile.Error != "" || status.Reconcile.LastSuccessAt.IsZero() {
+		t.Fatalf("recovered status = %+v", status)
+	}
+	device := env.Backend.Device("testnet")
+	if device == oldDevice {
+		t.Fatal("reconciliation did not replace the failed interface")
+	}
+	peers, err := device.GetPeerStatuses()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{record.Server.PublicKey: true, peerKey: true}
+	if len(peers) != len(want) {
+		t.Fatalf("recovered peers = %+v", peers)
+	}
+	for _, peer := range peers {
+		if !want[peer.PublicKey.String()] {
+			t.Errorf("unexpected recovered peer %s", peer.PublicKey)
+		}
+	}
+}
 
 // TestConverge_AppliesCachedPeersSynchronously verifies that the cached
 // peer set is on the device by the time a converge returns, without

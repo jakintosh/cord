@@ -235,7 +235,8 @@ func (r *Runtime) Start(
 }
 
 // Stop ends the periodic pass, waits for work in flight, and stops every
-// running network. The runtime cannot be started again.
+// running network. Failed cleanup stays owned and a later Stop retries it.
+// The runtime cannot be started again.
 func (r *Runtime) Stop() {
 	r.mu.Lock()
 	cancel := r.cancel
@@ -246,13 +247,14 @@ func (r *Runtime) Stop() {
 	r.loop.Wait()
 
 	r.mu.Lock()
-	networks := r.running
-	r.running = make(map[string]*Network)
-	r.mu.Unlock()
+	defer r.mu.Unlock()
 
-	for name, network := range networks {
-		if err := network.stop(); err != nil {
-			r.log.Warn("stop network failed", "network", name, "err", err)
+	for name, network := range r.running {
+		if err := r.stopNetwork(name, network); err != nil {
+			r.log.Warn("stop network failed",
+				"network", name,
+				"err", err,
+			)
 		}
 	}
 }
@@ -622,6 +624,11 @@ func (r *Runtime) converge(
 			return r.stopNetwork(record.Name, network)
 		}
 
+	case isRunning && network.closing:
+		// Finish a previous cleanup attempt before starting again, even if
+		// the desired configuration has returned to its original value.
+		return r.restartNetwork(record, network)
+
 	case isRunning && network.isDiverged(record):
 		// The stored configuration no longer describes the running
 		// tunnel, so the network restarts under the new one.
@@ -632,12 +639,11 @@ func (r *Runtime) converge(
 		if err := network.reconcile(); err != nil {
 			r.log.Warn(
 				"reconcile failed",
-				"network",
-				record.Name,
-				"err",
-				err,
+				"network", record.Name,
+				"err", err,
 			)
 		}
+		break // everything is good
 
 	default:
 		return r.startNetwork(record)
@@ -657,36 +663,39 @@ func (r *Runtime) startNetwork(
 		ctx = context.Background()
 	}
 
-	network := &Network{
+	network, err := newNetwork(networkOptions{
 		record:         record,
 		service:        r.service,
+		wireguard:      r.wireguard,
+		httpClient:     r.httpClient,
 		clock:          r.clock,
 		log:            r.log.With("network", record.Name),
 		syncInterval:   r.syncInterval,
 		scanInterval:   r.scanInterval,
 		reportInterval: r.reportInterval,
-		syncStatus:     ActivityStatus{Interval: r.syncInterval},
-		scanStatus:     ActivityStatus{Interval: r.scanInterval},
-		reportStatus:   ActivityStatus{Interval: r.reportInterval},
-	}
-	if err := network.start(
-		ctx,
-		r.wireguard,
-		r.httpClient,
-	); err != nil {
+	})
+	if err != nil {
 		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)
 		return err
 	}
 
+	// Own the instance before startup; cleanup decides when to forget it.
 	r.running[record.Name] = network
+
+	if err := network.start(ctx); err != nil {
+		cleanupErr := r.stopNetwork(record.Name, network)
+		err = errors.Join(err, cleanupErr)
+
+		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)
+		return err
+	}
+
 	delete(r.reasons, record.Name)
 
 	r.log.Info(
 		"network started",
-		"network",
-		record.Name,
-		"interface",
-		record.InterfaceName,
+		"network", record.Name,
+		"interface", record.InterfaceName,
 	)
 
 	return nil
@@ -698,36 +707,31 @@ func (r *Runtime) restartNetwork(
 	record *service.Network,
 	network *Network,
 ) error {
-	delete(r.running, record.Name)
-	if err := network.stop(); err != nil {
-		r.log.Warn(
-			"restart: stop network failed",
-			"network",
-			record.Name,
-			"err",
-			err,
-		)
+	if err := r.stopNetwork(record.Name, network); err != nil {
+		return err
 	}
 
 	return r.startNetwork(record)
 }
 
-// stopNetwork takes a running network down and forgets it. Callers hold
-// r.mu.
+// stopNetwork forgets a network only after cleanup succeeds. Callers hold r.mu.
 func (r *Runtime) stopNetwork(
 	name string,
 	network *Network,
 ) error {
+	network.closing = true
+	if err := network.stop(); err != nil {
+		err = fmt.Errorf("stop network %q: %w", name, err)
+		r.reasons[name] = err.Error()
+		return err
+	}
+
 	delete(r.running, name)
 	delete(r.reasons, name)
-	if err := network.stop(); err != nil {
-		return fmt.Errorf("stop network %q: %w", name, err)
-	}
 
 	r.log.Info(
 		"network stopped",
-		"network",
-		name,
+		"network", name,
 	)
 
 	return nil
@@ -817,6 +821,10 @@ func joinPeerStatuses(
 func networkHealth(
 	status NetworkStatus,
 ) string {
+	if status.Reason != "" {
+		return HealthDegraded
+	}
+
 	if !status.Enabled && !status.Running {
 		return HealthInactive
 	}
