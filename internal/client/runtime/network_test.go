@@ -3,6 +3,7 @@ package runtime_test
 import (
 	"errors"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -158,6 +159,7 @@ func TestSync_AppliesServerSnapshot(t *testing.T) {
 		Interval:     time.Hour,
 		SyncInterval: time.Hour,
 	})
+	testutil.RunRuntime(t, rt)
 	server := newInstallServer(t)
 
 	if _, err := rt.Install(t.Context(), server.invitation("testnet"), service.NetworkOptions{}); err != nil {
@@ -175,7 +177,7 @@ func TestSync_AppliesServerSnapshot(t *testing.T) {
 		}},
 	})
 
-	network, err := rt.Sync("testnet")
+	network, err := rt.Sync(t.Context(), "testnet")
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
@@ -213,15 +215,89 @@ func TestSync_AppliesServerSnapshot(t *testing.T) {
 	}
 }
 
+func TestActivities_RespectDueTimesAndOnDemandSync(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkDirect(t, env.Database, "testnet")
+	if err := env.Service.SetNetworkEnabled("testnet", true); err != nil {
+		t.Fatal(err)
+	}
+
+	now := testutil.FixedTime
+	var clock atomic.Value
+	clock.Store(now)
+	rt := newRuntime(t, env, wireguardtest.NewMockBackend(), runtime.Options{
+		HTTPClient:     testutil.NewOfflineHTTPClient(),
+		Interval:       time.Hour,
+		SyncInterval:   2 * time.Minute,
+		ScanInterval:   30 * time.Second,
+		ReportInterval: time.Minute,
+		Clock:          func() time.Time { return clock.Load().(time.Time) },
+	})
+	testutil.RunRuntime(t, rt)
+
+	waitFor(t, func() bool {
+		return !networkStatus(t, rt, "testnet").Sync.LastAttemptAt.IsZero()
+	}, "immediate sync")
+	status := networkStatus(t, rt, "testnet")
+	if !status.Scan.LastAttemptAt.IsZero() || !status.Report.LastAttemptAt.IsZero() {
+		t.Fatal("scan or report ran immediately at startup")
+	}
+	if status.Sync.Error == "" {
+		t.Fatal("offline sync did not record its failure")
+	}
+
+	// Commands wake the loop after advancing the test clock. Status reads
+	// remain projections; the activity timer drives the due work.
+	now = now.Add(30 * time.Second)
+	clock.Store(now)
+	waitFor(t, func() bool {
+		return networkStatus(t, rt, "testnet").Scan.LastAttemptAt.Equal(now)
+	}, "first scan")
+	status = networkStatus(t, rt, "testnet")
+	if !status.Report.LastAttemptAt.IsZero() {
+		t.Fatal("report ran before its first interval")
+	}
+
+	now = now.Add(30 * time.Second)
+	clock.Store(now)
+	waitFor(t, func() bool {
+		return networkStatus(t, rt, "testnet").Report.LastAttemptAt.Equal(now)
+	}, "first report")
+
+	// A failed on-demand sync still postpones the scheduled attempt.
+	if _, err := rt.Sync(t.Context(), "testnet"); err == nil {
+		t.Fatal("offline on-demand sync unexpectedly succeeded")
+	}
+	lastSync := now
+	now = now.Add(time.Minute)
+	clock.Store(now)
+	waitFor(t, func() bool {
+		return networkStatus(t, rt, "testnet").Report.LastAttemptAt.Equal(now)
+	}, "activities at the original sync deadline")
+	status = networkStatus(t, rt, "testnet")
+	if !status.Sync.LastAttemptAt.Equal(lastSync) {
+		t.Fatal("scheduled sync ignored the on-demand attempt")
+	}
+
+	now = now.Add(time.Minute)
+	clock.Store(now)
+	waitFor(t, func() bool {
+		return networkStatus(t, rt, "testnet").Sync.LastAttemptAt.Equal(now)
+	}, "failed sync retry at its new deadline")
+}
+
 func TestSync_RecordsFailureAndRecovery(t *testing.T) {
 	env := testutil.SetupService(t)
 	backend := wireguardtest.NewMockBackend()
 	now := testutil.FixedTime
+	var clock atomic.Value
+	clock.Store(now)
 	rt := newRuntime(t, env, backend, runtime.Options{
 		Interval:     time.Hour,
 		SyncInterval: time.Hour,
-		Clock:        func() time.Time { return now },
+		Clock:        func() time.Time { return clock.Load().(time.Time) },
 	})
+	testutil.RunRuntime(t, rt)
 	server := newInstallServer(t)
 
 	if _, err := rt.Install(t.Context(), server.invitation("testnet"), service.NetworkOptions{}); err != nil {
@@ -230,13 +306,14 @@ func TestSync_RecordsFailureAndRecovery(t *testing.T) {
 	waitFor(t, func() bool {
 		return server.calls("snapshot") >= 1
 	}, "initial sync to start")
-	if _, err := rt.Sync("testnet"); err != nil {
+	if _, err := rt.Sync(t.Context(), "testnet"); err != nil {
 		t.Fatalf("initial sync: %v", err)
 	}
 
 	now = now.Add(time.Minute)
+	clock.Store(now)
 	server.setSnapshotFailure(true)
-	if _, err := rt.Sync("testnet"); err == nil {
+	if _, err := rt.Sync(t.Context(), "testnet"); err == nil {
 		t.Fatal("sync unexpectedly succeeded")
 	}
 
@@ -253,7 +330,7 @@ func TestSync_RecordsFailureAndRecovery(t *testing.T) {
 	if !status.Sync.LastSuccessAt.Equal(testutil.FixedTime) {
 		t.Fatalf("last success = %v, want %v", status.Sync.LastSuccessAt, testutil.FixedTime)
 	}
-	overall, err := rt.GetStatus()
+	overall, err := rt.GetStatus(t.Context())
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -262,8 +339,9 @@ func TestSync_RecordsFailureAndRecovery(t *testing.T) {
 	}
 
 	now = now.Add(time.Minute)
+	clock.Store(now)
 	server.setSnapshotFailure(false)
-	if _, err := rt.Sync("testnet"); err != nil {
+	if _, err := rt.Sync(t.Context(), "testnet"); err != nil {
 		t.Fatalf("recovery sync: %v", err)
 	}
 
@@ -277,7 +355,7 @@ func TestSync_RecordsFailureAndRecovery(t *testing.T) {
 	if !status.Sync.LastSuccessAt.Equal(now) {
 		t.Fatalf("last success = %v, want %v", status.Sync.LastSuccessAt, now)
 	}
-	overall, err = rt.GetStatus()
+	overall, err = rt.GetStatus(t.Context())
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -286,29 +364,33 @@ func TestSync_RecordsFailureAndRecovery(t *testing.T) {
 	}
 }
 
-// TestStop_RetiresActivityTimers verifies that no activity outlives the
+// TestStop_RetiresScheduledActivities verifies that no activity outlives the
 // network whose device it configures.
-func TestStop_RetiresActivityTimers(t *testing.T) {
+func TestStop_RetiresScheduledActivities(t *testing.T) {
 	env := testutil.SetupService(t)
 	backend := wireguardtest.NewMockBackend()
 	rt := newRuntime(t, env, backend, runtime.Options{
 		Interval:     time.Hour,
 		SyncInterval: 5 * time.Millisecond,
+		Clock:        time.Now,
 	})
+	finish := testutil.RunRuntime(t, rt)
 	server := newInstallServer(t)
 
 	if _, err := rt.Install(t.Context(), server.invitation("testnet"), service.NetworkOptions{}); err != nil {
 		t.Fatalf("install network: %v", err)
 	}
-	waitFor(t, func() bool { return server.calls("snapshot") >= 2 }, "the sync timer to rearm")
+	waitFor(t, func() bool { return server.calls("snapshot") >= 2 }, "the next scheduled sync")
 
-	rt.Stop()
+	if err := finish(); err != nil {
+		t.Fatal(err)
+	}
 	syncs := server.calls("snapshot")
 
 	time.Sleep(50 * time.Millisecond)
 
 	if got := server.calls("snapshot"); got != syncs {
-		t.Fatalf("syncs after stop = %d, want %d — a timer outlived the network", got, syncs)
+		t.Fatalf("syncs after stop = %d, want %d — scheduled work outlived the network", got, syncs)
 	}
 }
 
@@ -321,7 +403,7 @@ func TestPeerStatus_NotRunning(t *testing.T) {
 		Route:     "10.42.0.9/32",
 	})
 
-	statuses, err := env.Runtime.GetPeerStatus("testnet")
+	statuses, err := env.Runtime.GetPeerStatus(t.Context(), "testnet")
 	if err != nil {
 		t.Fatalf("peer status: %v", err)
 	}
@@ -378,7 +460,7 @@ func TestPeerStatus_JoinsLiveDeviceState(t *testing.T) {
 				LastHandshake: tt.lastHandshake,
 			})
 
-			statuses, err := env.Runtime.GetPeerStatus("testnet")
+			statuses, err := env.Runtime.GetPeerStatus(t.Context(), "testnet")
 			if err != nil {
 				t.Fatalf("peer status: %v", err)
 			}
@@ -449,7 +531,7 @@ func TestNetworkTopology_ServerConnectivityUsesHandshake(t *testing.T) {
 				env.Backend.Device("testnet").SetPeers()
 			}
 
-			result, err := env.Runtime.GetNetworkTopology("testnet")
+			result, err := env.Runtime.GetNetworkTopology(t.Context(), "testnet")
 			if err != nil {
 				t.Fatalf("network topology: %v", err)
 			}

@@ -13,13 +13,7 @@ func (a *API) handleGetStatus(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	status, err := a.runtime.GetStatus()
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-
-	installs, err := a.service.ListInstalls()
+	status, err := a.runtime.GetStatus(r.Context())
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -30,8 +24,8 @@ func (a *API) handleGetStatus(
 		networkStatuses[i] = networkStatusFromRuntime(network)
 	}
 
-	installStatuses := make([]InstallStatus, len(installs))
-	for i, install := range installs {
+	installStatuses := make([]InstallStatus, len(status.Installs))
+	for i, install := range status.Installs {
 		installStatuses[i] = installStatusFromService(*install)
 	}
 

@@ -99,7 +99,6 @@ func TestSetNetworkEnabled_PersistsIntent(t *testing.T) {
 	if !nw.Enabled {
 		t.Error("network should be enabled")
 	}
-	expectWake(t, env, "enable-me")
 
 	if err := env.Service.SetNetworkEnabled("enable-me", false); err != nil {
 		t.Fatalf("disable: %v", err)
@@ -112,7 +111,6 @@ func TestSetNetworkEnabled_PersistsIntent(t *testing.T) {
 	if nw.Enabled {
 		t.Error("network should be disabled")
 	}
-	expectWake(t, env, "enable-me")
 }
 
 func TestSetNetworkEnabled_NotFound(t *testing.T) {
@@ -143,7 +141,6 @@ func TestUpdateNetwork_PersistsListenPort(t *testing.T) {
 	if nw.ListenPort != port {
 		t.Errorf("listen_port = %d, want %d", nw.ListenPort, port)
 	}
-	expectWake(t, env, "portnet")
 }
 
 func TestUpdateNetwork_RequiresListenPort(t *testing.T) {
@@ -168,7 +165,6 @@ func TestUninstallNetwork_Success(t *testing.T) {
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("after uninstall: err = %v, want ErrNotFound", err)
 	}
-	expectWake(t, env, "to-delete")
 }
 
 func TestUninstallNetwork_NotFound(t *testing.T) {
@@ -177,24 +173,5 @@ func TestUninstallNetwork_NotFound(t *testing.T) {
 	err := env.Service.UninstallNetwork("ghost")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
-	}
-}
-
-// expectWake asserts that the service told the runtime about a change to
-// the named network.
-func expectWake(
-	t *testing.T,
-	env *testutil.ServiceEnv,
-	network string,
-) {
-	t.Helper()
-
-	select {
-	case name := <-env.Wake:
-		if name != network {
-			t.Fatalf("wake = %q, want %q", name, network)
-		}
-	default:
-		t.Fatalf("no wake sent for %q", network)
 	}
 }

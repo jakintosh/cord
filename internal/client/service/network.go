@@ -62,8 +62,6 @@ func (s *Service) SetNetworkEnabled(
 		return err
 	}
 
-	s.requestReconcile(name)
-
 	s.log.Info(
 		"network intent recorded",
 		"network",
@@ -89,8 +87,6 @@ func (s *Service) UpdateNetwork(
 	if err := s.store.UpdateNetwork(name, opts); err != nil {
 		return err
 	}
-
-	s.requestReconcile(name)
 
 	return nil
 }

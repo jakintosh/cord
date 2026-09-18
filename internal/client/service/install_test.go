@@ -254,7 +254,6 @@ func TestConfirmInstall_CreatesEnabledNetwork(t *testing.T) {
 	if network.Server.PublicKey == "" {
 		t.Error("server public key should not be empty after confirm")
 	}
-	expectWake(t, env, "confirm-me")
 
 	if _, err := env.Service.GetInstall("confirm-me"); !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("install after confirm: err = %v, want ErrNotFound", err)

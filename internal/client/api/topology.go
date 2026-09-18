@@ -13,7 +13,10 @@ func (a *API) handleGetNetworkTopology(
 ) {
 	name := r.PathValue("name")
 
-	result, err := a.runtime.GetNetworkTopology(name)
+	result, err := a.runtime.GetNetworkTopology(
+		r.Context(),
+		name,
+	)
 	if err != nil {
 		writeServiceError(w, err)
 		return

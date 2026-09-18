@@ -14,7 +14,10 @@ func (a *API) handleListPeers(
 ) {
 	name := r.PathValue("name")
 
-	statuses, err := a.runtime.GetPeerStatus(name)
+	statuses, err := a.runtime.GetPeerStatus(
+		r.Context(),
+		name,
+	)
 	if err != nil {
 		writeServiceError(w, err)
 		return

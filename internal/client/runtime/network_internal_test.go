@@ -65,12 +65,12 @@ func TestNetworkConstructionAndPartialStartupCleanup(t *testing.T) {
 	}
 
 	// The record is absent from storage, so applying cached peers fails after
-	// the interface starts but before any activity timers can be armed.
+	// the interface starts but before any activities can be scheduled.
 	if err := network.start(t.Context()); !errors.Is(err, service.ErrNotFound) {
 		t.Fatalf("start = %v, want missing network", err)
 	}
-	if network.syncTimer != nil || network.scanTimer != nil || network.reportTimer != nil {
-		t.Fatal("failed startup armed activity timers")
+	if !network.nextSync.IsZero() || !network.nextScan.IsZero() || !network.nextReport.IsZero() {
+		t.Fatal("failed startup scheduled activities")
 	}
 	if network.reconcileStatus.Error == "" {
 		t.Fatal("failed startup did not record its reconciliation error")
@@ -84,42 +84,22 @@ func TestNetworkConstructionAndPartialStartupCleanup(t *testing.T) {
 	}
 }
 
-func TestNetworkStopCancelsBeforeWaitingForActivity(t *testing.T) {
+func TestNetworkStopRetiresScheduledWork(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	network := &Network{
-		ctx:         ctx,
-		cancel:      cancel,
-		syncTimer:   time.NewTimer(time.Hour),
-		scanTimer:   time.NewTimer(time.Hour),
-		reportTimer: time.NewTimer(time.Hour),
-		tunnel:      &Tunnel{},
+		ctx:        ctx,
+		cancel:     cancel,
+		nextSync:   time.Now(),
+		nextScan:   time.Now(),
+		nextReport: time.Now(),
+		tunnel:     &Tunnel{},
 	}
-
-	// Model an activity in flight. Shutdown must publish cancellation
-	// before waiting to acquire this lock.
-	network.mu.Lock()
-	stopped := make(chan struct{})
-	go func() {
-		_ = network.stop()
-		close(stopped)
-	}()
-
-	select {
-	case <-ctx.Done():
-	case <-time.After(time.Second):
-		t.Fatal("stop waited for the activity lock before cancelling")
+	if err := network.stop(); err != nil {
+		t.Fatal(err)
 	}
-
-	select {
-	case <-stopped:
-		t.Fatal("stop returned while an activity still held the lock")
-	default:
+	if ctx.Err() == nil || !network.nextActivity().IsZero() {
+		t.Fatal("stopped network still has an active lifetime or scheduled work")
 	}
-
-	network.mu.Unlock()
-	select {
-	case <-stopped:
-	case <-time.After(time.Second):
-		t.Fatal("stop did not finish after the activity released the lock")
-	}
+	// Retired work must not access the absent service or device.
+	network.runDueActivities()
 }

@@ -42,7 +42,7 @@ func TestTunnelReconcilePreservesNetworkPeers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(peers) != 1 || peers[0].PublicKey.String() != tunnel.serverPeer.PublicKey {
+	if len(peers) != 0 {
 		t.Fatalf("initial peers = %+v", peers)
 	}
 
@@ -54,7 +54,7 @@ func TestTunnelReconcilePreservesNetworkPeers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tunnel.device.SetPeers(tunnel.serverPeer, wireguard.PeerConfig{
+	if err := tunnel.device.SetPeers(wireguard.PeerConfig{
 		PublicKey:  publicKey,
 		AllowedIPs: []string{"10.42.0.3/32"},
 	}); err != nil {
@@ -78,7 +78,7 @@ func TestTunnelReconcilePreservesNetworkPeers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(peers) != 2 {
+		if len(peers) != 1 || peers[0].PublicKey.String() != publicKey {
 			t.Fatalf("peers after reconcile (failed=%v) = %+v", failed, peers)
 		}
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
@@ -18,16 +17,13 @@ type tunnelOptions struct {
 	route      string
 	listenPort uint16
 	server     service.ServerInfo
-	keepalive  time.Duration
 }
 
 // Tunnel owns a configured device and the coordination server's API address.
-// Its parent serializes lifecycle calls and owns cleanup after failed startup.
+// Its parent configures peers, serializes lifecycle calls, and owns cleanup.
 type Tunnel struct {
-	device      *wireguard.Device
-	apiAddr     string
-	serverPeer  wireguard.PeerConfig
-	initialized bool
+	device  *wireguard.Device
+	apiAddr string
 }
 
 // newTunnel constructs a device wrapper without creating an interface.
@@ -72,21 +68,9 @@ func newTunnel(
 		return nil, fmt.Errorf("create device %q: %w", opts.name, err)
 	}
 
-	serverPeer := wireguard.PeerConfig{
-		PublicKey:           opts.server.PublicKey,
-		AllowedIPs:          []string{opts.server.Route},
-		Endpoint:            opts.server.Endpoint,
-		EndpointPolicy:      wireguard.EndpointFixed,
-		PersistentKeepalive: int(opts.keepalive / time.Second),
-	}
-	if _, err := serverPeer.Parse(); err != nil {
-		return nil, fmt.Errorf("server peer for %q: %w", opts.name, err)
-	}
-
 	return &Tunnel{
-		device:     device,
-		apiAddr:    apiAddr,
-		serverPeer: serverPeer,
+		device:  device,
+		apiAddr: apiAddr,
 	}, nil
 }
 
@@ -95,23 +79,12 @@ func (t *Tunnel) status() resource.Status {
 	return t.device.Status()
 }
 
-// reconcile restores the device and seeds its server peer once. Subsequent
-// repairs preserve the full desired peer set maintained by the network.
+// reconcile restores device availability. The device retains and restores
+// the desired peers configured by the tunnel's parent.
 func (t *Tunnel) reconcile(
 	ctx context.Context,
 ) error {
-	if err := t.device.Reconcile(ctx); err != nil {
-		return err
-	}
-
-	if !t.initialized {
-		if err := t.device.SetPeers(t.serverPeer); err != nil {
-			return fmt.Errorf("set server peer: %w", err)
-		}
-		t.initialized = true
-	}
-
-	return nil
+	return t.device.Reconcile(ctx)
 }
 
 // close releases the interface, retaining the wrapper for retries and restarts.

@@ -42,7 +42,7 @@ func TestConfirm_ClosesTemporaryTunnelBeforePublishingNetwork(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(rt.Stop)
+			testutil.RunRuntime(t, rt)
 			t.Cleanup(func() {
 				if device := backend.Device("testnet"); device != nil {
 					device.CloseErr = nil
@@ -84,10 +84,134 @@ func TestConfirm_ClosesTemporaryTunnelBeforePublishingNetwork(t *testing.T) {
 	}
 }
 
+func TestEnrollmentRetainsCleanup(t *testing.T) {
+	for _, action := range []string{"retry", "maintenance after uninstall", "shutdown"} {
+		t.Run(action, func(t *testing.T) {
+			env := testutil.SetupService(t)
+			server := newInstallServer(t)
+			cleanupErr := errors.New("temporary tunnel cleanup failed")
+			backend := &confirmationBackend{
+				MockBackend: wireguardtest.NewMockBackend(),
+				closeErr:    cleanupErr,
+			}
+			rt, err := runtime.New(runtime.Options{
+				Service:    env.Service,
+				WireGuard:  wireguard.NewManagerWithBackend(backend),
+				HTTPClient: server.server.Client(),
+				Interval:   time.Hour,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			finish := testutil.RunRuntime(t, rt)
+			if _, err := rt.Install(t.Context(), server.invitation("testnet"), service.NetworkOptions{}); !errors.Is(err, cleanupErr) {
+				t.Fatalf("install = %v, want cleanup error", err)
+			}
+			device := backend.Device("testnet")
+			t.Cleanup(func() {
+				device.CloseErr = nil
+				_ = device.Close()
+			})
+			attempts := device.CloseCalls
+			creates := len(backend.CreateCalls)
+
+			// Retry must close the old child before creating another interface.
+			if _, err := rt.ConfirmInstall(t.Context(), "testnet"); !errors.Is(err, cleanupErr) {
+				t.Fatalf("confirm retry = %v, want cleanup error", err)
+			}
+			if device.CloseCalls <= attempts || len(backend.CreateCalls) != creates {
+				t.Fatal("retry did not retain the old child exclusively")
+			}
+
+			if action == "shutdown" {
+				attempts = device.CloseCalls
+				if err := finish(); !errors.Is(err, cleanupErr) {
+					t.Fatalf("shutdown = %v, want cleanup error", err)
+				}
+				if device.CloseCalls <= attempts {
+					t.Fatal("shutdown did not retry enrollment cleanup")
+				}
+				return
+			}
+
+			device.CloseErr = nil
+			backend.closeErr = nil
+			if action == "maintenance after uninstall" {
+				if err := rt.UninstallNetwork(t.Context(), "testnet"); err != nil {
+					t.Fatal(err)
+				}
+				if err := rt.ConvergeAll(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if device.Check() == nil {
+					t.Fatal("maintenance forgot cleanup after deleting the saved install")
+				}
+				attempts = device.CloseCalls
+				if err := rt.ConvergeAll(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if device.CloseCalls != attempts {
+					t.Fatal("successful cleanup remained registered")
+				}
+				return
+			}
+
+			if _, err := rt.ConfirmInstall(t.Context(), "testnet"); err != nil {
+				t.Fatal(err)
+			}
+			if server.calls("redeem") != 1 || !networkStatus(t, rt, "testnet").Running {
+				t.Fatal("retry did not resume saved progress into a permanent network")
+			}
+		})
+	}
+}
+
+func TestEnrollmentRetainsTunnelAfterPeerSetupFailure(t *testing.T) {
+	env := testutil.SetupService(t)
+	server := newInstallServer(t)
+	setupErr := errors.New("peer setup failed")
+	cleanupErr := errors.New("cleanup failed")
+	backend := &confirmationBackend{
+		MockBackend:   wireguardtest.NewMockBackend(),
+		closeErr:      cleanupErr,
+		invitePeerErr: setupErr,
+	}
+	rt, err := runtime.New(runtime.Options{
+		Service:    env.Service,
+		WireGuard:  wireguard.NewManagerWithBackend(backend),
+		HTTPClient: server.server.Client(),
+		Interval:   time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.RunRuntime(t, rt)
+	_, err = rt.Install(t.Context(), server.invitation("testnet"), service.NetworkOptions{})
+	if !errors.Is(err, setupErr) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("install = %v, want setup and cleanup errors", err)
+	}
+	device := backend.Device("testnet-i")
+	t.Cleanup(func() {
+		device.CloseErr = nil
+		_ = device.Close()
+	})
+	if server.calls("redeem") != 0 {
+		t.Fatal("redemption ran after peer setup failed")
+	}
+	device.CloseErr = nil
+	if err := rt.ConvergeAll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if device.Check() == nil {
+		t.Fatal("partial startup lost its tunnel before cleanup succeeded")
+	}
+}
+
 // confirmationBackend rejects creation while the previous interface is live.
 type confirmationBackend struct {
 	*wireguardtest.MockBackend
-	closeErr error
+	closeErr      error
+	invitePeerErr error
 }
 
 func (b *confirmationBackend) CreateDevice(
@@ -106,6 +230,10 @@ func (b *confirmationBackend) CreateDevice(
 	if config.Name == "testnet" {
 		b.Device(config.Name).CloseErr = b.closeErr
 	}
+	if config.Name == "testnet-i" && b.invitePeerErr != nil {
+		b.Device(config.Name).ApplyPeerOpsErr = b.invitePeerErr
+		b.Device(config.Name).CloseErr = b.closeErr
+	}
 	return device, nil
 }
 
@@ -113,6 +241,7 @@ func TestInstall_Success(t *testing.T) {
 	env := testutil.SetupService(t)
 	backend := wireguardtest.NewMockBackend()
 	rt := newRuntime(t, env, backend, runtime.Options{Interval: time.Hour})
+	testutil.RunRuntime(t, rt)
 	server := newInstallServer(t)
 
 	network, err := rt.Install(t.Context(), server.invitation("install-me"), service.NetworkOptions{})
@@ -174,6 +303,7 @@ func TestInstall_ResumesFromInvited(t *testing.T) {
 	env := testutil.SetupService(t)
 	backend := wireguardtest.NewMockBackend()
 	rt := newRuntime(t, env, backend, runtime.Options{Interval: time.Hour})
+	testutil.RunRuntime(t, rt)
 	server := newInstallServer(t)
 
 	invitation := server.invitation("resume-inv")
@@ -205,6 +335,7 @@ func TestInstall_ResumesFromRedeemed(t *testing.T) {
 	env := testutil.SetupService(t)
 	backend := wireguardtest.NewMockBackend()
 	rt := newRuntime(t, env, backend, runtime.Options{Interval: time.Hour})
+	testutil.RunRuntime(t, rt)
 	server := newInstallServer(t)
 
 	invitation := server.invitation("resume-red")
@@ -234,6 +365,7 @@ func TestRedeem_Idempotent(t *testing.T) {
 	env := testutil.SetupService(t)
 	backend := wireguardtest.NewMockBackend()
 	rt := newRuntime(t, env, backend, runtime.Options{Interval: time.Hour})
+	testutil.RunRuntime(t, rt)
 	server := newInstallServer(t)
 
 	install, err := env.Service.BeginInstall(
@@ -268,6 +400,7 @@ func TestRedeem_CancellationStopsRemoteCall(t *testing.T) {
 	env := testutil.SetupService(t)
 	backend := wireguardtest.NewMockBackend()
 	rt := newRuntime(t, env, backend, runtime.Options{Interval: time.Hour})
+	testutil.RunRuntime(t, rt)
 	server := newInstallServer(t)
 	started := server.blockRedemption()
 
@@ -302,6 +435,12 @@ func TestRedeem_CancellationStopsRemoteCall(t *testing.T) {
 		t.Fatal("redeem did not stop when its context was cancelled")
 	}
 
+	// Cancellation releases the caller before the owner finishes cleanup.
+	// A subsequent command waits for that operation to finish.
+	if _, err := rt.GetStatus(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
 	stored, err := env.Service.GetInstall(install.Name)
 	if err != nil {
 		t.Fatalf("get install: %v", err)
@@ -318,6 +457,7 @@ func TestConfirm_RequiresRedeemedInstall(t *testing.T) {
 	env := testutil.SetupService(t)
 	backend := wireguardtest.NewMockBackend()
 	rt := newRuntime(t, env, backend, runtime.Options{Interval: time.Hour})
+	testutil.RunRuntime(t, rt)
 	server := newInstallServer(t)
 
 	if _, err := env.Service.BeginInstall(
@@ -333,6 +473,58 @@ func TestConfirm_RequiresRedeemedInstall(t *testing.T) {
 	}
 	if got := server.calls("confirm"); got != 0 {
 		t.Errorf("confirm calls = %d, want 0", got)
+	}
+}
+
+func TestOnboardingSerializesCommandsAndStopsWithRuntime(t *testing.T) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkDirect(t, env.Database, "other")
+	server := newInstallServer(t)
+	started := server.blockRedemption()
+	backend := wireguardtest.NewMockBackend()
+	rt := newRuntime(t, env, backend, runtime.Options{
+		Interval:   time.Hour,
+		HTTPClient: server.server.Client(),
+	})
+	finish := testutil.RunRuntime(t, rt)
+	install, err := env.Service.BeginInstall(server.invitation("onboarding"), service.NetworkOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := rt.RedeemInstall(t.Context(), install.Name)
+		result <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("redemption did not start")
+	}
+
+	// A second command cannot mutate intent while the owner is in redemption.
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := rt.SetNetworkEnabled(ctx, "other", true); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("queued command = %v", err)
+	}
+	if err := finish(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, runtime.ErrNotRunning) {
+			t.Fatalf("redemption after shutdown = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not release the onboarding caller")
+	}
+	if backend.Device(install.InviteIfaceName).CloseCalls != 1 {
+		t.Fatal("shutdown did not close the onboarding tunnel")
+	}
+	record, err := env.Service.GetNetwork("other")
+	if err != nil || record.Enabled {
+		t.Fatalf("queued command changed intent: %+v, %v", record, err)
 	}
 }
 

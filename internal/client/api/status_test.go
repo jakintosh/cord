@@ -1,12 +1,30 @@
 package api_test
 
 import (
+	"net/http"
 	"testing"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 )
+
+func TestAPIReads_RuntimeStopped(t *testing.T) {
+	env := testutil.SetupRuntime(t)
+	control, err := api.New(api.Options{Runtime: env.Runtime})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/status", "/networks", "/networks/missing"} {
+		t.Run(path, func(t *testing.T) {
+			result := wire.TestGet[any](control.Router(), path)
+			result.ExpectStatus(t, http.StatusServiceUnavailable)
+		})
+	}
+}
 
 func TestAPIStatus_Success(
 	t *testing.T,

@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,8 +17,7 @@ import (
 
 // RuntimeEnv is a full client environment: a service over an in-memory
 // database plus a runtime backed by the mock WireGuard backend. The
-// runtime is constructed but not started, so tests can drive it with
-// Converge or start it explicitly.
+// runtime is active; tests drive changes through public commands.
 type RuntimeEnv struct {
 	Database *database.DB
 	Service  *service.Service
@@ -25,7 +25,7 @@ type RuntimeEnv struct {
 	Manager  *wireguard.Manager
 	Backend  *wireguardtest.MockBackend
 	Server   *httptest.Server
-	Wake     chan string
+	Stop     func() error
 }
 
 func SetupRuntime(
@@ -63,7 +63,6 @@ func SetupRuntimeWithServer(
 		Service:    env.Service,
 		WireGuard:  mgr,
 		HTTPClient: httpClient,
-		Wake:       env.Wake,
 		Clock:      func() time.Time { return FixedTime },
 		Logger:     logging.Discard(),
 
@@ -74,7 +73,10 @@ func SetupRuntimeWithServer(
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
-	t.Cleanup(rt.Stop)
+	stop := RunRuntime(t, rt)
+	if _, err := rt.GetStatus(t.Context()); err != nil {
+		t.Fatalf("runtime startup: %v", err)
+	}
 
 	return &RuntimeEnv{
 		Database: env.Database,
@@ -83,8 +85,36 @@ func SetupRuntimeWithServer(
 		Manager:  mgr,
 		Backend:  backend,
 		Server:   server,
-		Wake:     env.Wake,
+		Stop:     stop,
 	}
+}
+
+// RunRuntime runs a single lifetime and joins it before dependencies close.
+// Commands wait for startup; tests can assert the returned shutdown error.
+func RunRuntime(
+	t *testing.T,
+	rt *runtime.Runtime,
+) func() error {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	var runErr error
+	go func() {
+		defer close(done)
+		runErr = rt.Run(ctx)
+	}()
+	stop := func() error {
+		cancel()
+		select {
+		case <-done:
+			return runErr
+		case <-time.After(5 * time.Second):
+			t.Fatal("runtime did not finish shutdown")
+			return nil
+		}
+	}
+	t.Cleanup(func() { _ = stop() })
+	return stop
 }
 
 // Enable records the network as enabled and converges the runtime, so a
@@ -95,11 +125,8 @@ func (e *RuntimeEnv) Enable(
 ) {
 	t.Helper()
 
-	if err := e.Service.SetNetworkEnabled(network, true); err != nil {
+	if _, err := e.Runtime.SetNetworkEnabled(t.Context(), network, true); err != nil {
 		t.Fatalf("enable network %s: %v", network, err)
-	}
-	if err := e.Runtime.Converge(network); err != nil {
-		t.Fatalf("converge network %s: %v", network, err)
 	}
 }
 
@@ -110,7 +137,7 @@ func (e *RuntimeEnv) Converge(
 ) {
 	t.Helper()
 
-	if err := e.Runtime.Converge(network); err != nil {
+	if err := e.Runtime.Converge(t.Context(), network); err != nil {
 		t.Fatalf("converge network %s: %v", network, err)
 	}
 }

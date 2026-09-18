@@ -12,7 +12,7 @@ func (a *API) handleListNetworks(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	networks, err := a.service.ListNetworks()
+	networks, err := a.runtime.ListNetworks(r.Context())
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -32,19 +32,17 @@ func (a *API) handleGetNetwork(
 ) {
 	name := r.PathValue("name")
 
-	network, err := a.service.GetNetwork(name)
-	if err == nil {
-		wire.WriteData(w, http.StatusOK, networkFromService(*network))
-		return
-	}
-
-	inst, err := a.service.GetInstall(name)
+	lookup, err := a.runtime.LookupNetwork(r.Context(), name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
-	wire.WriteData(w, http.StatusOK, networkFromInstall(*inst))
+	if lookup.Network != nil {
+		wire.WriteData(w, http.StatusOK, networkFromService(*lookup.Network))
+	} else {
+		wire.WriteData(w, http.StatusOK, networkFromInstall(*lookup.Install))
+	}
 }
 
 func (a *API) handlePostNetwork(
@@ -86,6 +84,7 @@ func (a *API) handlePatchNetwork(
 	}
 
 	network, err := a.runtime.UpdateNetwork(
+		r.Context(),
 		name,
 		service.NetworkOptions{
 			ListenPort: request.ListenPort,
@@ -106,7 +105,10 @@ func (a *API) handlePostNetworkRedeem(
 ) {
 	name := r.PathValue("name")
 
-	inst, err := a.runtime.RedeemInstall(r.Context(), name)
+	inst, err := a.runtime.RedeemInstall(
+		r.Context(),
+		name,
+	)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -121,7 +123,10 @@ func (a *API) handlePostNetworkConfirm(
 ) {
 	name := r.PathValue("name")
 
-	if _, err := a.runtime.ConfirmInstall(r.Context(), name); err != nil {
+	if _, err := a.runtime.ConfirmInstall(
+		r.Context(),
+		name,
+	); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -135,7 +140,10 @@ func (a *API) handleDeleteNetwork(
 ) {
 	name := r.PathValue("name")
 
-	if err := a.runtime.UninstallNetwork(name); err != nil {
+	if err := a.runtime.UninstallNetwork(
+		r.Context(),
+		name,
+	); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -149,7 +157,11 @@ func (a *API) handlePostNetworkEnable(
 ) {
 	name := r.PathValue("name")
 
-	status, err := a.runtime.SetNetworkEnabled(name, true)
+	status, err := a.runtime.SetNetworkEnabled(
+		r.Context(),
+		name,
+		true,
+	)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -165,7 +177,11 @@ func (a *API) handlePostNetworkDisable(
 ) {
 	name := r.PathValue("name")
 
-	status, err := a.runtime.SetNetworkEnabled(name, false)
+	status, err := a.runtime.SetNetworkEnabled(
+		r.Context(),
+		name,
+		false,
+	)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -181,7 +197,10 @@ func (a *API) handPostNetworkSync(
 ) {
 	name := r.PathValue("name")
 
-	network, err := a.runtime.Sync(name)
+	network, err := a.runtime.Sync(
+		r.Context(),
+		name,
+	)
 	if err != nil {
 		writeServiceError(w, err)
 		return

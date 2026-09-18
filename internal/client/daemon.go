@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"time"
@@ -22,11 +23,6 @@ const DefaultSocketPath = adminclient.DefaultSocketPath
 
 // DefaultDBPath is the default database path used when none is provided.
 const DefaultDBPath = "data/client.db"
-
-// wakeBuffer is the depth of the channel the service uses to tell the
-// runtime that a network changed. Sends are dropped when it is full;
-// the runtime's periodic pass catches up.
-const wakeBuffer = 16
 
 // Options configures the client daemon composition root.
 type Options struct {
@@ -98,13 +94,10 @@ func Serve(
 	}
 	defer db.Close()
 
-	wake := make(chan string, wakeBuffer)
-
 	svc, err := service.New(service.Options{
 		Store:  db,
 		Clock:  time.Now,
 		Logger: log,
-		Wake:   wake,
 	})
 	if err != nil {
 		return fmt.Errorf("client: new service: %w", err)
@@ -113,7 +106,6 @@ func Serve(
 	rt, err := runtime.New(runtime.Options{
 		Service:   svc,
 		WireGuard: wg,
-		Wake:      wake,
 		Clock:     time.Now,
 		Logger:    log,
 	})
@@ -122,7 +114,6 @@ func Serve(
 	}
 
 	apiServer, err := api.New(api.Options{
-		Service: svc,
 		Runtime: rt,
 		Logger:  log.With("api", "control"),
 		Version: opts.Version,
@@ -131,18 +122,26 @@ func Serve(
 		return fmt.Errorf("client: new api: %w", err)
 	}
 
-	if err := rt.Start(ctx); err != nil {
-		return fmt.Errorf("client: start runtime: %w", err)
-	}
-	defer rt.Stop()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	runtimeDone := make(chan error, 1)
+	go func() {
+		runtimeDone <- rt.Run(ctx)
+		cancel()
+	}()
 
 	log.Info(
 		"daemon listening",
-		"socket",
-		opts.SocketPath,
-		"version",
-		opts.Version,
+		"socket", opts.SocketPath,
+		"version", opts.Version,
 	)
 
-	return daemon.ServeHTTP(ctx, ln, apiServer.Router())
+	serveErr := daemon.ServeHTTP(ctx, ln, apiServer.Router())
+	cancel()
+
+	return errors.Join(
+		serveErr,
+		<-runtimeDone,
+	)
 }

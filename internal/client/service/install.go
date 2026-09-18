@@ -245,8 +245,6 @@ func (s *Service) ConfirmInstall(
 		return nil, err
 	}
 
-	s.requestReconcile(name)
-
 	s.log.Info(
 		"network confirmed",
 		"network",
@@ -267,8 +265,6 @@ func (s *Service) UninstallNetwork(
 	if err := s.store.DeleteNetworkState(name); err != nil {
 		return err
 	}
-
-	s.requestReconcile(name)
 
 	s.log.Info(
 		"network uninstalled",

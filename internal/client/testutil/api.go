@@ -43,7 +43,6 @@ func SetupWithServer(
 	env := SetupRuntimeWithServer(t, handlerFactory)
 
 	apiServer, err := api.New(api.Options{
-		Service: env.Service,
 		Runtime: env.Runtime,
 		Logger:  logging.Discard(),
 	})
@@ -84,11 +83,8 @@ func (e *APIEnv) SeedEnabledNetwork(
 	t.Helper()
 
 	network := e.SeedNetwork(t, name)
-	if err := e.Service.SetNetworkEnabled(name, true); err != nil {
+	if _, err := e.Runtime.SetNetworkEnabled(t.Context(), name, true); err != nil {
 		t.Fatalf("enable network %q: %v", name, err)
-	}
-	if err := e.Runtime.Converge(name); err != nil {
-		t.Fatalf("converge network %q: %v", name, err)
 	}
 	network.Enabled = true
 	return network
