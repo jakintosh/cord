@@ -142,7 +142,6 @@ func printClientStatus(
 			rows[idx] = []string{
 				n.Name,
 				strconv.FormatBool(n.Enabled),
-				strconv.FormatBool(n.Running),
 				n.Health,
 				humanizeOptionalTime(n.Sync.LastSuccessAt),
 				humanizeOptionalTime(n.Scan.LastSuccessAt),
@@ -154,7 +153,6 @@ func printClientStatus(
 			[]string{
 				"NETWORK",
 				"ENABLED",
-				"RUNNING",
 				"HEALTH",
 				"LAST SYNC",
 				"LAST SCAN",

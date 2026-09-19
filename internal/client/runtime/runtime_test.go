@@ -99,7 +99,7 @@ func TestCleanupRetriesOwnedNetworks(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if status.Enabled || !status.Running || status.Reason == "" {
+				if status.Enabled || networkStatus(t, env.Runtime, "testnet").Resource == nil || status.Reason == "" {
 					t.Fatalf("failed cleanup status = %+v", status)
 				}
 			case "uninstall":
@@ -123,7 +123,7 @@ func TestCleanupRetriesOwnedNetworks(t *testing.T) {
 			}
 			if action != "uninstall" {
 				status := networkStatus(t, env.Runtime, "testnet")
-				if status.Running || status.Reason != "" {
+				if status.Resource != nil || status.Reason != "" {
 					t.Fatalf("completed cleanup status = %+v", status)
 				}
 			}
@@ -166,7 +166,7 @@ func TestReplacementWaitsForCleanupAfterConfigurationReverts(t *testing.T) {
 		t.Fatal("successful cleanup did not allow replacement")
 	}
 	status = networkStatus(t, env.Runtime, "testnet")
-	if !status.Running || status.Reason != "" {
+	if status.Resource == nil || status.Reason != "" {
 		t.Fatalf("replacement status = %+v", status)
 	}
 }
@@ -193,7 +193,7 @@ func TestFailedStartupRetainsPartialDeviceUntilCleanup(t *testing.T) {
 	device := backend.Device("testnet")
 	t.Cleanup(func() { device.CloseErr = nil })
 	status := networkStatus(t, rt, "testnet")
-	if !status.Enabled || !status.Running || status.Reason == "" {
+	if !status.Enabled || status.Resource == nil || status.Reason == "" {
 		t.Fatalf("partial startup status = %+v", status)
 	}
 	if err := rt.Converge(t.Context(), "testnet"); err == nil {
@@ -210,7 +210,7 @@ func TestFailedStartupRetainsPartialDeviceUntilCleanup(t *testing.T) {
 		t.Fatal("partial device cleanup was not retried before replacement")
 	}
 	status = networkStatus(t, rt, "testnet")
-	if !status.Running || status.Reason != "" {
+	if status.Resource == nil || status.Reason != "" {
 		t.Fatalf("recovered startup status = %+v", status)
 	}
 }
@@ -249,7 +249,7 @@ func TestRun_StartsEnabledNetworks(t *testing.T) {
 	testutil.RunRuntime(t, rt)
 
 	network := networkStatus(t, rt, "testnet")
-	if !network.Enabled || !network.Running {
+	if !network.Enabled || network.Resource == nil {
 		t.Fatalf("status = %+v, want enabled and running", network)
 	}
 	if network.Reason != "" {
@@ -265,7 +265,7 @@ func TestRun_LeavesDisabledNetworksStopped(t *testing.T) {
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 
 	network := networkStatus(t, env.Runtime, "testnet")
-	if network.Enabled || network.Running {
+	if network.Enabled || network.Resource != nil {
 		t.Fatalf("status = %+v, want disabled and stopped", network)
 	}
 	if network.Health != runtime.HealthInactive {
@@ -304,7 +304,7 @@ func TestConverge_FailedStartKeepsIntentAndReportsReason(t *testing.T) {
 	}
 
 	network := networkStatus(t, rt, "testnet")
-	if !network.Enabled || network.Running {
+	if !network.Enabled || network.Resource != nil {
 		t.Fatalf("status = %+v, want enabled and not running", network)
 	}
 	if network.Reason == "" {
@@ -335,7 +335,7 @@ func TestRun_RetriesFailedStartOnTick(t *testing.T) {
 	}, "initial startup failure")
 
 	network := networkStatus(t, rt, "testnet")
-	if network.Running || network.Reason == "" {
+	if network.Resource != nil || network.Reason == "" {
 		t.Fatalf("status = %+v, want stopped with a reason", network)
 	}
 
@@ -344,7 +344,7 @@ func TestRun_RetriesFailedStartOnTick(t *testing.T) {
 
 	waitFor(t, func() bool {
 		network := networkStatus(t, rt, "testnet")
-		return network.Running && network.Reason == ""
+		return network.Resource != nil && network.Reason == ""
 	}, "network to start on a later tick")
 }
 
@@ -353,7 +353,7 @@ func TestConverge_DisableStopsRunningNetwork(t *testing.T) {
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	env.Enable(t, "testnet")
 
-	if !networkStatus(t, env.Runtime, "testnet").Running {
+	if networkStatus(t, env.Runtime, "testnet").Resource == nil {
 		t.Fatal("network should be running")
 	}
 
@@ -363,7 +363,7 @@ func TestConverge_DisableStopsRunningNetwork(t *testing.T) {
 	env.Converge(t, "testnet")
 
 	network := networkStatus(t, env.Runtime, "testnet")
-	if network.Enabled || network.Running {
+	if network.Enabled || network.Resource != nil {
 		t.Fatalf("status = %+v, want disabled and stopped", network)
 	}
 	if device := env.Backend.Device("testnet"); device == nil || device.CloseCalls != 1 {
@@ -389,7 +389,7 @@ func TestConverge_RestartsChangedConfiguration(t *testing.T) {
 	}
 	env.Converge(t, "testnet")
 
-	if !networkStatus(t, env.Runtime, "testnet").Running {
+	if networkStatus(t, env.Runtime, "testnet").Resource == nil {
 		t.Fatal("network should still be running after a restart")
 	}
 	if original.CloseCalls != 1 {
@@ -476,7 +476,7 @@ func TestSetNetworkEnabled_ReportsDivergence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("set network enabled: %v", err)
 	}
-	if !status.Enabled || status.Running {
+	if !status.Enabled || networkStatus(t, rt, "testnet").Resource != nil {
 		t.Fatalf("status = %+v, want enabled and not running", status)
 	}
 	if status.Reason == "" {
@@ -505,7 +505,7 @@ func TestRun_ClosesNetworksBeforeReturning(t *testing.T) {
 
 	finish := env.Stop
 	waitFor(t, func() bool {
-		return networkStatus(t, env.Runtime, "testnet").Running
+		return networkStatus(t, env.Runtime, "testnet").Resource != nil
 	}, "initial network startup")
 	if err := finish(); err != nil {
 		t.Fatal(err)
@@ -529,7 +529,7 @@ func TestRun_RejectsConcurrentRunAndReuse(t *testing.T) {
 	env.Enable(t, "testnet")
 	finish := env.Stop
 	waitFor(t, func() bool {
-		return networkStatus(t, env.Runtime, "testnet").Running
+		return networkStatus(t, env.Runtime, "testnet").Resource != nil
 	}, "initial network startup")
 	if err := env.Runtime.Run(t.Context()); !errors.Is(err, runtime.ErrAlreadyRun) {
 		t.Fatalf("concurrent Run = %v", err)
@@ -590,7 +590,7 @@ func TestCommandsBeforeRunWaitAndRespectCancellation(t *testing.T) {
 		t.Fatal("waiting command was not released by Run")
 	}
 	status := networkStatus(t, rt, "testnet")
-	if status.Enabled || status.Running {
+	if status.Enabled || status.Resource != nil {
 		t.Fatalf("canceled command changed intent: %+v", status)
 	}
 }
@@ -605,7 +605,7 @@ func TestCommandContextDoesNotOwnNetworkLifetime(t *testing.T) {
 	}
 	cancel()
 	status := networkStatus(t, env.Runtime, "testnet")
-	if !status.Running || env.Backend.Device("testnet").Check() != nil {
+	if status.Resource == nil || env.Backend.Device("testnet").Check() != nil {
 		t.Fatal("command cancellation stopped the network")
 	}
 }
@@ -728,13 +728,18 @@ func newRuntime(
 	return rt
 }
 
-// networkStatus returns the status of one network, failing the test when
-// the runtime does not know it.
+type networkObservation struct {
+	runtime.NetworkStatus
+	Resource *runtime.ResourceSnapshot
+}
+
+// networkStatus returns the summary and owned resource of one network,
+// failing the test when the runtime does not know it.
 func networkStatus(
 	t *testing.T,
 	rt *runtime.Runtime,
 	name string,
-) runtime.NetworkStatus {
+) networkObservation {
 	t.Helper()
 
 	status, err := rt.GetStatus(t.Context())
@@ -743,11 +748,18 @@ func networkStatus(
 	}
 	for _, network := range status.Networks {
 		if network.Name == name {
-			return network
+			observation := networkObservation{NetworkStatus: network}
+			for _, child := range status.Snapshot.Children {
+				if child.Kind == "network" && child.Name == name {
+					observation.Resource = &child
+					break
+				}
+			}
+			return observation
 		}
 	}
 	t.Fatalf("network %q missing from status", name)
-	return runtime.NetworkStatus{}
+	return networkObservation{}
 }
 
 // waitFor polls until done reports true, or fails the test.

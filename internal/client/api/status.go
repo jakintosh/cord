@@ -29,7 +29,10 @@ func (a *API) handleGetStatus(
 		installStatuses[i] = installStatusFromService(*install)
 	}
 
+	snapshot := resourceSnapshotFromRuntime(status.Snapshot)
+
 	wire.WriteData(w, http.StatusOK, Status{
+		Snapshot: snapshot,
 		Status:   "ok",
 		Health:   status.Health,
 		Version:  a.version,
@@ -53,7 +56,6 @@ func networkStatusFromRuntime(
 	return NetworkStatus{
 		Name:      status.Name,
 		Enabled:   status.Enabled,
-		Running:   status.Running,
 		Reason:    status.Reason,
 		Health:    status.Health,
 		Reconcile: activityStatusFromRuntime(status.Reconcile),
@@ -77,6 +79,33 @@ func activityStatusFromRuntime(
 	if !status.LastSuccessAt.IsZero() {
 		formatted := status.LastSuccessAt.Format(time.RFC3339)
 		result.LastSuccessAt = &formatted
+	}
+	if !status.NextAttemptAt.IsZero() {
+		formatted := status.NextAttemptAt.Format(time.RFC3339)
+		result.NextAttemptAt = &formatted
+	}
+	return result
+}
+
+func resourceSnapshotFromRuntime(
+	status runtime.ResourceSnapshot,
+) ResourceSnapshot {
+	result := ResourceSnapshot{
+		Kind:   status.Kind,
+		Name:   status.Name,
+		State:  string(status.State),
+		Target: string(status.Target),
+		Health: status.Health,
+		Error:  status.Error,
+	}
+	if len(status.Activities) > 0 {
+		result.Activities = make(map[string]ActivityStatus, len(status.Activities))
+		for name, activity := range status.Activities {
+			result.Activities[name] = activityStatusFromRuntime(activity)
+		}
+	}
+	for _, child := range status.Children {
+		result.Children = append(result.Children, resourceSnapshotFromRuntime(child))
 	}
 	return result
 }

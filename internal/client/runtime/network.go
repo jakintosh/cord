@@ -75,11 +75,8 @@ type Network struct {
 	scanInterval   time.Duration
 	reportInterval time.Duration
 
-	nextSync   time.Time
-	nextScan   time.Time
-	nextReport time.Time
-
 	reconcileStatus ActivityStatus
+	cleanupStatus   ActivityStatus
 	syncStatus      ActivityStatus
 	scanStatus      ActivityStatus
 	reportStatus    ActivityStatus
@@ -139,11 +136,11 @@ func (n *Network) start(
 	}
 
 	now := n.clock()
-	n.nextSync = now
+	n.syncStatus.NextAttemptAt = now
 
 	// Give handshakes and local observations time to accumulate.
-	n.nextScan = now.Add(n.scanInterval)
-	n.nextReport = now.Add(n.reportInterval)
+	n.scanStatus.NextAttemptAt = now.Add(n.scanInterval)
+	n.reportStatus.NextAttemptAt = now.Add(n.reportInterval)
 
 	return nil
 }
@@ -170,14 +167,20 @@ func (n *Network) reconcile() (err error) {
 }
 
 // stop cancels the network lifetime and closes its tunnel.
-func (n *Network) stop() error {
+func (n *Network) stop() (
+	err error,
+) {
+	defer func() {
+		n.cleanupStatus.record(n.clock(), err)
+	}()
+
 	if n.cancel != nil {
 		n.cancel()
 	}
 
-	n.nextSync = time.Time{}
-	n.nextScan = time.Time{}
-	n.nextReport = time.Time{}
+	n.syncStatus.NextAttemptAt = time.Time{}
+	n.scanStatus.NextAttemptAt = time.Time{}
+	n.reportStatus.NextAttemptAt = time.Time{}
 
 	return n.tunnel.close()
 }
@@ -190,9 +193,9 @@ func (n *Network) nextActivity() time.Time {
 
 	var next time.Time
 	for _, due := range []time.Time{
-		n.nextSync,
-		n.nextScan,
-		n.nextReport,
+		n.syncStatus.NextAttemptAt,
+		n.scanStatus.NextAttemptAt,
+		n.reportStatus.NextAttemptAt,
 	} {
 		if due.IsZero() {
 			continue
@@ -210,7 +213,7 @@ func (n *Network) runDueActivities() {
 	if n.closing || n.isStopped() {
 		return
 	}
-	if !n.clock().Before(n.nextSync) {
+	if !n.clock().Before(n.syncStatus.NextAttemptAt) {
 		if err := n.sync(n.ctx); err != nil {
 			n.log.Warn("sync failed", "err", err)
 		}
@@ -219,7 +222,7 @@ func (n *Network) runDueActivities() {
 	if n.isStopped() {
 		return
 	}
-	if !n.clock().Before(n.nextScan) {
+	if !n.clock().Before(n.scanStatus.NextAttemptAt) {
 		if err := n.scan(); err != nil {
 			n.log.Warn("scan failed", "err", err)
 		}
@@ -228,7 +231,7 @@ func (n *Network) runDueActivities() {
 	if n.isStopped() {
 		return
 	}
-	if !n.clock().Before(n.nextReport) {
+	if !n.clock().Before(n.reportStatus.NextAttemptAt) {
 		if err := n.report(); err != nil {
 			n.log.Warn("report failed", "err", err)
 		}
@@ -248,7 +251,7 @@ func (n *Network) sync(
 	}
 
 	defer func() {
-		n.completeRefresh(&n.nextSync, n.syncInterval, &n.syncStatus, err)
+		n.completeRefresh(n.syncInterval, &n.syncStatus, err)
 	}()
 
 	snapshot, err := n.client.GetSnapshot(ctx)
@@ -286,12 +289,7 @@ func (n *Network) scan() (err error) {
 	}
 
 	defer func() {
-		n.completeRefresh(
-			&n.nextScan,
-			n.scanInterval,
-			&n.scanStatus,
-			err,
-		)
+		n.completeRefresh(n.scanInterval, &n.scanStatus, err)
 	}()
 
 	now := n.clock()
@@ -349,7 +347,7 @@ func (n *Network) report() (err error) {
 	}
 
 	defer func() {
-		n.completeRefresh(&n.nextReport, n.reportInterval, &n.reportStatus, err)
+		n.completeRefresh(n.reportInterval, &n.reportStatus, err)
 	}()
 
 	since := n.clock().Add(-n.reportInterval)
@@ -409,7 +407,6 @@ func (n *Network) applyPeers() error {
 // completeRefresh records an attempt and schedules the next one after completion.
 // Failed attempts use the same cadence. A stopped network schedules nothing.
 func (n *Network) completeRefresh(
-	next *time.Time,
 	cadence time.Duration,
 	status *ActivityStatus,
 	err error,
@@ -419,7 +416,7 @@ func (n *Network) completeRefresh(
 	if n.isStopped() {
 		return
 	}
-	*next = now.Add(cadence)
+	status.NextAttemptAt = now.Add(cadence)
 }
 
 // isStopped reports whether activities have no active network lifetime.

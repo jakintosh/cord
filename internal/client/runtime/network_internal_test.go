@@ -69,7 +69,9 @@ func TestNetworkConstructionAndPartialStartupCleanup(t *testing.T) {
 	if err := network.start(t.Context()); !errors.Is(err, service.ErrNotFound) {
 		t.Fatalf("start = %v, want missing network", err)
 	}
-	if !network.nextSync.IsZero() || !network.nextScan.IsZero() || !network.nextReport.IsZero() {
+	if !network.syncStatus.NextAttemptAt.IsZero() ||
+		!network.scanStatus.NextAttemptAt.IsZero() ||
+		!network.reportStatus.NextAttemptAt.IsZero() {
 		t.Fatal("failed startup scheduled activities")
 	}
 	if network.reconcileStatus.Error == "" {
@@ -87,12 +89,13 @@ func TestNetworkConstructionAndPartialStartupCleanup(t *testing.T) {
 func TestNetworkStopRetiresScheduledWork(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	network := &Network{
-		ctx:        ctx,
-		cancel:     cancel,
-		nextSync:   time.Now(),
-		nextScan:   time.Now(),
-		nextReport: time.Now(),
-		tunnel:     &Tunnel{},
+		clock:        time.Now,
+		ctx:          ctx,
+		cancel:       cancel,
+		syncStatus:   ActivityStatus{NextAttemptAt: time.Now()},
+		scanStatus:   ActivityStatus{NextAttemptAt: time.Now()},
+		reportStatus: ActivityStatus{NextAttemptAt: time.Now()},
+		tunnel:       &Tunnel{},
 	}
 	if err := network.stop(); err != nil {
 		t.Fatal(err)

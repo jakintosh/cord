@@ -94,10 +94,14 @@ type Runtime struct {
 	enrollments map[string]*Enrollment
 	reasons     map[string]string
 	ctx         context.Context
+
+	reconcileStatus ActivityStatus
+	cleanupStatus   ActivityStatus
 }
 
 // Status collects network state and pending installations in one runtime command.
 type Status struct {
+	Snapshot ResourceSnapshot
 	Health   string
 	Networks []NetworkStatus
 	Installs []*service.Install
@@ -125,7 +129,6 @@ type PeerStatus struct {
 type NetworkStatus struct {
 	Name      string
 	Enabled   bool
-	Running   bool
 	Reason    string
 	Health    string
 	Reconcile ActivityStatus
@@ -134,9 +137,10 @@ type NetworkStatus struct {
 	Report    ActivityStatus
 }
 
-// ActivityStatus describes the latest result of one runtime activity.
+// ActivityStatus holds the schedule and latest result of one runtime activity.
 // Interval is zero for work without a periodic schedule.
 type ActivityStatus struct {
+	NextAttemptAt time.Time
 	Interval      time.Duration
 	LastAttemptAt time.Time
 	LastSuccessAt time.Time
@@ -472,7 +476,8 @@ func (r *Runtime) ConvergeAll(
 }
 
 // GetStatus joins the persisted intent with what this process is actually
-// doing. It is the single source of operator-facing network state.
+// doing. Storage read failures are reported on the resource root so that
+// owned resources remain observable when their saved summaries are unavailable.
 func (r *Runtime) GetStatus(
 	ctx context.Context,
 ) (
@@ -480,23 +485,30 @@ func (r *Runtime) GetStatus(
 	error,
 ) {
 	return executeValue(r, ctx, func() (Status, error) {
-		records, err := r.service.ListNetworks()
-		if err != nil {
-			return Status{}, err
-		}
+		records, networkErr := r.service.ListNetworks()
 
 		statuses := make([]NetworkStatus, len(records))
 		for i, record := range records {
 			statuses[i] = r.parseStatusOf(record)
 		}
 
-		installs, err := r.service.ListInstalls()
-		if err != nil {
-			return Status{}, err
+		installs, installErr := r.service.ListInstalls()
+
+		tree := r.status()
+		if err := errors.Join(networkErr, installErr); err != nil {
+			tree.Error = fmt.Sprintf("read saved state: %v", err)
+			tree.updateHealth()
+		}
+
+		health := statusHealth(statuses)
+		if health == HealthDegraded || tree.Health == HealthDegraded {
+			health = HealthDegraded
+			tree.Health = HealthDegraded
 		}
 
 		return Status{
-			Health:   statusHealth(statuses),
+			Snapshot: tree,
+			Health:   health,
 			Networks: statuses,
 			Installs: installs,
 		}, nil
@@ -618,7 +630,14 @@ func (r *Runtime) closeNetworks() error {
 // convergeAll converges every installed network and stops anything still
 // running that no longer has a record. Per-network failures are recorded
 // and logged; only a failure to read the desired state is returned.
-func (r *Runtime) convergeAll() error {
+func (r *Runtime) convergeAll() (
+	err error,
+) {
+	defer func() {
+		r.reconcileStatus.Interval = r.interval
+		r.reconcileStatus.record(r.clock(), err)
+	}()
+
 	if err := r.closeEnrollments(); err != nil {
 		r.log.Warn(
 			"enrollment cleanup failed",
@@ -851,16 +870,21 @@ func (r *Runtime) parseStatusOf(
 	status := NetworkStatus{
 		Name:    record.Name,
 		Enabled: record.Enabled,
-		Running: isRunning,
 		Reason:  r.reasons[record.Name],
 		Sync:    ActivityStatus{Interval: r.syncInterval},
 		Scan:    ActivityStatus{Interval: r.scanInterval},
 		Report:  ActivityStatus{Interval: r.reportInterval},
 	}
+
 	if isRunning {
 		status.Reconcile, status.Sync, status.Scan, status.Report = network.getActivityStatuses()
 	}
-	status.Health = networkHealth(status)
+
+	status.Health = networkHealth(status, isRunning)
+	if isRunning && network.status().Health == HealthDegraded {
+		status.Health = HealthDegraded
+	}
+
 	return status
 }
 
@@ -985,28 +1009,31 @@ func joinPeerStatuses(
 
 func networkHealth(
 	status NetworkStatus,
+	owned bool,
 ) string {
 	if status.Reason != "" {
 		return HealthDegraded
 	}
 
-	if !status.Enabled && !status.Running {
+	if !status.Enabled && !owned {
 		return HealthInactive
 	}
-	if status.Enabled != status.Running {
+
+	if status.Enabled != owned {
 		return HealthDegraded
 	}
-	activities := []ActivityStatus{
+
+	for _, activity := range []ActivityStatus{
 		status.Reconcile,
 		status.Sync,
 		status.Scan,
 		status.Report,
-	}
-	for _, activity := range activities {
+	} {
 		if activity.Error != "" {
 			return HealthDegraded
 		}
 	}
+
 	return HealthHealthy
 }
 

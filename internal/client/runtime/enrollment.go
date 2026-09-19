@@ -18,12 +18,16 @@ import (
 // into a permanent network. The runtime serializes its methods and retains it
 // until cleanup succeeds.
 type Enrollment struct {
-	install *service.Install
-	tunnel  *Tunnel
-
+	install    *service.Install
+	tunnel     *Tunnel
 	service    *service.Service
 	wireguard  *wireguard.Manager
 	httpClient *http.Client
+	clock      func() time.Time
+
+	redeemStatus  ActivityStatus
+	confirmStatus ActivityStatus
+	cleanupStatus ActivityStatus
 }
 
 // redeem redeems the install's invite over a one-shot tunnel and
@@ -37,6 +41,10 @@ func (e *Enrollment) redeem(
 	result *service.Install,
 	err error,
 ) {
+	defer func() {
+		e.redeemStatus.record(e.clock(), err)
+	}()
+
 	if err := e.close(); err != nil {
 		return nil, err
 	}
@@ -134,6 +142,10 @@ func (e *Enrollment) confirm(
 	result *service.Network,
 	err error,
 ) {
+	defer func() {
+		e.confirmStatus.record(e.clock(), err)
+	}()
+
 	if err := e.close(); err != nil {
 		return nil, err
 	}
@@ -203,10 +215,16 @@ func (e *Enrollment) confirm(
 }
 
 // close retains the child when cleanup fails.
-func (e *Enrollment) close() error {
+func (e *Enrollment) close() (
+	err error,
+) {
 	if e.tunnel == nil {
 		return nil
 	}
+	defer func() {
+		e.cleanupStatus.record(e.clock(), err)
+	}()
+
 	if err := e.tunnel.close(); err != nil {
 		return err
 	}
@@ -389,6 +407,7 @@ func (r *Runtime) acquireEnrollment(
 		service:    r.service,
 		wireguard:  r.wireguard,
 		httpClient: r.httpClient,
+		clock:      r.clock,
 	}
 	r.enrollments[install.Name] = enrollment
 	return enrollment, nil
@@ -459,7 +478,13 @@ func (r *Runtime) releaseEnrollmentsUsing(
 }
 
 // closeEnrollments attempts every retained child even when one close fails.
-func (r *Runtime) closeEnrollments() error {
+func (r *Runtime) closeEnrollments() (
+	err error,
+) {
+	defer func() {
+		r.cleanupStatus.record(r.clock(), err)
+	}()
+
 	var errs []error
 	for name := range r.enrollments {
 		if err := r.releaseEnrollment(name); err != nil {

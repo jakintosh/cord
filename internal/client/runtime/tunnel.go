@@ -22,6 +22,7 @@ type tunnelOptions struct {
 // Tunnel owns a configured device and the coordination server's API address.
 // Its parent configures peers, serializes lifecycle calls, and owns cleanup.
 type Tunnel struct {
+	name    string
 	device  *wireguard.Device
 	apiAddr string
 }
@@ -69,14 +70,39 @@ func newTunnel(
 	}
 
 	return &Tunnel{
+		name:    opts.name,
 		device:  device,
 		apiAddr: apiAddr,
 	}, nil
 }
 
 // status observes device availability without repairing it.
-func (t *Tunnel) status() resource.Status {
-	return t.device.Status()
+func (t *Tunnel) status(
+	target resource.State,
+) ResourceSnapshot {
+	device := t.device.Status()
+
+	child := ResourceSnapshot{
+		Kind:   "wireguard-device",
+		Name:   t.name,
+		State:  device.State,
+		Target: target,
+	}
+	if device.Error != nil {
+		child.Error = device.Error.Error()
+	}
+	child.updateHealth()
+
+	status := ResourceSnapshot{
+		Kind:     "tunnel",
+		Name:     t.name,
+		State:    device.State,
+		Target:   target,
+		Children: []ResourceSnapshot{child},
+	}
+	status.updateHealth()
+
+	return status
 }
 
 // reconcile restores device availability. The device retains and restores

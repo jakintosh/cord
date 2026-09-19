@@ -55,7 +55,7 @@ func TestConfirm_ClosesTemporaryTunnelBeforePublishingNetwork(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !networkStatus(t, rt, "testnet").Running {
+				if networkStatus(t, rt, "testnet").Resource == nil {
 					t.Fatal("permanent network did not start")
 				}
 				return
@@ -114,6 +114,20 @@ func TestEnrollmentRetainsCleanup(t *testing.T) {
 			})
 			attempts := device.CloseCalls
 			creates := len(backend.CreateCalls)
+			status, err := rt.GetStatus(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(status.Snapshot.Children) != 1 {
+				t.Fatalf("retained enrollment missing: %+v", status.Snapshot)
+			}
+			enrollment := status.Snapshot.Children[0]
+			if enrollment.Kind != "enrollment" || enrollment.Target != "stopped" ||
+				enrollment.Activities["close"].Error == "" ||
+				enrollment.Activities["redeem"].LastSuccessAt.IsZero() ||
+				len(enrollment.Children) != 1 || status.Health != runtime.HealthDegraded {
+				t.Fatalf("retained enrollment status = %+v", enrollment)
+			}
 
 			// Retry must close the old child before creating another interface.
 			if _, err := rt.ConfirmInstall(t.Context(), "testnet"); !errors.Is(err, cleanupErr) {
@@ -159,7 +173,7 @@ func TestEnrollmentRetainsCleanup(t *testing.T) {
 			if _, err := rt.ConfirmInstall(t.Context(), "testnet"); err != nil {
 				t.Fatal(err)
 			}
-			if server.calls("redeem") != 1 || !networkStatus(t, rt, "testnet").Running {
+			if server.calls("redeem") != 1 || networkStatus(t, rt, "testnet").Resource == nil {
 				t.Fatal("retry did not resume saved progress into a permanent network")
 			}
 		})
@@ -274,7 +288,7 @@ func TestInstall_Success(t *testing.T) {
 
 	// The network the runtime owns is the one left running.
 	status := networkStatus(t, rt, "install-me")
-	if !status.Running {
+	if status.Resource == nil {
 		t.Fatalf("status = %+v, want running", status)
 	}
 	main := backend.Device("install-me")

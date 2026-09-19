@@ -37,7 +37,7 @@ func TestConverge_RepairsDeviceAndAppliesCurrentCache(t *testing.T) {
 	env.Backend.CreateErr = errors.New("device unavailable")
 	env.Converge(t, "testnet")
 	status := networkStatus(t, env.Runtime, "testnet")
-	if !status.Enabled || !status.Running || status.Reconcile.Error == "" {
+	if !status.Enabled || status.Resource == nil || status.Reconcile.Error == "" {
 		t.Fatalf("failed repair status = %+v", status)
 	}
 

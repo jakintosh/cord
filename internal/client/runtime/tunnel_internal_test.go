@@ -16,7 +16,7 @@ func TestTunnelConstructionDoesNotStartDevice(t *testing.T) {
 	if tunnel.apiAddr != "10.42.0.1:8080" {
 		t.Fatalf("API address = %q", tunnel.apiAddr)
 	}
-	if status := tunnel.status(); status.State != resource.Stopped {
+	if status := tunnel.status(resource.Running); status.State != resource.Stopped {
 		t.Fatalf("initial status = %+v", status)
 	}
 	if len(backend.CreateCalls) != 0 {
@@ -64,7 +64,7 @@ func TestTunnelReconcilePreservesNetworkPeers(t *testing.T) {
 	for _, failed := range []bool{false, true} {
 		if failed {
 			backend.Device("test").CheckErr = errors.New("interface lost")
-			if status := tunnel.status(); status.State != resource.Failed {
+			if status := tunnel.status(resource.Running); status.State != resource.Failed {
 				t.Fatalf("failed status = %+v", status)
 			}
 			if len(backend.CreateCalls) != 1 {
@@ -96,7 +96,7 @@ func TestTunnelCloseRetainsDeviceForRetryAndRestart(t *testing.T) {
 	if err := tunnel.close(); !errors.Is(err, closeErr) {
 		t.Fatalf("close = %v", err)
 	}
-	if status := tunnel.status(); status.State != resource.Failed {
+	if status := tunnel.status(resource.Running); status.State != resource.Failed {
 		t.Fatalf("cleanup status = %+v", status)
 	}
 
@@ -113,7 +113,7 @@ func TestTunnelCloseRetainsDeviceForRetryAndRestart(t *testing.T) {
 	if tunnel.device != wrapper || len(backend.CreateCalls) != 2 {
 		t.Fatal("restart did not reuse the configured wrapper")
 	}
-	if status := tunnel.status(); status.State != resource.Running {
+	if status := tunnel.status(resource.Running); status.State != resource.Running {
 		t.Fatalf("restarted status = %+v", status)
 	}
 }

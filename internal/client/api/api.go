@@ -18,6 +18,7 @@ type NetworkStatus = admin.NetworkStatus
 type NetworkTopology = admin.NetworkTopology
 type Peer = admin.Peer
 type Status = admin.Status
+type ResourceSnapshot = admin.ResourceSnapshot
 type TopologyAssociation = admin.TopologyAssociation
 type TopologyNode = admin.TopologyNode
 type UpdateNetworkRequest = admin.UpdateNetworkRequest

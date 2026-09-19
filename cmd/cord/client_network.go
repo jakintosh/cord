@@ -387,19 +387,18 @@ var clientNetworkSync = &args.Command{
 	},
 }
 
-// printClientNetworkRuntime reports what the daemon is actually doing
-// with a network when that differs from the intent just recorded.
+// printClientNetworkRuntime reports degraded network health after a change.
 func printClientNetworkRuntime(
 	status adminclient.NetworkStatus,
 ) {
-	if status.Enabled == status.Running {
+	if status.Health != "degraded" {
 		return
 	}
 	if status.Reason == "" {
-		fmt.Printf("running: %t\n", status.Running)
+		fmt.Printf("health: %s\n", status.Health)
 		return
 	}
-	fmt.Printf("running: %t (%s)\n", status.Running, status.Reason)
+	fmt.Printf("health: %s (%s)\n", status.Health, status.Reason)
 }
 
 // printClientNetworkDetail prints the key: value detail view for a single

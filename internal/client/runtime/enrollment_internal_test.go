@@ -3,6 +3,7 @@ package runtime
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 )
@@ -18,10 +19,12 @@ func TestEnrollmentInterfaceOwnership(t *testing.T) {
 	t.Cleanup(func() { device.CloseErr = nil })
 
 	enrollment := &Enrollment{
+		clock:   time.Now,
 		install: &service.Install{Name: "old", InviteIfaceName: "test"},
 		tunnel:  tunnel,
 	}
 	rt := &Runtime{
+		clock:       time.Now,
 		enrollments: map[string]*Enrollment{"old": enrollment},
 		running:     make(map[string]*Network),
 		reasons:     make(map[string]string),

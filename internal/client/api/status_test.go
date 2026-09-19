@@ -26,6 +26,26 @@ func TestAPIReads_RuntimeStopped(t *testing.T) {
 	}
 }
 
+func TestAPIStatus_ResourceTree(t *testing.T) {
+	env := testutil.Setup(t)
+	env.SeedEnabledNetwork(t, "office")
+	result := wire.TestGet[api.Status](env.Router, "/status")
+	status := result.ExpectOK(t)
+	root := status.Snapshot
+	if root.Kind != "runtime" || root.State != "running" || len(root.Children) != 1 {
+		t.Fatalf("runtime resource = %+v", root)
+	}
+	network := root.Children[0]
+	if network.Name != "office" || network.Activities["sync"].NextAttemptAt == nil {
+		t.Fatalf("network status = %+v", network)
+	}
+	tunnel := network.Children[0]
+	device := tunnel.Children[0]
+	if tunnel.Kind != "tunnel" || device.Kind != "wireguard-device" || device.Name != "office" {
+		t.Fatalf("child resources = %+v", tunnel)
+	}
+}
+
 func TestAPIStatus_Success(
 	t *testing.T,
 ) {
@@ -78,7 +98,7 @@ func TestAPIStatus_IncludesNetworks(
 	if network.Enabled {
 		t.Fatal("seeded network should be disabled")
 	}
-	if network.Running {
+	if len(data.Snapshot.Children) != 0 {
 		t.Fatal("seeded network should not be running")
 	}
 	if network.Health != "inactive" {
@@ -111,7 +131,7 @@ func TestAPIStatus_ReportsEnabledAndRunning(
 	if !network.Enabled {
 		t.Fatal("enabled network should report enabled")
 	}
-	if !network.Running {
+	if len(data.Snapshot.Children) != 1 || data.Snapshot.Children[0].State != "running" {
 		t.Fatal("enabled network should report running")
 	}
 	if network.Scan.LastAttemptAt != nil {

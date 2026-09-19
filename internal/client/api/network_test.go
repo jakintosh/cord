@@ -492,7 +492,7 @@ func TestAPIEnableNetwork_Success(
 
 	// verify result — the recorded intent and what the daemon is doing
 	data := result.ExpectOK(t)
-	if !data.Enabled || !data.Running {
+	if !data.Enabled || data.Health != "healthy" {
 		t.Fatalf("status = %+v, want enabled and running", data)
 	}
 	if data.Reason != "" {
@@ -523,7 +523,7 @@ func TestAPIEnableNetwork_ReportsDivergence(
 	result := wire.TestPost[api.NetworkStatus](env.Router, url, "")
 
 	data := result.ExpectOK(t)
-	if !data.Enabled || data.Running {
+	if !data.Enabled || data.Health != "degraded" {
 		t.Fatalf("status = %+v, want enabled and not running", data)
 	}
 	if data.Reason == "" {
@@ -594,7 +594,7 @@ func TestAPIDisableNetwork_Success(
 
 	// verify result — the recorded intent and what the daemon is doing
 	data := result.ExpectOK(t)
-	if data.Enabled || data.Running {
+	if data.Enabled || data.Health != "inactive" {
 		t.Fatalf("status = %+v, want disabled and stopped", data)
 	}
 
