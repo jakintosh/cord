@@ -2,37 +2,15 @@ package service_test
 
 import (
 	"errors"
+	"reflect"
 	"testing"
+	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
-
-func installOptions() service.NetworkOptions {
-	return service.NetworkOptions{}
-}
-
-// invitation returns a complete invite for the named network.
-func invitation(
-	name string,
-) protocol.Invitation {
-	return protocol.Invitation{
-		Network: protocol.NetworkInfo{
-			Name:        name,
-			PublicKey:   "srv-pub",
-			Endpoint:    "1.2.3.4:51821",
-			ServerRoute: "10.43.0.1/32",
-			NetworkCidr: "10.0.0.0/16",
-			APIPort:     8443,
-		},
-		Peer: protocol.PeerIdentity{
-			Route:      "10.43.0.2/24",
-			PrivateKey: "temp-key",
-		},
-	}
-}
 
 // assignment returns the invitation a redemption answers with: the main
 // network's identity, without a peer private key.
@@ -54,12 +32,12 @@ func assignment(
 	}
 }
 
-// TestBeginInstall_PersistsPermanentKey verifies that BeginInstall
-// generates a permanent keypair and persists it in the install record.
-func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
+func TestBeginInstall_PersistsPermanentKey(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
-
-	inst, err := env.Service.BeginInstall(invitation("keytest"), installOptions())
+	invite := testutil.Invitation("keytest", "10.43.0.1:8443")
+	inst, err := env.Service.BeginInstall(invite, service.NetworkOptions{})
 	if err != nil {
 		t.Fatalf("begin install: %v", err)
 	}
@@ -79,44 +57,71 @@ func TestBeginInstall_PersistsPermanentKey(t *testing.T) {
 	if inst.MainAssignedRoute != "" {
 		t.Errorf("assigned_cidr = %q, want empty before redeem", inst.MainAssignedRoute)
 	}
-}
-
-func TestBeginInstall_ListenPortOptions(t *testing.T) {
-	env := testutil.SetupService(t)
-
-	inst, err := env.Service.BeginInstall(invitation("listen-port"), service.NetworkOptions{})
+	if inst.MainIfaceName != "keytest" || inst.InviteIfaceName != "keytest-i" ||
+		inst.InvitePrivateKey != invite.Peer.PrivateKey || inst.InviteAssignedRoute != invite.Peer.Route ||
+		!inst.CreatedAt.Equal(testutil.FixedTime) {
+		t.Fatalf("install identity = %#v", inst)
+	}
+	wantServer := service.ServerInfo{
+		PublicKey: invite.Network.PublicKey, Endpoint: invite.Network.Endpoint,
+		Route: invite.Network.ServerRoute, NetworkCidr: invite.Network.NetworkCidr, APIPort: invite.Network.APIPort,
+	}
+	if inst.InviteServer != wantServer {
+		t.Errorf("invite server = %#v, want %#v", inst.InviteServer, wantServer)
+	}
+	persisted, err := env.Service.GetInstall(inst.Name)
 	if err != nil {
-		t.Fatalf("begin install with default options: %v", err)
+		t.Fatal(err)
 	}
-	if inst.ListenPort != 0 {
-		t.Errorf("default listen port = %d, want 0", inst.ListenPort)
-	}
-
-	port := uint16(51820)
-	inst, err = env.Service.BeginInstall(
-		invitation("port-explicit"),
-		service.NetworkOptions{ListenPort: &port},
-	)
-	if err != nil {
-		t.Fatalf("begin install with explicit port: %v", err)
-	}
-	if inst.ListenPort != port {
-		t.Errorf("explicit listen port = %d, want %d", inst.ListenPort, port)
+	persisted.CreatedAt = persisted.CreatedAt.UTC()
+	inst.CreatedAt = inst.CreatedAt.UTC()
+	if !reflect.DeepEqual(persisted, inst) {
+		t.Fatalf("persisted install = %#v, want %#v", persisted, inst)
 	}
 }
 
-// TestBeginInstall_Idempotent verifies that calling BeginInstall twice
-// with the same invite returns the same install record with the same
-// permanent key — the key is never regenerated.
-func TestBeginInstall_Idempotent(t *testing.T) {
-	env := testutil.SetupService(t)
+func TestBeginInstall_ListenPortOptions(
+	t *testing.T,
+) {
+	zero, chosen, maximum := uint16(0), uint16(51820), uint16(65535)
+	for _, tc := range []struct {
+		name string
+		port *uint16
+		want uint16
+	}{
+		{"default", nil, 0},
+		{"ephemeral", &zero, 0},
+		{"chosen", &chosen, 51820},
+		{"maximum", &maximum, 65535},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testutil.SetupService(t)
+			install, err := env.Service.BeginInstall(
+				testutil.Invitation("testnet", "10.43.0.1:8443"),
+				service.NetworkOptions{ListenPort: tc.port},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if install.ListenPort != tc.want {
+				t.Fatalf("listen port = %d, want %d", install.ListenPort, tc.want)
+			}
+		})
+	}
+}
 
-	inst1, err := env.Service.BeginInstall(invitation("idempotent"), installOptions())
+func TestBeginInstall_RetryPreservesPermanentIdentity(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	invite := testutil.Invitation("idempotent", "10.43.0.1:8443")
+
+	inst1, err := env.Service.BeginInstall(invite, service.NetworkOptions{})
 	if err != nil {
 		t.Fatalf("first begin: %v", err)
 	}
 
-	inst2, err := env.Service.BeginInstall(invitation("idempotent"), installOptions())
+	inst2, err := env.Service.BeginInstall(invite, service.NetworkOptions{})
 	if err != nil {
 		t.Fatalf("second begin: %v", err)
 	}
@@ -126,77 +131,96 @@ func TestBeginInstall_Idempotent(t *testing.T) {
 	}
 }
 
-func TestBeginInstall_IncompatibleRetryConflicts(t *testing.T) {
+func TestBeginInstall_IncompatibleRetryConflicts(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
+	invite := testutil.Invitation("incompatible", "10.43.0.1:8443")
 
 	if _, err := env.Service.BeginInstall(
-		invitation("incompatible"),
-		installOptions(),
+		invite,
+		service.NetworkOptions{},
 	); err != nil {
 		t.Fatalf("first begin: %v", err)
 	}
+	before, err := env.Service.GetInstall("incompatible")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	invite := invitation("incompatible")
 	invite.Peer.Route = "10.43.0.3/24"
-	_, err := env.Service.BeginInstall(invite, installOptions())
+	_, err = env.Service.BeginInstall(invite, service.NetworkOptions{})
 	if !errors.Is(err, service.ErrConflict) {
 		t.Fatalf("err = %v, want ErrConflict", err)
 	}
-}
-
-// TestBeginInstall_ExistingConfirmedNetwork verifies that BeginInstall
-// refuses if a completed network already exists.
-func TestBeginInstall_ExistingConfirmedNetwork(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Database, "already-here")
-
-	_, err := env.Service.BeginInstall(invitation("already-here"), installOptions())
-	if err == nil {
-		t.Fatal("expected error for existing network")
+	after, err := env.Service.GetInstall("incompatible")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("rejected retry changed install: %#v", after)
 	}
 }
 
-// TestBeginInstall_RejectsIncompleteInvitation verifies that every field
-// a peer needs is required before an install record is created.
-func TestBeginInstall_RejectsIncompleteInvitation(t *testing.T) {
+func TestBeginInstall_ExistingConfirmedNetwork(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkDirect(t, env.Database, "already-here")
+
+	_, err := env.Service.BeginInstall(testutil.Invitation("already-here", "10.43.0.1:8443"), service.NetworkOptions{})
+	if !errors.Is(err, service.ErrNetworkExists) {
+		t.Fatalf("error = %v, want ErrNetworkExists", err)
+	}
+}
+
+func TestBeginInstall_RejectsIncompleteInvitation(
+	t *testing.T,
+) {
 	tests := []struct {
-		name    string
-		mutate  func(*protocol.Invitation)
-		missing string
+		name   string
+		mutate func(*protocol.Invitation)
 	}{
-		{"network name", func(i *protocol.Invitation) { i.Network.Name = "" }, "name"},
-		{"peer private key", func(i *protocol.Invitation) { i.Peer.PrivateKey = "" }, "private key"},
-		{"peer route", func(i *protocol.Invitation) { i.Peer.Route = "" }, "route"},
-		{"server public key", func(i *protocol.Invitation) { i.Network.PublicKey = "" }, "public key"},
-		{"server endpoint", func(i *protocol.Invitation) { i.Network.Endpoint = "" }, "endpoint"},
-		{"server route", func(i *protocol.Invitation) { i.Network.ServerRoute = "" }, "server route"},
-		{"network cidr", func(i *protocol.Invitation) { i.Network.NetworkCidr = "" }, "cidr"},
-		{"api port", func(i *protocol.Invitation) { i.Network.APIPort = 0 }, "api port"},
+		{"network name", func(i *protocol.Invitation) { i.Network.Name = "" }},
+		{"peer private key", func(i *protocol.Invitation) { i.Peer.PrivateKey = "" }},
+		{"peer route", func(i *protocol.Invitation) { i.Peer.Route = "" }},
+		{"server public key", func(i *protocol.Invitation) { i.Network.PublicKey = "" }},
+		{"server endpoint", func(i *protocol.Invitation) { i.Network.Endpoint = "" }},
+		{"server route", func(i *protocol.Invitation) { i.Network.ServerRoute = "" }},
+		{"network cidr", func(i *protocol.Invitation) { i.Network.NetworkCidr = "" }},
+		{"api port", func(i *protocol.Invitation) { i.Network.APIPort = 0 }},
+		{"main interface too long", func(i *protocol.Invitation) { i.Network.Name = "abcdefghijklmnop" }},
+		{"invite suffix exceeds limit", func(i *protocol.Invitation) { i.Network.Name = "abcdefghijklmn" }},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			env := testutil.SetupService(t)
 
-			invite := invitation("incomplete")
+			invite := testutil.Invitation("incomplete", "10.43.0.1:8443")
 			tt.mutate(&invite)
 
-			_, err := env.Service.BeginInstall(invite, installOptions())
+			_, err := env.Service.BeginInstall(invite, service.NetworkOptions{})
 			if !errors.Is(err, service.ErrInvalidInput) {
 				t.Errorf("err = %v, want ErrInvalidInput", err)
+			}
+			installs, err := env.Service.ListInstalls()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(installs) != 0 {
+				t.Fatalf("invalid invitation created installs: %#v", installs)
 			}
 		})
 	}
 }
 
-// TestRedeemInstall_PersistsAssignment verifies that the main-network
-// identity a redemption returns is what moves the install forward.
-func TestRedeemInstall_PersistsAssignment(t *testing.T) {
+func TestRedeemInstall_PersistsAssignment(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 
-	if _, err := env.Service.BeginInstall(invitation("redeem-me"), installOptions()); err != nil {
-		t.Fatalf("begin install: %v", err)
-	}
+	testutil.SeedInstall(t, env.Service, "redeem-me")
 
 	inst, err := env.Service.RedeemInstall("redeem-me", assignment("redeem-me"))
 	if err != nil {
@@ -213,34 +237,57 @@ func TestRedeemInstall_PersistsAssignment(t *testing.T) {
 	}
 }
 
-func TestRedeemInstall_RejectsIncompleteResult(t *testing.T) {
-	env := testutil.SetupService(t)
+func TestRedeemInstall_RejectsIncompleteResultWithoutChangingInstall(
+	t *testing.T,
+) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*protocol.Invitation)
+	}{
+		{"network name", func(i *protocol.Invitation) { i.Network.Name = "" }},
+		{"peer route", func(i *protocol.Invitation) { i.Peer.Route = "" }},
+		{"server public key", func(i *protocol.Invitation) { i.Network.PublicKey = "" }},
+		{"server endpoint", func(i *protocol.Invitation) { i.Network.Endpoint = "" }},
+		{"server route", func(i *protocol.Invitation) { i.Network.ServerRoute = "" }},
+		{"network cidr", func(i *protocol.Invitation) { i.Network.NetworkCidr = "" }},
+		{"api port", func(i *protocol.Invitation) { i.Network.APIPort = 0 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testutil.SetupService(t)
+			testutil.SeedInstall(t, env.Service, "testnet")
+			before, err := env.Service.GetInstall("testnet")
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := assignment("testnet")
+			tc.mutate(&result)
 
-	if _, err := env.Service.BeginInstall(invitation("bad-redeem"), installOptions()); err != nil {
-		t.Fatalf("begin install: %v", err)
-	}
-
-	result := assignment("bad-redeem")
-	result.Network.ServerRoute = ""
-
-	_, err := env.Service.RedeemInstall("bad-redeem", result)
-	if !errors.Is(err, service.ErrInvalidInput) {
-		t.Errorf("err = %v, want ErrInvalidInput", err)
+			_, err = env.Service.RedeemInstall("testnet", result)
+			if !errors.Is(err, service.ErrInvalidInput) {
+				t.Fatalf("error = %v, want ErrInvalidInput", err)
+			}
+			after, err := env.Service.GetInstall("testnet")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(after, before) {
+				t.Fatalf("install changed after rejected assignment: %#v", after)
+			}
+		})
 	}
 }
 
-// TestConfirmInstall_CreatesEnabledNetwork verifies that confirmation
-// consumes the install into a membership the runtime is told to bring up.
-func TestConfirmInstall_CreatesEnabledNetwork(t *testing.T) {
-	env := testutil.SetupService(t)
-
-	if _, err := env.Service.BeginInstall(invitation("confirm-me"), installOptions()); err != nil {
-		t.Fatalf("begin install: %v", err)
-	}
+func TestConfirmInstall_CreatesEnabledNetwork(
+	t *testing.T,
+) {
+	now := testutil.FixedTime
+	env := testutil.SetupServiceWithClock(t, func() time.Time { return now })
+	invited := testutil.SeedInstall(t, env.Service, "confirm-me")
 	if _, err := env.Service.RedeemInstall("confirm-me", assignment("confirm-me")); err != nil {
 		t.Fatalf("redeem install: %v", err)
 	}
 
+	now = now.Add(time.Hour)
 	network, err := env.Service.ConfirmInstall("confirm-me")
 	if err != nil {
 		t.Fatalf("confirm install: %v", err)
@@ -254,21 +301,127 @@ func TestConfirmInstall_CreatesEnabledNetwork(t *testing.T) {
 	if network.Server.PublicKey == "" {
 		t.Error("server public key should not be empty after confirm")
 	}
+	if network.PrivateKey != invited.MainPrivateKey || network.InterfaceName != invited.MainIfaceName ||
+		!network.CreatedAt.Equal(now) {
+		t.Fatalf("confirmed identity/time = %#v", network)
+	}
+	persisted, err := env.Service.GetNetwork("confirm-me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted.CreatedAt = persisted.CreatedAt.UTC()
+	network.CreatedAt = network.CreatedAt.UTC()
+	if !reflect.DeepEqual(persisted, network) {
+		t.Fatalf("persisted network = %#v, want %#v", persisted, network)
+	}
 
 	if _, err := env.Service.GetInstall("confirm-me"); !errors.Is(err, service.ErrNotFound) {
 		t.Errorf("install after confirm: err = %v, want ErrNotFound", err)
 	}
 }
 
-func TestConfirmInstall_RequiresRedeemedPhase(t *testing.T) {
+func TestConfirmInstall_RequiresRedeemedPhase(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 
-	if _, err := env.Service.BeginInstall(invitation("still-invited"), installOptions()); err != nil {
-		t.Fatalf("begin install: %v", err)
-	}
+	testutil.SeedInstall(t, env.Service, "still-invited")
 
 	_, err := env.Service.ConfirmInstall("still-invited")
 	if !errors.Is(err, service.ErrInstallState) {
 		t.Errorf("err = %v, want ErrInstallState", err)
+	}
+	install, err := env.Service.GetInstall("still-invited")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if install.Phase != service.PhaseInvited {
+		t.Fatalf("rejected confirmation changed phase to %q", install.Phase)
+	}
+	if _, err := env.Service.GetNetwork("still-invited"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("rejected confirmation created network: %v", err)
+	}
+}
+
+func TestUninstallNetwork_RemovesMembership(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetworkDirect(t, env.Database, "to-delete")
+
+	if err := env.Service.UninstallNetwork("to-delete"); err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+
+	_, err := env.Service.GetNetwork("to-delete")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("after uninstall: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUninstallNetwork_NotFound(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+
+	err := env.Service.UninstallNetwork("ghost")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestListInstalls_ReturnsPendingInstallsInNameOrder(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	installs, err := env.Service.ListInstalls()
+	if err != nil || len(installs) != 0 {
+		t.Fatalf("empty installs = %#v, error %v", installs, err)
+	}
+	testutil.SeedInstall(t, env.Service, "beta")
+	testutil.SeedInstall(t, env.Service, "alpha")
+	if _, err := env.Service.RedeemInstall("alpha", assignment("alpha")); err != nil {
+		t.Fatal(err)
+	}
+	installs, err = env.Service.ListInstalls()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(installs) != 2 || installs[0].Name != "alpha" || installs[1].Name != "beta" ||
+		installs[0].Phase != service.PhaseRedeemed || installs[1].Phase != service.PhaseInvited {
+		t.Fatalf("pending installs = %#v, want redeemed alpha then invited beta", installs)
+	}
+}
+
+func TestUninstallNetwork_RemovesPendingInstall(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	testutil.SeedInstall(t, env.Service, "testnet")
+	if err := env.Service.UninstallNetwork("testnet"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Service.GetInstall("testnet"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("install after uninstall = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRedeemInstall_MissingInstall(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	_, err := env.Service.RedeemInstall("missing", assignment("missing"))
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestConfirmInstall_MissingInstall(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	_, err := env.Service.ConfirmInstall("missing")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
 	}
 }

@@ -56,6 +56,7 @@ func SetupRuntimeWithServer(
 		server = httptest.NewUnstartedServer(nil)
 		server.Config.Handler = handlerFactory(server.Listener.Addr().String())
 		server.Start()
+		t.Cleanup(server.Close)
 		httpClient = server.Client()
 	}
 

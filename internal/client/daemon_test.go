@@ -1,42 +1,37 @@
-package client
+package client_test
 
 import (
 	"context"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"git.studiopollinator.com/pollinator/cord/internal/client"
+	adminclient "git.studiopollinator.com/pollinator/cord/pkg/admin/client"
 )
 
-func TestServeRemainsActiveUntilCanceled(t *testing.T) {
-	tempRoot, err := filepath.Abs(filepath.Join("..", "..", ".opencode-tmp"))
+func TestServe_ReportsStatusUntilCanceled(
+	t *testing.T,
+) {
+	dir := daemonDirectory(t)
+	socket := filepath.Join(dir, "control.sock")
+	admin, err := adminclient.New(socket)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(tempRoot, 0700); err != nil {
-		t.Fatal(err)
-	}
-	dir, err := os.MkdirTemp(tempRoot, "client-daemon-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = os.RemoveAll(dir)
-		_ = os.Remove(tempRoot)
-	})
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	var serveErr error
-	socket := filepath.Join(dir, "control.sock")
 	go func() {
 		defer close(done)
-		serveErr = Serve(ctx, Options{
+		serveErr = client.Serve(ctx, client.Options{
 			SocketPath: socket,
 			DBPath:     filepath.Join(dir, "client.db"),
 			Backend:    "userspace",
+			Version:    "daemon-test",
 		})
 	}()
 	t.Cleanup(func() {
@@ -48,32 +43,33 @@ func TestServeRemainsActiveUntilCanceled(t *testing.T) {
 		}
 	})
 
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", socket)
-		},
-	}
-	t.Cleanup(transport.CloseIdleConnections)
-	client := &http.Client{Transport: transport, Timeout: time.Second}
-	deadline := time.Now().Add(5 * time.Second)
+	// Wait for the public control API to become available.
+	readyCtx, readyCancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer readyCancel()
 	for {
-		select {
-		case <-done:
-			t.Fatalf("daemon exited before cancellation: %v", serveErr)
-		default:
-		}
-		response, err := client.Get("http://daemon/status")
+		status, err := admin.Status(readyCtx)
 		if err == nil {
-			response.Body.Close()
-			if response.StatusCode != http.StatusOK {
-				t.Fatalf("status response = %d", response.StatusCode)
+			if status.Version != "daemon-test" || status.Status != "ok" || status.Health != "healthy" {
+				t.Fatalf("unexpected daemon status: %+v", status)
+			}
+			if len(status.Networks) != 0 || len(status.Installs) != 0 || len(status.Snapshot.Children) != 0 {
+				t.Fatalf("new daemon should have no networks or installs: %+v", status)
 			}
 			break
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-done:
+			t.Fatalf("daemon exited before cancellation: %v", serveErr)
+		case <-readyCtx.Done():
 			t.Fatalf("daemon never became available: %v", err)
+		case <-time.After(10 * time.Millisecond):
 		}
-		time.Sleep(10 * time.Millisecond)
+	}
+
+	select {
+	case <-done:
+		t.Fatalf("daemon exited before cancellation: %v", serveErr)
+	case <-time.After(50 * time.Millisecond):
 	}
 
 	cancel()
@@ -85,4 +81,78 @@ func TestServeRemainsActiveUntilCanceled(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("daemon did not exit after cancellation")
 	}
+}
+
+func TestServe_RejectsInvalidStartupOptions(
+	t *testing.T,
+) {
+	for _, tc := range []struct {
+		name    string
+		socket  string
+		backend string
+		db      string
+		wantErr string
+	}{
+		{
+			name:    "missing socket",
+			backend: "userspace",
+			db:      "client.db",
+			wantErr: "socket path required",
+		},
+		{
+			name:    "unknown backend",
+			socket:  "control.sock",
+			backend: "unsupported",
+			db:      "client.db",
+			wantErr: "unknown wireguard backend",
+		},
+		{
+			name:    "database path is a directory",
+			socket:  "control.sock",
+			backend: "userspace",
+			db:      ".",
+			wantErr: "open database",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := daemonDirectory(t)
+			opts := client.Options{
+				Backend: tc.backend,
+				DBPath:  filepath.Join(dir, tc.db),
+			}
+			if tc.socket != "" {
+				opts.SocketPath = filepath.Join(dir, tc.socket)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+
+			err := client.Serve(ctx, opts)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Serve error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func daemonDirectory(
+	t *testing.T,
+) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", ".opencode-tmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(root, "client-daemon-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("remove daemon directory: %v", err)
+		}
+	})
+	return dir
 }

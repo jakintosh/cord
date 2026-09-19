@@ -18,7 +18,9 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
 
-func TestConverge_RepairsDeviceAndAppliesCurrentCache(t *testing.T) {
+func TestConverge_RepairsDeviceAndAppliesCurrentCache(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	record := testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	env.Enable(t, "testnet")
@@ -66,10 +68,9 @@ func TestConverge_RepairsDeviceAndAppliesCurrentCache(t *testing.T) {
 	}
 }
 
-// TestConverge_AppliesCachedPeersSynchronously verifies that the cached
-// peer set is on the device by the time a converge returns, without
-// waiting for a sync.
-func TestConverge_AppliesCachedPeersSynchronously(t *testing.T) {
+func TestConverge_AppliesCachedPeersSynchronously(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 
@@ -106,9 +107,9 @@ func TestConverge_AppliesCachedPeersSynchronously(t *testing.T) {
 	}
 }
 
-// TestConverge_PinsTheServerPeer verifies that a network with no cached
-// peers still gets the one peer it always has.
-func TestConverge_PinsTheServerPeer(t *testing.T) {
+func TestConverge_PinsTheServerPeer(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	network := testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	env.Enable(t, "testnet")
@@ -129,7 +130,9 @@ func TestConverge_PinsTheServerPeer(t *testing.T) {
 	}
 }
 
-func TestConverge_UsesConfiguredListenPort(t *testing.T) {
+func TestConverge_UsesConfiguredListenPort(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 
@@ -150,17 +153,17 @@ func TestConverge_UsesConfiguredListenPort(t *testing.T) {
 	}
 }
 
-// TestSync_AppliesServerSnapshot verifies the on-demand sync round trip:
-// fetch, persist through the service, project onto the device.
-func TestSync_AppliesServerSnapshot(t *testing.T) {
+func TestSync_AppliesServerSnapshot(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	backend := wireguardtest.NewMockBackend()
-	rt := newRuntime(t, env, backend, runtime.Options{
+	server := newInstallServer(t)
+	rt := newRuntime(t, env, backend, runtime.Options{HTTPClient: server.server.Client(),
 		Interval:     time.Hour,
 		SyncInterval: time.Hour,
 	})
 	testutil.RunRuntime(t, rt)
-	server := newInstallServer(t)
 
 	if _, err := rt.Install(t.Context(), server.invitation("testnet"), service.NetworkOptions{}); err != nil {
 		t.Fatalf("install network: %v", err)
@@ -215,7 +218,9 @@ func TestSync_AppliesServerSnapshot(t *testing.T) {
 	}
 }
 
-func TestActivities_RespectDueTimesAndOnDemandSync(t *testing.T) {
+func TestActivities_RespectDueTimesAndOnDemandSync(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	if err := env.Service.SetNetworkEnabled("testnet", true); err != nil {
@@ -286,19 +291,21 @@ func TestActivities_RespectDueTimesAndOnDemandSync(t *testing.T) {
 	}, "failed sync retry at its new deadline")
 }
 
-func TestSync_RecordsFailureAndRecovery(t *testing.T) {
+func TestSync_RecordsFailureAndRecovery(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	backend := wireguardtest.NewMockBackend()
 	now := testutil.FixedTime
 	var clock atomic.Value
 	clock.Store(now)
-	rt := newRuntime(t, env, backend, runtime.Options{
+	server := newInstallServer(t)
+	rt := newRuntime(t, env, backend, runtime.Options{HTTPClient: server.server.Client(),
 		Interval:     time.Hour,
 		SyncInterval: time.Hour,
 		Clock:        func() time.Time { return clock.Load().(time.Time) },
 	})
 	testutil.RunRuntime(t, rt)
-	server := newInstallServer(t)
 
 	if _, err := rt.Install(t.Context(), server.invitation("testnet"), service.NetworkOptions{}); err != nil {
 		t.Fatalf("install network: %v", err)
@@ -364,18 +371,18 @@ func TestSync_RecordsFailureAndRecovery(t *testing.T) {
 	}
 }
 
-// TestStop_RetiresScheduledActivities verifies that no activity outlives the
-// network whose device it configures.
-func TestStop_RetiresScheduledActivities(t *testing.T) {
+func TestStop_RetiresScheduledActivities(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	backend := wireguardtest.NewMockBackend()
-	rt := newRuntime(t, env, backend, runtime.Options{
+	server := newInstallServer(t)
+	rt := newRuntime(t, env, backend, runtime.Options{HTTPClient: server.server.Client(),
 		Interval:     time.Hour,
 		SyncInterval: 5 * time.Millisecond,
 		Clock:        time.Now,
 	})
 	finish := testutil.RunRuntime(t, rt)
-	server := newInstallServer(t)
 
 	if _, err := rt.Install(t.Context(), server.invitation("testnet"), service.NetworkOptions{}); err != nil {
 		t.Fatalf("install network: %v", err)
@@ -394,7 +401,9 @@ func TestStop_RetiresScheduledActivities(t *testing.T) {
 	}
 }
 
-func TestPeerStatus_NotRunning(t *testing.T) {
+func TestGetPeerStatus_NotRunning(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	testutil.SeedPeers(t, env.Database, "testnet", service.Peer{
@@ -419,7 +428,9 @@ func TestPeerStatus_NotRunning(t *testing.T) {
 	}
 }
 
-func TestPeerStatus_JoinsLiveDeviceState(t *testing.T) {
+func TestGetPeerStatus_JoinsLiveDeviceState(
+	t *testing.T,
+) {
 	tests := []struct {
 		name          string
 		lastHandshake time.Time
@@ -481,7 +492,9 @@ func TestPeerStatus_JoinsLiveDeviceState(t *testing.T) {
 	}
 }
 
-func TestNetworkTopology_ServerConnectivityUsesHandshake(t *testing.T) {
+func TestGetNetworkTopology_ServerConnectivityUsesHandshake(
+	t *testing.T,
+) {
 	tests := []struct {
 		name          string
 		includePeer   bool

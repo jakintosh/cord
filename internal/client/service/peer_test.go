@@ -7,19 +7,12 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
-	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
+	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 )
 
-func mustGenKey(t *testing.T) string {
-	t.Helper()
-	k, err := wireguard.GenerateKey()
-	if err != nil {
-		t.Fatalf("generate key: %v", err)
-	}
-	return k
-}
-
-func TestListPeers_Empty(t *testing.T) {
+func TestListPeers_Empty(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "empty-peers")
 
@@ -32,7 +25,9 @@ func TestListPeers_Empty(t *testing.T) {
 	}
 }
 
-func TestListPeers_NetworkNotFound(t *testing.T) {
+func TestListPeers_NetworkNotFound(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.ListPeers("nonexistent")
@@ -41,16 +36,23 @@ func TestListPeers_NetworkNotFound(t *testing.T) {
 	}
 }
 
-func TestListPeers_CachedPeers(t *testing.T) {
+func TestListPeers_CachedPeers(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "cached")
 
-	peerKey := mustGenKey(t)
-	testutil.SeedPeers(t, env.Database, "cached", service.Peer{
+	peerKey := "alice-key"
+	if err := env.Service.ApplyNetworkSnapshot("cached", testutil.NetworkSnapshot(protocol.VisiblePeer{
 		Name:      "alice",
 		PublicKey: peerKey,
 		Route:     "10.42.0.9/32",
-	})
+		Endpoints: []protocol.EndpointWitness{{
+			Endpoint: "1.2.3.4:51820", Timestamp: testutil.FixedTime.Add(-time.Hour),
+		}},
+	})); err != nil {
+		t.Fatal(err)
+	}
 
 	peers, err := env.Service.ListPeers("cached")
 	if err != nil {
@@ -65,20 +67,33 @@ func TestListPeers_CachedPeers(t *testing.T) {
 	if peers[0].PublicKey != peerKey {
 		t.Errorf("public key = %q, want %q", peers[0].PublicKey, peerKey)
 	}
+	if peers[0].Route != "10.42.0.9/32" || peers[0].Endpoint != "1.2.3.4:51820" {
+		t.Fatalf("cached peer = %#v", peers[0])
+	}
+	endpoints, err := env.Service.ListPeerEndpoints("cached", peerKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(endpoints) != 1 || endpoints[0].Endpoint != "1.2.3.4:51820" ||
+		!endpoints[0].ServerObservedAt.Equal(testutil.FixedTime.Add(-time.Hour)) {
+		t.Fatalf("server observations = %#v", endpoints)
+	}
 }
 
-// TestRecordLocalEndpoint_FeedsTheCatalog verifies that an endpoint the
-// runtime observed becomes a rotation candidate for that peer.
-func TestRecordLocalEndpoint_FeedsTheCatalog(t *testing.T) {
+func TestRecordLocalEndpoint_FeedsTheCatalog(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "endpoints")
 
-	peerKey := mustGenKey(t)
-	testutil.SeedPeers(t, env.Database, "endpoints", service.Peer{
+	peerKey := "alice-key"
+	if err := env.Service.ApplyNetworkSnapshot("endpoints", testutil.NetworkSnapshot(protocol.VisiblePeer{
 		Name:      "alice",
 		PublicKey: peerKey,
 		Route:     "10.42.0.9/32",
-	})
+	})); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := env.Service.RecordLocalEndpoint(
 		"endpoints",
@@ -115,19 +130,20 @@ func TestRecordLocalEndpoint_FeedsTheCatalog(t *testing.T) {
 	}
 }
 
-// TestRecordEndpointAttempt_AdvancesRotationState verifies that a
-// recorded attempt is visible in the endpoint catalog, so rotation
-// resumes where it left off after a restart.
-func TestRecordEndpointAttempt_AdvancesRotationState(t *testing.T) {
+func TestRecordEndpointAttempt_AdvancesRotationState(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "attempts")
 
-	peerKey := mustGenKey(t)
-	testutil.SeedPeers(t, env.Database, "attempts", service.Peer{
+	peerKey := "alice-key"
+	if err := env.Service.ApplyNetworkSnapshot("attempts", testutil.NetworkSnapshot(protocol.VisiblePeer{
 		Name:      "alice",
 		PublicKey: peerKey,
 		Route:     "10.42.0.9/32",
-	})
+	})); err != nil {
+		t.Fatal(err)
+	}
 	if err := env.Service.RecordLocalEndpoint(
 		"attempts",
 		peerKey,

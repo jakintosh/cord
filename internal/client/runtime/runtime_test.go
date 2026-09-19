@@ -15,7 +15,31 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
 
-func TestLookupNetwork(t *testing.T) {
+func TestNew_RequiresDependencies(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	manager := wireguard.NewManagerWithBackend(wireguardtest.NewMockBackend())
+	tests := []struct {
+		name string
+		opts runtime.Options
+	}{
+		{name: "service", opts: runtime.Options{WireGuard: manager}},
+		{name: "wireguard manager", opts: runtime.Options{Service: env.Service}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, err := runtime.New(tt.opts)
+			if err == nil || rt != nil {
+				t.Fatalf("new without %s = %v, %v; want nil runtime and error", tt.name, rt, err)
+			}
+		})
+	}
+}
+
+func TestLookupNetwork_ResolvesInstalledPendingAndMissing(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "installed")
 	testutil.SeedInstall(t, env.Service, "pending")
@@ -50,88 +74,86 @@ func TestLookupNetwork(t *testing.T) {
 	}
 }
 
-func TestLookupNetworkDoesNotHideStorageFailure(t *testing.T) {
-	env := testutil.SetupService(t)
+func TestLookupNetwork_ReportsStorageFailure(
+	t *testing.T,
+) {
+	env := testutil.SetupRuntime(t)
 	testutil.SeedInstall(t, env.Service, "pending")
-	storageErr := errors.New("network read failed")
-	store := &failedNetworkLookupStore{Store: env.Database, err: storageErr}
-	svc, err := service.New(service.Options{Store: store})
+	if err := env.Database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	lookup, err := env.Runtime.LookupNetwork(t.Context(), "pending")
+	if err == nil || errors.Is(err, service.ErrNotFound) || lookup.Network != nil || lookup.Install != nil {
+		t.Fatalf("lookup = %+v, %v, want storage failure without a result", lookup, err)
+	}
+}
+
+func TestSetNetworkEnabled_RetriesCleanup(
+	t *testing.T,
+) {
+	env, device := networkWithBlockedCleanup(t)
+	status, err := env.Runtime.SetNetworkEnabled(t.Context(), "testnet", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	env.Service = svc
-	rt := newRuntime(t, env, wireguardtest.NewMockBackend(), runtime.Options{})
-	testutil.RunRuntime(t, rt)
-
-	lookup, err := rt.LookupNetwork(t.Context(), "pending")
-	if !errors.Is(err, storageErr) || lookup.Network != nil || lookup.Install != nil {
-		t.Fatalf("lookup = %+v, %v, want original storage error", lookup, err)
+	if status.Enabled || status.Reason == "" || networkStatus(t, env.Runtime, "testnet").Resource == nil {
+		t.Fatalf("failed cleanup status = %+v", status)
+	}
+	finishNetworkCleanup(t, env, device)
+	observed := networkStatus(t, env.Runtime, "testnet")
+	if observed.Resource != nil || observed.Reason != "" {
+		t.Fatalf("completed cleanup status = %+v", observed)
 	}
 }
 
-type failedNetworkLookupStore struct {
-	service.Store
-	err error
-}
-
-func (s *failedNetworkLookupStore) GetNetwork(
-	name string,
-) (
-	*service.Network,
-	error,
+func TestUninstallNetwork_RetriesCleanup(
+	t *testing.T,
 ) {
-	return nil, s.err
-}
-
-func TestCleanupRetriesOwnedNetworks(t *testing.T) {
-	for _, action := range []string{"disable", "uninstall"} {
-		t.Run(action, func(t *testing.T) {
-			env := testutil.SetupRuntime(t)
-			testutil.SeedNetworkDirect(t, env.Database, "testnet")
-			env.Enable(t, "testnet")
-			device := env.Backend.Device("testnet")
-			device.CloseErr = errors.New("close failed")
-			t.Cleanup(func() { device.CloseErr = nil })
-
-			switch action {
-			case "disable":
-				status, err := env.Runtime.SetNetworkEnabled(t.Context(), "testnet", false)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if status.Enabled || networkStatus(t, env.Runtime, "testnet").Resource == nil || status.Reason == "" {
-					t.Fatalf("failed cleanup status = %+v", status)
-				}
-			case "uninstall":
-				if err := env.Runtime.UninstallNetwork(t.Context(), "testnet"); err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			if device.CloseCalls != 1 {
-				t.Fatalf("close calls = %d, want 1", device.CloseCalls)
-			}
-			device.CloseErr = nil
-			if err := env.Runtime.ConvergeAll(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			if device.CloseCalls != 2 {
-				t.Fatalf("close calls = %d, want cleanup retry", device.CloseCalls)
-			}
-			if len(env.Backend.CreateCalls) != 1 {
-				t.Fatal("cleanup unexpectedly created another device")
-			}
-			if action != "uninstall" {
-				status := networkStatus(t, env.Runtime, "testnet")
-				if status.Resource != nil || status.Reason != "" {
-					t.Fatalf("completed cleanup status = %+v", status)
-				}
-			}
-		})
+	env, device := networkWithBlockedCleanup(t)
+	if err := env.Runtime.UninstallNetwork(t.Context(), "testnet"); err != nil {
+		t.Fatal(err)
+	}
+	finishNetworkCleanup(t, env, device)
+	if _, err := env.Service.GetNetwork("testnet"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("uninstalled network = %v", err)
 	}
 }
 
-func TestReplacementWaitsForCleanupAfterConfigurationReverts(t *testing.T) {
+func networkWithBlockedCleanup(
+	t *testing.T,
+) (*testutil.RuntimeEnv, *wireguardtest.MockDevice) {
+	t.Helper()
+	env := testutil.SetupRuntime(t)
+	testutil.SeedNetworkDirect(t, env.Database, "testnet")
+	env.Enable(t, "testnet")
+	device := env.Backend.Device("testnet")
+	device.CloseErr = errors.New("close failed")
+	t.Cleanup(func() { device.CloseErr = nil })
+	return env, device
+}
+
+func finishNetworkCleanup(
+	t *testing.T,
+	env *testutil.RuntimeEnv,
+	device *wireguardtest.MockDevice,
+) {
+	t.Helper()
+	if device.CloseCalls != 1 {
+		t.Fatalf("close calls = %d, want 1", device.CloseCalls)
+	}
+	device.CloseErr = nil
+	if err := env.Runtime.ConvergeAll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if device.CloseCalls != 2 || len(env.Backend.CreateCalls) != 1 {
+		t.Fatal("cleanup did not retry the original device exclusively")
+	}
+}
+
+func TestUpdateNetwork_WaitsForCleanupAfterConfigurationReverts(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	record := testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	env.Enable(t, "testnet")
@@ -171,7 +193,9 @@ func TestReplacementWaitsForCleanupAfterConfigurationReverts(t *testing.T) {
 	}
 }
 
-func TestFailedStartupRetainsPartialDeviceUntilCleanup(t *testing.T) {
+func TestRun_RetainsPartialDeviceUntilCleanup(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	if err := env.Service.SetNetworkEnabled("testnet", true); err != nil {
@@ -237,7 +261,9 @@ func (b *partialStartupBackend) CreateDevice(
 	return device, nil
 }
 
-func TestRun_StartsEnabledNetworks(t *testing.T) {
+func TestRun_StartsEnabledNetworks(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	if err := env.Service.SetNetworkEnabled("testnet", true); err != nil {
@@ -260,7 +286,9 @@ func TestRun_StartsEnabledNetworks(t *testing.T) {
 	}
 }
 
-func TestRun_LeavesDisabledNetworksStopped(t *testing.T) {
+func TestRun_LeavesDisabledNetworksStopped(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 
@@ -276,7 +304,9 @@ func TestRun_LeavesDisabledNetworksStopped(t *testing.T) {
 	}
 }
 
-func TestConverge_FailedStartKeepsIntentAndReportsReason(t *testing.T) {
+func TestConverge_FailedStartKeepsIntentAndReportsReason(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 
@@ -315,7 +345,9 @@ func TestConverge_FailedStartKeepsIntentAndReportsReason(t *testing.T) {
 	}
 }
 
-func TestRun_RetriesFailedStartOnTick(t *testing.T) {
+func TestRun_RetriesFailedStartOnTick(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	if err := env.Service.SetNetworkEnabled("testnet", true); err != nil {
@@ -348,7 +380,9 @@ func TestRun_RetriesFailedStartOnTick(t *testing.T) {
 	}, "network to start on a later tick")
 }
 
-func TestConverge_DisableStopsRunningNetwork(t *testing.T) {
+func TestConverge_DisableStopsRunningNetwork(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	env.Enable(t, "testnet")
@@ -371,10 +405,9 @@ func TestConverge_DisableStopsRunningNetwork(t *testing.T) {
 	}
 }
 
-// TestConverge_RestartsChangedConfiguration verifies that a stored
-// change to a running network's tunnel takes effect without any
-// disable/enable dance: the runtime restarts it under the new record.
-func TestConverge_RestartsChangedConfiguration(t *testing.T) {
+func TestConverge_RestartsChangedConfiguration(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	env.Enable(t, "testnet")
@@ -404,9 +437,9 @@ func TestConverge_RestartsChangedConfiguration(t *testing.T) {
 	}
 }
 
-// TestConverge_StopsUninstalledNetwork verifies that a record deleted
-// out from under a running network takes its device down.
-func TestConverge_StopsUninstalledNetwork(t *testing.T) {
+func TestConverge_StopsUninstalledNetwork(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	env.Enable(t, "testnet")
@@ -428,10 +461,9 @@ func TestConverge_StopsUninstalledNetwork(t *testing.T) {
 	}
 }
 
-// TestUpdateNetwork_RestartsRunningNetwork verifies that updating a
-// running network's configuration both returns the updated record and
-// restarts the network under it.
-func TestUpdateNetwork_RestartsRunningNetwork(t *testing.T) {
+func TestUpdateNetwork_RestartsRunningNetwork(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	env.Enable(t, "testnet")
@@ -458,10 +490,9 @@ func TestUpdateNetwork_RestartsRunningNetwork(t *testing.T) {
 	}
 }
 
-// TestSetNetworkEnabled_ReportsDivergence verifies that enabling a
-// network that cannot start returns the recorded intent alongside why it
-// is not running, rather than failing the operation.
-func TestSetNetworkEnabled_ReportsDivergence(t *testing.T) {
+func TestSetNetworkEnabled_ReportsDivergence(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 
@@ -484,7 +515,9 @@ func TestSetNetworkEnabled_ReportsDivergence(t *testing.T) {
 	}
 }
 
-func TestUninstallNetwork_StopsRunningNetwork(t *testing.T) {
+func TestUninstallNetwork_StopsRunningNetwork(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	env.Enable(t, "testnet")
@@ -498,7 +531,9 @@ func TestUninstallNetwork_StopsRunningNetwork(t *testing.T) {
 	}
 }
 
-func TestRun_ClosesNetworksBeforeReturning(t *testing.T) {
+func TestRun_ClosesNetworksBeforeReturning(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	env.Enable(t, "testnet")
@@ -523,7 +558,9 @@ func TestRun_ClosesNetworksBeforeReturning(t *testing.T) {
 	}
 }
 
-func TestRun_RejectsConcurrentRunAndReuse(t *testing.T) {
+func TestRun_RejectsConcurrentRunAndReuse(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	env.Enable(t, "testnet")
@@ -542,7 +579,9 @@ func TestRun_RejectsConcurrentRunAndReuse(t *testing.T) {
 	}
 }
 
-func TestRun_CanceledBeforeStartup(t *testing.T) {
+func TestRun_CanceledBeforeStartup(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	backend := wireguardtest.NewMockBackend()
 	rt := newRuntime(t, env, backend, runtime.Options{})
@@ -560,7 +599,9 @@ func TestRun_CanceledBeforeStartup(t *testing.T) {
 	}
 }
 
-func TestCommandsBeforeRunWaitAndRespectCancellation(t *testing.T) {
+func TestCommands_WaitForRunAndRespectCancellation(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	backend := wireguardtest.NewMockBackend()
@@ -595,7 +636,9 @@ func TestCommandsBeforeRunWaitAndRespectCancellation(t *testing.T) {
 	}
 }
 
-func TestCommandContextDoesNotOwnNetworkLifetime(t *testing.T) {
+func TestSetNetworkEnabled_OutlivesCommandContext(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	ctx, cancel := context.WithCancel(t.Context())
@@ -610,7 +653,9 @@ func TestCommandContextDoesNotOwnNetworkLifetime(t *testing.T) {
 	}
 }
 
-func TestRun_InitialFailureReleasesWaitingCommands(t *testing.T) {
+func TestRun_InitialFailureReleasesWaitingCommands(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	backend := wireguardtest.NewMockBackend()
 	rt := newRuntime(t, env, backend, runtime.Options{})
@@ -625,7 +670,9 @@ func TestRun_InitialFailureReleasesWaitingCommands(t *testing.T) {
 	}
 }
 
-func TestRun_ReturnsCleanupError(t *testing.T) {
+func TestRun_ReturnsCleanupError(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	env.Enable(t, "testnet")
@@ -644,7 +691,9 @@ func TestRun_ReturnsCleanupError(t *testing.T) {
 	}
 }
 
-func TestRun_CancellationReleasesInFlightSync(t *testing.T) {
+func TestRun_CancellationReleasesInFlightSync(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "testnet")
 	if err := env.Service.SetNetworkEnabled("testnet", true); err != nil {
@@ -690,13 +739,41 @@ func (t *blockingSyncTransport) RoundTrip(
 	return nil, request.Context().Err()
 }
 
-func TestSync_NotRunning(t *testing.T) {
+func TestSync_RejectsUnavailableNetworks(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
-	testutil.SeedNetworkDirect(t, env.Database, "testnet")
+	testutil.SeedNetworkDirect(t, env.Database, "disabled")
+	testutil.SeedInstall(t, env.Service, "pending")
 
-	_, err := env.Runtime.Sync(t.Context(), "testnet")
-	if !errors.Is(err, service.ErrNetworkNotEnabled) {
-		t.Errorf("err = %v, want ErrNetworkNotEnabled", err)
+	for _, tc := range []struct {
+		name string
+		want error
+	}{
+		{name: "missing", want: service.ErrNotFound},
+		{name: "pending", want: service.ErrNetworkNotEnabled},
+		{name: "disabled", want: service.ErrNetworkNotEnabled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			network, err := env.Runtime.Sync(t.Context(), tc.name)
+			if network != nil || !errors.Is(err, tc.want) {
+				t.Fatalf("sync = %v, %v; want nil, %v", network, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestSync_ReportsStorageFailure(
+	t *testing.T,
+) {
+	env := testutil.SetupRuntime(t)
+	if err := env.Database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	network, err := env.Runtime.Sync(t.Context(), "missing")
+	if network != nil || err == nil || errors.Is(err, service.ErrNotFound) || errors.Is(err, service.ErrNetworkNotEnabled) {
+		t.Fatalf("sync = %v, %v; want storage failure", network, err)
 	}
 }
 
@@ -713,8 +790,7 @@ func newRuntime(
 	opts.Service = env.Service
 	opts.WireGuard = wireguard.NewManagerWithBackend(backend)
 	if opts.HTTPClient == nil {
-		// Install and sync tests use real local HTTP servers.
-		opts.HTTPClient = &http.Client{Timeout: 100 * time.Millisecond}
+		opts.HTTPClient = testutil.NewOfflineHTTPClient()
 	}
 	opts.Logger = logging.Discard()
 	if opts.Clock == nil {

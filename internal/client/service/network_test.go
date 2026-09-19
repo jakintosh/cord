@@ -9,7 +9,9 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-func TestGetNetwork_Success(t *testing.T) {
+func TestGetNetwork_ReturnsMembership(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "mynet")
 
@@ -46,7 +48,9 @@ func TestGetNetwork_Success(t *testing.T) {
 	}
 }
 
-func TestGetNetwork_NotFound(t *testing.T) {
+func TestGetNetwork_NotFound(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 
 	_, err := env.Service.GetNetwork("nonexistent")
@@ -55,7 +59,9 @@ func TestGetNetwork_NotFound(t *testing.T) {
 	}
 }
 
-func TestListNetworks_Empty(t *testing.T) {
+func TestListNetworks_Empty(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 
 	networks, err := env.Service.ListNetworks()
@@ -67,10 +73,12 @@ func TestListNetworks_Empty(t *testing.T) {
 	}
 }
 
-func TestListNetworks_WithNetworks(t *testing.T) {
+func TestListNetworks_OrdersByName(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Database, "alpha")
 	testutil.SeedNetworkDirect(t, env.Database, "beta")
+	testutil.SeedNetworkDirect(t, env.Database, "alpha")
 
 	networks, err := env.Service.ListNetworks()
 	if err != nil {
@@ -79,12 +87,14 @@ func TestListNetworks_WithNetworks(t *testing.T) {
 	if len(networks) != 2 {
 		t.Fatalf("expected 2 networks, got %d", len(networks))
 	}
+	if networks[0].Name != "alpha" || networks[1].Name != "beta" {
+		t.Fatalf("network order = %q, %q", networks[0].Name, networks[1].Name)
+	}
 }
 
-// TestSetNetworkEnabled_PersistsIntent verifies that the enabled flag is
-// the whole of the operation: it is written unconditionally and the
-// runtime is woken to converge toward it.
-func TestSetNetworkEnabled_PersistsIntent(t *testing.T) {
+func TestSetNetworkEnabled_PersistsIntent(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "enable-me")
 
@@ -113,7 +123,9 @@ func TestSetNetworkEnabled_PersistsIntent(t *testing.T) {
 	}
 }
 
-func TestSetNetworkEnabled_NotFound(t *testing.T) {
+func TestSetNetworkEnabled_NotFound(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 
 	err := env.Service.SetNetworkEnabled("ghost", true)
@@ -122,7 +134,9 @@ func TestSetNetworkEnabled_NotFound(t *testing.T) {
 	}
 }
 
-func TestUpdateNetwork_PersistsListenPort(t *testing.T) {
+func TestUpdateNetwork_PersistsListenPort(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetworkDirect(t, env.Database, "portnet")
 
@@ -143,35 +157,32 @@ func TestUpdateNetwork_PersistsListenPort(t *testing.T) {
 	}
 }
 
-func TestUpdateNetwork_RequiresListenPort(t *testing.T) {
+func TestUpdateNetwork_RequiresListenPort(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Database, "portnet")
+	before := testutil.SeedNetworkDirect(t, env.Database, "portnet")
 
 	err := env.Service.UpdateNetwork("portnet", service.NetworkOptions{})
 	if !errors.Is(err, service.ErrInvalidInput) {
 		t.Errorf("err = %v, want ErrInvalidInput", err)
 	}
-}
-
-func TestUninstallNetwork_Success(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetworkDirect(t, env.Database, "to-delete")
-
-	if err := env.Service.UninstallNetwork("to-delete"); err != nil {
-		t.Fatalf("uninstall: %v", err)
+	after, err := env.Service.GetNetwork("portnet")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	_, err := env.Service.GetNetwork("to-delete")
-	if !errors.Is(err, service.ErrNotFound) {
-		t.Errorf("after uninstall: err = %v, want ErrNotFound", err)
+	if after.ListenPort != before.ListenPort {
+		t.Fatalf("invalid update changed port from %d to %d", before.ListenPort, after.ListenPort)
 	}
 }
 
-func TestUninstallNetwork_NotFound(t *testing.T) {
+func TestUpdateNetwork_MissingNetwork(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
-
-	err := env.Service.UninstallNetwork("ghost")
+	port := uint16(51820)
+	err := env.Service.UpdateNetwork("missing", service.NetworkOptions{ListenPort: &port})
 	if !errors.Is(err, service.ErrNotFound) {
-		t.Errorf("err = %v, want ErrNotFound", err)
+		t.Fatalf("error = %v, want ErrNotFound", err)
 	}
 }

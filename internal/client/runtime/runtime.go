@@ -426,8 +426,9 @@ func (r *Runtime) UninstallNetwork(
 
 // Sync fetches the network snapshot from the server on demand, outside
 // the network's own sync cadence, and returns the updated record. It
-// returns ErrNetworkNotEnabled when the network is not running, since
-// there is no tunnel to fetch over.
+// returns ErrNotFound when neither a network nor an install exists, and
+// ErrNetworkNotEnabled when it exists but is not running, since there is
+// no tunnel to fetch over.
 func (r *Runtime) Sync(
 	ctx context.Context,
 	name string,
@@ -436,6 +437,17 @@ func (r *Runtime) Sync(
 	error,
 ) {
 	return executeValue(r, ctx, func() (*service.Network, error) {
+		_, err := r.service.GetNetwork(name)
+		if errors.Is(err, service.ErrNotFound) {
+			_, err = r.service.GetInstall(name)
+			if err == nil {
+				return nil, service.ErrNetworkNotEnabled
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
+
 		network, isRunning := r.running[name]
 
 		if !isRunning {

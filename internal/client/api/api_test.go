@@ -9,28 +9,22 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 )
 
-func TestAPIRouter_ExposesNetworkRoutes(
+func TestAPINew_RequiresRuntime(
 	t *testing.T,
 ) {
-	// setup env
-	env := testutil.Setup(t)
-
-	// list networks on empty router — should return 200 with empty data
-	result := wire.TestGet[[]api.Network](env.Router, "/networks")
-	result.ExpectOK(t)
-
-	// get nonexistent network should return 404
-	notFound := wire.TestGet[any](env.Router, "/networks/ghost")
-	notFound.ExpectStatusError(t, http.StatusNotFound)
+	control, err := api.New(api.Options{})
+	if err == nil || control != nil {
+		t.Fatalf("New without runtime = %v, %v; want nil and error", control, err)
+	}
 }
 
-func TestAPIError_NotFound(
+func TestAPIRouter_UnknownPathReturnsNotFound(
 	t *testing.T,
 ) {
 	// setup env
 	env := testutil.Setup(t)
 
-	// get nonexistent path
+	// send request
 	url := "/nonexistent"
 	result := wire.TestGet[any](env.Router, url)
 

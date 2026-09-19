@@ -1,5 +1,8 @@
 # Repository Guidelines
 
+## Testing
+- Follow [TESTING.md](TESTING.md) when adding, changing, or reviewing tests.
+
 ## Build, Test, and Development Commands
 - Use the `Makefile` for build, test, lint, and similar workflows. Run `make help` to see available targets.
 - Never use temporary GOCACHE caches; ask for build permission if necessary, and use `make build`.

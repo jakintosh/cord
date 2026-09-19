@@ -9,7 +9,9 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/resource"
 )
 
-func TestStatusObservesLostDeviceWithoutRepair(t *testing.T) {
+func TestGetStatus_ObservesLostDeviceWithoutRepair(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "office")
 	env.Enable(t, "office")
@@ -57,7 +59,9 @@ func TestStatusObservesLostDeviceWithoutRepair(t *testing.T) {
 	}
 }
 
-func TestStatusRetainsUninstalledNetworkUntilCleanup(t *testing.T) {
+func TestGetStatus_RetainsUninstalledNetworkUntilCleanup(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "office")
 	env.Enable(t, "office")
@@ -92,7 +96,9 @@ func TestStatusRetainsUninstalledNetworkUntilCleanup(t *testing.T) {
 	}
 }
 
-func TestStatusReportsMaintenanceAndStorageFailure(t *testing.T) {
+func TestGetStatus_ReportsMaintenanceAndStorageFailure(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetworkDirect(t, env.Database, "office")
 	env.Enable(t, "office")

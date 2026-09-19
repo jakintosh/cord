@@ -6,10 +6,16 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
 
-func TestEnrollmentInterfaceOwnership(t *testing.T) {
-	tunnel, backend := newTestTunnel(t)
+// Cross-name reservations must keep failed cleanup exclusive. Reaching this
+// state through enrollment HTTP flows would obscure the ownership invariant.
+func TestAcquireEnrollment_PreservesExclusiveInterfaceOwnership(
+	t *testing.T,
+) {
+	tunnel, backend := newOwnedEnrollmentTunnel(t)
 	if err := tunnel.reconcile(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -70,4 +76,43 @@ func TestEnrollmentInterfaceOwnership(t *testing.T) {
 	if _, err := rt.acquireEnrollment(&service.Install{Name: "other", InviteIfaceName: "occupied"}); !errors.Is(err, service.ErrConflict) {
 		t.Fatalf("network-owned interface = %v, want conflict even during cleanup", err)
 	}
+}
+
+func newOwnedEnrollmentTunnel(
+	t *testing.T,
+) (
+	*Tunnel,
+	*wireguardtest.MockBackend,
+) {
+	t.Helper()
+	key, err := wireguard.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKey, err := wireguard.PublicKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := wireguardtest.NewMockBackend()
+	tunnel, err := newTunnel(tunnelOptions{
+		name:       "test",
+		privateKey: key,
+		route:      "10.42.0.2/32",
+		server: service.ServerInfo{
+			PublicKey:   publicKey,
+			Route:       "10.42.0.1/32",
+			NetworkCidr: "10.42.0.0/24",
+			Endpoint:    "127.0.0.1:51820",
+			APIPort:     8080,
+		},
+	}, wireguard.NewManagerWithBackend(backend))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := tunnel.close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return tunnel, backend
 }
