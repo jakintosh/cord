@@ -109,9 +109,19 @@ func startDNS(
 	address string,
 ) *serverdns.Server {
 	t.Helper()
+	return startNetworkDNS(t, env, "looptest", address)
+}
+
+func startNetworkDNS(
+	t *testing.T,
+	env *testutil.ServiceEnv,
+	network string,
+	address string,
+) *serverdns.Server {
+	t.Helper()
 	srv, err := serverdns.New(serverdns.Options{
-		Network: "looptest",
-		Zone:    "LoopTest.Internal",
+		Network: network,
+		Zone:    network + ".Internal",
 		Address: address,
 		Service: env.Service,
 	})
@@ -131,6 +141,164 @@ func startDNS(
 	}
 
 	return srv
+}
+
+func TestReconcile_IsolatesNetworksSharingPort(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	seedZone(t, env, "alpha", "127.0.0.0/24")
+	seedZone(t, env, "beta", "::/120")
+	testutil.SeedPeerDB(
+		t,
+		env.Database,
+		"alpha",
+		"api",
+		"127.0.0.2/32",
+		"alpha-api",
+		false,
+		true,
+		true,
+	)
+	testutil.SeedPeerDB(
+		t,
+		env.Database,
+		"beta",
+		"api",
+		"::2/128",
+		"beta-api",
+		false,
+		true,
+		true,
+	)
+
+	// Each server can see its own network's peer named api.
+	for _, network := range []string{"alpha", "beta"} {
+		if _, err := env.Service.CreateGroup(network, "shared"); err != nil {
+			t.Fatal(err)
+		}
+		for _, cidr := range []string{"cord-server", "api"} {
+			if err := env.Service.AssignCidrGroup(network, cidr, "shared"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := env.Service.CreateAssociation(network, "shared", "shared"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// These addresses are available without interface aliases on macOS and
+	// Linux. Share one ephemeral port across two distinct address families.
+	alpha := startNetworkDNS(t, env, "alpha", "127.0.0.1:0")
+	_, port, err := net.SplitHostPort(alpha.Address())
+	if err != nil {
+		t.Fatal(err)
+	}
+	betaAddress := net.JoinHostPort("::1", port)
+	beta := startNetworkDNS(t, env, "beta", betaAddress)
+
+	checkAlpha := func() {
+		t.Helper()
+		assertDNSZoneIsolation(
+			t,
+			alpha,
+			"127.0.0.1",
+			"alpha.internal.",
+			"beta.internal.",
+			dns.TypeA,
+			"api.alpha.internal.\t3600\tIN\tA\t127.0.0.2",
+		)
+	}
+	checkBeta := func() {
+		t.Helper()
+		assertDNSZoneIsolation(
+			t,
+			beta,
+			"::1",
+			"beta.internal.",
+			"alpha.internal.",
+			dns.TypeAAAA,
+			"api.beta.internal.\t3600\tIN\tAAAA\t::2",
+		)
+	}
+
+	// Both networks answer their own zone and refuse the other zone.
+	checkAlpha()
+	checkBeta()
+
+	// Closing beta must leave alpha answering on its original address.
+	alphaAddress := alpha.Address()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := beta.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	betaStatus := beta.Status()
+	if betaStatus.State != resource.Stopped {
+		t.Fatalf("beta after close = %+v", betaStatus)
+	}
+	checkAlpha()
+
+	// Restart beta on the shared port and check both networks again.
+	if err := beta.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	checkBeta()
+	checkAlpha()
+	if address := alpha.Address(); address != alphaAddress {
+		t.Fatalf("alpha address = %s, want %s", address, alphaAddress)
+	}
+	alphaStatus := alpha.Status()
+	if alphaStatus.State != resource.Running {
+		t.Fatalf("alpha after beta restart = %+v", alphaStatus)
+	}
+}
+
+func assertDNSZoneIsolation(
+	t *testing.T,
+	srv *serverdns.Server,
+	source string,
+	zone string,
+	otherZone string,
+	qtype uint16,
+	wantAnswer string,
+) {
+	t.Helper()
+
+	for _, protocol := range []string{"udp", "tcp"} {
+		question := new(dns.Msg)
+		question.SetQuestion("api."+zone, qtype)
+		response := exchangeDNS(
+			t,
+			protocol,
+			source,
+			srv.Address(),
+			question,
+		)
+		if response.Rcode != dns.RcodeSuccess {
+			t.Fatalf("%s %s response = %v", zone, protocol, response)
+		}
+		if !response.Authoritative || response.RecursionAvailable {
+			t.Fatalf("unexpected response flags: %+v", response.MsgHdr)
+		}
+		assertRecords(t, response.Answer, wantAnswer)
+
+		otherQuestion := new(dns.Msg)
+		otherQuestion.SetQuestion("api."+otherZone, qtype)
+		response = exchangeDNS(
+			t,
+			protocol,
+			source,
+			srv.Address(),
+			otherQuestion,
+		)
+		if response.Rcode != dns.RcodeRefused || response.Authoritative {
+			t.Fatalf("%s answered for the other zone: %v", zone, response)
+		}
+		assertRecords(t, response.Answer, "")
+		assertRecords(t, response.Ns, "")
+		assertRecords(t, response.Extra, "")
+	}
 }
 
 // seedZone creates a one-peer-less network; the bootstrap server peer

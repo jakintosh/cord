@@ -86,3 +86,91 @@ func TestResolveDNSHost_VisibilityAndNameRules(
 		})
 	}
 }
+
+func TestResolveDNSHost_RefreshesAfterMutation(
+	t *testing.T,
+) {
+	for _, name := range []string{"rename", "disable", "remove association"} {
+		t.Run(name, func(t *testing.T) {
+			env := testutil.SetupService(t)
+			testutil.SeedNetwork(t, env.Service)
+			seedDNSVisibility(t, env)
+
+			// Warm the subject view through synchronization, then DNS.
+			_, err := env.Service.GetVisibleNetworkSnapshot("testnet", "frank")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := service.DNSHost{
+				Name:  "api-1",
+				Route: "10.0.1.1/32",
+			}
+			host, err := env.Service.ResolveDNSHost("testnet", "frank", "api-1")
+			if err != nil || host != want {
+				t.Fatalf("warm lookup = %+v, %v; want %+v", host, err, want)
+			}
+
+			// Change one fact that affects the cached hostname lookup.
+			switch name {
+			case "rename":
+				renamed := "api-2"
+				diff := service.PeerDiff{
+					Name: &renamed,
+				}
+				_, err := env.Service.UpdatePeer("testnet", "api-1", diff)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want.Name = renamed
+			case "disable":
+				enabled := false
+				diff := service.PeerDiff{
+					Enabled: &enabled,
+				}
+				_, err := env.Service.UpdatePeer("testnet", "api-1", diff)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "remove association":
+				err := env.Service.DeleteAssociation(
+					"testnet",
+					"app:api",
+					"team:ops",
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// The old name must disappear from the next lookup.
+			host, err = env.Service.ResolveDNSHost("testnet", "frank", "api-1")
+			if !errors.Is(err, service.ErrNotFound) {
+				t.Fatalf("old lookup error = %v, want ErrNotFound", err)
+			}
+			if host != (service.DNSHost{}) {
+				t.Fatalf("old lookup = %+v, want empty host", host)
+			}
+
+			// Synchronization and DNS must agree on the updated peer set.
+			snapshot, err := env.Service.GetVisibleNetworkSnapshot("testnet", "frank")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name == "rename" {
+				host, err := env.Service.ResolveDNSHost("testnet", "frank", "API-2")
+				if err != nil || host != want {
+					t.Fatalf("renamed lookup = %+v, %v; want %+v", host, err, want)
+				}
+				if len(snapshot.Peers) != 1 {
+					t.Fatalf("snapshot has %d peers, want one", len(snapshot.Peers))
+				}
+				peer := snapshot.Peers[0]
+				if peer.Name != want.Name || peer.Route != want.Route {
+					t.Fatalf("snapshot peer = %+v, want %+v", peer, want)
+				}
+			} else if len(snapshot.Peers) != 0 {
+				t.Fatalf("snapshot retained hidden/disabled peers: %+v", snapshot.Peers)
+			}
+		})
+	}
+}

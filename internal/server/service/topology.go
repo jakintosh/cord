@@ -150,11 +150,12 @@ func (s *Service) GetVisibleNetworkSnapshot(
 	}, nil
 }
 
-// peerView is one subject's visibility explanation and projected
-// topology within a network model.
+// peerView is one subject's visibility, projected topology, and DNS host
+// index within a network model. Published views are immutable.
 type peerView struct {
-	visibility *topology.Visibility
-	projected  topology.View
+	visibility  *topology.Visibility
+	projected   topology.View
+	hostsByName map[string]DNSHost
 }
 
 // peerViewCache retains subject views for the lifetime of one network
@@ -191,9 +192,18 @@ func (c *peerViewCache) view(
 		return nil, fmt.Errorf("project topology for %q: %w", peerName, err)
 	}
 
+	hostsByName := make(map[string]DNSHost, len(visibility.Peers))
+	for _, peer := range visibility.Peers {
+		hostsByName[peer.Name] = DNSHost{
+			Name:  peer.Name,
+			Route: peer.Route,
+		}
+	}
+
 	view := &peerView{
-		visibility: &visibility,
-		projected:  projected,
+		visibility:  &visibility,
+		projected:   projected,
+		hostsByName: hostsByName,
 	}
 	c.views[peerName] = view
 

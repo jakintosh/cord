@@ -59,13 +59,8 @@ func (s *Service) ResolveDNSHost(
 		return dnsHostFromIndex(model, host)
 	}
 
-	for _, peer := range view.visibility.Peers {
-		if peer.Name == host {
-			return DNSHost{
-				Name:  peer.Name,
-				Route: peer.Route,
-			}, nil
-		}
+	if target, ok := view.hostsByName[host]; ok {
+		return target, nil
 	}
 
 	return DNSHost{}, fmt.Errorf("resolve dns host %q: %w", hostname, ErrNotFound)

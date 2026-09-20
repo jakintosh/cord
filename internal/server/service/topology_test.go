@@ -181,9 +181,80 @@ func TestGetNetworkTopology_NotFound(
 	}
 }
 
+// countingTopologyStore observes topology reads while retaining the real SQLite
+// adapter. The test uses it sequentially through public service operations.
+type countingTopologyStore struct {
+	service.Store
+	loads int
+}
+
+func (s *countingTopologyStore) LoadTopologyState(
+	network string,
+) (
+	*service.TopologyState,
+	error,
+) {
+	s.loads++
+	return s.Store.LoadTopologyState(network)
+}
+
+func TestNetworkModel_ReusesTopologyAcrossDNSAndSynchronization(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+	seedDNSVisibility(t, env)
+
+	store := &countingTopologyStore{
+		Store: env.Database,
+	}
+	svc, err := service.New(service.Options{
+		Store: store,
+		Clock: func() time.Time { return testutil.FixedTime },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sourceIP := net.ParseIP("10.0.32.5")
+	wantHost := service.DNSHost{
+		Name:  "api-1",
+		Route: "10.0.1.1/32",
+	}
+
+	// Repeated identity, DNS, and sync reads share one compiled model.
+	for range 3 {
+		identity, err := svc.ResolvePeerIdentity("testnet", sourceIP)
+		if err != nil || identity.Name != "frank" {
+			t.Fatalf("identity = %+v, %v", identity, err)
+		}
+
+		host, err := svc.ResolveDNSHost("testnet", "frank", "api-1")
+		if err != nil || host != wantHost {
+			t.Fatalf("host = %+v, %v", host, err)
+		}
+
+		snapshot, err := svc.GetVisibleNetworkSnapshot("testnet", "frank")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(snapshot.Peers) != 1 {
+			t.Fatalf("snapshot has %d peers, want one", len(snapshot.Peers))
+		}
+		peer := snapshot.Peers[0]
+		if peer.Name != host.Name || peer.Route != host.Route {
+			t.Fatalf("DNS and sync disagree: %+v, %+v", host, peer)
+		}
+	}
+
+	if store.loads != 1 {
+		t.Fatalf("topology loads = %d, want one shared load", store.loads)
+	}
+}
+
 // blockingStore wraps a real store and holds the first
-// LoadTopologyState caller until released, so a test can mutate the
-// network while a model load is in flight. Later loads pass through.
+// LoadTopologyState result until released, so a test can mutate the
+// network after an old snapshot was read. Later loads pass through.
 type blockingStore struct {
 	service.Store
 
@@ -198,11 +269,12 @@ func (s *blockingStore) LoadTopologyState(
 	*service.TopologyState,
 	error,
 ) {
+	state, err := s.Store.LoadTopologyState(network)
 	s.once.Do(func() {
 		s.entered <- struct{}{}
 		<-s.release
 	})
-	return s.Store.LoadTopologyState(network)
+	return state, err
 }
 
 func TestNetworkModel_PreventsStalePublicationDuringInvalidation(
