@@ -3,6 +3,7 @@ package wireguard_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,74 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
+
+func TestDevice_NameFollowsBackendLifetime(
+	t *testing.T,
+) {
+	backend := &namedBackend{
+		Backend: wireguardtest.NewMockBackend(),
+	}
+	manager := wireguard.NewManagerWithBackend(backend)
+	device, err := manager.NewDevice(wireguard.DeviceConfig{
+		Name:       "logical",
+		PrivateKey: mustGeneratePrivateKey(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = device.Close() })
+
+	if name, err := device.Name(); err == nil || name != "" {
+		t.Fatalf("unstarted name = %q, %v; want no live name", name, err)
+	}
+	for _, expected := range []string{"utun1", "utun2"} {
+		if err := device.Reconcile(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		name, err := device.Name()
+		if err != nil || name != expected {
+			t.Fatalf("live name = %q, %v; want %q", name, err, expected)
+		}
+		if err := device.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if name, err := device.Name(); err == nil || name != "" {
+			t.Fatalf("closed name = %q, %v; want no live name", name, err)
+		}
+	}
+}
+
+// namedBackend models an OS allocating a different actual name on each start.
+type namedBackend struct {
+	wireguard.Backend
+	starts int
+}
+
+func (b *namedBackend) CreateDevice(
+	config wireguard.DeviceConfig,
+) (
+	wireguard.WgDevice,
+	error,
+) {
+	device, err := b.Backend.CreateDevice(config)
+	if err != nil {
+		return nil, err
+	}
+	b.starts++
+	return &namedDevice{
+		WgDevice: device,
+		name:     fmt.Sprintf("utun%d", b.starts),
+	}, nil
+}
+
+type namedDevice struct {
+	wireguard.WgDevice
+	name string
+}
+
+func (d *namedDevice) Name() string {
+	return d.name
+}
 
 func TestDevice_SetPeers_AddsNewPeers(t *testing.T) {
 	backend := wireguardtest.NewMockBackend()

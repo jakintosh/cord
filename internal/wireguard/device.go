@@ -54,6 +54,22 @@ func newDevice(
 	}
 }
 
+// Name returns the current backend's OS interface name. Callers that require a
+// working interface must reconcile first; a retained failed handle still has a
+// name. A stopped wrapper never substitutes its configured logical name.
+func (d *Device) Name() (
+	string,
+	error,
+) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.backend == nil {
+		return "", fmt.Errorf("wireguard: device is stopped")
+	}
+	return d.backend.Name(), nil
+}
+
 // Status reads interface availability without repairing it. Peer handshakes
 // describe remote connectivity and do not determine device health.
 func (d *Device) Status() resource.Status {
