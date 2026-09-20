@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/client/dns"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
@@ -40,29 +41,28 @@ const (
 )
 
 type networkOptions struct {
-	record         *service.Network
-	service        *service.Service
-	wireguard      *wireguard.Manager
-	httpClient     *http.Client
-	clock          func() time.Time
-	log            *slog.Logger
+	record     *service.Network
+	service    *service.Service
+	wireguard  *wireguard.Manager
+	dns        DNSManager
+	httpClient *http.Client
+	clock      func() time.Time
+	log        *slog.Logger
+
 	syncInterval   time.Duration
 	scanInterval   time.Duration
 	reportInterval time.Duration
 }
 
 // Network is a configured client network owned by the runtime loop.
-// It holds one Tunnel and activity due times. Durable state is read and
+// It owns a tunnel, a DNS resolver, and activity due times. Durable state is read and
 // written through the service. Its activities (sync, scan, report) project
 // between the store, the device, and the server.
 type Network struct {
-	// Only the runtime loop accesses closing. Once cleanup
-	// begins, this instance must be retired before a replacement can start.
-	closing bool
-
 	record  *service.Network
 	tunnel  *Tunnel
 	service *service.Service
+	dns     *dnsResolver
 	client  *client.PeerClient
 	clock   func() time.Time
 	log     *slog.Logger
@@ -70,6 +70,10 @@ type Network struct {
 	// ctx follows the runtime lifetime and is canceled when this network stops.
 	ctx    context.Context
 	cancel context.CancelFunc
+	//
+	// Only the runtime loop accesses closing. Once cleanup
+	// begins, this instance must be retired before a replacement can start.
+	closing bool
 
 	syncInterval   time.Duration
 	scanInterval   time.Duration
@@ -82,7 +86,7 @@ type Network struct {
 	reportStatus    ActivityStatus
 }
 
-// newNetwork constructs the tunnel and API client without starting resources
+// newNetwork constructs the tunnel, DNS resolver, and API client without starting resources
 // or scheduling activities. Runtime supplies resolved dependencies and intervals.
 func newNetwork(
 	opts networkOptions,
@@ -106,9 +110,24 @@ func newNetwork(
 		return nil, fmt.Errorf("create peer client: %w", err)
 	}
 
+	serverRoute, err := netaddr.ParseRoute(opts.record.Server.Route)
+	if err != nil {
+		return nil, fmt.Errorf("DNS server route: %w", err)
+	}
+
 	return &Network{
-		record:         opts.record,
-		tunnel:         tunnel,
+		record: opts.record,
+		tunnel: tunnel,
+		dns: &dnsResolver{
+			manager: opts.dns,
+			device:  tunnel.device,
+			config: dns.Config{
+				Network:    opts.record.Name,
+				Domain:     opts.record.Name + ".internal",
+				Nameserver: serverRoute.IP,
+			},
+			clock: opts.clock,
+		},
 		service:        opts.service,
 		client:         peerNetClient,
 		clock:          opts.clock,
@@ -151,8 +170,9 @@ func (n *Network) reconcile() (err error) {
 		return nil
 	}
 
+	var dnsErr error
 	defer func() {
-		n.reconcileStatus.record(n.clock(), err)
+		n.reconcileStatus.record(n.clock(), errors.Join(err, dnsErr))
 	}()
 
 	if err := n.tunnel.reconcile(n.ctx); err != nil {
@@ -161,6 +181,16 @@ func (n *Network) reconcile() (err error) {
 
 	if err := n.applyPeers(); err != nil {
 		return err
+	}
+
+	dnsErr = n.dns.reconcile(n.ctx)
+	if dnsErr != nil {
+		// DNS failure degrades the network without rolling back its tunnel or
+		// preventing sync, scan, and report from being scheduled at startup.
+		n.log.Warn(
+			"DNS reconciliation failed",
+			"err", dnsErr,
+		)
 	}
 
 	return nil
@@ -182,7 +212,14 @@ func (n *Network) stop() (
 	n.scanStatus.NextAttemptAt = time.Time{}
 	n.reportStatus.NextAttemptAt = time.Time{}
 
-	return n.tunnel.close()
+	// Cleanup must remain usable after network or daemon cancellation.
+	ctx, cancel := context.WithTimeout(context.Background(), dnsCleanupTimeout)
+	defer cancel()
+
+	dnsErr := n.dns.close(ctx)
+	tunnelErr := n.tunnel.close()
+
+	return errors.Join(dnsErr, tunnelErr)
 }
 
 // nextActivity returns the earliest due time, or zero for a retired network.

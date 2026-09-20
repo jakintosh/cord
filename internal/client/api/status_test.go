@@ -51,13 +51,17 @@ func TestAPIStatus_ResourceTree(
 	if network.Name != "office" || network.Activities["sync"].NextAttemptAt == nil {
 		t.Fatalf("network status = %+v", network)
 	}
-	if len(network.Children) != 1 || len(network.Children[0].Children) != 1 {
+	if len(network.Children) != 2 || len(network.Children[0].Children) != 1 {
 		t.Fatalf("network resources = %+v", network)
 	}
 	tunnel := network.Children[0]
 	device := tunnel.Children[0]
 	if tunnel.Kind != "tunnel" || device.Kind != "wireguard-device" || device.Name != "office" {
 		t.Fatalf("child resources = %+v", tunnel)
+	}
+	resolver := network.Children[1]
+	if resolver.Kind != "dns-resolver" || resolver.Name != "office.internal" || resolver.State != "running" {
+		t.Fatalf("DNS resource = %+v", resolver)
 	}
 }
 

@@ -63,6 +63,7 @@ func SetupRuntimeWithServer(
 	rt, err := runtime.New(runtime.Options{
 		Service:    env.Service,
 		WireGuard:  mgr,
+		DNS:        NewDNSManager(t),
 		HTTPClient: httpClient,
 		Clock:      func() time.Time { return FixedTime },
 		Logger:     logging.Discard(),

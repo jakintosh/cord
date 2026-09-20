@@ -28,10 +28,11 @@ func TestServe_ReportsStatusUntilCanceled(
 	go func() {
 		defer close(done)
 		serveErr = client.Serve(ctx, client.Options{
-			SocketPath: socket,
-			DBPath:     filepath.Join(dir, "client.db"),
-			Backend:    "userspace",
-			Version:    "daemon-test",
+			SocketPath:  socket,
+			DBPath:      filepath.Join(dir, "client.db"),
+			ResolverDir: filepath.Join(dir, "resolver"),
+			Backend:     "userspace",
+			Version:     "daemon-test",
 		})
 	}()
 	t.Cleanup(func() {

@@ -26,6 +26,7 @@ func TestNew_RequiresDependencies(
 	}{
 		{name: "service", opts: runtime.Options{WireGuard: manager}},
 		{name: "wireguard manager", opts: runtime.Options{Service: env.Service}},
+		{name: "DNS manager", opts: runtime.Options{Service: env.Service, WireGuard: manager}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -205,6 +206,7 @@ func TestRun_RetainsPartialDeviceUntilCleanup(
 	rt, err := runtime.New(runtime.Options{
 		Service:    env.Service,
 		WireGuard:  wireguard.NewManagerWithBackend(backend),
+		DNS:        testutil.NewDNSManager(t),
 		HTTPClient: testutil.NewOfflineHTTPClient(),
 	})
 	if err != nil {
@@ -789,6 +791,9 @@ func newRuntime(
 
 	opts.Service = env.Service
 	opts.WireGuard = wireguard.NewManagerWithBackend(backend)
+	if opts.DNS == nil {
+		opts.DNS = testutil.NewDNSManager(t)
+	}
 	if opts.HTTPClient == nil {
 		opts.HTTPClient = testutil.NewOfflineHTTPClient()
 	}

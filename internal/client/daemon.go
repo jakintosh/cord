@@ -9,6 +9,7 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
+	"git.studiopollinator.com/pollinator/cord/internal/client/dns"
 	"git.studiopollinator.com/pollinator/cord/internal/client/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
@@ -35,6 +36,9 @@ type Options struct {
 
 	// DBPath is the filesystem path to the SQLite database file.
 	DBPath string
+
+	// ResolverDir is the macOS resolver directory. Empty uses /etc/resolver.
+	ResolverDir string
 
 	// Backend selects the WireGuard implementation: "auto" (default),
 	// "kernel", or "userspace".
@@ -103,9 +107,17 @@ func Serve(
 		return fmt.Errorf("client: new service: %w", err)
 	}
 
+	resolver, err := dns.New(dns.Options{
+		ResolverDir: opts.ResolverDir,
+	})
+	if err != nil {
+		return fmt.Errorf("client: new DNS manager: %w", err)
+	}
+
 	rt, err := runtime.New(runtime.Options{
 		Service:   svc,
 		WireGuard: wg,
+		DNS:       resolver,
 		Clock:     time.Now,
 		Logger:    log,
 	})

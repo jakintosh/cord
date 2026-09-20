@@ -49,6 +49,9 @@ type Options struct {
 	// WireGuard is the manager used to create network devices.
 	WireGuard *wireguard.Manager
 
+	// DNS manages resolver configuration for permanent networks.
+	DNS DNSManager
+
 	// HTTPClient backs every call to a server API. Nil uses the
 	// default transport.
 	HTTPClient *http.Client
@@ -76,6 +79,7 @@ type Options struct {
 type Runtime struct {
 	service    *service.Service
 	wireguard  *wireguard.Manager
+	dns        DNSManager
 	httpClient *http.Client
 	interval   time.Duration
 	clock      func() time.Time
@@ -95,8 +99,10 @@ type Runtime struct {
 	reasons     map[string]string
 	ctx         context.Context
 
-	reconcileStatus ActivityStatus
-	cleanupStatus   ActivityStatus
+	reconcileStatus  ActivityStatus
+	cleanupStatus    ActivityStatus
+	dnsCleanupStatus ActivityStatus
+	dnsCleanupDone   bool
 }
 
 // Status collects network state and pending installations in one runtime command.
@@ -187,6 +193,9 @@ func New(
 	if opts.WireGuard == nil {
 		return nil, fmt.Errorf("client: wireguard manager required")
 	}
+	if opts.DNS == nil {
+		return nil, fmt.Errorf("client: DNS manager required")
+	}
 
 	interval := opts.Interval
 	if interval <= 0 {
@@ -210,6 +219,7 @@ func New(
 	return &Runtime{
 		service:        opts.Service,
 		wireguard:      opts.WireGuard,
+		dns:            opts.DNS,
 		httpClient:     opts.HTTPClient,
 		interval:       interval,
 		clock:          clock,
@@ -639,6 +649,34 @@ func (r *Runtime) closeNetworks() error {
 	return errors.Join(errs...)
 }
 
+// cleanupDNS runs only after a successful saved-state read. Failed startup
+// cleanup is retried with a fresh active set on the next full maintenance pass.
+func (r *Runtime) cleanupDNS(
+	records []*service.Network,
+) {
+	if r.dnsCleanupDone {
+		return
+	}
+
+	active := make(map[string]bool, len(records))
+	for _, record := range records {
+		if record.Enabled {
+			active[record.Name+".internal"] = true
+		}
+	}
+
+	err := r.dns.CleanupStale(r.ctx, active)
+	r.dnsCleanupStatus.record(r.clock(), err)
+	if err != nil {
+		r.log.Warn(
+			"stale DNS cleanup failed",
+			"err", err,
+		)
+		return
+	}
+	r.dnsCleanupDone = true
+}
+
 // convergeAll converges every installed network and stops anything still
 // running that no longer has a record. Per-network failures are recorded
 // and logged; only a failure to read the desired state is returned.
@@ -661,6 +699,8 @@ func (r *Runtime) convergeAll() (
 	if err != nil {
 		return err
 	}
+
+	r.cleanupDNS(records)
 
 	installed := make(map[string]bool, len(records))
 	for _, record := range records {
@@ -775,6 +815,7 @@ func (r *Runtime) startNetwork(
 		record:         record,
 		service:        r.service,
 		wireguard:      r.wireguard,
+		dns:            r.dns,
 		httpClient:     r.httpClient,
 		clock:          r.clock,
 		log:            r.log.With("network", record.Name),

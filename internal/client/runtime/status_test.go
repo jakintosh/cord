@@ -49,6 +49,8 @@ func TestGetStatus_ObservesLostDeviceWithoutRepair(
 	// Returned maps and slices belong to the caller.
 	status.Snapshot.Children[0].Activities["sync"] = runtime.ActivityStatus{Error: "caller mutation"}
 	status.Snapshot.Children[0].Children[0].Kind = "changed"
+	resolver := resolverStatus(t, &status.Snapshot.Children[0])
+	resolver.Activities["apply"] = runtime.ActivityStatus{Error: "caller mutation"}
 	again, err := env.Runtime.GetStatus(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +58,10 @@ func TestGetStatus_ObservesLostDeviceWithoutRepair(
 	if again.Snapshot.Children[0].Activities["sync"].Error == "caller mutation" ||
 		again.Snapshot.Children[0].Children[0].Kind != "tunnel" {
 		t.Fatal("snapshot aliases live resource state")
+	}
+	resolver = resolverStatus(t, &again.Snapshot.Children[0])
+	if resolver.Activities["apply"].Error != "" {
+		t.Fatal("DNS snapshot aliases live activity state")
 	}
 }
 
@@ -82,6 +88,10 @@ func TestGetStatus_RetainsUninstalledNetworkUntilCleanup(
 	if network.Target != resource.Stopped || network.Activities["close"].Error == "" ||
 		status.Health != runtime.HealthDegraded {
 		t.Fatalf("cleanup status = %+v", network)
+	}
+	resolver := resolverStatus(t, &network)
+	if resolver.State != resource.Stopped || resolver.Health != runtime.HealthInactive {
+		t.Fatalf("completed DNS cleanup = %+v", resolver)
 	}
 	device.CloseErr = nil
 	if err := env.Runtime.ConvergeAll(t.Context()); err != nil {

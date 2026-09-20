@@ -39,6 +39,7 @@ func TestConfirmInstall_ClosesTemporaryTunnelBeforePublishingNetwork(
 			rt, err := runtime.New(runtime.Options{
 				Service:    env.Service,
 				WireGuard:  wireguard.NewManagerWithBackend(backend),
+				DNS:        testutil.NewDNSManager(t),
 				HTTPClient: server.server.Client(),
 			})
 			if err != nil {
@@ -158,6 +159,7 @@ func enrollmentWithBlockedCleanup(
 	rt, err := runtime.New(runtime.Options{
 		Service:    env.Service,
 		WireGuard:  wireguard.NewManagerWithBackend(backend),
+		DNS:        testutil.NewDNSManager(t),
 		HTTPClient: server.server.Client(),
 		Interval:   time.Hour,
 	})
@@ -201,6 +203,7 @@ func TestInstall_RetainsTunnelAfterPeerSetupFailure(
 	rt, err := runtime.New(runtime.Options{
 		Service:    env.Service,
 		WireGuard:  wireguard.NewManagerWithBackend(backend),
+		DNS:        testutil.NewDNSManager(t),
 		HTTPClient: server.server.Client(),
 		Interval:   time.Hour,
 	})

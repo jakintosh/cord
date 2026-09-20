@@ -26,8 +26,9 @@ func (r *Runtime) status() ResourceSnapshot {
 		State:  resource.Running,
 		Target: resource.Running,
 		Activities: map[string]ActivityStatus{
-			"reconcile": r.reconcileStatus,
-			"cleanup":   r.cleanupStatus,
+			"reconcile":   r.reconcileStatus,
+			"cleanup":     r.cleanupStatus,
+			"dns-cleanup": r.dnsCleanupStatus,
 		},
 	}
 
@@ -79,7 +80,10 @@ func (n *Network) status() ResourceSnapshot {
 			"report":    n.reportStatus,
 			"close":     n.cleanupStatus,
 		},
-		Children: []ResourceSnapshot{n.tunnel.status(target)},
+		Children: []ResourceSnapshot{
+			n.tunnel.status(target),
+			n.dns.status(target),
+		},
 	}
 	status.updateHealth()
 	return status
