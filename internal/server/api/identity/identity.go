@@ -24,6 +24,7 @@ type LookupFunc func(ctx context.Context, ip net.IP) (*Peer, error)
 // failure, otherwise stash the *Peer in the request context and call
 // next. Rejections are logged with the reason, since the caller only
 // ever sees the opaque 403.
+// The logger must be non-nil, and a successful lookup must return a non-nil peer.
 func Require(
 	lookup LookupFunc,
 	next http.HandlerFunc,

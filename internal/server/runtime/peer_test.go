@@ -9,7 +9,9 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-func TestPeerCommandsApplyPeersBeforeReturning(t *testing.T) {
+func TestPeerCommands_ApplyPeersBeforeReturning(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetwork(t, env.Service)
 	if status, err := env.Runtime.SetNetworkEnabled(t.Context(), "testnet", true); err != nil || !status.Running {

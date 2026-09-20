@@ -17,7 +17,7 @@ func (a *API) handleGetStatus(
 	if status, err := a.runtime.GetOverview(
 		r.Context(),
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		networks := make([]NetworkStatus, len(status.Networks))
 		for i, network := range status.Networks {

@@ -8,32 +8,52 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
-func writeServiceError(
+func (a *API) writeServiceError(
 	w http.ResponseWriter,
+	r *http.Request,
 	err error,
 ) {
+	if r.Context().Err() != nil {
+		return
+	}
 	switch {
 	case errors.Is(err, service.ErrNotFound):
 		wire.WriteError(w, http.StatusNotFound, err.Error())
+
 	case errors.Is(err, service.ErrConflict):
 		wire.WriteError(w, http.StatusConflict, err.Error())
+
 	case errors.Is(err, service.ErrNetworkExists):
 		wire.WriteError(w, http.StatusConflict, err.Error())
+
 	case errors.Is(err, service.ErrCIDROverlap):
 		wire.WriteError(w, http.StatusBadRequest, err.Error())
+
 	case errors.Is(err, service.ErrInvalidInput):
 		wire.WriteError(w, http.StatusBadRequest, err.Error())
+
 	case errors.Is(err, service.ErrRegistrationAddressExhausted):
 		wire.WriteError(w, http.StatusConflict, err.Error())
+
 	case errors.Is(err, service.ErrRegistrationExpired):
 		wire.WriteError(w, http.StatusGone, err.Error())
+
 	case errors.Is(err, service.ErrRegistrationRedeemed):
 		wire.WriteError(w, http.StatusGone, err.Error())
+
 	case errors.Is(err, service.ErrNetworkEnabled):
 		wire.WriteError(w, http.StatusConflict, err.Error())
+
 	case errors.Is(err, service.ErrNotImplemented):
 		wire.WriteError(w, http.StatusNotImplemented, err.Error())
+
 	default:
-		wire.WriteError(w, http.StatusInternalServerError, err.Error())
+		a.log.Error(
+			"admin request failed",
+			"operation", r.Pattern,
+			"network", r.PathValue("name"),
+			"err", err,
+		)
+		wire.WriteError(w, http.StatusInternalServerError, "internal server error")
 	}
 }

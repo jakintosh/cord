@@ -73,6 +73,8 @@ func TestAPICreateNetwork_WithAllFields(
 	url := "/networks"
 	body := `{
 		"name": "fullnet",
+		"main_name": "primary",
+		"invite_name": "onboarding",
 		"main_cidr": "10.0.0.0/16",
 		"invite_cidr": "10.1.0.0/24",
 		"external_ip": "1.2.3.4",
@@ -85,18 +87,15 @@ func TestAPICreateNetwork_WithAllFields(
 
 	// verify result
 	data := result.ExpectStatusOK(t, http.StatusCreated)
-	if data.InviteCidr != "10.1.0.0/24" {
-		t.Fatalf("invite_cidr = %q, want 10.1.0.0/24", data.InviteCidr)
+	want := admin.Network{
+		Name: "fullnet", ExternalIP: "1.2.3.4", MainName: "primary",
+		MainCidr: "10.0.0.0/16", MainWgPort: 51820, MainApiPort: 8080,
+		InviteName: "onboarding", InviteCidr: "10.1.0.0/24", InviteWgPort: 51821, InviteApiPort: 8080,
 	}
-	if data.MainApiPort != 8080 {
-		t.Fatalf("api_port = %d, want 8080", data.MainApiPort)
+	if data != want {
+		t.Fatalf("network = %+v, want %+v", data, want)
 	}
-	if data.InviteApiPort != 8080 {
-		t.Fatalf("invite_api_port = %d, want 8080", data.InviteApiPort)
-	}
-	if data.InviteWgPort != 51821 {
-		t.Fatalf("invite_wg_port = %d, want 51821", data.InviteWgPort)
-	}
+
 }
 
 func TestAPICreateNetwork_InvalidJSON(
@@ -111,7 +110,16 @@ func TestAPICreateNetwork_InvalidJSON(
 	result := wire.TestPost[any](env.Router, url, body)
 
 	// verify result
-	result.ExpectStatusError(t, http.StatusBadRequest)
+	apiErr := result.ExpectStatusError(t, http.StatusBadRequest)
+	if apiErr.Message == "" {
+		t.Fatal("expected an error message")
+	}
+
+	// state: rejected input must not create a network
+	networks, err := env.Service.ListNetworks()
+	if err != nil || len(networks) != 0 {
+		t.Fatalf("networks = %+v, error = %v", networks, err)
+	}
 }
 
 func TestAPICreateNetwork_EmptyName(
@@ -123,14 +131,23 @@ func TestAPICreateNetwork_EmptyName(
 	// post without name
 	url := "/networks"
 	body := `{
-		"cidr": "10.0.0.0/16",
+		"main_cidr": "10.0.0.0/16",
 		"external_ip": "1.2.3.4",
-		"port": 51820
+		"main_wg_port": 51820
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 
 	// verify result
-	result.ExpectStatusError(t, http.StatusBadRequest)
+	apiErr := result.ExpectStatusError(t, http.StatusBadRequest)
+	if apiErr.Message == "" {
+		t.Fatal("expected an error message")
+	}
+
+	// state: rejected input must not create a network
+	networks, err := env.Service.ListNetworks()
+	if err != nil || len(networks) != 0 {
+		t.Fatalf("networks = %+v, error = %v", networks, err)
+	}
 }
 
 func TestAPICreateNetwork_InvalidCIDR(
@@ -143,28 +160,51 @@ func TestAPICreateNetwork_InvalidCIDR(
 	url := "/networks"
 	body := `{
 		"name": "badcidr",
-		"cidr": "not-a-cidr",
+		"main_cidr": "not-a-cidr",
 		"external_ip": "1.2.3.4",
-		"port": 51820
+		"main_wg_port": 51820
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 
 	// verify result
-	result.ExpectStatusError(t, http.StatusBadRequest)
+	apiErr := result.ExpectStatusError(t, http.StatusBadRequest)
+	if apiErr.Message == "" {
+		t.Fatal("expected an error message")
+	}
+
+	// state: rejected input must not create a network
+	networks, err := env.Service.ListNetworks()
+	if err != nil || len(networks) != 0 {
+		t.Fatalf("networks = %+v, error = %v", networks, err)
+	}
 }
 
 func TestAPICreateNetwork_CIDRWithHostBits(
 	t *testing.T,
 ) {
+	// setup
 	env := testutil.Setup(t)
 
-	result := wire.TestPost[any](env.Router, "/networks", `{
+	// request
+	url := "/networks"
+	body := `{
 		"name": "hostbits",
 		"external_ip": "1.2.3.4",
 		"main_cidr": "10.0.99.0/16"
-	}`)
+	}`
+	result := wire.TestPost[any](env.Router, url, body)
 
-	result.ExpectStatusError(t, http.StatusBadRequest)
+	// result
+	apiErr := result.ExpectStatusError(t, http.StatusBadRequest)
+	if apiErr.Message == "" {
+		t.Fatal("expected an error message")
+	}
+
+	// state: rejected input must not create a network
+	networks, err := env.Service.ListNetworks()
+	if err != nil || len(networks) != 0 {
+		t.Fatalf("networks = %+v, error = %v", networks, err)
+	}
 }
 
 func TestAPICreateNetwork_MissingExternalIP(
@@ -177,16 +217,25 @@ func TestAPICreateNetwork_MissingExternalIP(
 	url := "/networks"
 	body := `{
 		"name": "noip",
-		"cidr": "10.0.0.0/16",
-		"port": 51820
+		"main_cidr": "10.0.0.0/16",
+		"main_wg_port": 51820
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 
 	// verify result
-	result.ExpectStatusError(t, http.StatusBadRequest)
+	apiErr := result.ExpectStatusError(t, http.StatusBadRequest)
+	if apiErr.Message == "" {
+		t.Fatal("expected an error message")
+	}
+
+	// state: rejected input must not create a network
+	networks, err := env.Service.ListNetworks()
+	if err != nil || len(networks) != 0 {
+		t.Fatalf("networks = %+v, error = %v", networks, err)
+	}
 }
 
-func TestAPICreateNetwork_MissingPort(
+func TestAPICreateNetwork_DefaultPort(
 	t *testing.T,
 ) {
 	// setup env
@@ -196,13 +245,20 @@ func TestAPICreateNetwork_MissingPort(
 	url := "/networks"
 	body := `{
 		"name": "noport",
-		"cidr": "10.0.0.0/16",
+		"main_cidr": "10.0.0.0/16",
 		"external_ip": "1.2.3.4"
 	}`
-	result := wire.TestPost[any](env.Router, url, body)
+	result := wire.TestPost[admin.Network](env.Router, url, body)
 
 	// verify result
-	result.ExpectStatusError(t, http.StatusBadRequest)
+	data := result.ExpectStatusOK(t, http.StatusCreated)
+	if data.MainWgPort != 51820 {
+		t.Fatalf("main port = %d, want 51820", data.MainWgPort)
+	}
+	network, err := env.Service.GetNetwork("noport")
+	if err != nil || network.Main.WireguardPort != 51820 {
+		t.Fatalf("stored network = %+v, error = %v", network, err)
+	}
 }
 
 func TestAPICreateNetwork_DuplicateName(
@@ -349,10 +405,12 @@ func TestAPIDeleteNetwork_RefusesEnabled(
 	// setup env, seed and enable a network
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
-	wire.TestPost[admin.NetworkStatus](env.Router, "/networks/testnet/enable", "").ExpectOK(t)
+	enableURL := "/networks/testnet/enable"
+	wire.TestPost[admin.NetworkStatus](env.Router, enableURL, "").ExpectOK(t)
 
 	// delete the enabled network
-	result := wire.TestDelete[any](env.Router, "/networks/testnet")
+	url := "/networks/testnet"
+	result := wire.TestDelete[any](env.Router, url)
 
 	// verify result
 	result.ExpectStatusError(t, http.StatusConflict)
@@ -400,7 +458,8 @@ func TestAPIEnableNetwork_StartFailureKeepsIntent(
 	env.Backend.CreateErr = errors.New("no such device")
 
 	// enable network
-	result := wire.TestPost[admin.NetworkStatus](env.Router, "/networks/testnet/enable", "")
+	url := "/networks/testnet/enable"
+	result := wire.TestPost[admin.NetworkStatus](env.Router, url, "")
 
 	// verify result — the intent stands and the response explains reality
 	data := result.ExpectOK(t)
@@ -446,6 +505,7 @@ func TestAPIDisableNetwork_Success(
 	enableURL := "/networks/testnet/enable"
 	wire.TestPost[admin.NetworkStatus](env.Router, enableURL, "").ExpectOK(t)
 
+	// request
 	url := "/networks/testnet/disable"
 	result := wire.TestPost[admin.NetworkStatus](env.Router, url, "")
 
@@ -477,4 +537,35 @@ func TestAPIDisableNetwork_NotFound(
 
 	// verify result
 	result.ExpectStatusError(t, http.StatusNotFound)
+}
+
+func TestAPICreateNetwork_OverlappingCidrs(
+	t *testing.T,
+) {
+	// setup env and seed network
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+
+	// add overlapping invite CIDR at network creation time
+	url := "/networks"
+	body := `{
+		"name": "overlap",
+		"main_cidr": "10.0.0.0/16",
+		"invite_cidr": "10.0.1.0/24",
+		"external_ip": "1.2.3.4",
+		"main_wg_port": 51820
+	}`
+	result := wire.TestPost[any](env.Router, url, body)
+
+	// verify result
+	apiErr := result.ExpectStatusError(t, http.StatusBadRequest)
+	if apiErr.Message == "" {
+		t.Fatal("expected an error message")
+	}
+
+	// state: rejected input must not create a network
+	networks, err := env.Service.ListNetworks()
+	if err != nil || len(networks) != 1 {
+		t.Fatalf("networks = %+v, error = %v", networks, err)
+	}
 }

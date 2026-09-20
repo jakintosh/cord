@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	peerapi "git.studiopollinator.com/pollinator/cord/internal/server/api/peer"
 	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
@@ -18,7 +17,9 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
 
-func TestHTTPStartupRetriesAfterPortReleased(t *testing.T) {
+func TestHTTP_StartupRetriesAfterPortReleased(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	rt, address, _, _ := newHTTPRuntime(t, env.Service, 0, nil)
 	blocker, err := net.Listen("tcp", address)
@@ -43,7 +44,9 @@ func TestHTTPStartupRetriesAfterPortReleased(t *testing.T) {
 	assertHTTPHealthy(t, rt)
 }
 
-func TestHTTPStopReleasesListener(t *testing.T) {
+func TestHTTP_StopReleasesListener(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	rt, address, _, stop := newHTTPRuntime(t, env.Service, 0, nil)
 	if err := env.Service.SetNetworkEnabled("httptest", true); err != nil {
@@ -62,7 +65,9 @@ func TestHTTPStopReleasesListener(t *testing.T) {
 	}
 }
 
-func TestHTTPStopWithRequestInFlight(t *testing.T) {
+func TestHTTP_StopWithRequestInFlight(
+	t *testing.T,
+) {
 	for _, graceful := range []bool{true, false} {
 		t.Run(fmt.Sprintf("graceful=%t", graceful), func(t *testing.T) {
 			env := testutil.SetupService(t)
@@ -82,7 +87,7 @@ func TestHTTPStopWithRequestInFlight(t *testing.T) {
 						} else {
 							<-release
 						}
-						w.WriteHeader(http.StatusForbidden)
+						w.WriteHeader(http.StatusNoContent)
 					})
 				}}
 			}
@@ -130,7 +135,7 @@ func newHTTPRuntime(
 	func() error,
 ) {
 	t.Helper()
-	port := freeDNSPort(t)
+	port := reserveTCPPort(t)
 	_, err := svc.CreateNetwork("httptest", "192.168.1.1",
 		service.Plane{Cidr: "127.0.0.0/24", ApiPort: port},
 		service.Plane{Cidr: "172.16.10.0/24"},
@@ -149,7 +154,11 @@ func newHTTPRuntime(
 	if err != nil {
 		t.Fatal(err)
 	}
-	handlers := runtime.Handlers{Peer: peerapi.New(rt, nil).Router}
+	handlers := runtime.Handlers{Peer: func(string) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})
+	}}
 	if buildHandlers != nil {
 		handlers = buildHandlers(rt)
 	}
@@ -157,28 +166,35 @@ func newHTTPRuntime(
 	return rt, fmt.Sprintf("127.0.0.1:%d", port), backend, stop
 }
 
-func requestHTTP(address string) error {
+func requestHTTP(
+	address string,
+) error {
 	client := &http.Client{Timeout: 12 * time.Second}
 	resp, err := client.Post("http://"+address+"/confirm", "application/json", nil)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	// No provisional peer was seeded: the real API should reject this identity.
-	if resp.StatusCode != http.StatusForbidden {
-		return fmt.Errorf("HTTP status = %d, want 403", resp.StatusCode)
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("HTTP status = %d, want 204", resp.StatusCode)
 	}
 	return nil
 }
 
-func assertHTTPResponds(t *testing.T, address string) {
+func assertHTTPResponds(
+	t *testing.T,
+	address string,
+) {
 	t.Helper()
 	if err := requestHTTP(address); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func assertHTTPHealthy(t *testing.T, rt *runtime.Runtime) {
+func assertHTTPHealthy(
+	t *testing.T,
+	rt *runtime.Runtime,
+) {
 	t.Helper()
 	status := networkStatus(t, rt, "httptest")
 	if !status.Running || status.Health != runtime.HealthHealthy || status.Status == nil || status.Status.Main.HTTP.Error != nil {
@@ -186,7 +202,10 @@ func assertHTTPHealthy(t *testing.T, rt *runtime.Runtime) {
 	}
 }
 
-func assertHTTPPortReleased(t *testing.T, address string) {
+func assertHTTPPortReleased(
+	t *testing.T,
+	address string,
+) {
 	t.Helper()
 	conn, err := net.DialTimeout("tcp", address, time.Second)
 	if err == nil {
@@ -202,7 +221,9 @@ func assertHTTPPortReleased(t *testing.T, address string) {
 
 // A network-disable command occupies the loop while closing HTTP. Canceled
 // request contexts must release handlers without another command-loop turn.
-func TestShutdownAllowsHandlerToReturnThroughRuntime(t *testing.T) {
+func TestHTTP_ShutdownAllowsHandlerToReturnThroughRuntime(
+	t *testing.T,
+) {
 	for _, wholeRuntime := range []bool{false, true} {
 		t.Run(fmt.Sprint(wholeRuntime), func(t *testing.T) {
 			env := testutil.SetupService(t)
@@ -215,7 +236,7 @@ func TestShutdownAllowsHandlerToReturnThroughRuntime(t *testing.T) {
 						<-req.Context().Done()
 						_, err := rt.CreateGroup(req.Context(), "httptest", "late")
 						result <- err
-						w.WriteHeader(http.StatusForbidden)
+						w.WriteHeader(http.StatusNoContent)
 					})
 				}}
 			}
@@ -255,4 +276,88 @@ func TestShutdownAllowsHandlerToReturnThroughRuntime(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHTTP_DisableReleasesHandlerWaitingForRead(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	store := &blockedDisableStore{
+		Store:   env.Database,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc, err := service.New(service.Options{Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entered := make(chan struct{})
+	read := make(chan error, 1)
+	build := func(rt *runtime.Runtime) runtime.Handlers {
+		return runtime.Handlers{Peer: func(string) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				close(entered)
+				_, err := rt.GetNetwork(req.Context(), "httptest")
+				read <- err
+				w.WriteHeader(http.StatusNoContent)
+			})
+		}}
+	}
+	rt, address, _, _ := newHTTPRuntime(t, svc, time.Second, build)
+	if _, err := rt.SetNetworkEnabled(t.Context(), "httptest", true); err != nil {
+		t.Fatal(err)
+	}
+
+	var once sync.Once
+	release := func() { once.Do(func() { close(store.release) }) }
+	t.Cleanup(release)
+	disabled := make(chan error, 1)
+	go func() {
+		status, err := rt.SetNetworkEnabled(t.Context(), "httptest", false)
+		if err == nil && status.Reason != "" {
+			err = errors.New(status.Reason)
+		}
+		disabled <- err
+	}()
+	<-store.entered
+
+	response := make(chan error, 1)
+	go func() { response <- requestHTTP(address) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("handler did not enter")
+	}
+	release()
+
+	if err := <-disabled; err != nil {
+		t.Fatalf("disable failed to drain a waiting reader: %v", err)
+	}
+	if err := <-read; !errors.Is(err, context.Canceled) {
+		t.Fatalf("waiting read = %v", err)
+	}
+	if err := <-response; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.ListNetworks(t.Context()); err != nil {
+		t.Fatalf("runtime stopped processing commands: %v", err)
+	}
+}
+
+type blockedDisableStore struct {
+	service.Store
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockedDisableStore) SetNetworkEnabled(
+	name string,
+	enabled bool,
+) error {
+	if !enabled {
+		close(s.entered)
+		<-s.release
+	}
+	return s.Store.SetNetworkEnabled(name, enabled)
 }

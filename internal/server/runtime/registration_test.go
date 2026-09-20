@@ -13,7 +13,9 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-func TestRegistrationResultSurvivesApplicationFailure(t *testing.T) {
+func TestCreateRegistration_ResultSurvivesApplicationFailure(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	rt, _, backend, _ := newHTTPRuntime(t, env.Service, time.Second, nil)
 	status, err := rt.SetNetworkEnabled(t.Context(), "httptest", true)
@@ -54,7 +56,9 @@ func TestRegistrationResultSurvivesApplicationFailure(t *testing.T) {
 	}
 }
 
-func TestRegistrationCommandsApplyPeersBeforeReturning(t *testing.T) {
+func TestRegistrationCommands_ApplyPeersBeforeReturning(
+	t *testing.T,
+) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetwork(t, env.Service)
 	if status, err := env.Runtime.SetNetworkEnabled(t.Context(), "testnet", true); err != nil || !status.Running {

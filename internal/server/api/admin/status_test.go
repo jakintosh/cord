@@ -2,11 +2,11 @@ package admin_test
 
 import (
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/admin"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
@@ -16,13 +16,20 @@ func TestAPIStatus_Success(
 ) {
 	// setup env
 	env := testutil.Setup(t)
+	api, err := admin.New(admin.Options{Runtime: env.Runtime, Logger: logging.Discard(), Version: "test-version"})
+	if err != nil {
+		t.Fatalf("new versioned API: %v", err)
+	}
 
 	// get status
 	url := "/status"
-	result := wire.TestGet[admin.Status](env.Router, url)
+	result := wire.TestGet[admin.Status](api.Router(), url)
 
 	// verify result
 	data := result.ExpectOK(t)
+	if data.Version != "test-version" {
+		t.Fatalf("version = %q, want test-version", data.Version)
+	}
 	if data.Status != "ok" {
 		t.Fatalf("status = %q, want ok", data.Status)
 	}
@@ -75,12 +82,21 @@ func TestAPIStatus_IncludesNetworks(
 func TestAPIStatus_IncludesRunningReconcileSchedule(
 	t *testing.T,
 ) {
+	// setup
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
-	wire.TestPost[admin.NetworkStatus](env.Router, "/networks/testnet/enable", "").ExpectOK(t)
+	enableURL := "/networks/testnet/enable"
+	wire.TestPost[admin.NetworkStatus](env.Router, enableURL, "").ExpectOK(t)
 
-	result := wire.TestGet[admin.Status](env.Router, "/status")
+	// request
+	url := "/status"
+	result := wire.TestGet[admin.Status](env.Router, url)
+
+	// result
 	data := result.ExpectOK(t)
+	if len(data.Networks) != 1 || data.Networks[0].Name != "testnet" {
+		t.Fatalf("networks = %+v, want testnet", data.Networks)
+	}
 	reconcile := data.Networks[0].Reconcile
 	wantLast := testutil.FixedTime.Format(time.RFC3339)
 	if reconcile.LastAttemptAt == nil || *reconcile.LastAttemptAt != wantLast {
@@ -97,18 +113,16 @@ func TestAPIStatus_ReportsDegradedRuntimeHealth(
 	// setup running network with a reconciliation failure
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
-	wire.TestPost[admin.NetworkStatus](
-		env.Router,
-		"/networks/testnet/enable",
-		"",
-	).ExpectOK(t)
+	enableURL := "/networks/testnet/enable"
+	wire.TestPost[admin.NetworkStatus](env.Router, enableURL, "").ExpectOK(t)
 	env.Backend.Device("testnet").PeersErr = errors.New("read peers failed")
-	if err := testutil.ApplyNetwork(t, env.Runtime, "testnet"); err == nil || !strings.Contains(err.Error(), "read peers failed") {
-		t.Fatalf("converge = %v, want peer read failure", err)
-	}
+	// A successful intent update triggers reconciliation through the API.
+	body := ""
+	wire.TestPost[admin.NetworkStatus](env.Router, enableURL, body).ExpectOK(t)
 
 	// get status
-	result := wire.TestGet[admin.Status](env.Router, "/status")
+	url := "/status"
+	result := wire.TestGet[admin.Status](env.Router, url)
 
 	// verify aggregate and activity health
 	data := result.ExpectOK(t)

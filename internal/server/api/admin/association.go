@@ -18,7 +18,7 @@ func (a *API) handleListAssociations(
 		r.Context(),
 		network,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		associationsDTO := associationsFromService(assocs)
 		wire.WriteData(w, http.StatusOK, associationsDTO)
@@ -43,7 +43,7 @@ func (a *API) handlePostAssociation(
 		req.Group1,
 		req.Group2,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusCreated, nil)
 	}
@@ -63,7 +63,7 @@ func (a *API) handleDeleteAssociation(
 		group1,
 		group2,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusOK, nil)
 	}

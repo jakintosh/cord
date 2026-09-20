@@ -17,7 +17,7 @@ func (a *API) handleGetNetworkTopology(
 		r.Context(),
 		name,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		topologyDTO := topologyFromRuntime(result)
 		wire.WriteData(w, http.StatusOK, topologyDTO)

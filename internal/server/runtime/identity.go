@@ -7,7 +7,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
-// ResolveRegistrationIdentity looks up an unredeemed, unexpired
+// ResolveRegistrationIdentity looks up an unconfirmed, unexpired
 // registration by temporary IP within the invite network.
 func (r *Runtime) ResolveRegistrationIdentity(
 	ctx context.Context,

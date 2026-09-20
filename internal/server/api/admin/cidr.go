@@ -15,7 +15,7 @@ func (a *API) handleListCidrs(
 	network := r.PathValue("name")
 
 	if cidrs, err := a.runtime.ListCidrs(r.Context(), network); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		cidrsDTO := cidrsFromService(cidrs)
 		wire.WriteData(w, http.StatusOK, cidrsDTO)
@@ -40,7 +40,7 @@ func (a *API) handlePostCidr(
 		req.Name,
 		req.Cidr,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusCreated, nil)
 	}
@@ -65,7 +65,7 @@ func (a *API) handlePatchCidr(
 		cidr,
 		req.Name,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusOK, nil)
 	}
@@ -83,7 +83,7 @@ func (a *API) handleDeleteCidr(
 		network,
 		cidr,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusOK, nil)
 	}
@@ -101,7 +101,7 @@ func (a *API) handleListCidrGroups(
 		network,
 		cidr,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		groupsDTO := groupsFromService(groups)
 		wire.WriteData(w, http.StatusOK, groupsDTO)
@@ -127,7 +127,7 @@ func (a *API) handlePostCidrGroup(
 		cidr,
 		req.Group,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusCreated, nil)
 	}
@@ -147,7 +147,7 @@ func (a *API) handleDeleteCidrGroup(
 		cidr,
 		group,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusOK, nil)
 	}

@@ -83,13 +83,19 @@ func CheckSqliteErr(
 		return fmt.Errorf("%w: no rows while %s", service.ErrNotFound, context)
 	}
 
-	if sqliteErr, ok := err.(*sqlite.Error); ok {
-		if sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
-			return fmt.Errorf("%w: unique constraint violation while %s", service.ErrConflict, context)
+	var sqliteErr *sqlite.Error
+	if errors.As(err, &sqliteErr) {
+		if sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE ||
+			sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY {
+			return fmt.Errorf(
+				"%w: uniqueness violation while %s: %w",
+				service.ErrConflict, context, err,
+			)
 		}
+
 		return fmt.Errorf(
-			"SQLite error (%d) while %s: %s",
-			sqliteErr.Code(), context, sqliteErr.Error(),
+			"SQLite error (%d) while %s: %w",
+			sqliteErr.Code(), context, err,
 		)
 	}
 

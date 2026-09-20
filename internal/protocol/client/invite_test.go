@@ -3,6 +3,8 @@ package client_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
@@ -60,6 +62,32 @@ func TestRedeemInvite_Forbidden(t *testing.T) {
 	}
 	if !wire.IsStatus(err, http.StatusForbidden) {
 		t.Errorf("expected 403, got %v", err)
+	}
+}
+
+func TestRedeemInvite_RetryStatusPolicy(
+	t *testing.T,
+) {
+	for _, status := range []int{http.StatusNotFound, http.StatusConflict, http.StatusGone, http.StatusServiceUnavailable} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			var attempts atomic.Int32
+			c, teardown := newTestInviteClient(t, func(w http.ResponseWriter, r *http.Request) {
+				attempts.Add(1)
+				wire.WriteError(w, status, "request failed")
+			})
+			defer teardown()
+			_, err := c.RedeemInvitation(t.Context(), "perm-key")
+			if !wire.IsStatus(err, status) {
+				t.Fatalf("error = %v, want HTTP %d", err, status)
+			}
+			want := int32(1)
+			if status == http.StatusServiceUnavailable {
+				want = 3
+			}
+			if attempts.Load() != want {
+				t.Fatalf("attempts = %d, want %d", attempts.Load(), want)
+			}
+		})
 	}
 }
 

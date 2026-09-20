@@ -30,7 +30,7 @@ func (a *API) handleRedeemInvite(
 			peer.PublicKey,
 			req.PermPubKey,
 		); err != nil {
-			wire.WriteError(w, http.StatusInternalServerError, err.Error())
+			a.writeServiceError(w, r, network, "redeem invite", err)
 		} else {
 			wire.WriteData(w, http.StatusOK, invitation)
 		}

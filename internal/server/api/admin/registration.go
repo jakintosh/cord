@@ -19,7 +19,7 @@ func (a *API) handleListRegistrations(
 		r.Context(),
 		network,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		registrationsDTO := registrationsFromService(regs)
 		wire.WriteData(w, http.StatusOK, registrationsDTO)
@@ -54,7 +54,7 @@ func (a *API) handlePostRegistration(
 		req.Name,
 		opts,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusCreated, invitation)
 	}
@@ -72,7 +72,7 @@ func (a *API) handleDeleteRegistration(
 		network,
 		registration,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusOK, nil)
 	}
@@ -90,7 +90,7 @@ func (a *API) handleListRegistrationGroups(
 		network,
 		registration,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		groupsDTO := groupsFromService(groups)
 		wire.WriteData(w, http.StatusOK, groupsDTO)
@@ -116,7 +116,7 @@ func (a *API) handlePostRegistrationGroup(
 		registration,
 		req.Group,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusCreated, nil)
 	}
@@ -136,7 +136,7 @@ func (a *API) handleDeleteRegistrationGroup(
 		registration,
 		group,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusOK, nil)
 	}

@@ -51,7 +51,7 @@ func (a *API) Router(
 	return logging.Middleware(log, mux)
 }
 
-// lookupRegistration looks up an unredeemed, unexpired registration by
+// lookupRegistration looks up an unconfirmed, unexpired registration by
 // temporary IP within the network.
 func (a *API) lookupRegistration(
 	network string,

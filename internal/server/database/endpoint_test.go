@@ -10,55 +10,12 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
-func seedNetworkForEndpoint(t *testing.T, db *database.DB) {
+func seedNetworkForEndpoint(
+	t *testing.T,
+	db *database.DB,
+) {
 	t.Helper()
-
-	var name string = "epnet"
-	if err := db.BootstrapNetwork(
-		&service.Network{
-			Name:       name,
-			PrivateKey: "priv-" + name,
-			PublicKey:  "pub-" + name,
-			ExternalIP: "1.1.1.1",
-			Main: service.Plane{
-				Name:          name,
-				Cidr:          "10.0.0.0/16",
-				WireguardPort: 51820,
-				ApiPort:       8080,
-			},
-			Invite: service.Plane{
-				Name:          name + "-i",
-				Cidr:          "10.1.0.0/24",
-				WireguardPort: 51821,
-				ApiPort:       8080,
-			},
-			CreatedAt: time.Now(),
-		},
-		&service.Cidr{
-			Name:   "epnet",
-			Cidr:   "10.0.0.0/16",
-			Prefix: 16,
-			Bits:   32,
-		},
-		&service.Cidr{
-			Name:     "cord-server",
-			Cidr:     "10.0.0.1/32",
-			Prefix:   32,
-			Bits:     32,
-			Terminal: true,
-		},
-		&service.Peer{
-			Name:      "cord-server",
-			CidrName:  "cord-server",
-			Route:     "10.0.0.1/32",
-			PublicKey: "pub",
-			Admin:     true,
-			Enabled:   true,
-			Confirmed: true,
-		},
-	); err != nil {
-		t.Fatalf("seed network: %v", err)
-	}
+	seedDatabaseNetwork(t, db, "epnet")
 	for _, p := range []struct {
 		name, cidr, pubKey string
 	}{
@@ -69,7 +26,9 @@ func seedNetworkForEndpoint(t *testing.T, db *database.DB) {
 	}
 }
 
-func TestInsertAndGetEndpoints(t *testing.T) {
+func TestInsertEndpointSightings_RoundTrip(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)
 
@@ -116,40 +75,45 @@ func TestInsertAndGetEndpoints(t *testing.T) {
 	}
 }
 
-func TestGetRecentEndpoints_SinceFilter(t *testing.T) {
+func TestGetRecentEndpoints_IncludesCutoffAndOrdersWitnesses(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)
-
-	oldTime := time.Now().Add(-2 * time.Hour)
-	recentTime := time.Now()
-
+	cutoff := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+	testutil.SeedPeerDB(t, db, "epnet", "peer-c", "10.0.1.3/32", "pub-c", false, true, true)
 	if err := db.InsertEndpointSightings("epnet", []service.EndpointSighting{
-		{WitnessKey: "pub-a", PeerKey: "pub-b", Endpoint: "old.ep:1", Timestamp: oldTime},
+		{WitnessKey: "pub-a", PeerKey: "pub-b", Endpoint: "cutoff:1", Timestamp: cutoff},
+		{WitnessKey: "pub-c", PeerKey: "pub-b", Endpoint: "newest:1", Timestamp: cutoff.Add(time.Second)},
+		{WitnessKey: "pub-b", PeerKey: "pub-a", Endpoint: "old:1", Timestamp: cutoff.Add(-time.Second)},
 	}); err != nil {
-		t.Fatalf("insert old sighting: %v", err)
+		t.Fatal(err)
 	}
-
+	// A correction at an equal timestamp replaces the previous observation.
 	if err := db.InsertEndpointSightings("epnet", []service.EndpointSighting{
-		{WitnessKey: "pub-a", PeerKey: "pub-b", Endpoint: "new.ep:1", Timestamp: recentTime},
+		{WitnessKey: "pub-a", PeerKey: "pub-b", Endpoint: "corrected:1", Timestamp: cutoff},
 	}); err != nil {
-		t.Fatalf("insert recent sighting: %v", err)
+		t.Fatal(err)
 	}
-
-	endpoints, err := db.GetRecentEndpoints("epnet", recentTime.Add(-time.Hour))
+	endpoints, err := db.GetRecentEndpoints("epnet", cutoff)
 	if err != nil {
-		t.Fatalf("get recent: %v", err)
+		t.Fatal(err)
 	}
-
 	witnesses := endpoints["pub-b"]
-	if len(witnesses) != 1 {
-		t.Fatalf("expected 1 witness, got %d", len(witnesses))
+	if len(endpoints) != 1 || len(witnesses) != 2 {
+		t.Fatalf("endpoints = %+v", endpoints)
 	}
-	if witnesses[0].Endpoint != "new.ep:1" {
-		t.Errorf("endpoint = %q, want new.ep:1", witnesses[0].Endpoint)
+	if witnesses[0].Witness != "pub-c" || witnesses[0].Endpoint != "newest:1" || !witnesses[0].Timestamp.Equal(cutoff.Add(time.Second)) {
+		t.Fatalf("newest witness = %+v", witnesses[0])
+	}
+	if witnesses[1].Witness != "pub-a" || witnesses[1].Endpoint != "corrected:1" || !witnesses[1].Timestamp.Equal(cutoff) {
+		t.Fatalf("cutoff witness = %+v", witnesses[1])
 	}
 }
 
-func TestInsertEndpointSightings_KeepsLatestPerWitnessAndPeer(t *testing.T) {
+func TestInsertEndpointSightings_KeepsLatestPerWitnessAndPeer(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)
 
@@ -179,17 +143,26 @@ func TestInsertEndpointSightings_KeepsLatestPerWitnessAndPeer(t *testing.T) {
 	}
 }
 
-func TestDeleteEndpointsBefore(t *testing.T) {
+func TestDeleteEndpointsBefore_PreservesCutoffAndOtherNetworks(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)
 
-	cutoff := time.Now().Add(-1 * time.Hour)
+	cutoff := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
 	oldTime := cutoff.Add(-1 * time.Hour)
-	recentTime := time.Now()
+	seedDatabaseNetwork(t, db, "other")
+	testutil.SeedPeerDB(t, db, "other", "a", "10.0.2.1/32", "pub-a", false, true, true)
+	testutil.SeedPeerDB(t, db, "other", "b", "10.0.2.2/32", "pub-b", false, true, true)
+	if err := db.InsertEndpointSightings("other", []service.EndpointSighting{
+		{WitnessKey: "pub-a", PeerKey: "pub-b", Endpoint: "other:1", Timestamp: oldTime},
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := db.InsertEndpointSightings("epnet", []service.EndpointSighting{
-		{WitnessKey: "pub-a", PeerKey: "pub-b", Endpoint: "old.ep:1", Timestamp: oldTime},
-		{WitnessKey: "pub-a", PeerKey: "pub-b", Endpoint: "recent.ep:1", Timestamp: recentTime},
+		{WitnessKey: "pub-b", PeerKey: "pub-a", Endpoint: "old.ep:1", Timestamp: oldTime},
+		{WitnessKey: "pub-a", PeerKey: "pub-b", Endpoint: "recent.ep:1", Timestamp: cutoff},
 	}); err != nil {
 		t.Fatalf("insert sightings: %v", err)
 	}
@@ -210,9 +183,21 @@ func TestDeleteEndpointsBefore(t *testing.T) {
 	if witnesses[0].Endpoint != "recent.ep:1" {
 		t.Errorf("endpoint = %q, want recent.ep:1", witnesses[0].Endpoint)
 	}
+	if len(endpoints) != 1 || !witnesses[0].Timestamp.Equal(cutoff) {
+		t.Fatalf("pruned endpoints = %+v", endpoints)
+	}
+	other, err := db.GetRecentEndpoints("other", oldTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(other["pub-b"]) != 1 || other["pub-b"][0].Endpoint != "other:1" {
+		t.Fatalf("other endpoints = %+v", other)
+	}
 }
 
-func TestInsertEndpointSightings_MissingNetwork(t *testing.T) {
+func TestInsertEndpointSightings_MissingNetwork(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	err := db.InsertEndpointSightings("missing", nil)
@@ -221,7 +206,9 @@ func TestInsertEndpointSightings_MissingNetwork(t *testing.T) {
 	}
 }
 
-func TestInsertEndpointSightings_UnknownPeerRejectsBatch(t *testing.T) {
+func TestInsertEndpointSightings_UnknownPeerRejectsBatch(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)
 
@@ -243,7 +230,9 @@ func TestInsertEndpointSightings_UnknownPeerRejectsBatch(t *testing.T) {
 	}
 }
 
-func TestInsertEndpointSightings_UnknownWitnessRejectsBatch(t *testing.T) {
+func TestInsertEndpointSightings_UnknownWitnessRejectsBatch(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)
 
@@ -255,7 +244,9 @@ func TestInsertEndpointSightings_UnknownWitnessRejectsBatch(t *testing.T) {
 	}
 }
 
-func TestEmptyEndpoints(t *testing.T) {
+func TestGetRecentEndpoints_Empty(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForEndpoint(t, db)
 

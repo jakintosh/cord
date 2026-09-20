@@ -18,7 +18,7 @@ func (a *API) handleListPeers(
 		r.Context(),
 		network,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		peersDTO := peersFromService(peers)
 		wire.WriteData(w, http.StatusOK, peersDTO)
@@ -48,7 +48,7 @@ func (a *API) handlePatchPeer(
 		peer,
 		diff,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		peerDTO := peerFromService(*updated)
 		wire.WriteData(w, http.StatusOK, peerDTO)
@@ -67,7 +67,7 @@ func (a *API) handleDeletePeer(
 		network,
 		peer,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusOK, nil)
 	}

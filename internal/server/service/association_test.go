@@ -21,7 +21,9 @@ func seedTwoGroups(
 	}
 }
 
-func TestAddAssociation_Success(t *testing.T) {
+func TestCreateAssociation_Success(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 	seedTwoGroups(t, env.Service)
@@ -43,7 +45,9 @@ func TestAddAssociation_Success(t *testing.T) {
 	}
 }
 
-func TestAddAssociation_EmptyGroup(t *testing.T) {
+func TestCreateAssociation_EmptyGroup(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -58,11 +62,13 @@ func TestAddAssociation_EmptyGroup(t *testing.T) {
 	}
 }
 
-func TestAddAssociation_UnknownGroup(t *testing.T) {
+func TestCreateAssociation_UnknownGroup(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
-	if _, err := svcCreateGroup(env.Service, "known"); err != nil {
+	if _, err := env.Service.CreateGroup("testnet", "known"); err != nil {
 		t.Fatalf("add group: %v", err)
 	}
 
@@ -72,11 +78,9 @@ func TestAddAssociation_UnknownGroup(t *testing.T) {
 	}
 }
 
-func svcCreateGroup(svc *service.Service, name string) (*service.Group, error) {
-	return svc.CreateGroup("testnet", name)
-}
-
-func TestListAssociations_Empty(t *testing.T) {
+func TestListAssociations_Empty(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -89,7 +93,9 @@ func TestListAssociations_Empty(t *testing.T) {
 	}
 }
 
-func TestRemoveAssociation_Success(t *testing.T) {
+func TestDeleteAssociation_Success(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 	seedTwoGroups(t, env.Service)
@@ -111,7 +117,9 @@ func TestRemoveAssociation_Success(t *testing.T) {
 	}
 }
 
-func TestRemoveAssociation_NotFound(t *testing.T) {
+func TestDeleteAssociation_NotFound(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -121,7 +129,9 @@ func TestRemoveAssociation_NotFound(t *testing.T) {
 	}
 }
 
-func TestCreateAssociation_InvalidatesCompiledModel(t *testing.T) {
+func TestCreateAssociation_InvalidatesCompiledModel(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 	if _, err := env.Service.CreateGroup("testnet", "group-a"); err != nil {
@@ -150,7 +160,9 @@ func TestCreateAssociation_InvalidatesCompiledModel(t *testing.T) {
 	t.Fatal("created association missing from compiled topology")
 }
 
-func TestDeleteAssociation_InvalidatesCompiledModel(t *testing.T) {
+func TestDeleteAssociation_InvalidatesCompiledModel(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 	if _, err := env.Service.CreateGroup("testnet", "group-a"); err != nil {
@@ -177,42 +189,6 @@ func TestDeleteAssociation_InvalidatesCompiledModel(t *testing.T) {
 	for _, association := range view.Associations {
 		if association.Group1 == "group-a" && association.Group2 == "group-b" {
 			t.Fatal("deleted association still present in compiled topology")
-		}
-	}
-}
-
-func TestDeleteGroup_InvalidatesCompiledModel(t *testing.T) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-	if err := env.Service.CreateCidr("testnet", "east", "10.0.1.0/24"); err != nil {
-		t.Fatalf("create CIDR: %v", err)
-	}
-	if _, err := env.Service.CreateGroup("testnet", "riders"); err != nil {
-		t.Fatalf("create group: %v", err)
-	}
-	if err := env.Service.AssignCidrGroup("testnet", "east", "riders"); err != nil {
-		t.Fatalf("assign group: %v", err)
-	}
-
-	if _, err := env.Service.GetNetworkTopology("testnet"); err != nil {
-		t.Fatalf("get topology: %v", err)
-	}
-	if err := env.Service.DeleteGroup("testnet", "riders"); err != nil {
-		t.Fatalf("delete group: %v", err)
-	}
-
-	view, err := env.Service.GetNetworkTopology("testnet")
-	if err != nil {
-		t.Fatalf("get topology after delete: %v", err)
-	}
-	for _, node := range view.Nodes {
-		if node.Cidr.Name != "east" {
-			continue
-		}
-		for _, group := range node.Groups {
-			if group == "riders" {
-				t.Fatal("deleted group still present in compiled topology")
-			}
 		}
 	}
 }

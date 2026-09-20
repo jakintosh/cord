@@ -1,62 +1,20 @@
 package database_test
 
 import (
+	"errors"
 	"testing"
-	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
-func seedNetworkForAssoc(t *testing.T, db *database.DB) {
+func seedNetworkForAssoc(
+	t *testing.T,
+	db *database.DB,
+) {
 	t.Helper()
-
-	name := "assocnet"
-	if err := db.BootstrapNetwork(
-		&service.Network{
-			Name:       name,
-			PrivateKey: "priv-" + name,
-			PublicKey:  "pub-" + name,
-			ExternalIP: "1.1.1.1",
-			Main: service.Plane{
-				Name:          name,
-				Cidr:          "10.0.0.0/16",
-				WireguardPort: 51820,
-				ApiPort:       8080,
-			},
-			Invite: service.Plane{
-				Name:          name + "-i",
-				Cidr:          "10.1.0.0/24",
-				WireguardPort: 51821,
-				ApiPort:       8080,
-			},
-			CreatedAt: time.Now(),
-		},
-		&service.Cidr{
-			Name:   "assocnet",
-			Cidr:   "10.0.0.0/16",
-			Prefix: 16,
-			Bits:   32,
-		},
-		&service.Cidr{
-			Name:     "cord-server",
-			Cidr:     "10.0.0.1/32",
-			Prefix:   32,
-			Bits:     32,
-			Terminal: true,
-		},
-		&service.Peer{
-			Name:      "cord-server",
-			CidrName:  "cord-server",
-			PublicKey: "pub",
-			Admin:     true,
-			Enabled:   true,
-			Confirmed: true,
-		},
-	); err != nil {
-		t.Fatalf("seed network: %v", err)
-	}
+	seedDatabaseNetwork(t, db, "assocnet")
 	for _, c := range []service.Cidr{
 		{Name: "subnet-a", Cidr: "10.0.1.0/24", Prefix: 24, Bits: 32},
 		{Name: "subnet-b", Cidr: "10.0.2.0/24", Prefix: 24, Bits: 32},
@@ -73,7 +31,9 @@ func seedNetworkForAssoc(t *testing.T, db *database.DB) {
 	}
 }
 
-func TestInsertAndListAssociation(t *testing.T) {
+func TestInsertAssociation_RoundTrip(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
@@ -96,7 +56,9 @@ func TestInsertAndListAssociation(t *testing.T) {
 	}
 }
 
-func TestInsertAssociation_ReversedOrderNormalized(t *testing.T) {
+func TestInsertAssociation_ReversedOrderNormalized(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
@@ -119,7 +81,9 @@ func TestInsertAssociation_ReversedOrderNormalized(t *testing.T) {
 	}
 }
 
-func TestInsertAssociation_Duplicate(t *testing.T) {
+func TestInsertAssociation_Duplicate(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
@@ -132,12 +96,14 @@ func TestInsertAssociation_Duplicate(t *testing.T) {
 		Group1: "group-b",
 		Group2: "group-a",
 	})
-	if err == nil {
-		t.Fatal("expected error for duplicate association")
+	if !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("expected error for duplicate association: %v", err)
 	}
 }
 
-func TestInsertAssociation_UnknownGroup(t *testing.T) {
+func TestInsertAssociation_UnknownGroup(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
@@ -145,12 +111,14 @@ func TestInsertAssociation_UnknownGroup(t *testing.T) {
 		Group1: "group-a",
 		Group2: "ghost",
 	})
-	if err == nil {
-		t.Fatal("expected error for unknown group")
+	if !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("expected error for unknown group: %v", err)
 	}
 }
 
-func TestDeleteAssociation(t *testing.T) {
+func TestDeleteAssociation_RemovesPair(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
@@ -174,7 +142,9 @@ func TestDeleteAssociation(t *testing.T) {
 	}
 }
 
-func TestDeleteAssociation_ReversedOrder(t *testing.T) {
+func TestDeleteAssociation_ReversedOrder(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
@@ -198,7 +168,9 @@ func TestDeleteAssociation_ReversedOrder(t *testing.T) {
 	}
 }
 
-func TestListMultipleAssociations(t *testing.T) {
+func TestListAssociations_MultiplePairs(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
@@ -222,38 +194,21 @@ func TestListMultipleAssociations(t *testing.T) {
 	if len(assocs) != 3 {
 		t.Fatalf("expected 3 associations, got %d", len(assocs))
 	}
+	for i, want := range [][2]string{{"group-a", "group-b"}, {"group-a", "group-c"}, {"group-b", "group-c"}} {
+		if assocs[i].Group1 != want[0] || assocs[i].Group2 != want[1] {
+			t.Fatalf("association %d = %+v, want %v", i, assocs[i], want)
+		}
+	}
 }
 
-func TestDeleteAssociation_NotFound(t *testing.T) {
+func TestDeleteAssociation_NotFound(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForAssoc(t, db)
 
 	err := db.DeleteAssociation("assocnet", "group-a", "group-b")
 	if err != nil {
 		t.Fatalf("delete nonexistent should not error: %v", err)
-	}
-}
-
-func TestAssociation_CascadeOnGroupDelete(t *testing.T) {
-	db := testutil.SetupDB(t)
-	seedNetworkForAssoc(t, db)
-
-	if err := db.InsertAssociation("assocnet", &service.Association{
-		Group1: "group-a",
-		Group2: "group-b",
-	}); err != nil {
-		t.Fatalf("insert association: %v", err)
-	}
-
-	if err := db.DeleteGroup("assocnet", "group-a"); err != nil {
-		t.Fatalf("delete group: %v", err)
-	}
-
-	assocs, err := db.ListAssociations("assocnet")
-	if err != nil {
-		t.Fatalf("list after cascade: %v", err)
-	}
-	if len(assocs) != 0 {
-		t.Errorf("expected 0 associations after cascade, got %d", len(assocs))
 	}
 }

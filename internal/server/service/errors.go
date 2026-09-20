@@ -1,9 +1,6 @@
 package service
 
-import (
-	"errors"
-	"strings"
-)
+import "errors"
 
 var (
 	ErrNotFound                     = errors.New("resource not found")
@@ -20,8 +17,8 @@ var (
 )
 
 // mapStoreError translates store-level sentinel errors into
-// service-level sentinel errors. It also normalizes conflict errors
-// into ErrNetworkExists when the context mentions "network".
+// service-level sentinel errors. Operation-specific classifications belong
+// to the owning service method, never to diagnostic text.
 func mapStoreError(
 	err error,
 ) error {
@@ -34,20 +31,6 @@ func mapStoreError(
 	}
 
 	if errors.Is(err, ErrConflict) {
-		if strings.Contains(err.Error(), "network") {
-			return ErrNetworkExists
-		}
-		return ErrConflict
-	}
-
-	// The database adapter wraps SQLite unique constraint violations
-	// as a fmt.Errorf chain that doesn't use errors.Is with ErrConflict.
-	// Check the error message for unique constraint patterns.
-	errStr := err.Error()
-	if strings.Contains(errStr, "UNIQUE constraint failed") {
-		if strings.Contains(errStr, "network.name") {
-			return ErrNetworkExists
-		}
 		return ErrConflict
 	}
 

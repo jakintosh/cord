@@ -15,7 +15,7 @@ func (a *API) handleListNetworks(
 	if networks, err := a.runtime.ListNetworks(
 		r.Context(),
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		names := make([]string, len(networks))
 		for i, network := range networks {
@@ -35,7 +35,7 @@ func (a *API) handleGetNetwork(
 		r.Context(),
 		name,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		networkDTO := networkFromService(*network)
 		wire.WriteData(w, http.StatusOK, networkDTO)
@@ -79,7 +79,7 @@ func (a *API) handlePostNetwork(
 		main,
 		invite,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		networkDTO := networkFromService(*network)
 		wire.WriteData(w, http.StatusCreated, networkDTO)
@@ -96,7 +96,7 @@ func (a *API) handleDeleteNetwork(
 		r.Context(),
 		name,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusOK, nil)
 	}
@@ -113,7 +113,7 @@ func (a *API) handlePostNetworkEnable(
 		name,
 		true,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		statusDTO := networkStatusFromRuntime(status)
 		wire.WriteData(w, http.StatusOK, statusDTO)
@@ -131,7 +131,7 @@ func (a *API) handlePostNetworkDisable(
 		name,
 		false,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		statusDTO := networkStatusFromRuntime(status)
 		wire.WriteData(w, http.StatusOK, statusDTO)

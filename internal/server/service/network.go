@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -231,6 +232,9 @@ func (s *Service) CreateNetwork(
 		serverCidr,
 		serverPeer,
 	); err != nil {
+		if errors.Is(err, ErrConflict) {
+			return nil, fmt.Errorf("bootstrap network: %w", ErrNetworkExists)
+		}
 		return nil, fmt.Errorf("bootstrap network: %w", mapStoreError(err))
 	}
 

@@ -25,8 +25,8 @@ var retryBackoffs = []time.Duration{
 
 // withRetry retries a call on transport errors and 5xx responses.
 // 4xx responses are not retried — they indicate a client-side problem
-// that repeating won't fix. All server endpoints called through this
-// client are idempotent by design.
+// that repeating won't fix. Retried operations do not duplicate durable
+// effects; redemption retries still require an unexpired registration.
 func withRetry(
 	ctx context.Context,
 	fn func(context.Context) error,

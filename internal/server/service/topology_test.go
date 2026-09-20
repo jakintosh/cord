@@ -14,7 +14,9 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/topology"
 )
 
-func TestTopologyState_CompilesAllOrActivePeers(t *testing.T) {
+func TestTopologyState_CompilesAllOrActivePeers(
+	t *testing.T,
+) {
 	var cidrs []topology.Cidr
 	for _, name := range []string{"active", "disabled", "pending"} {
 		cidr, err := topology.CidrFromString(name, map[string]string{
@@ -61,7 +63,9 @@ func TestTopologyState_CompilesAllOrActivePeers(t *testing.T) {
 	}
 }
 
-func TestTopologyState_PreservesDistinctPeerAndCIDRNames(t *testing.T) {
+func TestTopologyState_PreservesDistinctPeerAndCIDRNames(
+	t *testing.T,
+) {
 	cidr, err := topology.CidrFromString("cord-server-cidr", "10.0.0.1/32", true)
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +87,9 @@ func TestTopologyState_PreservesDistinctPeerAndCIDRNames(t *testing.T) {
 	}
 }
 
-func TestGetNetworkTopology_IncludesDisabledAndUnconfirmedPeers(t *testing.T) {
+func TestGetNetworkTopology_IncludesDisabledAndUnconfirmedPeers(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 	testutil.SeedPeerDB(t, env.Database, "testnet", "disabled", "10.0.0.40/32", "disabled-key", false, false, true)
@@ -199,7 +205,9 @@ func (s *blockingStore) LoadTopologyState(
 	return s.Store.LoadTopologyState(network)
 }
 
-func TestNetworkModel_PreventsStalePublicationDuringInvalidation(t *testing.T) {
+func TestNetworkModel_PreventsStalePublicationDuringInvalidation(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	setup, err := service.New(service.Options{
 		Store:  db,
@@ -240,7 +248,15 @@ func TestNetworkModel_PreventsStalePublicationDuringInvalidation(t *testing.T) {
 		err error
 	}
 	results := make(chan snapshotResult, 1)
+	done := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(blocked.release) }) }
+	// This external test controls a public Store operation to exercise a
+	// concurrent publication guarantee. Always release and join the reader,
+	// including when the mutation below fails, before SQLite cleanup.
+	t.Cleanup(func() { release(); <-done })
 	go func() {
+		defer close(done)
 		_, err := svc.GetVisibleNetworkSnapshot("testnet", "alice")
 		results <- snapshotResult{err: err}
 	}()
@@ -252,7 +268,7 @@ func TestNetworkModel_PreventsStalePublicationDuringInvalidation(t *testing.T) {
 	if _, err := svc.UpdatePeer("testnet", "alice", service.PeerDiff{Enabled: &disabled}); err != nil {
 		t.Fatalf("disable peer mid-load: %v", err)
 	}
-	blocked.release <- struct{}{}
+	release()
 
 	res := <-results
 	if res.err == nil {
@@ -261,4 +277,23 @@ func TestNetworkModel_PreventsStalePublicationDuringInvalidation(t *testing.T) {
 	if !strings.Contains(res.err.Error(), "not found") {
 		t.Fatalf("snapshot error = %v, want the subject to be missing from the fresh model", res.err)
 	}
+}
+
+// topologyPeerByCidr returns the full topology's CIDR to peer-name mapping.
+func topologyPeerByCidr(
+	t *testing.T,
+	svc *service.Service,
+	network string,
+) map[string]string {
+	t.Helper()
+
+	view, err := svc.GetNetworkTopology(network)
+	if err != nil {
+		t.Fatalf("get topology: %v", err)
+	}
+	peerByCidr := make(map[string]string, len(view.Nodes))
+	for _, node := range view.Nodes {
+		peerByCidr[node.Cidr.Name] = node.PeerName
+	}
+	return peerByCidr
 }

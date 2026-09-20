@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
@@ -18,7 +19,7 @@ func (a *API) handleListGroups(
 		r.Context(),
 		network,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		groupsDTO := groupsFromService(groups)
 		wire.WriteData(w, http.StatusOK, groupsDTO)
@@ -42,7 +43,11 @@ func (a *API) handlePostGroup(
 		network,
 		req.Name,
 	); err != nil {
-		writeServiceError(w, err)
+		if errors.Is(err, service.ErrNotFound) {
+			// This mutation's missing parent has a stable public message.
+			err = service.ErrNotFound
+		}
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusCreated, nil)
 	}
@@ -60,7 +65,7 @@ func (a *API) handleDeleteGroup(
 		network,
 		group,
 	); err != nil {
-		writeServiceError(w, err)
+		a.writeServiceError(w, r, err)
 	} else {
 		wire.WriteData(w, http.StatusOK, nil)
 	}

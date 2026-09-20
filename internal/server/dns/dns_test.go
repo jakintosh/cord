@@ -2,6 +2,7 @@ package dns_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strconv"
 	"strings"
@@ -16,6 +17,77 @@ import (
 	"github.com/miekg/dns"
 )
 
+func TestNew_RejectsInvalidOptions(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	for _, tt := range []struct {
+		name, network, zone, address string
+		missingService               bool
+	}{
+		{"missing network", "", "x.internal", "127.0.0.1:0", false},
+		{"missing zone", "looptest", "", "127.0.0.1:0", false},
+		{"malformed zone", "looptest", "bad..internal", "127.0.0.1:0", false},
+		{"missing port", "looptest", "x.internal", "127.0.0.1", false},
+		{"hostname", "looptest", "x.internal", "localhost:53", false},
+		{"large port", "looptest", "x.internal", "127.0.0.1:70000", false},
+		{"non-numeric port", "looptest", "x.internal", "127.0.0.1:dns", false},
+		{"missing service", "looptest", "x.internal", "127.0.0.1:0", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := serverdns.Options{
+				Network: tt.network,
+				Zone:    tt.zone,
+				Address: tt.address,
+				Service: env.Service,
+			}
+			if tt.missingService {
+				opts.Service = nil
+			}
+			if srv, err := serverdns.New(opts); err == nil || srv != nil {
+				t.Fatalf("New = %v, %v, want nil server and error", srv, err)
+			}
+		})
+	}
+}
+
+func TestReconcile_CancelledStartRecovers(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	seedZone(t, env, "looptest", "127.0.0.0/24")
+	srv, err := serverdns.New(serverdns.Options{
+		Network: "looptest",
+		Zone:    "looptest.internal",
+		Address: "127.0.0.1:0",
+		Service: env.Service,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srv.Close(context.Background()) })
+	if srv.Address() != "127.0.0.1:0" || srv.Status().State != resource.Stopped {
+		t.Fatalf("new server = %s, %+v", srv.Address(), srv.Status())
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := srv.Reconcile(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Reconcile = %v", err)
+	}
+	if status := srv.Status(); status.State != resource.Failed || !errors.Is(status.Error, context.Canceled) {
+		t.Fatalf("status = %+v", status)
+	}
+	if srv.Address() != "127.0.0.1:0" {
+		t.Fatalf("cancelled startup bound address %s", srv.Address())
+	}
+	if err := srv.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if srv.Address() == "127.0.0.1:0" || srv.Status().State != resource.Running || srv.Status().Error != nil {
+		t.Fatalf("recovered server = %s, %+v", srv.Address(), srv.Status())
+	}
+}
+
 // startLoopbackDNS starts a real server for a loopback network whose
 // server peer is 127.0.0.1, so client exchanges from loopback resolve.
 // All socket tests use an OS-assigned ephemeral port read back from
@@ -28,22 +100,35 @@ func startLoopbackDNS(
 	env := testutil.SetupService(t)
 	seedZone(t, env, "looptest", "127.0.0.0/24")
 
+	return startDNS(t, env, "127.0.0.1:0")
+}
+
+func startDNS(
+	t *testing.T,
+	env *testutil.ServiceEnv,
+	address string,
+) *serverdns.Server {
+	t.Helper()
 	srv, err := serverdns.New(serverdns.Options{
 		Network: "looptest",
-		Zone:    "looptest.internal",
-		Address: "127.0.0.1:0",
+		Zone:    "LoopTest.Internal",
+		Address: address,
 		Service: env.Service,
 	})
 	if err != nil {
 		t.Fatalf("new dns server: %v", err)
 	}
 
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := srv.Close(ctx); err != nil {
+			t.Errorf("cleanup DNS: %v", err)
+		}
+	})
 	if err := srv.Reconcile(t.Context()); err != nil {
 		t.Fatalf("start dns server: %v", err)
 	}
-	t.Cleanup(func() {
-		_ = srv.Close(context.Background())
-	})
 
 	return srv
 }
@@ -68,49 +153,7 @@ func seedZone(
 	}
 }
 
-func TestServer_UDPRoundTrip(
-	t *testing.T,
-) {
-	srv := startLoopbackDNS(t)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	client := &dns.Client{Net: "udp"}
-	resp, _, err := client.ExchangeContext(ctx, apexQuery("cord-server.looptest.internal."), srv.Address())
-	if err != nil {
-		t.Fatalf("udp exchange: %v", err)
-	}
-	if resp.Rcode != dns.RcodeSuccess || len(resp.Answer) != 1 {
-		t.Fatalf("rcode = %d, answers = %d, want one A answer", resp.Rcode, len(resp.Answer))
-	}
-	if a := resp.Answer[0].(*dns.A); a.A.String() != "127.0.0.1" {
-		t.Fatalf("address = %s, want 127.0.0.1", a.A)
-	}
-}
-
-func TestServer_TCPRoundTrip(
-	t *testing.T,
-) {
-	srv := startLoopbackDNS(t)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	client := &dns.Client{Net: "tcp"}
-	resp, _, err := client.ExchangeContext(ctx, apexQuery("cord-server.looptest.internal."), srv.Address())
-	if err != nil {
-		t.Fatalf("tcp exchange: %v", err)
-	}
-	if resp.Rcode != dns.RcodeSuccess || len(resp.Answer) != 1 {
-		t.Fatalf("rcode = %d, answers = %d, want one A answer", resp.Rcode, len(resp.Answer))
-	}
-	if a := resp.Answer[0].(*dns.A); a.A.String() != "127.0.0.1" {
-		t.Fatalf("address = %s, want 127.0.0.1", a.A)
-	}
-}
-
-func TestServer_PartialBindRollback(
+func TestReconcile_PartialBindRollback(
 	t *testing.T,
 ) {
 	env := testutil.SetupService(t)
@@ -134,6 +177,8 @@ func TestServer_PartialBindRollback(
 	if err != nil {
 		t.Fatalf("new dns server: %v", err)
 	}
+
+	t.Cleanup(func() { _ = srv.Close(context.Background()) })
 
 	startErr := srv.Reconcile(t.Context())
 	if startErr == nil || !strings.Contains(startErr.Error(), "listen tcp") {
@@ -170,7 +215,7 @@ func TestServer_PartialBindRollback(
 	}
 }
 
-func TestServer_BoundedShutdown(
+func TestClose_StopsAndPermitsRestart(
 	t *testing.T,
 ) {
 	srv := startLoopbackDNS(t)
@@ -202,7 +247,7 @@ func TestServer_BoundedShutdown(
 	}
 }
 
-func TestServer_StatusReportsRunning(
+func TestStatus_ReportsRunning(
 	t *testing.T,
 ) {
 	srv := startLoopbackDNS(t)
@@ -217,23 +262,9 @@ func TestServer_StatusReportsRunning(
 	}
 }
 
-// apexQuery builds an A query for the running server's own name, which
-// resolves because loopback queries originate from 127.0.0.1 — the
-// network's server peer.
-func apexQuery(
-	name string,
-) *dns.Msg {
-	q := &dns.Msg{}
-	q.Question = []dns.Question{{
-		Name:   name,
-		Qtype:  dns.TypeA,
-		Qclass: dns.ClassINET,
-	}}
-
-	return q
-}
-
-func TestServer_ReconcileServesQueries(t *testing.T) {
+func TestReconcile_ServesQueriesAfterRestart(
+	t *testing.T,
+) {
 	srv := startLoopbackDNS(t)
 	if err := srv.Close(context.Background()); err != nil {
 		t.Fatal(err)
@@ -261,7 +292,7 @@ func TestServer_ReconcileServesQueries(t *testing.T) {
 	}
 }
 
-func TestServer_ConcurrentLifecycle(
+func TestReconcile_ConcurrentLifecycle(
 	t *testing.T,
 ) {
 	srv := startLoopbackDNS(t)

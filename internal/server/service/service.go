@@ -75,7 +75,7 @@ func New(
 	}, nil
 }
 
-// ResolveRegistrationIdentity looks up an unredeemed, unexpired
+// ResolveRegistrationIdentity looks up an unconfirmed, unexpired
 // registration by temporary IP within the invite network.
 func (s *Service) ResolveRegistrationIdentity(
 	networkName string,

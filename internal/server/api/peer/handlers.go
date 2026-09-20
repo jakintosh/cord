@@ -22,7 +22,7 @@ func (a *API) handleVisibleSnapshot(
 			network,
 			caller.Name,
 		); err != nil {
-			wire.WriteError(w, http.StatusInternalServerError, err.Error())
+			a.writeServiceError(w, r, network, "snapshot", err)
 		} else {
 			snapshotDTO := toVisibleNetworkSnapshot(snapshot)
 			wire.WriteData(w, http.StatusOK, snapshotDTO)
@@ -56,7 +56,7 @@ func (a *API) handleReportEndpoints(
 			network,
 			svcSightings,
 		); err != nil {
-			wire.WriteError(w, http.StatusInternalServerError, err.Error())
+			a.writeServiceError(w, r, network, "report endpoints", err)
 		} else {
 			wire.WriteData(w, http.StatusOK, protocol.StatusResponse{
 				Status: "ok",
@@ -76,7 +76,7 @@ func (a *API) handleConfirmPeer(
 			network,
 			caller.Name,
 		); err != nil {
-			wire.WriteError(w, http.StatusInternalServerError, err.Error())
+			a.writeServiceError(w, r, network, "confirm peer", err)
 		} else {
 			wire.WriteData(w, http.StatusOK, protocol.StatusResponse{
 				Status: "confirmed",

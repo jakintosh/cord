@@ -65,7 +65,10 @@ func TestAPICreateRegistration_Success(
 	}
 }
 
-func TestAPICreateRegistration_AddressExhausted(t *testing.T) {
+func TestAPICreateRegistration_AddressExhausted(
+	t *testing.T,
+) {
+	// setup
 	env := testutil.Setup(t)
 	if _, err := env.Service.CreateNetwork(
 		"small",
@@ -76,6 +79,7 @@ func TestAPICreateRegistration_AddressExhausted(t *testing.T) {
 		t.Fatalf("create network: %v", err)
 	}
 
+	// request
 	url := "/networks/small/registrations"
 	wire.TestPost[protocol.Invitation](
 		env.Router,
@@ -92,9 +96,11 @@ func TestAPICreateRegistration_AddressExhausted(t *testing.T) {
 func TestAPICreateRegistration_MissingIP(
 	t *testing.T,
 ) {
+	// setup
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
 
+	// request
 	url := "/networks/testnet/registrations"
 	body := `{
 		"name": "bob",
@@ -102,6 +108,7 @@ func TestAPICreateRegistration_MissingIP(
 	}`
 	result := wire.TestPost[any](env.Router, url, body)
 
+	// result
 	result.ExpectStatusError(t, http.StatusBadRequest)
 }
 
@@ -286,11 +293,15 @@ func TestAPIRevokeRegistration_NotFound(
 	result.ExpectStatusError(t, http.StatusNotFound)
 }
 
-func TestAPIRegistrationGroups_AddListRemove(t *testing.T) {
+func TestAPIRegistrationGroups_AddListRemove(
+	t *testing.T,
+) {
+	// setup
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
 	seedRegistrationGroupResources(t, env)
 
+	// request
 	url := "/networks/testnet/registrations/alice/groups"
 	body := `{"group":"engineering"}`
 	wire.TestPost[any](env.Router, url, body).ExpectStatusOK(t, http.StatusCreated)
@@ -308,13 +319,24 @@ func TestAPIRegistrationGroups_AddListRemove(t *testing.T) {
 	}
 }
 
-func TestAPIRegistrationGroups_RejectsMissingAndConfirmed(t *testing.T) {
+func TestAPIRegistrationGroups_RejectsMissingRegistration(
+	t *testing.T,
+) {
+	// setup
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+	// request and result
+	missingURL := "/networks/testnet/registrations/missing/groups"
+	wire.TestGet[[]admin.Group](env.Router, missingURL).ExpectStatusError(t, http.StatusNotFound)
+}
+
+func TestAPIRegistrationGroups_RejectsConfirmedRegistration(
+	t *testing.T,
+) {
+	// setup confirmed registration
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
 	seedRegistrationGroupResources(t, env)
-
-	missingURL := "/networks/testnet/registrations/missing/groups"
-	wire.TestGet[[]admin.Group](env.Router, missingURL).ExpectStatusError(t, http.StatusNotFound)
 
 	reg, err := env.Service.ListRegistrations("testnet")
 	if err != nil {
@@ -327,10 +349,57 @@ func TestAPIRegistrationGroups_RejectsMissingAndConfirmed(t *testing.T) {
 		t.Fatalf("confirm: %v", err)
 	}
 
+	// request
 	url := "/networks/testnet/registrations/alice/groups"
-	body := `{"group":"engineering"}`
-	wire.TestPost[any](env.Router, url, body).ExpectStatusError(t, http.StatusConflict)
-	wire.TestDelete[any](env.Router, "/networks/testnet/registrations/alice").ExpectStatusError(t, http.StatusConflict)
+	body := `{
+		"group": "engineering"
+	}`
+	result := wire.TestPost[any](env.Router, url, body)
+
+	// result
+	result.ExpectStatusError(t, http.StatusConflict)
+
+	// confirmed registration and peer remain intact
+	registrations, err := env.Service.ListRegistrations("testnet")
+	if err != nil || len(registrations) != 1 || !registrations[0].Confirmed {
+		t.Fatalf("registrations = %+v, error = %v", registrations, err)
+	}
+	peer, err := env.Service.GetPeer("testnet", "alice")
+	if err != nil || !peer.Confirmed {
+		t.Fatalf("peer = %+v, error = %v", peer, err)
+	}
+}
+
+func TestAPIRevokeRegistration_RejectsConfirmedRegistration(
+	t *testing.T,
+) {
+	// setup confirmed registration
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+	seedRegistrationGroupResources(t, env)
+	registrations, err := env.Service.ListRegistrations("testnet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Service.RedeemRegistration("testnet", registrations[0].InvitePublicKey, "alice-key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.Service.ConfirmPeer("testnet", "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	// request
+	url := "/networks/testnet/registrations/alice"
+	result := wire.TestDelete[any](env.Router, url)
+
+	// result
+	result.ExpectStatusError(t, http.StatusConflict)
+
+	// state
+	registrations, err = env.Service.ListRegistrations("testnet")
+	if err != nil || len(registrations) != 1 || !registrations[0].Confirmed {
+		t.Fatalf("registrations = %+v, error = %v", registrations, err)
+	}
 }
 
 func seedRegistrationGroupResources(t *testing.T, env *testutil.APIEnv) {

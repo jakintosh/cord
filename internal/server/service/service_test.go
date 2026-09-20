@@ -8,26 +8,74 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
-	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-func lastTempKey(
+func TestResolveRegistrationIdentity_RetainsRedeemedIdentityUntilConfirmation(
 	t *testing.T,
-	svc *service.Service,
-	network string,
-) string {
-	t.Helper()
-	regs, err := svc.ListRegistrations(network)
+) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+	inv, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")})
 	if err != nil {
-		t.Fatalf("list registrations: %v", err)
+		t.Fatal(err)
 	}
-	if len(regs) == 0 {
-		t.Fatal("no registrations found")
+	inviteIP, _, err := net.ParseCIDR(inv.Peer.Route)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return regs[len(regs)-1].InvitePublicKey
+	before, err := env.Service.ResolveRegistrationIdentity("testnet", inviteIP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Name != "alice" || before.Redeemed || before.MainRoute != "10.0.0.5/32" {
+		t.Fatalf("initial identity = %+v", before)
+	}
+	if _, err := env.Service.RedeemRegistration("testnet", before.InvitePublicKey, mustGenKey(t)); err != nil {
+		t.Fatal(err)
+	}
+	after, err := env.Service.ResolveRegistrationIdentity("testnet", inviteIP)
+	if err != nil || !after.Redeemed || after.Name != "alice" {
+		t.Fatalf("redeemed identity = %+v, %v", after, err)
+	}
+	if err := env.Service.ConfirmPeer("testnet", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Service.ResolveRegistrationIdentity("testnet", inviteIP); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("confirmed invite identity: %v", err)
+	}
 }
 
-func TestResolvePeerIdentity_TransitionsOnConfirmation(t *testing.T) {
+func TestResolveRegistrationIdentity_ExpiresAtDeadline(
+	t *testing.T,
+) {
+	clock := &mutableClock{t: testutil.FixedTime}
+	env := testutil.SetupServiceWithClock(t, clock.now)
+	testutil.SeedNetwork(t, env.Service)
+	inv, err := env.Service.CreateRegistration("testnet", "alice", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inviteIP, _, err := net.ParseCIDR(inv.Peer.Route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := env.Service.ResolveRegistrationIdentity("testnet", inviteIP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock.t = before.ExpiresAt
+	if _, err := env.Service.ResolveRegistrationIdentity("testnet", inviteIP); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("expired identity: %v", err)
+	}
+	registrations, err := env.Service.ListRegistrations("testnet")
+	if err != nil || len(registrations) != 1 || registrations[0].Name != "alice" {
+		t.Fatalf("lookup removed registration: %+v, %v", registrations, err)
+	}
+}
+
+func TestResolvePeerIdentity_TransitionsOnConfirmation(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 	ip := net.ParseIP("10.0.0.5")
@@ -65,7 +113,9 @@ func TestResolvePeerIdentity_TransitionsOnConfirmation(t *testing.T) {
 	}
 }
 
-func TestResolvePeerIdentity_ExcludesDisabled(t *testing.T) {
+func TestResolvePeerIdentity_ExcludesDisabled(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -97,7 +147,9 @@ func TestResolvePeerIdentity_ExcludesDisabled(t *testing.T) {
 	}
 }
 
-func TestResolvePeerIdentity_NormalizesSourceIP(t *testing.T) {
+func TestResolvePeerIdentity_NormalizesSourceIP(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -122,28 +174,7 @@ func TestResolvePeerIdentity_NormalizesSourceIP(t *testing.T) {
 	}
 }
 
-// topologyPeerByCidr returns the compiled full topology view's CIDR to
-// peer-name mapping for the network.
-func topologyPeerByCidr(
-	t *testing.T,
-	svc *service.Service,
-	network string,
-) map[string]string {
-	t.Helper()
-
-	view, err := svc.GetNetworkTopology(network)
-	if err != nil {
-		t.Fatalf("get topology: %v", err)
-	}
-	peerByCidr := make(map[string]string, len(view.Nodes))
-	for _, node := range view.Nodes {
-		peerByCidr[node.Cidr.Name] = node.PeerName
-	}
-	return peerByCidr
-}
-
-// wantInvalidInput asserts that err rejects the operation as invalid
-// input and that the rejection names the rule the caller expects.
+// wantInvalidInput checks the public sentinel and the validation rule.
 func wantInvalidInput(
 	t *testing.T,
 	err error,
@@ -157,17 +188,4 @@ func wantInvalidInput(
 	if !strings.Contains(err.Error(), fragment) {
 		t.Fatalf("err = %q, want it to contain %q", err, fragment)
 	}
-}
-
-func mustGenKey(t *testing.T) string {
-	t.Helper()
-	k, err := wireguard.GenerateKey()
-	if err != nil {
-		t.Fatalf("generate key: %v", err)
-	}
-	pub, err := wireguard.PublicKey(k)
-	if err != nil {
-		t.Fatalf("derive public key: %v", err)
-	}
-	return pub
 }

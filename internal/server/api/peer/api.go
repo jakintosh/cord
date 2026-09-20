@@ -2,6 +2,7 @@ package peer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/identity"
 	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
+	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
 // API serves the peer-facing HTTP surface over a network's main plane.
@@ -58,7 +60,7 @@ func (a *API) Router(
 	mux.HandleFunc(
 		"POST /confirm",
 		identity.Require(
-			a.lookupProvisional(network),
+			a.lookupConfirmationPeer(network),
 			a.handleConfirmPeer(network),
 			log,
 		),
@@ -82,8 +84,9 @@ func (a *API) lookupPeer(
 	}
 }
 
-// lookupProvisional looks up an unconfirmed, enabled peer by source IP.
-func (a *API) lookupProvisional(
+// lookupConfirmationPeer accepts enabled provisional and confirmed peers so
+// a lost confirmation response can be retried after the state transition.
+func (a *API) lookupConfirmationPeer(
 	network string,
 ) identity.LookupFunc {
 	return func(
@@ -94,6 +97,9 @@ func (a *API) lookupProvisional(
 		error,
 	) {
 		p, err := a.runtime.ResolveProvisionalIdentity(ctx, network, ip)
+		if errors.Is(err, service.ErrNotFound) {
+			return a.lookupPeer(network)(ctx, ip)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("resolve provisional identity: %w", err)
 		}

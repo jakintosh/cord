@@ -47,158 +47,42 @@ func seedDNSVisibility(
 	}
 }
 
-func TestResolveDNSHost_Self(
+func TestResolveDNSHost_VisibilityAndNameRules(
 	t *testing.T,
 ) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-	seedDNSVisibility(t, env)
-
-	host, err := env.Service.ResolveDNSHost("testnet", "frank", "frank")
-	if err != nil {
-		t.Fatalf("resolve self: %v", err)
-	}
-	if host.Name != "frank" || host.Route != "10.0.32.5/32" {
-		t.Fatalf("host = %+v, want frank at 10.0.32.5/32", host)
-	}
-}
-
-func TestResolveDNSHost_CordServerAlwaysAddressable(
-	t *testing.T,
-) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-	seedDNSVisibility(t, env)
-
-	host, err := env.Service.ResolveDNSHost("testnet", "frank", "cord-server")
-	if err != nil {
-		t.Fatalf("resolve cord-server: %v", err)
-	}
-	if host.Name != "cord-server" || host.Route != "10.0.0.1/32" {
-		t.Fatalf("host = %+v, want cord-server at 10.0.0.1/32", host)
-	}
-}
-
-func TestResolveDNSHost_VisiblePeer(
-	t *testing.T,
-) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-	seedDNSVisibility(t, env)
-
-	host, err := env.Service.ResolveDNSHost("testnet", "frank", "api-1")
-	if err != nil {
-		t.Fatalf("resolve visible peer: %v", err)
-	}
-	if host.Name != "api-1" || host.Route != "10.0.1.1/32" {
-		t.Fatalf("host = %+v, want api-1 at 10.0.1.1/32", host)
-	}
-}
-
-func TestResolveDNSHost_HiddenPeer(
-	t *testing.T,
-) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-	seedDNSVisibility(t, env)
-
-	_, err := env.Service.ResolveDNSHost("testnet", "frank", "lonely")
-	if !errors.Is(err, service.ErrNotFound) {
-		t.Fatalf("hidden peer error = %v, want ErrNotFound", err)
-	}
-}
-
-func TestResolveDNSHost_DisabledPeer(
-	t *testing.T,
-) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-	seedDNSVisibility(t, env)
-
-	_, err := env.Service.ResolveDNSHost("testnet", "frank", "down")
-	if !errors.Is(err, service.ErrNotFound) {
-		t.Fatalf("disabled peer error = %v, want ErrNotFound", err)
-	}
-}
-
-func TestResolveDNSHost_UnconfirmedPeer(
-	t *testing.T,
-) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-	seedDNSVisibility(t, env)
-
-	_, err := env.Service.ResolveDNSHost("testnet", "frank", "pending")
-	if !errors.Is(err, service.ErrNotFound) {
-		t.Fatalf("unconfirmed peer error = %v, want ErrNotFound", err)
-	}
-}
-
-func TestResolveDNSHost_UnknownHost(
-	t *testing.T,
-) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-	seedDNSVisibility(t, env)
-
-	_, err := env.Service.ResolveDNSHost("testnet", "frank", "nobody")
-	if !errors.Is(err, service.ErrNotFound) {
-		t.Fatalf("unknown host error = %v, want ErrNotFound", err)
-	}
-}
-
-func TestResolveDNSHost_UnknownNetwork(
-	t *testing.T,
-) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-
-	_, err := env.Service.ResolveDNSHost("missing", "frank", "frank")
-	if !errors.Is(err, service.ErrNotFound) {
-		t.Fatalf("unknown network error = %v, want ErrNotFound", err)
-	}
-}
-
-func TestResolveDNSHost_UnknownRequester(
-	t *testing.T,
-) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-	seedDNSVisibility(t, env)
-
-	for _, target := range []string{"frank", "cord-server"} {
-		if _, err := env.Service.ResolveDNSHost("testnet", "ghost", target); !errors.Is(err, service.ErrNotFound) {
-			t.Fatalf("unknown requester resolving %q error = %v, want ErrNotFound", target, err)
-		}
-	}
-}
-
-func TestResolveDNSHost_CaseInsensitive(
-	t *testing.T,
-) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-	seedDNSVisibility(t, env)
-
-	host, err := env.Service.ResolveDNSHost("testnet", "frank", "API-1")
-	if err != nil {
-		t.Fatalf("resolve mixed-case name: %v", err)
-	}
-	if host.Name != "api-1" || host.Route != "10.0.1.1/32" {
-		t.Fatalf("host = %+v, want stored lowercase api-1 record", host)
-	}
-}
-
-func TestResolveDNSHost_RejectsNonLabelNames(
-	t *testing.T,
-) {
-	env := testutil.SetupService(t)
-	testutil.SeedNetwork(t, env.Service)
-	seedDNSVisibility(t, env)
-
-	for _, name := range []string{"", "a.b", "cord-server.extra"} {
-		if _, err := env.Service.ResolveDNSHost("testnet", "frank", name); !errors.Is(err, service.ErrNotFound) {
-			t.Fatalf("name %q error = %v, want ErrNotFound", name, err)
-		}
+	for _, tc := range []struct{ name, network, requester, target, wantName, wantRoute string }{
+		{"self", "testnet", "frank", "frank", "frank", "10.0.32.5/32"},
+		{"server", "testnet", "frank", "cord-server", "cord-server", "10.0.0.1/32"},
+		{"visible", "testnet", "frank", "api-1", "api-1", "10.0.1.1/32"},
+		{"case insensitive", "testnet", "frank", "API-1", "api-1", "10.0.1.1/32"},
+		{"hidden", "testnet", "frank", "lonely", "", ""},
+		{"disabled", "testnet", "frank", "down", "", ""},
+		{"unconfirmed", "testnet", "frank", "pending", "", ""},
+		{"unknown host", "testnet", "frank", "nobody", "", ""},
+		{"unknown network", "missing", "frank", "frank", "", ""},
+		{"unknown requester", "testnet", "ghost", "frank", "", ""},
+		{"unknown requester to server", "testnet", "ghost", "cord-server", "", ""},
+		{"empty name", "testnet", "frank", "", "", ""},
+		{"qualified name", "testnet", "frank", "a.b", "", ""},
+		{"qualified server", "testnet", "frank", "cord-server.extra", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testutil.SetupService(t)
+			testutil.SeedNetwork(t, env.Service)
+			seedDNSVisibility(t, env)
+			host, err := env.Service.ResolveDNSHost(tc.network, tc.requester, tc.target)
+			if tc.wantName == "" {
+				if !errors.Is(err, service.ErrNotFound) {
+					t.Fatalf("resolve: %v, want ErrNotFound", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if host.Name != tc.wantName || host.Route != tc.wantRoute {
+				t.Fatalf("resolved host = %+v, want %s at %s", host, tc.wantName, tc.wantRoute)
+			}
+		})
 	}
 }

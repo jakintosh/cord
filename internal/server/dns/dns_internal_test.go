@@ -12,8 +12,9 @@ import (
 	"github.com/miekg/dns"
 )
 
-// Internal access lets this test verify forced cleanup with a blocked handler.
-func TestStopForcesCleanup(
+// White-box exception: a deliberately blocked library handler proves forced socket
+// cleanup without adding a production hook or blocking the service/database.
+func TestClose_ForcesCleanup(
 	t *testing.T,
 ) {
 	for _, protocol := range []string{"udp", "tcp"} {
