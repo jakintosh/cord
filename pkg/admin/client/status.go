@@ -46,11 +46,14 @@ type ActivityStatus struct {
 // State is observed availability; Target is the owner's intended state.
 // Health includes activity failures and unhealthy descendants. Status collection
 // is serialized with runtime operations and never repairs resources.
+// Reason is an optional machine-readable explanation. DNS uses "unsupported"
+// when platform integration is unavailable. Clients should tolerate new codes.
 type ResourceSnapshot struct {
 	Kind       string                    `json:"kind"`
 	Name       string                    `json:"name,omitempty"`
 	State      string                    `json:"state"`
 	Target     string                    `json:"target"`
+	Reason     string                    `json:"reason,omitempty"`
 	Health     string                    `json:"health"`
 	Error      string                    `json:"error,omitempty"`
 	Activities map[string]ActivityStatus `json:"activities,omitempty"`

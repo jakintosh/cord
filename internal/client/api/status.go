@@ -95,6 +95,7 @@ func resourceSnapshotFromRuntime(
 		Name:   status.Name,
 		State:  string(status.State),
 		Target: string(status.Target),
+		Reason: status.Reason,
 		Health: status.Health,
 		Error:  status.Error,
 	}

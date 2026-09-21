@@ -14,6 +14,7 @@ type ResourceSnapshot struct {
 	Name       string
 	State      resource.State
 	Target     resource.State
+	Reason     string // Optional machine-readable explanation, such as "unsupported".
 	Error      string
 	Health     string
 	Activities map[string]ActivityStatus

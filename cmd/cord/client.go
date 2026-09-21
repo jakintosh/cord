@@ -163,6 +163,8 @@ func printClientStatus(
 		)
 	}
 
+	printClientDNSStatus(s)
+
 	if len(s.Installs) > 0 {
 		rows := make([][]string, len(s.Installs))
 		for idx, inst := range s.Installs {
@@ -175,6 +177,71 @@ func printClientStatus(
 			"INSTALL",
 			"STATE",
 		}, rows)
+	}
+}
+
+// printClientDNSStatus includes retained cleanup owners even when their saved
+// network records have been deleted. It only formats reported outcomes.
+func printClientDNSStatus(
+	status adminclient.Status,
+) {
+	var rows [][]string
+	seen := make(map[string]bool)
+	for _, network := range status.Snapshot.Children {
+		if network.Kind != "network" {
+			continue
+		}
+		for _, child := range network.Children {
+			if child.Kind != "dns-resolver" {
+				continue
+			}
+			seen[network.Name] = true
+			detail := "-"
+			if child.Error != "" {
+				detail = strings.ReplaceAll(child.Error, "\n", "; ")
+			}
+			rows = append(rows, []string{
+				network.Name,
+				child.Name,
+				clientDNSState(child),
+				detail,
+			})
+		}
+	}
+	for _, network := range status.Networks {
+		if seen[network.Name] {
+			continue
+		}
+		state, detail := "inactive", "-"
+		if network.Enabled {
+			state, detail = "degraded", "resolver not started"
+		}
+		rows = append(rows, []string{network.Name, "-", state, detail})
+	}
+	if len(rows) > 0 {
+		fmt.Println()
+		printTable([]string{"NETWORK", "DOMAIN", "DNS", "DETAIL"}, rows)
+	}
+	if cleanup := status.Snapshot.Activities["dns-cleanup"]; cleanup.Error != "" {
+		detail := strings.ReplaceAll(cleanup.Error, "\n", "; ")
+		fmt.Printf("\nDNS stale cleanup failed: %s\n", detail)
+	}
+}
+
+func clientDNSState(
+	status adminclient.ResourceSnapshot,
+) string {
+	switch {
+	case status.Target == "stopped" && status.State != "stopped":
+		return "cleanup owed"
+	case status.Reason == "unsupported":
+		return "unsupported"
+	case status.State == "failed" || status.Health == "degraded" || status.Error != "":
+		return "degraded"
+	case status.State == "running":
+		return "applied"
+	default:
+		return "inactive"
 	}
 }
 

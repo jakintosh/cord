@@ -1,13 +1,108 @@
 package api_test
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
+	"git.studiopollinator.com/pollinator/cord/internal/client/dns"
+	"git.studiopollinator.com/pollinator/cord/internal/client/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
+	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
+
+func TestAPIStatus_DNSFailureReasonAndRecovery(
+	t *testing.T,
+) {
+	tests := []struct {
+		name    string
+		failure error
+		reason  string
+	}{
+		{name: "unsupported", failure: dns.ErrUnsupported, reason: "unsupported"},
+		{name: "operational", failure: errors.New("permission denied")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Use the shared real store and isolated platform manager.
+			env := testutil.SetupService(t)
+			resolver := &failingStatusResolver{
+				Manager: testutil.NewDNSManager(t),
+				failure: tc.failure,
+			}
+			backend := wireguardtest.NewMockBackend()
+			rt, err := runtime.New(runtime.Options{
+				Service:    env.Service,
+				WireGuard:  wireguard.NewManagerWithBackend(backend),
+				DNS:        resolver,
+				HTTPClient: testutil.NewOfflineHTTPClient(),
+				Interval:   time.Hour,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			testutil.RunRuntime(t, rt)
+			control, err := api.New(api.Options{Runtime: rt})
+			if err != nil {
+				t.Fatal(err)
+			}
+			testutil.SeedNetworkDirect(t, env.Database, "office")
+			if _, err := rt.SetNetworkEnabled(t.Context(), "office", true); err != nil {
+				t.Fatal(err)
+			}
+
+			// Repeated reads expose saved failures without retrying DNS.
+			for range 2 {
+				result := wire.TestGet[api.Status](control.Router(), "/status")
+				status := result.ExpectStatusOK(t, http.StatusOK)
+				child := status.Snapshot.Children[0].Children[1]
+				if child.State != "failed" || child.Reason != tc.reason || child.Error == "" {
+					t.Fatalf("DNS failure = %+v", child)
+				}
+				if status.Networks[0].Health != "degraded" || status.Health != "degraded" {
+					t.Fatal("DNS failure was not reflected in network and root health")
+				}
+			}
+			if resolver.calls != 1 {
+				t.Fatalf("status retried DNS: %d calls", resolver.calls)
+			}
+
+			// Ordinary reconciliation clears both the error and reason code.
+			resolver.failure = nil
+			if err := rt.Converge(t.Context(), "office"); err != nil {
+				t.Fatal(err)
+			}
+			result := wire.TestGet[api.Status](control.Router(), "/status")
+			status := result.ExpectStatusOK(t, http.StatusOK)
+			child := status.Snapshot.Children[0].Children[1]
+			if child.State != "running" || child.Reason != "" || child.Error != "" {
+				t.Fatalf("recovered DNS = %+v", child)
+			}
+		})
+	}
+}
+
+type failingStatusResolver struct {
+	*dns.Manager
+	failure error
+	calls   int
+}
+
+func (r *failingStatusResolver) Apply(
+	ctx context.Context,
+	config dns.Config,
+) error {
+	r.calls++
+	if r.failure != nil {
+		return r.failure
+	}
+	return r.Manager.Apply(ctx, config)
+}
 
 func TestAPIStatus_ReportsConfiguredVersion(
 	t *testing.T,

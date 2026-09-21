@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -116,8 +117,12 @@ func (d *dnsResolver) status(
 		},
 	}
 	if d.lastErr != nil {
+		if errors.Is(d.lastErr, dns.ErrUnsupported) {
+			status.Reason = "unsupported"
+		}
 		status.Error = d.lastErr.Error()
 	}
+
 	status.updateHealth()
 	return status
 }
