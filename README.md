@@ -6,7 +6,7 @@ peers install networks from invites and keep them in sync.
 
 ## Requirements
 
-- Go 1.26 or newer to build from source
+- Go 1.25 or newer to build from source
 - A host with WireGuard interface support (the `wireguard` kernel
   module, or the userspace backend)
 

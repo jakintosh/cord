@@ -1,6 +1,6 @@
 module git.studiopollinator.com/pollinator/cord
 
-go 1.27.0
+go 1.25.0
 
 require (
 	git.sr.ht/~jakintosh/command-go v0.8.0
