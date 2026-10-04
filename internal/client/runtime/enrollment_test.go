@@ -15,6 +15,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
@@ -182,7 +183,7 @@ func enrollmentWithBlockedCleanup(
 	enrollment := status.Snapshot.Children[0]
 	if enrollment.Kind != "enrollment" || enrollment.Target != "stopped" ||
 		enrollment.Activities["close"].Error == "" || enrollment.Activities["redeem"].LastSuccessAt.IsZero() ||
-		len(enrollment.Children) != 1 || status.Health != runtime.HealthDegraded {
+		len(enrollment.Children) != 1 || status.Health != resource.HealthDegraded {
 		t.Fatalf("retained enrollment status = %+v", enrollment)
 	}
 	return env, rt, backend, server, finish

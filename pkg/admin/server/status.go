@@ -4,23 +4,20 @@ import "context"
 
 // Status describes the server daemon and its managed networks.
 type Status struct {
-	Status   string          `json:"status"`
-	Health   string          `json:"health"`
-	Version  string          `json:"version"`
-	Networks []NetworkStatus `json:"networks"`
+	Snapshot ResourceSnapshot `json:"resource"`
+	Status   string           `json:"status"`
+	Health   string           `json:"health"`
+	Version  string           `json:"version"`
+	Networks []NetworkStatus  `json:"networks"`
 }
 
 // NetworkStatus describes persisted intent and live network state.
 type NetworkStatus struct {
 	Name      string         `json:"name"`
 	Enabled   bool           `json:"enabled"`
-	Running   bool           `json:"running"`
 	Reason    string         `json:"reason,omitempty"`
 	Health    string         `json:"health"`
 	Reconcile ActivityStatus `json:"reconcile"`
-	MainAPI   ActivityStatus `json:"main_api"`
-	InviteAPI ActivityStatus `json:"invite_api"`
-	DNS       ActivityStatus `json:"dns"`
 }
 
 // ActivityStatus describes one periodic daemon activity.
@@ -31,7 +28,23 @@ type ActivityStatus struct {
 	Error           string  `json:"error,omitempty"`
 }
 
-// Status returns the daemon's current status.
+// ResourceSnapshot describes an owned resource and its immediate children.
+// State is observed availability; Target is the owner's intended state.
+// Health includes activity failures and unhealthy descendants. Status collection
+// is serialized with runtime operations and never repairs resources.
+type ResourceSnapshot struct {
+	Kind       string                    `json:"kind"`
+	Name       string                    `json:"name,omitempty"`
+	State      string                    `json:"state"`
+	Target     string                    `json:"target"`
+	Health     string                    `json:"health"`
+	Error      string                    `json:"error,omitempty"`
+	Activities map[string]ActivityStatus `json:"activities,omitempty"`
+	Children   []ResourceSnapshot        `json:"children,omitempty"`
+}
+
+// Status returns current status, waiting behind runtime work. Storage errors
+// degrade the snapshot without hiding owned resources awaiting cleanup.
 func (c *Client) Status(
 	ctx context.Context,
 ) (

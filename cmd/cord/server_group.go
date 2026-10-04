@@ -1,10 +1,7 @@
 package main
 
 import (
-	"fmt"
-
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	adminserver "git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
 
 var serverGroupCmd = &args.Command{
@@ -42,12 +39,7 @@ var serverGroupList = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(groups)
-		}
-
-		printGroups(groups)
-		return nil
+		return cliApp(i).Groups(groups)
 	},
 }
 
@@ -81,12 +73,7 @@ var serverGroupCreate = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return nil
-		}
-
-		fmt.Printf("group %q created\n", name)
-		return nil
+		return cliApp(i).Message("group %q created\n", name)
 	},
 }
 
@@ -120,21 +107,6 @@ var serverGroupDelete = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return nil
-		}
-
-		fmt.Printf("group %q deleted\n", name)
-		return nil
+		return cliApp(i).Message("group %q deleted\n", name)
 	},
-}
-
-func printGroups(
-	groups []adminserver.Group,
-) {
-	rows := make([][]string, len(groups))
-	for idx, g := range groups {
-		rows[idx] = []string{g.Name}
-	}
-	printTable([]string{"NAME"}, rows)
 }

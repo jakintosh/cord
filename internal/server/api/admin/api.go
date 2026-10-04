@@ -26,6 +26,7 @@ type NetworkTopology = server.NetworkTopology
 type Peer = server.Peer
 type Registration = server.Registration
 type RegistrationGroupRequest = server.RegistrationGroupRequest
+type ResourceSnapshot = server.ResourceSnapshot
 type Status = server.Status
 type TopologyAssociation = server.TopologyAssociation
 type TopologyNode = server.TopologyNode

@@ -1,32 +1,85 @@
 package runtime
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"slices"
 
+	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/resource"
 )
 
-// ResourceSnapshot is a detached ownership tree collected by the runtime loop.
-// State describes availability; Target describes the owner's intended lifetime.
-// Health includes local activity failures and unhealthy descendants.
-type ResourceSnapshot struct {
-	Kind       string
-	Name       string
-	State      resource.State
-	Target     resource.State
-	Reason     string // Optional machine-readable explanation, such as "unsupported".
-	Error      string
-	Health     string
-	Activities map[string]ActivityStatus
-	Children   []ResourceSnapshot
+// Status collects network state and pending installations in one runtime command.
+type Status struct {
+	Snapshot resource.Snapshot
+	Health   resource.Health
+	Networks []NetworkStatus
+	Installs []*service.Install
 }
 
-func (r *Runtime) status() ResourceSnapshot {
-	status := ResourceSnapshot{
+// NetworkStatus is the operator-facing state of an installed network:
+// persisted intent, actual process state, and the health of running work.
+type NetworkStatus struct {
+	Name      string
+	Enabled   bool
+	Reason    string
+	Health    resource.Health
+	Reconcile resource.ActivityStatus
+	Sync      resource.ActivityStatus
+	Scan      resource.ActivityStatus
+	Report    resource.ActivityStatus
+}
+
+// GetStatus joins the persisted intent with what this process is actually
+// doing. Storage read failures are reported on the resource root so that
+// owned resources remain observable when their saved summaries are unavailable.
+func (r *Runtime) GetStatus(
+	ctx context.Context,
+) (
+	Status,
+	error,
+) {
+	return executeValue(r, ctx, func() (Status, error) {
+		tree := r.status()
+		records, networkErr := r.service.ListNetworks()
+		installs, installErr := r.service.ListInstalls()
+
+		if err := errors.Join(networkErr, installErr); err != nil {
+			tree.Error = fmt.Sprintf("read saved state: %v", err)
+			tree.UpdateHealth()
+		}
+
+		owned := make(map[string]*resource.Snapshot, len(tree.Children))
+		for i := range tree.Children {
+			child := &tree.Children[i]
+			if child.Kind == "network" {
+				owned[child.Name] = child
+			}
+		}
+		statuses := make([]NetworkStatus, len(records))
+		for i, record := range records {
+			statuses[i] = r.networkStatus(record, owned[record.Name])
+			if statuses[i].Health == resource.HealthDegraded {
+				tree.Health = resource.HealthDegraded
+			}
+		}
+
+		return Status{
+			Snapshot: tree,
+			Health:   tree.Health,
+			Networks: statuses,
+			Installs: installs,
+		}, nil
+	})
+}
+
+func (r *Runtime) status() resource.Snapshot {
+	status := resource.Snapshot{
 		Kind:   "runtime",
 		State:  resource.Running,
 		Target: resource.Running,
-		Activities: map[string]ActivityStatus{
+		Activities: map[string]resource.ActivityStatus{
 			"reconcile":   r.reconcileStatus,
 			"cleanup":     r.cleanupStatus,
 			"dns-cleanup": r.dnsCleanupStatus,
@@ -51,95 +104,56 @@ func (r *Runtime) status() ResourceSnapshot {
 		status.Children = append(status.Children, r.enrollments[name].status())
 	}
 
-	status.updateHealth()
+	status.UpdateHealth()
 	return status
 }
 
-func (n *Network) status() ResourceSnapshot {
-	target := resource.Running
-	if n.closing {
-		target = resource.Stopped
+// getNetworkStatus reports the status of one network by name.
+func (r *Runtime) getNetworkStatus(
+	name string,
+) (
+	NetworkStatus,
+	error,
+) {
+	record, err := r.service.GetNetwork(name)
+	if err != nil {
+		return NetworkStatus{}, err
 	}
 
-	state := resource.Running
-	if n.isStopped() {
-		state = resource.Stopped
+	var snapshot *resource.Snapshot
+	if network := r.running[name]; network != nil {
+		status := network.status()
+		snapshot = &status
 	}
-	if n.cleanupStatus.Error != "" {
-		state = resource.Failed
-	}
-
-	status := ResourceSnapshot{
-		Kind:   "network",
-		Name:   n.record.Name,
-		State:  state,
-		Target: target,
-		Activities: map[string]ActivityStatus{
-			"reconcile": n.reconcileStatus,
-			"sync":      n.syncStatus,
-			"scan":      n.scanStatus,
-			"report":    n.reportStatus,
-			"close":     n.cleanupStatus,
-		},
-		Children: []ResourceSnapshot{
-			n.tunnel.status(target),
-			n.dns.status(target),
-		},
-	}
-	status.updateHealth()
-	return status
+	return r.networkStatus(record, snapshot), nil
 }
 
-func (e *Enrollment) status() ResourceSnapshot {
-	// Status commands run between operations. A retained enrollment is
-	// awaiting cleanup, even when its saved installation has been deleted.
-	status := ResourceSnapshot{
-		Kind:   "enrollment",
-		Name:   e.install.Name,
-		State:  resource.Stopped,
-		Target: resource.Stopped,
-		Activities: map[string]ActivityStatus{
-			"redeem":  e.redeemStatus,
-			"confirm": e.confirmStatus,
-			"close":   e.cleanupStatus,
-		},
+// networkStatus joins saved intent with an already collected network snapshot.
+func (r *Runtime) networkStatus(
+	record *service.Network,
+	snapshot *resource.Snapshot,
+) NetworkStatus {
+	status := NetworkStatus{
+		Name:    record.Name,
+		Enabled: record.Enabled,
+		Reason:  r.reasons[record.Name],
+		Health:  resource.HealthInactive,
+		Sync:    resource.ActivityStatus{Interval: r.syncInterval},
+		Scan:    resource.ActivityStatus{Interval: r.scanInterval},
+		Report:  resource.ActivityStatus{Interval: r.reportInterval},
 	}
-	if e.cleanupStatus.Error != "" {
-		status.State = resource.Failed
+
+	if snapshot != nil {
+		status.Health = snapshot.Health
+		status.Reconcile = snapshot.Activities["reconcile"]
+		status.Sync = snapshot.Activities["sync"]
+		status.Scan = snapshot.Activities["scan"]
+		status.Report = snapshot.Activities["report"]
 	}
-	if e.tunnel != nil {
-		status.Children = []ResourceSnapshot{
-			e.tunnel.status(resource.Stopped),
-		}
+
+	if status.Reason != "" || record.Enabled != (snapshot != nil) {
+		status.Health = resource.HealthDegraded
 	}
-	status.updateHealth()
 
 	return status
-}
-
-func (s *ResourceSnapshot) updateHealth() {
-	s.Health = HealthHealthy
-	if s.State == resource.Stopped && s.Target == resource.Stopped {
-		s.Health = HealthInactive
-	}
-
-	if s.Error != "" || s.State == resource.Failed || s.State != s.Target {
-		s.Health = HealthDegraded
-	}
-
-	for name, activity := range s.Activities {
-		// Completed operational work does not prevent intentional retirement.
-		if s.Target == resource.Stopped && name != "close" {
-			continue
-		}
-		if activity.Error != "" {
-			s.Health = HealthDegraded
-		}
-	}
-
-	for _, child := range s.Children {
-		if child.Health == HealthDegraded {
-			s.Health = HealthDegraded
-		}
-	}
 }

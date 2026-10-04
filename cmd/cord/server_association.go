@@ -1,10 +1,7 @@
 package main
 
 import (
-	"fmt"
-
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	adminserver "git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
 
 var serverAssociationCmd = &args.Command{
@@ -53,12 +50,7 @@ var serverAssociationCreate = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return nil
-		}
-
-		fmt.Printf("groups %q and %q associated\n", group1, group2)
-		return nil
+		return cliApp(i).Message("groups %q and %q associated\n", group1, group2)
 	},
 }
 
@@ -98,12 +90,7 @@ var serverAssociationDelete = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return nil
-		}
-
-		fmt.Printf("association %q deleted\n", group1+"/"+group2)
-		return nil
+		return cliApp(i).Message("association %q deleted\n", group1+"/"+group2)
 	},
 }
 
@@ -132,22 +119,6 @@ var serverAssociationList = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(associations)
-		}
-
-		printAssociations(associations)
-		return nil
+		return cliApp(i).Associations(associations)
 	},
-}
-
-// printAssociations prints a one-row-per-association summary table.
-func printAssociations(
-	associations []adminserver.Association,
-) {
-	rows := make([][]string, len(associations))
-	for idx, a := range associations {
-		rows[idx] = []string{a.Group1, a.Group2}
-	}
-	printTable([]string{"GROUP1", "GROUP2"}, rows)
 }

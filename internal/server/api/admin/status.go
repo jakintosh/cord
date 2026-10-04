@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
@@ -14,7 +13,7 @@ func (a *API) handleGetStatus(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	if status, err := a.runtime.GetOverview(
+	if status, err := a.runtime.GetStatus(
 		r.Context(),
 	); err != nil {
 		a.writeServiceError(w, r, err)
@@ -25,8 +24,9 @@ func (a *API) handleGetStatus(
 		}
 
 		statusDTO := Status{
+			Snapshot: snapshotFromRuntime(status.Snapshot),
 			Status:   "ok",
-			Health:   status.Health,
+			Health:   string(status.Health),
 			Version:  a.version,
 			Networks: networks,
 		}
@@ -35,26 +35,19 @@ func (a *API) handleGetStatus(
 }
 
 func networkStatusFromRuntime(
-	status runtime.NetworkOverview,
+	status runtime.NetworkStatus,
 ) NetworkStatus {
-	result := NetworkStatus{
-		Name:    status.Name,
-		Enabled: status.Enabled,
-		Running: status.Running,
-		Reason:  status.Reason,
-		Health:  status.Health,
+	return NetworkStatus{
+		Name:      status.Name,
+		Enabled:   status.Enabled,
+		Reason:    status.Reason,
+		Health:    string(status.Health),
+		Reconcile: activityStatusFromRuntime(status.Reconcile),
 	}
-	if snapshot := status.Status; snapshot != nil {
-		result.Reconcile = activityStatusFromRuntime(snapshot.Reconcile)
-		result.MainAPI = activityStatusFromResource(snapshot.Main.HTTP)
-		result.InviteAPI = activityStatusFromResource(snapshot.Invite.HTTP)
-		result.DNS = activityStatusFromResource(snapshot.Main.DNS)
-	}
-	return result
 }
 
 func activityStatusFromRuntime(
-	status runtime.ActivityStatus,
+	status resource.ActivityStatus,
 ) ActivityStatus {
 	result := ActivityStatus{
 		IntervalSeconds: int64(status.Interval / time.Second),
@@ -71,16 +64,28 @@ func activityStatusFromRuntime(
 	return result
 }
 
-// activityStatusFromResource preserves the admin API's existing activity fields
-// while the runtime reports current resource state.
-func activityStatusFromResource(
-	status resource.Status,
-) ActivityStatus {
-	if status.State == resource.Disabled || status.State == resource.Running {
-		return ActivityStatus{}
+func snapshotFromRuntime(
+	status resource.Snapshot,
+) ResourceSnapshot {
+	result := ResourceSnapshot{
+		Kind:   status.Kind,
+		Name:   status.Name,
+		State:  string(status.State),
+		Target: string(status.Target),
+		Health: string(status.Health),
+		Error:  status.Error,
 	}
-	if status.Error != nil {
-		return ActivityStatus{Error: status.Error.Error()}
+
+	if len(status.Activities) > 0 {
+		result.Activities = make(map[string]ActivityStatus, len(status.Activities))
+		for name, activity := range status.Activities {
+			result.Activities[name] = activityStatusFromRuntime(activity)
+		}
 	}
-	return ActivityStatus{Error: fmt.Sprintf("resource %s", status.State)}
+
+	for _, child := range status.Children {
+		result.Children = append(result.Children, snapshotFromRuntime(child))
+	}
+
+	return result
 }

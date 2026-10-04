@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	inviteapi "git.studiopollinator.com/pollinator/cord/internal/server/api/invite"
 	peerapi "git.studiopollinator.com/pollinator/cord/internal/server/api/peer"
 	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
@@ -234,17 +235,17 @@ func TestReconcileNetwork_DNSStartsHealthy(
 	}
 
 	status := networkStatus(t, rt, "dnstest")
-	if !status.Running {
+	if status.Snapshot == nil {
 		t.Fatalf("status = %+v, want running", status)
 	}
-	if status.Health != runtime.HealthHealthy {
+	if status.Health != resource.HealthHealthy {
 		t.Fatalf("health = %q, want healthy", status.Health)
 	}
 	if status.Reason != "" {
 		t.Fatalf("reason = %q, want empty", status.Reason)
 	}
-	if status.Status.Main.DNS.Error != nil {
-		t.Fatalf("dns status error = %q, want empty", status.Status.Main.DNS.Error)
+	if resourceAt(t, *status.Snapshot, "main", "dns").Error != "" {
+		t.Fatalf("dns status error = %q, want empty", resourceAt(t, *status.Snapshot, "main", "dns").Error)
 	}
 }
 
@@ -272,13 +273,13 @@ func TestReconcileNetwork_DNSFailureRecordsReasonAndRecovers(
 	}
 
 	status := networkStatus(t, rt, "dnstest")
-	if status.Running {
+	if status.Snapshot != nil {
 		t.Fatalf("status = %+v, want the failed start to roll back", status)
 	}
 	if !strings.Contains(status.Reason, "dns:") {
 		t.Fatalf("reason = %q, want a dns: failure", status.Reason)
 	}
-	if status.Health != runtime.HealthDegraded {
+	if status.Health != resource.HealthDegraded {
 		t.Fatalf("health = %q, want degraded", status.Health)
 	}
 
@@ -291,11 +292,11 @@ func TestReconcileNetwork_DNSFailureRecordsReasonAndRecovers(
 	}
 
 	status = networkStatus(t, rt, "dnstest")
-	if !status.Running || status.Health != runtime.HealthHealthy {
+	if status.Snapshot == nil || status.Health != resource.HealthHealthy {
 		t.Fatalf("status = %+v, want running and healthy", status)
 	}
-	if status.Status.Main.DNS.Error != nil {
-		t.Fatalf("dns status error = %q, want empty", status.Status.Main.DNS.Error)
+	if resourceAt(t, *status.Snapshot, "main", "dns").Error != "" {
+		t.Fatalf("dns status error = %q, want empty", resourceAt(t, *status.Snapshot, "main", "dns").Error)
 	}
 }
 
@@ -320,8 +321,8 @@ func TestReconcileNetwork_RecoversDeviceBeforeApplyingPeers(
 	}
 
 	env.ReconcileNetwork(t, "testnet")
-	if status := networkStatus(t, env.Runtime, "testnet"); status.Status.Reconcile.Error != "" {
-		t.Fatalf("recovery pass reported a peer application failure: %s", status.Status.Reconcile.Error)
+	if status := networkStatus(t, env.Runtime, "testnet"); status.Reconcile.Error != "" {
+		t.Fatalf("recovery pass reported a peer application failure: %s", status.Reconcile.Error)
 	}
 
 	replacement := env.Backend.Device("testnet-i")
@@ -372,7 +373,7 @@ func TestReconcileNetwork_PeerStartupFailureRollsBack(
 				t.Fatalf("reconcileNetwork = %v, want store failure", err)
 			}
 			status := networkStatus(t, rt, "testnet")
-			if !status.Enabled || status.Running || status.Status != nil || !strings.Contains(status.Reason, failure.Error()) {
+			if !status.Enabled || status.Snapshot != nil || !strings.Contains(status.Reason, failure.Error()) {
 				t.Fatalf("failed startup status = %+v", status)
 			}
 			for _, name := range []string{"testnet", "testnet-i"} {
@@ -384,7 +385,7 @@ func TestReconcileNetwork_PeerStartupFailureRollsBack(
 			if err := testutil.ApplyNetwork(t, rt, "testnet"); err != nil {
 				t.Fatal(err)
 			}
-			if status := networkStatus(t, rt, "testnet"); !status.Running || status.Health != runtime.HealthHealthy || status.Reason != "" {
+			if status := networkStatus(t, rt, "testnet"); status.Snapshot == nil || status.Health != resource.HealthHealthy || status.Reason != "" {
 				t.Fatalf("recovery status = %+v", status)
 			}
 		})
@@ -422,7 +423,7 @@ func TestReconcileNetwork_MainFailureStillUpdatesInvitePeers(
 		t.Fatal("main failure prevented applying the invite peer")
 	}
 	status := networkStatus(t, env.Runtime, "testnet")
-	if !status.Running || status.Status == nil || status.Health != runtime.HealthDegraded {
+	if status.Snapshot == nil || status.Health != resource.HealthDegraded {
 		t.Fatalf("failed maintenance should keep network owned: %+v", status)
 	}
 	main.PeersErr = nil
@@ -687,10 +688,10 @@ func TestSetNetworkEnabled_LeavesDisabledNetworksStopped(
 	}
 
 	network := networkStatus(t, env.Runtime, "testnet")
-	if network.Enabled || network.Running {
+	if network.Enabled || network.Snapshot != nil {
 		t.Fatalf("status = %+v, want disabled and stopped", network)
 	}
-	if network.Health != runtime.HealthInactive {
+	if network.Health != resource.HealthInactive {
 		t.Fatalf("health = %q, want inactive", network.Health)
 	}
 	if env.Backend.Device("testnet") != nil {
@@ -717,23 +718,23 @@ func TestReconcileNetwork_RecordsFailureAndRecovery(
 	}
 
 	status := networkStatus(t, env.Runtime, "testnet")
-	if status.Health != runtime.HealthDegraded {
+	if status.Health != resource.HealthDegraded {
 		t.Fatalf("health = %q, want degraded", status.Health)
 	}
-	if status.Status.Reconcile.Error == "" {
+	if status.Reconcile.Error == "" {
 		t.Fatal("reconcile error should describe the current failure")
 	}
-	if !status.Status.Reconcile.LastAttemptAt.Equal(now) {
-		t.Fatalf("last attempt = %v, want %v", status.Status.Reconcile.LastAttemptAt, now)
+	if !status.Reconcile.LastAttemptAt.Equal(now) {
+		t.Fatalf("last attempt = %v, want %v", status.Reconcile.LastAttemptAt, now)
 	}
-	if !status.Status.Reconcile.LastSuccessAt.Equal(testutil.FixedTime) {
-		t.Fatalf("last success = %v, want %v", status.Status.Reconcile.LastSuccessAt, testutil.FixedTime)
+	if !status.Reconcile.LastSuccessAt.Equal(testutil.FixedTime) {
+		t.Fatalf("last success = %v, want %v", status.Reconcile.LastSuccessAt, testutil.FixedTime)
 	}
-	overall, err := env.Runtime.GetOverview(t.Context())
+	overall, err := env.Runtime.GetStatus(t.Context())
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if overall.Health != runtime.HealthDegraded {
+	if overall.Health != resource.HealthDegraded {
 		t.Fatalf("overall health = %q, want degraded", overall.Health)
 	}
 
@@ -743,20 +744,20 @@ func TestReconcileNetwork_RecordsFailureAndRecovery(
 	env.ReconcileNetwork(t, "testnet")
 
 	status = networkStatus(t, env.Runtime, "testnet")
-	if status.Health != runtime.HealthHealthy {
+	if status.Health != resource.HealthHealthy {
 		t.Fatalf("health = %q, want healthy", status.Health)
 	}
-	if status.Status.Reconcile.Error != "" {
-		t.Fatalf("reconcile error = %q, want cleared", status.Status.Reconcile.Error)
+	if status.Reconcile.Error != "" {
+		t.Fatalf("reconcile error = %q, want cleared", status.Reconcile.Error)
 	}
-	if !status.Status.Reconcile.LastSuccessAt.Equal(now) {
-		t.Fatalf("last success = %v, want %v", status.Status.Reconcile.LastSuccessAt, now)
+	if !status.Reconcile.LastSuccessAt.Equal(now) {
+		t.Fatalf("last success = %v, want %v", status.Reconcile.LastSuccessAt, now)
 	}
-	overall, err = env.Runtime.GetOverview(t.Context())
+	overall, err = env.Runtime.GetStatus(t.Context())
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if overall.Health != runtime.HealthHealthy {
+	if overall.Health != resource.HealthHealthy {
 		t.Fatalf("overall health = %q, want healthy", overall.Health)
 	}
 }
@@ -771,7 +772,7 @@ func TestSetNetworkEnabled_StartsAndReportsStatus(
 	if err != nil {
 		t.Fatalf("set network enabled: %v", err)
 	}
-	if !status.Enabled || !status.Running {
+	if !status.Enabled || status.Health != resource.HealthHealthy {
 		t.Fatalf("status = %+v, want enabled and running", status)
 	}
 	if status.Reason != "" {
@@ -796,13 +797,13 @@ func TestSetNetworkEnabled_ReportsDivergence(
 	if err != nil {
 		t.Fatalf("set network enabled: %v", err)
 	}
-	if !status.Enabled || status.Running {
+	if !status.Enabled || status.Health != resource.HealthDegraded {
 		t.Fatalf("status = %+v, want enabled and not running", status)
 	}
 	if status.Reason == "" {
 		t.Fatal("status reason should explain the divergence")
 	}
-	if status.Health != runtime.HealthDegraded {
+	if status.Health != resource.HealthDegraded {
 		t.Fatalf("health = %q, want degraded", status.Health)
 	}
 	stored, err := env.Service.GetNetwork("testnet")
@@ -822,7 +823,7 @@ func TestSetNetworkEnabled_DisableStopsNetwork(
 	if err != nil {
 		t.Fatalf("set network enabled: %v", err)
 	}
-	if status.Enabled || status.Running {
+	if status.Enabled || status.Health != resource.HealthInactive {
 		t.Fatalf("status = %+v, want disabled and stopped", status)
 	}
 	if device := env.Backend.Device("testnet"); device == nil || device.CloseCalls != 1 {
@@ -844,7 +845,7 @@ func TestSetNetworkEnabled_FailedCleanupPreventsReplacement(
 	t.Cleanup(func() { main.CloseErr = nil })
 
 	status, err := env.Runtime.SetNetworkEnabled(t.Context(), "testnet", false)
-	if err != nil || status.Reason == "" || !status.Running {
+	if err != nil || status.Reason == "" || networkStatus(t, env.Runtime, "testnet").Snapshot == nil {
 		t.Fatalf("failed disable = %+v, %v", status, err)
 	}
 	status, err = env.Runtime.SetNetworkEnabled(t.Context(), "testnet", true)
@@ -854,7 +855,7 @@ func TestSetNetworkEnabled_FailedCleanupPreventsReplacement(
 
 	main.CloseErr = nil
 	status, err = env.Runtime.SetNetworkEnabled(t.Context(), "testnet", true)
-	if err != nil || status.Health != runtime.HealthHealthy || env.Backend.Device("testnet") == main {
+	if err != nil || status.Health != resource.HealthHealthy || env.Backend.Device("testnet") == main {
 		t.Fatalf("cleanup retry = %+v, %v", status, err)
 	}
 }

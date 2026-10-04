@@ -33,17 +33,17 @@ func TestRun_StartsEnabledNetworks(
 	testutil.RunRuntime(t, rt, runtime.Handlers{})
 
 	network := networkStatus(t, rt, "testnet")
-	if !network.Enabled || !network.Running {
+	if !network.Enabled || network.Snapshot == nil {
 		t.Fatalf("status = %+v, want enabled and running", network)
 	}
 	if network.Reason != "" {
 		t.Fatalf("reason = %q, want empty", network.Reason)
 	}
-	if !network.Status.Reconcile.LastAttemptAt.Equal(testutil.FixedTime) {
-		t.Fatalf("last reconcile attempt = %v, want %v", network.Status.Reconcile.LastAttemptAt, testutil.FixedTime)
+	if !network.Reconcile.LastAttemptAt.Equal(testutil.FixedTime) {
+		t.Fatalf("last reconcile attempt = %v, want %v", network.Reconcile.LastAttemptAt, testutil.FixedTime)
 	}
-	if !network.Status.Reconcile.LastSuccessAt.Equal(testutil.FixedTime) {
-		t.Fatalf("last reconcile success = %v, want %v", network.Status.Reconcile.LastSuccessAt, testutil.FixedTime)
+	if !network.Reconcile.LastSuccessAt.Equal(testutil.FixedTime) {
+		t.Fatalf("last reconcile success = %v, want %v", network.Reconcile.LastSuccessAt, testutil.FixedTime)
 	}
 	if backend.Device("testnet") == nil || backend.Device("testnet-i") == nil {
 		t.Fatal("expected both plane devices")
@@ -64,7 +64,7 @@ func TestRun_RetriesFailedStartOnTick(
 	rt := startRuntimeWithInterval(t, env, backend, 5*time.Millisecond)
 
 	network := networkStatus(t, rt, "testnet")
-	if network.Running || network.Reason == "" {
+	if network.Snapshot != nil || network.Reason == "" {
 		t.Fatalf("status = %+v, want stopped with a reason", network)
 	}
 
@@ -73,7 +73,7 @@ func TestRun_RetriesFailedStartOnTick(
 
 	waitFor(t, func() bool {
 		network := networkStatus(t, rt, "testnet")
-		return network.Running && network.Reason == ""
+		return network.Snapshot != nil && network.Reason == ""
 	}, "network to start on a later tick")
 }
 
@@ -189,12 +189,6 @@ func TestRun_OwnsOneLifetime(
 		t.Fatalf("second Run = %v", err)
 	}
 
-	snapshot := testutil.RuntimeStatus(t, rt)
-	delete(snapshot.Networks, "testnet")
-	if len(testutil.RuntimeStatus(t, rt).Networks) != 1 {
-		t.Fatal("changing the returned snapshot changed runtime state")
-	}
-
 	if err := stop(); err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +228,7 @@ func TestRun_CanceledDoesNotStartResources(
 	if len(backend.CreateCalls) != 0 {
 		t.Fatal("a canceled Run created devices")
 	}
-	if _, err := rt.Status(t.Context()); !errors.Is(err, runtime.ErrNotRunning) {
+	if _, err := rt.GetStatus(t.Context()); !errors.Is(err, runtime.ErrNotRunning) {
 		t.Fatalf("status after canceled Run = %v", err)
 	}
 }
@@ -288,7 +282,7 @@ func TestRun_PrunesExpiredRegistrationsOnPeriodicPass(
 
 		// Frequent commands must not postpone the periodic cleanup.
 		for range int(runtime.DefaultInterval / time.Second) {
-			if _, err := env.Runtime.Status(t.Context()); err != nil {
+			if _, err := env.Runtime.GetStatus(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			time.Sleep(time.Second)
@@ -301,8 +295,8 @@ func TestRun_PrunesExpiredRegistrationsOnPeriodicPass(
 			t.Fatal("expiry replaced the device")
 		}
 		status := testutil.RuntimeStatus(t, env.Runtime)
-		if status.Networks["testnet"].Reconcile.Interval != runtime.DefaultInterval {
-			t.Fatalf("network maintenance interval = %v", status.Networks["testnet"].Reconcile.Interval)
+		if resourceAt(t, status.Snapshot, "testnet").Activities["reconcile"].Interval != runtime.DefaultInterval {
+			t.Fatalf("network maintenance interval = %v", resourceAt(t, status.Snapshot, "testnet").Activities["reconcile"].Interval)
 		}
 
 		if err := env.Stop(); err != nil {
@@ -340,11 +334,11 @@ func TestRun_SnapshotSurvivesStorageFailure(
 		time.Sleep(time.Hour)
 		synctest.Wait()
 		before := testutil.RuntimeStatus(t, rt)
-		if before.Resource.State != resource.Running || before.Reconcile.Error == "" || before.Networks["testnet"].Main.WireGuard.State != resource.Running {
+		if before.Snapshot.State != resource.Running || before.Snapshot.Activities["reconcile"].Error == "" || resourceAt(t, before.Snapshot, "testnet", "main", "wireguard-device").State != resource.Running {
 			t.Fatalf("maintenance failure changed availability: %+v", before)
 		}
-		if _, err := rt.GetOverview(t.Context()); !errors.Is(err, failure) {
-			t.Fatalf("overview = %v, want storage error", err)
+		if status, err := rt.GetStatus(t.Context()); err != nil || !strings.Contains(status.Snapshot.Error, failure.Error()) || status.Health != resource.HealthDegraded {
+			t.Fatalf("status = %+v, %v, want snapshot with storage error", status, err)
 		}
 		if backend.Device("testnet") != device {
 			t.Fatal("storage failure replaced existing resources")
@@ -354,12 +348,12 @@ func TestRun_SnapshotSurvivesStorageFailure(
 		if err := testutil.ApplyNetwork(t, rt, "testnet"); err != nil {
 			t.Fatal(err)
 		}
-		if testutil.RuntimeStatus(t, rt).Reconcile != before.Reconcile {
+		if testutil.RuntimeStatus(t, rt).Snapshot.Activities["reconcile"] != before.Snapshot.Activities["reconcile"] {
 			t.Fatal("targeted success erased the failed full pass")
 		}
 		time.Sleep(time.Hour)
 		synctest.Wait()
-		if status := testutil.RuntimeStatus(t, rt); status.Reconcile.Error != "" || status.Resource.State != resource.Running {
+		if status := testutil.RuntimeStatus(t, rt); status.Snapshot.Activities["reconcile"].Error != "" || status.Snapshot.State != resource.Running {
 			t.Fatalf("recovered status = %+v", status)
 		}
 	})
@@ -391,11 +385,11 @@ func TestRun_ContainsAndJoinsChildFailures(
 	rt := newStoppedRuntime(t, env.Service, backend, time.Hour)
 	testutil.RunRuntime(t, rt, runtime.Handlers{})
 	status := testutil.RuntimeStatus(t, rt)
-	if !strings.Contains(status.Reconcile.Error, first.Error()) || !strings.Contains(status.Reconcile.Error, second.Error()) {
+	if !strings.Contains(status.Snapshot.Activities["reconcile"].Error, first.Error()) || !strings.Contains(status.Snapshot.Activities["reconcile"].Error, second.Error()) {
 		t.Fatalf("full pass lost child failures: %+v", status)
 	}
 
-	if status := testutil.RuntimeStatus(t, rt); status.Resource.State != resource.Running || status.Networks["healthy"].Main.WireGuard.State != resource.Running {
+	if status := testutil.RuntimeStatus(t, rt); status.Snapshot.State != resource.Running || resourceAt(t, status.Snapshot, "healthy", "main", "wireguard-device").State != resource.Running {
 		t.Fatalf("failed child prevented healthy network startup: %+v", status)
 	}
 }

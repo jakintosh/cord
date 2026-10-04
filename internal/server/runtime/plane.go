@@ -18,13 +18,6 @@ import (
 
 const defaultShutdownTimeout = 5 * time.Second
 
-// PlaneStatus is a snapshot of the plane's configured child resources.
-type PlaneStatus struct {
-	WireGuard resource.Status
-	DNS       resource.Status
-	HTTP      resource.Status
-}
-
 // Plane groups a device and its servers. Only the runtime loop operates on it.
 type Plane struct {
 	device *wireguard.Device
@@ -99,24 +92,41 @@ func newPlane(
 }
 
 // status collects child status without changing resources.
-func (p *Plane) status() PlaneStatus {
-	status := PlaneStatus{
-		WireGuard: p.device.Status(),
-		DNS: resource.Status{
-			State: resource.Disabled,
-		},
-		HTTP: resource.Status{
-			State: resource.Disabled,
-		},
-	}
+func (p *Plane) status(
+	name string,
+	target resource.State,
+) resource.Snapshot {
 
-	if p.dns != nil {
-		status.DNS = p.dns.Status()
+	deviceStatus := resourceSnapshot("wireguard-device", p.device.Status(), target)
+	status := resource.Snapshot{
+		Kind:     "plane",
+		Name:     name,
+		State:    resource.Running,
+		Target:   target,
+		Children: []resource.Snapshot{deviceStatus},
 	}
 
 	if p.http != nil {
-		status.HTTP = p.http.status()
+		httpStatus := resourceSnapshot("http", p.http.status(), target)
+		status.Children = append(status.Children, httpStatus)
 	}
+
+	if p.dns != nil {
+		dnsStatus := resourceSnapshot("dns", p.dns.Status(), target)
+		status.Children = append(status.Children, dnsStatus)
+	}
+
+	if target == resource.Stopped {
+		status.State = resource.Stopped
+		for _, child := range status.Children {
+			if child.State != resource.Stopped {
+				status.State = child.State
+				break
+			}
+		}
+	}
+
+	status.UpdateHealth()
 
 	return status
 }

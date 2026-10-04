@@ -2,180 +2,132 @@ package runtime
 
 import (
 	"context"
-	"time"
+	"fmt"
+	"slices"
 
 	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
-// RuntimeStatus observes owned resources and full-pass activity without storage reads.
-type RuntimeStatus struct {
-	Resource  resource.Status
-	Reconcile ActivityStatus
-	Networks  map[string]NetworkStatus
+// Status joins saved network intent with a detached tree of owned resources.
+type Status struct {
+	Snapshot resource.Snapshot
+	Health   resource.Health
+	Networks []NetworkStatus
 }
 
-// RuntimeOverview joins persisted network intent with runtime and child health.
-type RuntimeOverview struct {
-	Health    string
-	Resource  resource.Status
-	Reconcile ActivityStatus
-	Networks  []NetworkOverview
+// NetworkStatus describes saved intent and the health of its owned resource.
+type NetworkStatus struct {
+	Name      string
+	Enabled   bool
+	Reason    string
+	Health    resource.Health
+	Reconcile resource.ActivityStatus
 }
 
-// NetworkOverview is the operator-facing state of a server network:
-// persisted intent, actual process state, and the health of running work.
-type NetworkOverview struct {
-	Name    string
-	Enabled bool
-	Running bool // The runtime owns an instance; its resources may be unhealthy.
-	Reason  string
-	Health  string
-	Status  *NetworkStatus // Nil when there is no running instance.
-}
-
-// ActivityStatus describes the latest result of one runtime activity.
-// Interval is zero for work without a periodic schedule.
-type ActivityStatus struct {
-	Interval      time.Duration
-	LastAttemptAt time.Time
-	LastSuccessAt time.Time
-	Error         string
-}
-
-func (s *ActivityStatus) record(
-	at time.Time,
-	err error,
-) {
-	s.LastAttemptAt = at
-	if err != nil {
-		s.Error = err.Error()
-		return
-	}
-	s.LastSuccessAt = at
-	s.Error = ""
-}
-
-// Status collects runtime availability, full-pass activity, and child snapshots.
-func (r *Runtime) Status(
+// GetStatus waits behind runtime work and observes resources without repairing them.
+// Storage failures degrade the response without hiding the ownership tree.
+func (r *Runtime) GetStatus(
 	ctx context.Context,
 ) (
-	RuntimeStatus,
+	Status,
 	error,
 ) {
-	return executeValue(r, ctx, func() (RuntimeStatus, error) {
-		networks := make(map[string]NetworkStatus, len(r.running))
-		for name, network := range r.running {
-			networks[name] = network.status()
-		}
-
-		return RuntimeStatus{
-			Resource:  resource.Status{State: resource.Running},
-			Reconcile: r.reconcileStatus,
-			Networks:  networks,
-		}, nil
-	})
-}
-
-// GetOverview joins the persisted intent with what this process is actually
-// doing. It is the single source of operator-facing state.
-func (r *Runtime) GetOverview(
-	ctx context.Context,
-) (
-	RuntimeOverview,
-	error,
-) {
-	return executeValue(r, ctx, func() (RuntimeOverview, error) {
+	return executeValue(r, ctx, func() (Status, error) {
+		snapshot := r.status()
 		networks, err := r.service.ListNetworks()
 		if err != nil {
-			return RuntimeOverview{}, err
+			snapshot.Error = fmt.Sprintf("read saved state: %v", err)
+			snapshot.UpdateHealth()
 		}
 
-		statuses := make([]NetworkOverview, len(networks))
+		owned := make(map[string]*resource.Snapshot, len(snapshot.Children))
+		for i := range snapshot.Children {
+			child := &snapshot.Children[i]
+			owned[child.Name] = child
+		}
+		statuses := make([]NetworkStatus, len(networks))
 		for i, network := range networks {
-			statuses[i] = r.networkOverview(network)
+			statuses[i] = r.networkStatus(network, owned[network.Name])
+			if statuses[i].Health == resource.HealthDegraded {
+				snapshot.Health = resource.HealthDegraded
+			}
 		}
 
-		state := resource.Status{State: resource.Running}
-		health := statusHealth(statuses)
-		if r.reconcileStatus.Error != "" {
-			health = HealthDegraded
-		}
-
-		return RuntimeOverview{
-			Health:    health,
-			Resource:  state,
-			Reconcile: r.reconcileStatus,
-			Networks:  statuses,
+		return Status{
+			Snapshot: snapshot,
+			Health:   snapshot.Health,
+			Networks: statuses,
 		}, nil
 	})
 }
 
-// networkOverview joins one persisted record with the running set.
-func (r *Runtime) networkOverview(
-	network *service.Network,
-) NetworkOverview {
-	running, isRunning := r.running[network.Name]
-	status := NetworkOverview{
-		Name:    network.Name,
-		Enabled: network.Enabled,
-		Running: isRunning,
-		Reason:  r.reasons[network.Name],
-	}
-	if isRunning {
-		snapshot := running.status()
-		status.Status = &snapshot
+func (r *Runtime) status() resource.Snapshot {
+	status := resource.Snapshot{
+		Kind:   "runtime",
+		State:  resource.Running,
+		Target: resource.Running,
+		Activities: map[string]resource.ActivityStatus{
+			"reconcile": r.reconcileStatus,
+		},
 	}
 
-	status.Health = networkHealth(status)
+	var names []string
+	for name := range r.running {
+		names = append(names, name)
+	}
+
+	slices.Sort(names)
+	for _, name := range names {
+		childStatus := r.running[name].status()
+		status.Children = append(status.Children, childStatus)
+	}
+
+	status.UpdateHealth()
+
 	return status
 }
 
-func networkHealth(
-	status NetworkOverview,
-) string {
-	if status.Reason != "" {
-		return HealthDegraded
+func (r *Runtime) networkStatus(
+	network *service.Network,
+	snapshot *resource.Snapshot,
+) NetworkStatus {
+	status := NetworkStatus{
+		Name:    network.Name,
+		Enabled: network.Enabled,
+		Reason:  r.reasons[network.Name],
+		Health:  resource.HealthInactive,
 	}
 
-	if !status.Enabled && !status.Running {
-		return HealthInactive
+	if snapshot != nil {
+		status.Health = snapshot.Health
+		status.Reconcile = snapshot.Activities["reconcile"]
 	}
 
-	if status.Enabled != status.Running {
-		return HealthDegraded
+	if status.Reason != "" || network.Enabled != (snapshot != nil) {
+		status.Health = resource.HealthDegraded
 	}
 
-	if status.Status == nil || status.Status.Reconcile.Error != "" {
-		return HealthDegraded
-	}
-
-	for _, plane := range []PlaneStatus{
-		status.Status.Main,
-		status.Status.Invite,
-	} {
-		for _, child := range []resource.Status{
-			plane.WireGuard,
-			plane.DNS,
-			plane.HTTP,
-		} {
-			if child.Error != nil || (child.State != resource.Running && child.State != resource.Disabled) {
-				return HealthDegraded
-			}
-		}
-	}
-
-	return HealthHealthy
+	return status
 }
 
-func statusHealth(
-	statuses []NetworkOverview,
-) string {
-	for _, status := range statuses {
-		if status.Health == HealthDegraded {
-			return HealthDegraded
-		}
+// resourceSnapshot adapts a leaf observation without changing its resource.
+func resourceSnapshot(
+	kind string,
+	status resource.Status,
+	target resource.State,
+) resource.Snapshot {
+	snapshot := resource.Snapshot{
+		Kind:   kind,
+		State:  status.State,
+		Target: target,
 	}
 
-	return HealthHealthy
+	if status.Error != nil {
+		snapshot.Error = status.Error.Error()
+	}
+
+	snapshot.UpdateHealth()
+
+	return snapshot
 }

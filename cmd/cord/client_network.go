@@ -8,7 +8,6 @@ import (
 	"strconv"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	adminclient "git.studiopollinator.com/pollinator/cord/pkg/admin/client"
 	"git.studiopollinator.com/pollinator/cord/pkg/invite"
 )
 
@@ -44,14 +43,7 @@ var clientNetworkList = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(networks)
-		}
-
-		for _, n := range networks {
-			fmt.Println(n)
-		}
-		return nil
+		return cliApp(i).Names(networks)
 	},
 }
 
@@ -77,11 +69,7 @@ var clientNetworkShow = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(result)
-		}
-		printClientNetworkDetail(result)
-		return nil
+		return cliApp(i).ClientNetworkDetail(result)
 	},
 }
 
@@ -147,15 +135,10 @@ var clientNetworkInstall = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(result)
-		}
 		if result.Address != "" {
-			fmt.Printf("network %q installed (%s)\n", result.Name, result.Address)
-		} else {
-			fmt.Printf("network %q installed\n", result.Name)
+			return cliApp(i).Result(result, "network %q installed (%s)\n", result.Name, result.Address)
 		}
-		return nil
+		return cliApp(i).Result(result, "network %q installed\n", result.Name)
 	},
 }
 
@@ -196,8 +179,7 @@ var clientNetworkListenPort = &args.Command{
 			return err
 		}
 
-		fmt.Printf("network %q listen port set to %d\n", network, port)
-		return nil
+		return cliApp(i).Message("network %q listen port set to %d\n", network, port)
 	},
 }
 
@@ -223,15 +205,10 @@ var clientNetworkRedeem = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(result)
-		}
 		if result.Address != "" {
-			fmt.Printf("network %q redeemed (%s)\n", network, result.Address)
-		} else {
-			fmt.Printf("network %q redeemed\n", network)
+			return cliApp(i).Result(result, "network %q redeemed (%s)\n", network, result.Address)
 		}
-		return nil
+		return cliApp(i).Result(result, "network %q redeemed\n", network)
 	},
 }
 
@@ -256,11 +233,7 @@ var clientNetworkConfirm = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return nil
-		}
-		fmt.Printf("network %q confirmed\n", network)
-		return nil
+		return cliApp(i).Message("network %q confirmed\n", network)
 	},
 }
 
@@ -285,11 +258,7 @@ var clientNetworkUninstall = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return nil
-		}
-		fmt.Printf("network %q deleted\n", network)
-		return nil
+		return cliApp(i).Message("network %q deleted\n", network)
 	},
 }
 
@@ -315,13 +284,11 @@ var clientNetworkEnable = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(status)
+		output := cliApp(i)
+		if err := output.Message("network %q enabled\n", network); err != nil {
+			return err
 		}
-
-		fmt.Printf("network %q enabled\n", network)
-		printClientNetworkRuntime(status)
-		return nil
+		return output.ClientNetworkRuntime(status)
 	},
 }
 
@@ -347,13 +314,11 @@ var clientNetworkDisable = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(status)
+		output := cliApp(i)
+		if err := output.Message("network %q disabled\n", network); err != nil {
+			return err
 		}
-
-		fmt.Printf("network %q disabled\n", network)
-		printClientNetworkRuntime(status)
-		return nil
+		return output.ClientNetworkRuntime(status)
 	},
 }
 
@@ -379,46 +344,6 @@ var clientNetworkSync = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(result)
-		}
-		fmt.Printf("network %q synced\n", network)
-		return nil
+		return cliApp(i).Result(result, "network %q synced\n", network)
 	},
-}
-
-// printClientNetworkRuntime reports degraded network health after a change.
-func printClientNetworkRuntime(
-	status adminclient.NetworkStatus,
-) {
-	if status.Health != "degraded" {
-		return
-	}
-	if status.Reason == "" {
-		fmt.Printf("health: %s\n", status.Health)
-		return
-	}
-	fmt.Printf("health: %s (%s)\n", status.Health, status.Reason)
-}
-
-// printClientNetworkDetail prints the key: value detail view for a single
-// network, as shown by `client network show`.
-func printClientNetworkDetail(
-	n adminclient.Network,
-) {
-	fmt.Printf("name: %s\n", n.Name)
-	fmt.Printf("state: %s\n", n.State)
-	fmt.Printf("enabled: %t\n", n.Enabled)
-	if n.Address != "" {
-		fmt.Printf("address: %s\n", n.Address)
-	}
-	if n.Interface != "" {
-		fmt.Printf("interface: %s\n", n.Interface)
-	}
-	if n.ListenPort != 0 {
-		fmt.Printf("listen_port: %d\n", n.ListenPort)
-	}
-	if n.ServerEndpoint != "" {
-		fmt.Printf("server_endpoint: %s\n", n.ServerEndpoint)
-	}
 }

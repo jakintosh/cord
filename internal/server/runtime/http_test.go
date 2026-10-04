@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
@@ -31,7 +32,7 @@ func TestHTTP_StartupRetriesAfterPortReleased(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Running || status.Health != runtime.HealthDegraded || status.Reason == "" {
+	if status.Health != resource.HealthDegraded || status.Reason == "" {
 		t.Fatalf("status = %+v, want failed startup", status)
 	}
 	if err := blocker.Close(); err != nil {
@@ -60,7 +61,7 @@ func TestHTTP_StopReleasesListener(
 		t.Fatal(err)
 	}
 	assertHTTPPortReleased(t, address)
-	if _, err := rt.GetOverview(t.Context()); !errors.Is(err, runtime.ErrNotRunning) {
+	if _, err := rt.GetStatus(t.Context()); !errors.Is(err, runtime.ErrNotRunning) {
 		t.Fatalf("stopped runtime accepted a read: %v", err)
 	}
 }
@@ -197,7 +198,9 @@ func assertHTTPHealthy(
 ) {
 	t.Helper()
 	status := networkStatus(t, rt, "httptest")
-	if !status.Running || status.Health != runtime.HealthHealthy || status.Status == nil || status.Status.Main.HTTP.Error != nil {
+	if status.Health != resource.HealthHealthy ||
+		status.Snapshot == nil ||
+		resourceAt(t, *status.Snapshot, "main", "http").Error != "" {
 		t.Fatalf("status = %+v, want healthy HTTP", status)
 	}
 }
@@ -241,7 +244,7 @@ func TestHTTP_ShutdownAllowsHandlerToReturnThroughRuntime(
 				}}
 			}
 			rt, address, _, stop := newHTTPRuntime(t, env.Service, time.Second, build)
-			if status, err := rt.SetNetworkEnabled(t.Context(), "httptest", true); err != nil || !status.Running {
+			if status, err := rt.SetNetworkEnabled(t.Context(), "httptest", true); err != nil || status.Health != "healthy" {
 				t.Fatalf("enable = %+v, %v", status, err)
 			}
 
@@ -259,7 +262,7 @@ func TestHTTP_ShutdownAllowsHandlerToReturnThroughRuntime(
 				}
 			} else {
 				status, err := rt.SetNetworkEnabled(t.Context(), "httptest", false)
-				if err != nil || status.Running || status.Reason != "" {
+				if err != nil || status.Health != "inactive" || status.Reason != "" {
 					t.Fatalf("disable = %+v, %v", status, err)
 				}
 			}

@@ -25,12 +25,6 @@ import (
 // retries for networks that failed to start.
 const DefaultInterval = 30 * time.Second
 
-const (
-	HealthInactive = "inactive"
-	HealthHealthy  = "healthy"
-	HealthDegraded = "degraded"
-)
-
 var (
 	// ErrNotRunning is returned once Run has stopped accepting commands.
 	ErrNotRunning = errors.New("runtime is not running")
@@ -97,7 +91,7 @@ type Runtime struct {
 	ctx             context.Context
 	running         map[string]*Network
 	reasons         map[string]string
-	reconcileStatus ActivityStatus
+	reconcileStatus resource.ActivityStatus
 }
 
 // New constructs a runtime without starting work. Call Run exactly once.
@@ -149,7 +143,7 @@ func New(
 		operations:      make(chan operation),
 		done:            make(chan struct{}),
 		reasons:         make(map[string]string),
-		reconcileStatus: ActivityStatus{
+		reconcileStatus: resource.ActivityStatus{
 			Interval: interval,
 		},
 	}
@@ -238,7 +232,7 @@ func (r *Runtime) reconcile() (err error) {
 	// Record one outcome for the entire pass, including early failures.
 	defer func() {
 		err = errors.Join(err, r.ctx.Err())
-		r.reconcileStatus.record(r.clock(), err)
+		r.reconcileStatus.Record(r.clock(), err)
 	}()
 
 	// First get all the networks tracked by the service.

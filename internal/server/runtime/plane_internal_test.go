@@ -66,8 +66,8 @@ func TestPlane_ReconcilesIndependentResourceFailures(
 	}
 	want := resource.Stopped
 
-	if status := p.status(); status.WireGuard.State != resource.Stopped ||
-		status.DNS.State != want || status.HTTP.State != resource.Stopped {
+	if status := p.status("main", resource.Running); status.Children[0].State != resource.Stopped ||
+		status.Children[2].State != want || status.Children[1].State != resource.Stopped {
 		t.Fatalf("initial status = %+v", status)
 	}
 	defer p.close()
@@ -79,14 +79,14 @@ func TestPlane_ReconcilesIndependentResourceFailures(
 		t.Fatal(err)
 	}
 
-	if p.status().DNS.State != resource.Running {
+	if p.dns.Status().State != resource.Running {
 		t.Fatal("DNS not running")
 	}
 	if err := p.dns.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if status := p.status(); status.DNS.State != resource.Stopped || status.HTTP.State != resource.Running {
+		if status := p.status("main", resource.Running); status.Children[2].State != resource.Stopped || status.Children[1].State != resource.Running {
 			t.Fatalf("status read repaired DNS or changed HTTP: %+v", status)
 		}
 	}
@@ -105,7 +105,7 @@ func TestPlane_ReconcilesIndependentResourceFailures(
 		t.Fatalf("device failure was lost: %v", repairErr)
 	}
 	for range 2 {
-		status := p.status().DNS
+		status := p.dns.Status()
 		if status.State != resource.Failed || status.Error == nil {
 			t.Fatalf("failed DNS status = %+v", status)
 		}
@@ -113,7 +113,7 @@ func TestPlane_ReconcilesIndependentResourceFailures(
 	if err := p.dns.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if p.status().DNS.Error == nil {
+	if p.dns.Status().Error == nil {
 		t.Fatal("cleanup discarded failed startup error")
 	}
 	// HTTP still recovers when both WireGuard and DNS cannot restart.
@@ -129,7 +129,7 @@ func TestPlane_ReconcilesIndependentResourceFailures(
 	if err := p.reconcile(t.Context()); !errors.Is(err, deviceErr) || !errors.Is(err, p.dns.Status().Error) {
 		t.Fatalf("resource failures were not joined: %v", err)
 	}
-	if p.status().HTTP.State != resource.Running {
+	if p.http.status().State != resource.Running {
 		t.Fatal("DNS failure prevented HTTP recovery")
 	}
 	if err := blocker.Close(); err != nil {
@@ -138,7 +138,7 @@ func TestPlane_ReconcilesIndependentResourceFailures(
 	if err := p.reconcile(t.Context()); !errors.Is(err, deviceErr) {
 		t.Fatalf("device failure was lost during DNS recovery: %v", err)
 	}
-	if status := p.status().DNS; status.State != resource.Running || status.Error != nil {
+	if status := p.dns.Status(); status.State != resource.Running || status.Error != nil {
 		t.Fatalf("recovered DNS status = %+v", status)
 	}
 	backend.CreateErr = nil
@@ -152,8 +152,8 @@ func TestPlane_ReconcilesIndependentResourceFailures(
 	if err := p.close(); err != nil {
 		t.Fatal(err)
 	}
-	status := p.status()
-	if status.WireGuard.State != resource.Stopped || status.DNS.State != want || status.HTTP.State != resource.Stopped {
+	status := p.status("main", resource.Running)
+	if status.Children[0].State != resource.Stopped || status.Children[2].State != want || status.Children[1].State != resource.Stopped {
 		t.Fatalf("stopped status = %+v", status)
 	}
 	if p.device != device || p.http != httpWrapper || p.dns != dnsWrapper {
@@ -184,15 +184,15 @@ func TestPlane_DisabledDNSHasNoResource(
 		if err := p.reconcile(t.Context()); err != nil {
 			t.Fatal(err)
 		}
-		if p.dns != nil || p.status().DNS.State != resource.Disabled {
-			t.Fatalf("disabled DNS = %+v", p.status().DNS)
+		if p.dns != nil || len(p.status("main", resource.Running).Children) != 1 {
+			t.Fatalf("disabled DNS = %+v", p.status("main", resource.Running))
 		}
 	}
 	if err := p.close(); err != nil {
 		t.Fatal(err)
 	}
-	if p.status().DNS.State != resource.Disabled || backend.Device("test").CloseCalls != 1 {
-		t.Fatalf("closed plane = %+v", p.status())
+	if len(p.status("main", resource.Stopped).Children) != 1 || backend.Device("test").CloseCalls != 1 {
+		t.Fatalf("closed plane = %+v", p.status("main", resource.Running))
 	}
 }
 
@@ -225,7 +225,7 @@ func TestPlaneReconcile_RepairsFailedHTTP(
 	if err := backend.Device("httptest").Close(); err != nil {
 		t.Fatal(err)
 	}
-	if status := p.status().WireGuard; status.State != resource.Failed || status.Error == nil {
+	if status := p.device.Status(); status.State != resource.Failed || status.Error == nil {
 		t.Fatalf("failed device status = %+v", status)
 	}
 	address := run.server.Addr
@@ -233,7 +233,7 @@ func TestPlaneReconcile_RepairsFailedHTTP(
 	if err := p.reconcile(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if p.status().WireGuard.State != resource.Running || p.device != device {
+	if p.device.Status().State != resource.Running || p.device != device {
 		t.Fatal("WireGuard recovery lost the wrapper or failed to restore service")
 	}
 	if p.http.run != run {
@@ -248,7 +248,7 @@ func TestPlaneReconcile_RepairsFailedHTTP(
 		t.Fatal("HTTP did not exit")
 	}
 	for range 2 {
-		status := p.status().HTTP
+		status := p.http.status()
 		if status.State != resource.Failed || !errors.Is(status.Error, http.ErrServerClosed) {
 			t.Fatalf("failed status = %+v", status)
 		}
@@ -264,7 +264,7 @@ func TestPlaneReconcile_RepairsFailedHTTP(
 	if err := p.reconcile(t.Context()); err == nil {
 		t.Fatal("expected blocked restart")
 	}
-	if status := p.status().HTTP; status.State != resource.Failed || status.Error == nil {
+	if status := p.http.status(); status.State != resource.Failed || status.Error == nil {
 		t.Fatalf("failed restart status = %+v", status)
 	}
 	if p.http != wrapper || wrapper.run != nil {
@@ -276,7 +276,7 @@ func TestPlaneReconcile_RepairsFailedHTTP(
 	if err := p.reconcile(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if status := p.status().HTTP; status.State != resource.Running || status.Error != nil {
+	if status := p.http.status(); status.State != resource.Running || status.Error != nil {
 		t.Fatalf("recovered status = %+v", status)
 	}
 	client := &http.Client{Timeout: time.Second}

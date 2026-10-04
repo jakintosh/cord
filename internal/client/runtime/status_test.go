@@ -35,8 +35,8 @@ func TestGetStatus_ObservesLostDeviceWithoutRepair(
 	if network.Kind != "network" || tunnel.Kind != "tunnel" || leaf.Kind != "wireguard-device" {
 		t.Fatalf("unexpected tree: %+v", network)
 	}
-	if status.Health != runtime.HealthDegraded || network.Health != runtime.HealthDegraded ||
-		tunnel.Health != runtime.HealthDegraded || leaf.Health != runtime.HealthDegraded {
+	if status.Health != resource.HealthDegraded || network.Health != resource.HealthDegraded ||
+		tunnel.Health != resource.HealthDegraded || leaf.Health != resource.HealthDegraded {
 		t.Fatal("device failure did not propagate through ancestor health")
 	}
 	if leaf.Error == "" || leaf.Target != resource.Running {
@@ -47,10 +47,10 @@ func TestGetStatus_ObservesLostDeviceWithoutRepair(
 	}
 
 	// Returned maps and slices belong to the caller.
-	status.Snapshot.Children[0].Activities["sync"] = runtime.ActivityStatus{Error: "caller mutation"}
+	status.Snapshot.Children[0].Activities["sync"] = resource.ActivityStatus{Error: "caller mutation"}
 	status.Snapshot.Children[0].Children[0].Kind = "changed"
 	resolver := resolverStatus(t, &status.Snapshot.Children[0])
-	resolver.Activities["apply"] = runtime.ActivityStatus{Error: "caller mutation"}
+	resolver.Activities["apply"] = resource.ActivityStatus{Error: "caller mutation"}
 	again, err := env.Runtime.GetStatus(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -86,11 +86,11 @@ func TestGetStatus_RetainsUninstalledNetworkUntilCleanup(
 	}
 	network := status.Snapshot.Children[0]
 	if network.Target != resource.Stopped || network.Activities["close"].Error == "" ||
-		status.Health != runtime.HealthDegraded {
+		status.Health != resource.HealthDegraded {
 		t.Fatalf("cleanup status = %+v", network)
 	}
 	resolver := resolverStatus(t, &network)
-	if resolver.State != resource.Stopped || resolver.Health != runtime.HealthInactive {
+	if resolver.State != resource.Stopped || resolver.Health != resource.HealthInactive {
 		t.Fatalf("completed DNS cleanup = %+v", resolver)
 	}
 	device.CloseErr = nil
@@ -101,7 +101,7 @@ func TestGetStatus_RetainsUninstalledNetworkUntilCleanup(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(status.Snapshot.Children) != 0 || status.Health != runtime.HealthHealthy {
+	if len(status.Snapshot.Children) != 0 || status.Health != resource.HealthHealthy {
 		t.Fatalf("successful cleanup remained unhealthy: %+v", status)
 	}
 }
@@ -123,7 +123,41 @@ func TestGetStatus_ReportsMaintenanceAndStorageFailure(
 		t.Fatal(err)
 	}
 	if status.Snapshot.Error == "" || status.Snapshot.Activities["reconcile"].Error == "" ||
-		len(status.Snapshot.Children) != 1 || status.Health != runtime.HealthDegraded {
+		len(status.Snapshot.Children) != 1 || status.Health != resource.HealthDegraded {
 		t.Fatalf("storage failure hid resource diagnostics: %+v", status)
 	}
+}
+
+type networkObservation struct {
+	runtime.NetworkStatus
+	Resource *resource.Snapshot
+}
+
+// networkStatus returns the summary and owned resource of one network,
+// failing the test when the runtime does not know it.
+func networkStatus(
+	t *testing.T,
+	rt *runtime.Runtime,
+	name string,
+) networkObservation {
+	t.Helper()
+
+	status, err := rt.GetStatus(t.Context())
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	for _, network := range status.Networks {
+		if network.Name == name {
+			observation := networkObservation{NetworkStatus: network}
+			for _, child := range status.Snapshot.Children {
+				if child.Kind == "network" && child.Name == name {
+					observation.Resource = &child
+					break
+				}
+			}
+			return observation
+		}
+	}
+	t.Fatalf("network %q missing from status", name)
+	return networkObservation{}
 }

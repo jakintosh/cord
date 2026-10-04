@@ -432,7 +432,7 @@ func TestAPIEnableNetwork_Success(
 
 	// verify result — the network is enabled and running, with no divergence
 	data := result.ExpectOK(t)
-	if !data.Enabled || !data.Running {
+	if !data.Enabled || data.Health != "healthy" {
 		t.Fatalf("status = %+v, want enabled and running", data)
 	}
 	if data.Reason != "" {
@@ -463,7 +463,7 @@ func TestAPIEnableNetwork_StartFailureKeepsIntent(
 
 	// verify result — the intent stands and the response explains reality
 	data := result.ExpectOK(t)
-	if !data.Enabled || data.Running {
+	if !data.Enabled || data.Health != "degraded" {
 		t.Fatalf("status = %+v, want enabled but not running", data)
 	}
 	if data.Reason == "" {
@@ -511,7 +511,7 @@ func TestAPIDisableNetwork_Success(
 
 	// verify result — the network is neither enabled nor running
 	data := result.ExpectOK(t)
-	if data.Enabled || data.Running {
+	if data.Enabled || data.Health != "inactive" {
 		t.Fatalf("status = %+v, want disabled and stopped", data)
 	}
 

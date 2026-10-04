@@ -11,6 +11,7 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol/client"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -25,9 +26,37 @@ type Enrollment struct {
 	httpClient *http.Client
 	clock      func() time.Time
 
-	redeemStatus  ActivityStatus
-	confirmStatus ActivityStatus
-	cleanupStatus ActivityStatus
+	redeemStatus  resource.ActivityStatus
+	confirmStatus resource.ActivityStatus
+	cleanupStatus resource.ActivityStatus
+}
+
+// status reports temporary resources retained for cleanup.
+func (e *Enrollment) status() resource.Snapshot {
+	// Status commands run between operations. A retained enrollment is
+	// awaiting cleanup, even when its saved installation has been deleted.
+	status := resource.Snapshot{
+		Kind:   "enrollment",
+		Name:   e.install.Name,
+		State:  resource.Stopped,
+		Target: resource.Stopped,
+		Activities: map[string]resource.ActivityStatus{
+			"redeem":  e.redeemStatus,
+			"confirm": e.confirmStatus,
+			"close":   e.cleanupStatus,
+		},
+	}
+	if e.cleanupStatus.Error != "" {
+		status.State = resource.Failed
+	}
+	if e.tunnel != nil {
+		status.Children = []resource.Snapshot{
+			e.tunnel.status(resource.Stopped),
+		}
+	}
+	status.UpdateHealth()
+
+	return status
 }
 
 // redeem redeems the install's invite over a one-shot tunnel and
@@ -42,7 +71,7 @@ func (e *Enrollment) redeem(
 	err error,
 ) {
 	defer func() {
-		e.redeemStatus.record(e.clock(), err)
+		e.redeemStatus.Record(e.clock(), err)
 	}()
 
 	if err := e.close(); err != nil {
@@ -143,7 +172,7 @@ func (e *Enrollment) confirm(
 	err error,
 ) {
 	defer func() {
-		e.confirmStatus.record(e.clock(), err)
+		e.confirmStatus.Record(e.clock(), err)
 	}()
 
 	if err := e.close(); err != nil {
@@ -222,7 +251,7 @@ func (e *Enrollment) close() (
 		return nil
 	}
 	defer func() {
-		e.cleanupStatus.record(e.clock(), err)
+		e.cleanupStatus.Record(e.clock(), err)
 	}()
 
 	if err := e.tunnel.close(); err != nil {
@@ -482,7 +511,7 @@ func (r *Runtime) closeEnrollments() (
 	err error,
 ) {
 	defer func() {
-		r.cleanupStatus.record(r.clock(), err)
+		r.cleanupStatus.Record(r.clock(), err)
 	}()
 
 	var errs []error

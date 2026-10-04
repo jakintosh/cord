@@ -8,7 +8,7 @@ import (
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	"git.sr.ht/~jakintosh/command-go/pkg/version"
-	topotext "git.studiopollinator.com/pollinator/cord/internal/topology/text"
+	"git.studiopollinator.com/pollinator/cord/internal/cli"
 )
 
 const (
@@ -49,7 +49,7 @@ var root = &args.Command{
 				if err != nil {
 					return fmt.Errorf("compile topology: %w", err)
 				}
-				return topotext.Render(os.Stdout, topo.FullView(), topotext.Options{})
+				return cli.New(os.Stdout, cli.Options{}).Topology(topo.FullView(), cli.TopologyOptions{})
 			},
 		},
 		{
@@ -83,7 +83,7 @@ var root = &args.Command{
 				if err != nil {
 					return err
 				}
-				return topotext.Render(os.Stdout, view, topotext.Options{
+				return cli.New(os.Stdout, cli.Options{}).Topology(view, cli.TopologyOptions{
 					Heading: "topology (projected)",
 				})
 			},

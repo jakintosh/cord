@@ -13,6 +13,8 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol/client"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
+	"git.studiopollinator.com/pollinator/cord/internal/topology"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -39,6 +41,27 @@ const (
 	// handshake is considered stale and eligible for endpoint rotation.
 	StaleThreshold = wireguard.ActiveHandshakeThreshold
 )
+
+const serverPeerName = "cord-server"
+
+// NetworkLookup contains exactly one record on a successful lookup.
+type NetworkLookup struct {
+	Network *service.Network
+	Install *service.Install
+}
+
+// NetworkTopology is the network's cached topology joined with live peer
+// connectivity for display. Connected maps a peer name to its live
+// state; peers absent from the map have no known connectivity. The
+// subject peer is always present: its connectivity is whether the
+// network is running. The pinned server peer is evaluated from its
+// live WireGuard handshake.
+type NetworkTopology struct {
+	View        topology.View
+	GeneratedAt time.Time
+	SyncedAt    time.Time
+	Connected   map[string]bool
+}
 
 type networkOptions struct {
 	record     *service.Network
@@ -79,11 +102,11 @@ type Network struct {
 	scanInterval   time.Duration
 	reportInterval time.Duration
 
-	reconcileStatus ActivityStatus
-	cleanupStatus   ActivityStatus
-	syncStatus      ActivityStatus
-	scanStatus      ActivityStatus
-	reportStatus    ActivityStatus
+	reconcileStatus resource.ActivityStatus
+	cleanupStatus   resource.ActivityStatus
+	syncStatus      resource.ActivityStatus
+	scanStatus      resource.ActivityStatus
+	reportStatus    resource.ActivityStatus
 }
 
 // newNetwork constructs the tunnel, DNS resolver, and API client without starting resources
@@ -135,10 +158,46 @@ func newNetwork(
 		syncInterval:   opts.syncInterval,
 		scanInterval:   opts.scanInterval,
 		reportInterval: opts.reportInterval,
-		syncStatus:     ActivityStatus{Interval: opts.syncInterval},
-		scanStatus:     ActivityStatus{Interval: opts.scanInterval},
-		reportStatus:   ActivityStatus{Interval: opts.reportInterval},
+		syncStatus:     resource.ActivityStatus{Interval: opts.syncInterval},
+		scanStatus:     resource.ActivityStatus{Interval: opts.scanInterval},
+		reportStatus:   resource.ActivityStatus{Interval: opts.reportInterval},
 	}, nil
+}
+
+// status collects resource health and activity without changing the network.
+func (n *Network) status() resource.Snapshot {
+	target := resource.Running
+	if n.closing {
+		target = resource.Stopped
+	}
+
+	state := resource.Running
+	if n.isStopped() {
+		state = resource.Stopped
+	}
+	if n.cleanupStatus.Error != "" {
+		state = resource.Failed
+	}
+
+	status := resource.Snapshot{
+		Kind:   "network",
+		Name:   n.record.Name,
+		State:  state,
+		Target: target,
+		Activities: map[string]resource.ActivityStatus{
+			"reconcile": n.reconcileStatus,
+			"sync":      n.syncStatus,
+			"scan":      n.scanStatus,
+			"report":    n.reportStatus,
+			"close":     n.cleanupStatus,
+		},
+		Children: []resource.Snapshot{
+			n.tunnel.status(target),
+			n.dns.status(target),
+		},
+	}
+	status.UpdateHealth()
+	return status
 }
 
 // start reconciles the tunnel and cached peers before scheduling activities.
@@ -172,7 +231,7 @@ func (n *Network) reconcile() (err error) {
 
 	var dnsErr error
 	defer func() {
-		n.reconcileStatus.record(n.clock(), errors.Join(err, dnsErr))
+		n.reconcileStatus.Record(n.clock(), errors.Join(err, dnsErr))
 	}()
 
 	if err := n.tunnel.reconcile(n.ctx); err != nil {
@@ -201,7 +260,7 @@ func (n *Network) stop() (
 	err error,
 ) {
 	defer func() {
-		n.cleanupStatus.record(n.clock(), err)
+		n.cleanupStatus.Record(n.clock(), err)
 	}()
 
 	if n.cancel != nil {
@@ -445,11 +504,11 @@ func (n *Network) applyPeers() error {
 // Failed attempts use the same cadence. A stopped network schedules nothing.
 func (n *Network) completeRefresh(
 	cadence time.Duration,
-	status *ActivityStatus,
+	status *resource.ActivityStatus,
 	err error,
 ) {
 	now := n.clock()
-	status.record(now, err)
+	status.Record(now, err)
 	if n.isStopped() {
 		return
 	}
@@ -474,16 +533,6 @@ func (n *Network) isDiverged(
 		n.record.Server != record.Server
 }
 
-// getActivityStatuses returns a consistent snapshot of this network's work.
-func (n *Network) getActivityStatuses() (
-	ActivityStatus,
-	ActivityStatus,
-	ActivityStatus,
-	ActivityStatus,
-) {
-	return n.reconcileStatus, n.syncStatus, n.scanStatus, n.reportStatus
-}
-
 // getPeerStatuses reports the live device state for this network's getPeerStatuses.
 func (n *Network) getPeerStatuses() (
 	[]wireguard.PeerStatus,
@@ -496,15 +545,418 @@ func (n *Network) getPeerStatuses() (
 	return n.tunnel.device.GetPeerStatuses()
 }
 
-// peerHealthy reports whether a peer's last handshake is recent enough
-// to consider it connected. Peers that have never handshaken are not
-// healthy.
-func peerHealthy(
-	peerStatus wireguard.PeerStatus,
-	now time.Time,
-) bool {
-	return !peerStatus.LastHandshake.IsZero() &&
-		now.Sub(peerStatus.LastHandshake) < StaleThreshold
+// ListNetworks returns installed network records, ordered by name.
+func (r *Runtime) ListNetworks(
+	ctx context.Context,
+) (
+	[]*service.Network,
+	error,
+) {
+	return executeValue(r, ctx, func() ([]*service.Network, error) {
+		return r.service.ListNetworks()
+	})
+}
+
+// LookupNetwork resolves an installed network or a pending installation in one
+// command, so confirmation cannot occur between the two reads.
+func (r *Runtime) LookupNetwork(
+	ctx context.Context,
+	name string,
+) (
+	NetworkLookup,
+	error,
+) {
+	return executeValue(r, ctx, func() (NetworkLookup, error) {
+		network, err := r.service.GetNetwork(name)
+		if err == nil {
+			return NetworkLookup{Network: network}, nil
+		}
+		if !errors.Is(err, service.ErrNotFound) {
+			return NetworkLookup{}, err
+		}
+
+		install, err := r.service.GetInstall(name)
+		if err != nil {
+			return NetworkLookup{}, err
+		}
+		return NetworkLookup{Install: install}, nil
+	})
+}
+
+// UpdateNetwork persists local network configuration and converges the
+// network under it: a running network whose stored configuration changed
+// is restarted. It returns the updated record. The record is already
+// stored when convergence runs, so a converge failure is logged and
+// retried on the next pass rather than failing the operation.
+func (r *Runtime) UpdateNetwork(
+	ctx context.Context,
+	name string,
+	opts service.NetworkOptions,
+) (
+	*service.Network,
+	error,
+) {
+	return executeValue(r, ctx, func() (*service.Network, error) {
+		if err := r.service.UpdateNetwork(name, opts); err != nil {
+			return nil, err
+		}
+
+		if err := r.convergeName(name); err != nil {
+			r.log.Error(
+				"converge network failed",
+				"network", name,
+				"err", err,
+			)
+		}
+
+		return r.service.GetNetwork(name)
+	})
+}
+
+// SetNetworkEnabled records whether the network should be running and
+// converges it, returning the resulting status. The intent is persisted
+// unconditionally, so a network that cannot start stays enabled and its
+// status explains why, rather than the operation failing and reverting
+// the operator's intent.
+func (r *Runtime) SetNetworkEnabled(
+	ctx context.Context,
+	name string,
+	enabled bool,
+) (
+	NetworkStatus,
+	error,
+) {
+	return executeValue(r, ctx, func() (NetworkStatus, error) {
+		if err := r.service.SetNetworkEnabled(name, enabled); err != nil {
+			return NetworkStatus{}, err
+		}
+
+		if err := r.convergeName(name); err != nil {
+			r.log.Error(
+				"converge network failed",
+				"network", name,
+				"err", err,
+			)
+		}
+
+		return r.getNetworkStatus(name)
+	})
+}
+
+// UninstallNetwork removes the network's record and converges: the
+// record is gone, so a network still running is taken down with it.
+func (r *Runtime) UninstallNetwork(
+	ctx context.Context,
+	name string,
+) error {
+	return execute(r, ctx, func() error {
+		if err := r.service.UninstallNetwork(name); err != nil {
+			return err
+		}
+
+		if err := r.convergeName(name); err != nil {
+			r.log.Error(
+				"converge network failed",
+				"network", name,
+				"err", err,
+			)
+		}
+
+		return nil
+	})
+}
+
+// Sync fetches the network snapshot from the server on demand, outside
+// the network's own sync cadence, and returns the updated record. It
+// returns ErrNotFound when neither a network nor an install exists, and
+// ErrNetworkNotEnabled when it exists but is not running, since there is
+// no tunnel to fetch over.
+func (r *Runtime) Sync(
+	ctx context.Context,
+	name string,
+) (
+	*service.Network,
+	error,
+) {
+	return executeValue(r, ctx, func() (*service.Network, error) {
+		_, err := r.service.GetNetwork(name)
+		if errors.Is(err, service.ErrNotFound) {
+			_, err = r.service.GetInstall(name)
+			if err == nil {
+				return nil, service.ErrNetworkNotEnabled
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		network, isRunning := r.running[name]
+
+		if !isRunning {
+			return nil, service.ErrNetworkNotEnabled
+		}
+
+		// Stop outbound requests on caller or runtime cancellation.
+		requestCtx, cancel := context.WithCancel(ctx)
+		removeShutdownHook := context.AfterFunc(r.ctx, cancel)
+		defer removeShutdownHook()
+		defer cancel()
+
+		if err := network.sync(requestCtx); err != nil {
+			return nil, err
+		}
+
+		return r.service.GetNetwork(name)
+	})
+}
+
+// Converge applies a network's saved intent through the runtime owner.
+func (r *Runtime) Converge(
+	ctx context.Context,
+	name string,
+) error {
+	return execute(r, ctx, func() error {
+		return r.convergeName(name)
+	})
+}
+
+// GetNetworkTopology returns the last synchronized topology joined with
+// live peer connectivity. It remains available while the network is
+// disabled or offline.
+func (r *Runtime) GetNetworkTopology(
+	ctx context.Context,
+	name string,
+) (
+	NetworkTopology,
+	error,
+) {
+	return executeValue(r, ctx, func() (NetworkTopology, error) {
+		cached, err := r.service.GetNetworkTopology(name)
+		if err != nil {
+			return NetworkTopology{}, err
+		}
+
+		record, err := r.service.GetNetwork(name)
+		if err != nil {
+			return NetworkTopology{}, err
+		}
+
+		peers, err := r.service.ListPeers(name)
+		if err != nil {
+			return NetworkTopology{}, err
+		}
+
+		livePeerStatuses, err := r.getLivePeerStatuses(name)
+		if err != nil {
+			return NetworkTopology{}, err
+		}
+
+		now := r.clock()
+		statuses := joinPeerStatuses(peers, livePeerStatuses, now)
+
+		_, running := r.running[name]
+
+		connected := make(map[string]bool, len(statuses)+2)
+		for _, status := range statuses {
+			connected[status.Name] = status.Connected
+		}
+		serverConnected := false
+		if devicePeerStatus, ok := livePeerStatuses[record.Server.PublicKey]; ok {
+			serverConnected = peerHealthy(devicePeerStatus, now)
+		}
+		connected[serverPeerName] = serverConnected
+
+		if cached.View.SubjectPeer != "" {
+			if _, ok := connected[cached.View.SubjectPeer]; !ok {
+				connected[cached.View.SubjectPeer] = running
+			}
+		}
+
+		return NetworkTopology{
+			View:        cached.View,
+			GeneratedAt: cached.GeneratedAt,
+			SyncedAt:    cached.SyncedAt,
+			Connected:   connected,
+		}, nil
+	})
+}
+
+// convergeName brings one network in line with its persisted intent: an
+// enabled network that is not running is started, a running network that
+// is no longer enabled — or no longer installed — is stopped, and a
+// running network whose stored configuration has changed is restarted. A
+// start failure is recorded as the network's reason and returned; the
+// persisted intent is never touched.
+func (r *Runtime) convergeName(
+	name string,
+) error {
+	record, err := r.service.GetNetwork(name)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			return r.removeNetwork(name)
+		default:
+			return err
+		}
+	}
+	return r.converge(record)
+}
+
+// converge applies one network record under the runtime owner.
+func (r *Runtime) converge(
+	record *service.Network,
+) error {
+	if r.ctx.Err() != nil {
+		return nil
+	}
+
+	network, isRunning := r.running[record.Name]
+
+	switch {
+	case !record.Enabled:
+		// Stopped by intent; a network still running comes down with it.
+		delete(r.reasons, record.Name)
+		if isRunning {
+			return r.stopNetwork(record.Name, network)
+		}
+
+	case isRunning && network.closing:
+		// Finish a previous cleanup attempt before starting again, even if
+		// the desired configuration has returned to its original value.
+		return r.restartNetwork(record, network)
+
+	case isRunning && network.isDiverged(record):
+		// The stored configuration no longer describes the running
+		// tunnel, so the network restarts under the new one.
+		return r.restartNetwork(record, network)
+
+	case isRunning:
+		// Already where it should be; reapply the cached peer set.
+		if err := network.reconcile(); err != nil {
+			r.log.Warn(
+				"reconcile failed",
+				"network", record.Name,
+				"err", err,
+			)
+		}
+		break // everything is good
+
+	default:
+		return r.startNetwork(record)
+	}
+
+	return nil
+}
+
+// startNetwork brings a network up under its record and into the
+// running set, or records the failure as its reason to be retried on
+// the next pass.
+func (r *Runtime) startNetwork(
+	record *service.Network,
+) error {
+	if err := r.releaseEnrollmentsUsing(record.InterfaceName); err != nil {
+		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)
+		return err
+	}
+
+	network, err := newNetwork(networkOptions{
+		record:         record,
+		service:        r.service,
+		wireguard:      r.wireguard,
+		dns:            r.dns,
+		httpClient:     r.httpClient,
+		clock:          r.clock,
+		log:            r.log.With("network", record.Name),
+		syncInterval:   r.syncInterval,
+		scanInterval:   r.scanInterval,
+		reportInterval: r.reportInterval,
+	})
+	if err != nil {
+		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)
+		return err
+	}
+
+	// Own the instance before startup; cleanup decides when to forget it.
+	r.running[record.Name] = network
+
+	if err := network.start(r.ctx); err != nil {
+		cleanupErr := r.stopNetwork(record.Name, network)
+		err = errors.Join(err, cleanupErr)
+
+		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)
+		return err
+	}
+
+	delete(r.reasons, record.Name)
+
+	r.log.Info(
+		"network started",
+		"network", record.Name,
+		"interface", record.InterfaceName,
+	)
+
+	return nil
+}
+
+// restartNetwork stops a diverged network and brings it back up under
+// the new record.
+func (r *Runtime) restartNetwork(
+	record *service.Network,
+	network *Network,
+) error {
+	if err := r.stopNetwork(record.Name, network); err != nil {
+		return err
+	}
+
+	return r.startNetwork(record)
+}
+
+// stopNetwork forgets a network only after cleanup succeeds.
+func (r *Runtime) stopNetwork(
+	name string,
+	network *Network,
+) error {
+	network.closing = true
+	if err := network.stop(); err != nil {
+		err = fmt.Errorf("stop network %q: %w", name, err)
+		r.reasons[name] = err.Error()
+		return err
+	}
+
+	delete(r.running, name)
+	delete(r.reasons, name)
+
+	r.log.Info(
+		"network stopped",
+		"network", name,
+	)
+
+	return nil
+}
+
+// removeNetwork stops a network that is no longer installed and forgets it.
+func (r *Runtime) removeNetwork(
+	name string,
+) error {
+
+	network, isRunning := r.running[name]
+	if !isRunning {
+		delete(r.reasons, name)
+		return nil
+	}
+
+	return r.stopNetwork(name, network)
+}
+
+// closeNetworks retains failed cleanup and reports it to the Run caller.
+func (r *Runtime) closeNetworks() error {
+	var errs []error
+	for name, network := range r.running {
+		if err := r.stopNetwork(name, network); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // sightingsToProtocol converts stored domain sightings into the protocol

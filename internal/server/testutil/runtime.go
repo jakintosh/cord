@@ -174,7 +174,7 @@ func runRuntime(
 	})
 	readyCtx, readyCancel := context.WithTimeout(ctx, waitTimeout)
 	defer readyCancel()
-	if _, err := rt.Status(readyCtx); err != nil {
+	if _, err := rt.GetStatus(readyCtx); err != nil {
 		t.Fatalf("run runtime: %v", err)
 	}
 	return func() error {
@@ -184,13 +184,13 @@ func runRuntime(
 	}
 }
 
-// RuntimeStatus reads an owned-state snapshot through the public command API.
+// RuntimeStatus reads the unified status through the public command API.
 func RuntimeStatus(
 	t *testing.T,
 	rt *runtime.Runtime,
-) runtime.RuntimeStatus {
+) runtime.Status {
 	t.Helper()
-	status, err := rt.Status(t.Context())
+	status, err := rt.GetStatus(t.Context())
 	if err != nil {
 		t.Fatalf("runtime status: %v", err)
 	}

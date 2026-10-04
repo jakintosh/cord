@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/resource"
-	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
@@ -19,7 +18,7 @@ func TestCreateRegistration_ResultSurvivesApplicationFailure(
 	env := testutil.SetupService(t)
 	rt, _, backend, _ := newHTTPRuntime(t, env.Service, time.Second, nil)
 	status, err := rt.SetNetworkEnabled(t.Context(), "httptest", true)
-	if err != nil || status.Status == nil {
+	if err != nil || status.Health != "healthy" {
 		t.Fatalf("enable = %+v, %v", status, err)
 	}
 	device := backend.Device("httptest-i")
@@ -38,10 +37,10 @@ func TestCreateRegistration_ResultSurvivesApplicationFailure(
 		t.Fatalf("saved registration does not match invitation: %+v, %v", registrations, err)
 	}
 	overview := networkStatus(t, rt, "httptest")
-	if overview.Reason == "" || overview.Health != runtime.HealthDegraded {
+	if overview.Reason == "" || overview.Health != resource.HealthDegraded {
 		t.Fatalf("application failure missing from status: %+v", overview)
 	}
-	if overview.Status.Main.HTTP.State != resource.Running {
+	if resourceAt(t, *overview.Snapshot, "main", "http").State != resource.Running {
 		t.Fatal("registration command stopped the HTTP listener")
 	}
 	if backend.Device("httptest-i") != device {
@@ -51,7 +50,7 @@ func TestCreateRegistration_ResultSurvivesApplicationFailure(
 	if err := rt.RevokeRegistration(t.Context(), "httptest", "alice"); err != nil {
 		t.Fatal(err)
 	}
-	if status := networkStatus(t, rt, "httptest"); status.Reason != "" || status.Health != runtime.HealthHealthy {
+	if status := networkStatus(t, rt, "httptest"); status.Reason != "" || status.Health != resource.HealthHealthy {
 		t.Fatalf("recovery = %+v", status)
 	}
 }
@@ -61,7 +60,7 @@ func TestRegistrationCommands_ApplyPeersBeforeReturning(
 ) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetwork(t, env.Service)
-	if status, err := env.Runtime.SetNetworkEnabled(t.Context(), "testnet", true); err != nil || !status.Running {
+	if status, err := env.Runtime.SetNetworkEnabled(t.Context(), "testnet", true); err != nil || status.Health != "healthy" {
 		t.Fatalf("enable = %+v, %v", status, err)
 	}
 	main, invite := env.Backend.Device("testnet"), env.Backend.Device("testnet-i")

@@ -79,10 +79,10 @@ func newTunnel(
 // status observes device availability without repairing it.
 func (t *Tunnel) status(
 	target resource.State,
-) ResourceSnapshot {
+) resource.Snapshot {
 	device := t.device.Status()
 
-	child := ResourceSnapshot{
+	child := resource.Snapshot{
 		Kind:   "wireguard-device",
 		Name:   t.name,
 		State:  device.State,
@@ -91,16 +91,16 @@ func (t *Tunnel) status(
 	if device.Error != nil {
 		child.Error = device.Error.Error()
 	}
-	child.updateHealth()
+	child.UpdateHealth()
 
-	status := ResourceSnapshot{
+	status := resource.Snapshot{
 		Kind:     "tunnel",
 		Name:     t.name,
 		State:    device.State,
 		Target:   target,
-		Children: []ResourceSnapshot{child},
+		Children: []resource.Snapshot{child},
 	}
-	status.updateHealth()
+	status.UpdateHealth()
 
 	return status
 }

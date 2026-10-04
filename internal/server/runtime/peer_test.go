@@ -14,7 +14,7 @@ func TestPeerCommands_ApplyPeersBeforeReturning(
 ) {
 	env := testutil.SetupRuntime(t)
 	testutil.SeedNetwork(t, env.Service)
-	if status, err := env.Runtime.SetNetworkEnabled(t.Context(), "testnet", true); err != nil || !status.Running {
+	if status, err := env.Runtime.SetNetworkEnabled(t.Context(), "testnet", true); err != nil || status.Health != "healthy" {
 		t.Fatalf("enable = %+v, %v", status, err)
 	}
 	main, invite := env.Backend.Device("testnet"), env.Backend.Device("testnet-i")

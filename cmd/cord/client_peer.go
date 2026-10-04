@@ -1,10 +1,7 @@
 package main
 
 import (
-	"strconv"
-
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	api "git.studiopollinator.com/pollinator/cord/pkg/admin/client"
 )
 
 var clientPeerCmd = &args.Command{
@@ -37,32 +34,6 @@ var clientPeerList = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(peers)
-		}
-
-		printClientPeers(peers)
-		return nil
+		return cliApp(i).ClientPeers(peers)
 	},
-}
-
-// printClientPeers prints a one-row-per-peer summary table.
-func printClientPeers(
-	peers []api.Peer,
-) {
-	rows := make([][]string, len(peers))
-	for idx, p := range peers {
-		lastHandshake := ""
-		if p.LastHandshake != nil {
-			lastHandshake = *p.LastHandshake
-		}
-		rows[idx] = []string{
-			p.Name,
-			p.Route,
-			p.Endpoint,
-			humanizeSince(lastHandshake),
-			strconv.FormatBool(p.Connected),
-		}
-	}
-	printTable([]string{"NAME", "ROUTE", "ENDPOINT", "LAST HANDSHAKE", "CONNECTED"}, rows)
 }

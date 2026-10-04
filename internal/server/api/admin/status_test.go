@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -41,6 +42,52 @@ func TestAPIStatus_Success(
 	}
 }
 
+func TestAPIStatus_ExposesResourceTreeAndDeviceFailure(
+	t *testing.T,
+) {
+	// Setup an owned network, then lose its device without reconciliation.
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+	wire.TestPost[admin.NetworkStatus](env.Router, "/networks/testnet/enable", "").ExpectOK(t)
+	if err := env.Backend.Device("testnet").Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Request the public snapshot.
+	result := wire.TestGet[admin.Status](env.Router, "/status")
+	result.ExpectStatus(t, http.StatusOK)
+	status := result.ExpectOK(t)
+	root := status.Snapshot
+	if root.Kind != "runtime" || root.State != "running" || root.Target != "running" || root.Health != "degraded" {
+		t.Fatalf("runtime snapshot = %+v", root)
+	}
+	if root.Activities["reconcile"].LastSuccessAt == nil || len(root.Children) != 1 {
+		t.Fatalf("runtime activity or ownership missing: %+v", root)
+	}
+	network := root.Children[0]
+	if network.Kind != "network" || network.Name != "testnet" || network.Health != "degraded" || len(network.Children) != 2 {
+		t.Fatalf("network snapshot = %+v", network)
+	}
+	if network.Activities["reconcile"].LastSuccessAt == nil {
+		t.Fatal("network reconciliation activity missing")
+	}
+	main, invite := network.Children[0], network.Children[1]
+	if main.Kind != "plane" || main.Name != "main" || invite.Name != "invite" {
+		t.Fatalf("plane identities = %+v", network.Children)
+	}
+	// This environment configures neither DNS nor HTTP; neither should appear.
+	if len(main.Children) != 1 || len(invite.Children) != 1 {
+		t.Fatalf("unexpected unconfigured resources: %+v", network.Children)
+	}
+	device := main.Children[0]
+	if device.Kind != "wireguard-device" || device.State != "failed" || device.Target != "running" || device.Error == "" {
+		t.Fatalf("device snapshot = %+v", device)
+	}
+	if invite.Health != "healthy" || invite.Children[0].State != "running" {
+		t.Fatalf("device failure affected sibling: %+v", invite)
+	}
+}
+
 func TestAPIStatus_IncludesNetworks(
 	t *testing.T,
 ) {
@@ -64,7 +111,7 @@ func TestAPIStatus_IncludesNetworks(
 	if net.Enabled {
 		t.Fatal("expected freshly created network to be disabled")
 	}
-	if net.Running {
+	if len(data.Snapshot.Children) != 0 {
 		t.Fatal("expected freshly created network not to be running")
 	}
 	if net.Health != "inactive" {

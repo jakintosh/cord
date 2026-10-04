@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/server/dns"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
@@ -28,14 +29,6 @@ type networkOptions struct {
 	log             *slog.Logger
 }
 
-// NetworkStatus combines current child resource state with the latest
-// reconciliation activity. Reading it never performs maintenance.
-type NetworkStatus struct {
-	Main      PlaneStatus
-	Invite    PlaneStatus
-	Reconcile ActivityStatus
-}
-
 // Network holds two planes. Only the runtime loop operates on it.
 type Network struct {
 	record  *service.Network
@@ -46,7 +39,8 @@ type Network struct {
 	log     *slog.Logger
 
 	closing         bool // Retained only when cleanup needs another attempt.
-	reconcileStatus ActivityStatus
+	reconcileStatus resource.ActivityStatus
+	cleanupStatus   resource.ActivityStatus
 }
 
 // newNetwork constructs both planes without starting resources or scheduling work.
@@ -104,19 +98,45 @@ func newNetwork(
 		service: opts.service,
 		clock:   opts.clock,
 		log:     opts.log,
-		reconcileStatus: ActivityStatus{
+		reconcileStatus: resource.ActivityStatus{
 			Interval: opts.interval,
 		},
 	}, nil
 }
 
 // status collects plane snapshots and activity without changing resources.
-func (n *Network) status() NetworkStatus {
-	return NetworkStatus{
-		Main:      n.main.status(),
-		Invite:    n.invite.status(),
-		Reconcile: n.reconcileStatus,
+func (n *Network) status() resource.Snapshot {
+	target := resource.Running
+	if n.closing {
+		target = resource.Stopped
 	}
+
+	status := resource.Snapshot{
+		Kind:   "network",
+		Name:   n.record.Name,
+		State:  resource.Running,
+		Target: target,
+		Activities: map[string]resource.ActivityStatus{
+			"reconcile": n.reconcileStatus,
+			"close":     n.cleanupStatus,
+		},
+		Children: []resource.Snapshot{
+			n.main.status("main", target),
+			n.invite.status("invite", target),
+		},
+	}
+
+	if n.closing {
+		status.State = resource.Stopped
+	}
+
+	if n.cleanupStatus.Error != "" {
+		status.State = resource.Failed
+	}
+
+	status.UpdateHealth()
+
+	return status
 }
 
 // reconcile repairs infrastructure before applying saved peer configuration.
@@ -134,13 +154,17 @@ func (n *Network) reconcile(
 		n.applyPeers(),
 	)
 
-	n.reconcileStatus.record(n.clock(), err)
+	n.reconcileStatus.Record(n.clock(), err)
 
 	return err
 }
 
 // close releases servers before devices. Failed cleanup is retried by runtime.
-func (n *Network) close() error {
+func (n *Network) close() (err error) {
+	defer func() {
+		n.cleanupStatus.Record(n.clock(), err)
+	}()
+
 	n.closing = true
 	return errors.Join(
 		n.main.close(),
@@ -224,27 +248,27 @@ func (n *Network) observe(
 	return nil
 }
 
-// SetNetworkEnabled saves intent and returns the immediate application overview.
+// SetNetworkEnabled saves intent and returns the resulting network status.
 func (r *Runtime) SetNetworkEnabled(
 	ctx context.Context,
 	name string,
 	enabled bool,
 ) (
-	NetworkOverview,
+	NetworkStatus,
 	error,
 ) {
-	return executeValue(r, ctx, func() (NetworkOverview, error) {
+	return executeValue(r, ctx, func() (NetworkStatus, error) {
 
 		if err := r.service.SetNetworkEnabled(
 			name,
 			enabled,
 		); err != nil {
-			return NetworkOverview{}, err
+			return NetworkStatus{}, err
 		}
 
 		record, err := r.service.GetNetwork(name)
 		if err != nil {
-			return NetworkOverview{}, err
+			return NetworkStatus{}, err
 		}
 
 		if err := r.reconcileNetwork(record); err != nil {
@@ -256,7 +280,12 @@ func (r *Runtime) SetNetworkEnabled(
 			)
 		}
 
-		return r.networkOverview(record), nil
+		var snapshot *resource.Snapshot
+		if network := r.running[name]; network != nil {
+			status := network.status()
+			snapshot = &status
+		}
+		return r.networkStatus(record, snapshot), nil
 	})
 }
 
@@ -446,7 +475,7 @@ func (r *Runtime) applyPeers(
 	}
 
 	err := n.applyPeers()
-	n.reconcileStatus.record(r.clock(), err)
+	n.reconcileStatus.Record(r.clock(), err)
 	if err != nil {
 		r.reasons[name] = fmt.Sprintf("apply failed: %v", err)
 		r.log.Error(

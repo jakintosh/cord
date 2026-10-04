@@ -89,7 +89,7 @@ func TestInstall_DNSFailureKeepsTunnelAndSyncRunning(
 		t.Fatal("DNS retry did not preserve the original tunnel")
 	}
 	resolverState = resolverStatus(t, status.Resource)
-	if resolverState.State != resource.Running || resolverState.Health != runtime.HealthHealthy {
+	if resolverState.State != resource.Running || resolverState.Health != resource.HealthHealthy {
 		t.Fatalf("recovered DNS resource = %+v", resolverState)
 	}
 }
@@ -142,7 +142,7 @@ func TestUninstallNetwork_RetainsDNSCleanupAfterRecordDeletion(
 	if err != nil {
 		t.Fatal(err)
 	}
-	var pending *runtime.ResourceSnapshot
+	var pending *resource.Snapshot
 	for _, child := range status.Snapshot.Children {
 		if child.Name == "testnet" {
 			pending = &child
@@ -402,8 +402,8 @@ func TestRun_DoesNotCleanDNSWhenSavedStateCannotBeRead(
 
 func resolverStatus(
 	t *testing.T,
-	network *runtime.ResourceSnapshot,
-) runtime.ResourceSnapshot {
+	network *resource.Snapshot,
+) resource.Snapshot {
 	t.Helper()
 	if network == nil {
 		t.Fatal("network resource is missing")
@@ -414,7 +414,7 @@ func resolverStatus(
 		}
 	}
 	t.Fatal("DNS resource is missing")
-	return runtime.ResourceSnapshot{}
+	return resource.Snapshot{}
 }
 
 // Callbacks run in the owner loop. Tests inspect or change their state only

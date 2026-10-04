@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/dns"
+	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
@@ -36,8 +37,8 @@ type dnsResolver struct {
 	attempted *dns.Config
 	lastErr   error
 
-	applyStatus   ActivityStatus
-	cleanupStatus ActivityStatus
+	applyStatus   resource.ActivityStatus
+	cleanupStatus resource.ActivityStatus
 }
 
 // reconcile reapplies the desired configuration, removing a previous attempt
@@ -49,7 +50,7 @@ func (d *dnsResolver) reconcile(
 ) {
 	defer func() {
 		d.lastErr = err
-		d.applyStatus.record(d.clock(), err)
+		d.applyStatus.Record(d.clock(), err)
 	}()
 
 	interfaceName, err := d.device.Name()
@@ -84,7 +85,7 @@ func (d *dnsResolver) close(
 	}
 	defer func() {
 		d.lastErr = err
-		d.cleanupStatus.record(d.clock(), err)
+		d.cleanupStatus.Record(d.clock(), err)
 	}()
 
 	if err := d.manager.Remove(ctx, *d.attempted); err != nil {
@@ -97,7 +98,7 @@ func (d *dnsResolver) close(
 // status reports saved outcomes without reading or changing OS configuration.
 func (d *dnsResolver) status(
 	target resource.State,
-) ResourceSnapshot {
+) resource.Snapshot {
 	state := resource.Stopped
 	switch {
 	case d.lastErr != nil:
@@ -106,12 +107,12 @@ func (d *dnsResolver) status(
 		state = resource.Running
 	}
 
-	status := ResourceSnapshot{
+	status := resource.Snapshot{
 		Kind:   "dns-resolver",
 		Name:   d.config.Domain,
 		State:  state,
 		Target: target,
-		Activities: map[string]ActivityStatus{
+		Activities: map[string]resource.ActivityStatus{
 			"apply": d.applyStatus,
 			"close": d.cleanupStatus,
 		},
@@ -123,6 +124,34 @@ func (d *dnsResolver) status(
 		status.Error = d.lastErr.Error()
 	}
 
-	status.updateHealth()
+	status.UpdateHealth()
 	return status
+}
+
+// cleanupDNS runs only after a successful saved-state read. Failed startup
+// cleanup is retried with a fresh active set on the next full maintenance pass.
+func (r *Runtime) cleanupDNS(
+	records []*service.Network,
+) {
+	if r.dnsCleanupDone {
+		return
+	}
+
+	active := make(map[string]bool, len(records))
+	for _, record := range records {
+		if record.Enabled {
+			active[record.Name+".internal"] = true
+		}
+	}
+
+	err := r.dns.CleanupStale(r.ctx, active)
+	r.dnsCleanupStatus.Record(r.clock(), err)
+	if err != nil {
+		r.log.Warn(
+			"stale DNS cleanup failed",
+			"err", err,
+		)
+		return
+	}
+	r.dnsCleanupDone = true
 }

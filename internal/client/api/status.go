@@ -7,6 +7,7 @@ import (
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 )
 
 func (a *API) handleGetStatus(
@@ -34,7 +35,7 @@ func (a *API) handleGetStatus(
 	wire.WriteData(w, http.StatusOK, Status{
 		Snapshot: snapshot,
 		Status:   "ok",
-		Health:   status.Health,
+		Health:   string(status.Health),
 		Version:  a.version,
 		Networks: networkStatuses,
 		Installs: installStatuses,
@@ -57,7 +58,7 @@ func networkStatusFromRuntime(
 		Name:      status.Name,
 		Enabled:   status.Enabled,
 		Reason:    status.Reason,
-		Health:    status.Health,
+		Health:    string(status.Health),
 		Reconcile: activityStatusFromRuntime(status.Reconcile),
 		Sync:      activityStatusFromRuntime(status.Sync),
 		Scan:      activityStatusFromRuntime(status.Scan),
@@ -66,7 +67,7 @@ func networkStatusFromRuntime(
 }
 
 func activityStatusFromRuntime(
-	status runtime.ActivityStatus,
+	status resource.ActivityStatus,
 ) ActivityStatus {
 	result := ActivityStatus{
 		IntervalSeconds: int64(status.Interval / time.Second),
@@ -88,7 +89,7 @@ func activityStatusFromRuntime(
 }
 
 func resourceSnapshotFromRuntime(
-	status runtime.ResourceSnapshot,
+	status resource.Snapshot,
 ) ResourceSnapshot {
 	result := ResourceSnapshot{
 		Kind:   status.Kind,
@@ -96,7 +97,7 @@ func resourceSnapshotFromRuntime(
 		State:  string(status.State),
 		Target: string(status.Target),
 		Reason: status.Reason,
-		Health: status.Health,
+		Health: string(status.Health),
 		Error:  status.Error,
 	}
 	if len(status.Activities) > 0 {
