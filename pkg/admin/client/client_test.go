@@ -61,11 +61,8 @@ func TestClientEscapesPathSegments(t *testing.T) {
 func newTestClient(t *testing.T, handler http.Handler) *admin.Client {
 	t.Helper()
 
-	tempRoot := filepath.Join("..", "..", "..", ".opencode-tmp")
-	if err := os.MkdirAll(tempRoot, 0755); err != nil {
-		t.Fatalf("create test temp root: %v", err)
-	}
-	dir, err := os.MkdirTemp(tempRoot, "client-admin-")
+	// keep the socket path short
+	dir, err := os.MkdirTemp("", "client-admin-")
 	if err != nil {
 		t.Fatalf("create test temp directory: %v", err)
 	}

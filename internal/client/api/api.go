@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/runtime"
-	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	admin "git.studiopollinator.com/pollinator/cord/pkg/admin/client"
 )
@@ -19,19 +18,18 @@ type NetworkStatus = admin.NetworkStatus
 type NetworkTopology = admin.NetworkTopology
 type Peer = admin.Peer
 type Status = admin.Status
+type ResourceSnapshot = admin.ResourceSnapshot
 type TopologyAssociation = admin.TopologyAssociation
 type TopologyNode = admin.TopologyNode
 type UpdateNetworkRequest = admin.UpdateNetworkRequest
 
 type Options struct {
-	Service *service.Service
 	Runtime *runtime.Runtime
 	Logger  *slog.Logger
 	Version string
 }
 
 type API struct {
-	service *service.Service
 	runtime *runtime.Runtime
 	log     *slog.Logger
 	version string
@@ -43,9 +41,6 @@ func New(
 	*API,
 	error,
 ) {
-	if opts.Service == nil {
-		return nil, fmt.Errorf("client: service required")
-	}
 	if opts.Runtime == nil {
 		return nil, fmt.Errorf("client: runtime required")
 	}
@@ -55,7 +50,6 @@ func New(
 		log = logging.Discard()
 	}
 	return &API{
-		service: opts.Service,
 		runtime: opts.Runtime,
 		log:     log,
 		version: opts.Version,

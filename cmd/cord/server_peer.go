@@ -1,11 +1,7 @@
 package main
 
 import (
-	"fmt"
-	"strconv"
-
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	adminserver "git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
 
 var serverPeerCmd = &args.Command{
@@ -58,12 +54,7 @@ var serverPeerRename = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(updated)
-		}
-
-		fmt.Printf("peer %q renamed to %q\n", peer, newName)
-		return nil
+		return cliApp(i).Result(updated, "peer %q renamed to %q\n", peer, newName)
 	},
 }
 
@@ -100,12 +91,7 @@ var serverPeerEnable = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return nil
-		}
-
-		fmt.Printf("peer %q enabled\n", peer)
-		return nil
+		return cliApp(i).Message("peer %q enabled\n", peer)
 	},
 }
 
@@ -142,12 +128,7 @@ var serverPeerDisable = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return nil
-		}
-
-		fmt.Printf("peer %q disabled\n", peer)
-		return nil
+		return cliApp(i).Message("peer %q disabled\n", peer)
 	},
 }
 
@@ -181,12 +162,7 @@ var serverPeerDelete = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return nil
-		}
-
-		fmt.Printf("peer %q deleted\n", peer)
-		return nil
+		return cliApp(i).Message("peer %q deleted\n", peer)
 	},
 }
 
@@ -212,28 +188,6 @@ var serverPeerList = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(peers)
-		}
-
-		printServerPeers(peers)
-		return nil
+		return cliApp(i).ServerPeers(peers)
 	},
-}
-
-// printServerPeers prints a one-row-per-peer summary table.
-func printServerPeers(
-	peers []adminserver.Peer,
-) {
-	rows := make([][]string, len(peers))
-	for idx, p := range peers {
-		rows[idx] = []string{
-			p.Name,
-			p.Route,
-			strconv.FormatBool(p.Admin),
-			strconv.FormatBool(p.Enabled),
-			p.PublicKey,
-		}
-	}
-	printTable([]string{"NAME", "ROUTE", "ADMIN", "ENABLED", "PUBLIC KEY"}, rows)
 }

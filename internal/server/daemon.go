@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"time"
@@ -24,11 +25,6 @@ const DefaultSocketPath = adminclient.DefaultSocketPath
 
 // DefaultDBPath is the default database path used when none is provided.
 const DefaultDBPath = "data/server.db"
-
-// wakeBuffer is the depth of the channel the service uses to tell the
-// runtime that a network changed. Sends are dropped when it is full;
-// the runtime's periodic pass catches up.
-const wakeBuffer = 16
 
 // Options configures the server composition root.
 type Options struct {
@@ -55,7 +51,7 @@ type Options struct {
 }
 
 // Serve is the production composition root for the cord server daemon.
-// It opens dependencies, wires them database → service → APIs → runtime,
+// It opens dependencies, wires them database → service → runtime → APIs,
 // starts the daemon on a Unix socket, and blocks until cancellation or
 // control-endpoint failure.
 func Serve(
@@ -100,27 +96,19 @@ func Serve(
 	}
 	defer db.Close()
 
-	wake := make(chan string, wakeBuffer)
-
 	svc, err := service.New(service.Options{
 		Store:  db,
 		Clock:  time.Now,
 		Logger: log,
-		Wake:   wake,
 	})
 	if err != nil {
 		return fmt.Errorf("server: new service: %w", err)
 	}
 
-	peer := peerapi.New(svc, log.With("api", "peer"))
-	invite := inviteapi.New(svc, log.With("api", "invite"))
-
 	rt, err := runtime.New(runtime.Options{
 		Service:   svc,
 		WireGuard: wg,
-		Peer:      peer,
-		Invite:    invite,
-		Wake:      wake,
+		DNSPort:   53,
 		Clock:     time.Now,
 		Logger:    log,
 	})
@@ -128,8 +116,14 @@ func Serve(
 		return fmt.Errorf("server: new runtime: %w", err)
 	}
 
-	api, err := adminapi.New(adminapi.Options{
-		Service: svc,
+	peer := peerapi.New(rt, log.With("api", "peer"))
+	invite := inviteapi.New(rt, log.With("api", "invite"))
+	handlers := runtime.Handlers{
+		Peer:   peer.Router,
+		Invite: invite.Router,
+	}
+
+	admin, err := adminapi.New(adminapi.Options{
 		Runtime: rt,
 		Logger:  log.With("api", "admin"),
 		Version: opts.Version,
@@ -138,18 +132,26 @@ func Serve(
 		return fmt.Errorf("server: new api: %w", err)
 	}
 
-	if err := rt.Start(ctx); err != nil {
-		return fmt.Errorf("server: start runtime: %w", err)
-	}
-	defer rt.Stop()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	runtimeDone := make(chan error, 1)
+	go func() {
+		runtimeDone <- rt.Run(ctx, handlers)
+		cancel()
+	}()
 
 	log.Info(
 		"daemon listening",
-		"socket",
-		opts.SocketPath,
-		"version",
-		opts.Version,
+		"socket", opts.SocketPath,
+		"version", opts.Version,
 	)
 
-	return daemon.ServeHTTP(ctx, ln, api.Router())
+	serveErr := daemon.ServeHTTP(ctx, ln, admin.Router())
+	cancel()
+
+	return errors.Join(
+		serveErr,
+		<-runtimeDone,
+	)
 }

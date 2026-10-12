@@ -3,10 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
-	"strconv"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	adminserver "git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
 
 var serverRegistrationCmd = &args.Command{
@@ -80,14 +78,13 @@ var serverRegistrationCreate = &args.Command{
 				return fmt.Errorf("write invitation file: %w", err)
 			}
 
-			fmt.Printf("registration %q created; invitation written to %s\n", name, *output)
-			return nil
+			return cliApp(i).Message("registration %q created; invitation written to %s\n", name, *output)
 		}
 
 		// The invitation payload is the deliverable, so it is printed
 		// as JSON in both human and --json modes unless redirected to
 		// a file via --output.
-		return printJSON(invitation)
+		return cliApp(i).JSON(invitation)
 	},
 }
 
@@ -113,12 +110,7 @@ var serverRegistrationList = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(registrations)
-		}
-
-		printRegistrations(registrations)
-		return nil
+		return cliApp(i).Registrations(registrations)
 	},
 }
 
@@ -152,12 +144,7 @@ var serverRegistrationRevoke = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return nil
-		}
-
-		fmt.Printf("registration %q revoked\n", name)
-		return nil
+		return cliApp(i).Message("registration %q revoked\n", name)
 	},
 }
 
@@ -205,10 +192,7 @@ var serverRegistrationGroupAdd = &args.Command{
 		); err != nil {
 			return err
 		}
-		if !i.GetFlag("json") {
-			fmt.Printf("group %q assigned to registration %q\n", group, registration)
-		}
-		return nil
+		return cliApp(i).Message("group %q assigned to registration %q\n", group, registration)
 	},
 }
 
@@ -246,10 +230,7 @@ var serverRegistrationGroupRemove = &args.Command{
 		); err != nil {
 			return err
 		}
-		if !i.GetFlag("json") {
-			fmt.Printf("group %q removed from registration %q\n", group, registration)
-		}
-		return nil
+		return cliApp(i).Message("group %q removed from registration %q\n", group, registration)
 	},
 }
 
@@ -282,27 +263,6 @@ var serverRegistrationGroupList = &args.Command{
 		if err != nil {
 			return err
 		}
-		if i.GetFlag("json") {
-			return printJSON(groups)
-		}
-		printGroups(groups)
-		return nil
+		return cliApp(i).Groups(groups)
 	},
-}
-
-// printRegistrations prints a one-row-per-registration summary table.
-func printRegistrations(
-	registrations []adminserver.Registration,
-) {
-	rows := make([][]string, len(registrations))
-	for idx, reg := range registrations {
-		rows[idx] = []string{
-			reg.Name,
-			reg.Route,
-			strconv.FormatBool(reg.Admin),
-			strconv.FormatBool(reg.Redeemed),
-			reg.ExpiresAt,
-		}
-	}
-	printTable([]string{"NAME", "ROUTE", "ADMIN", "REDEEMED", "EXPIRES AT"}, rows)
 }

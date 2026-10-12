@@ -2,12 +2,14 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
 	"git.studiopollinator.com/pollinator/cord/internal/client/database"
+	"git.studiopollinator.com/pollinator/cord/internal/client/dns"
 	"git.studiopollinator.com/pollinator/cord/internal/client/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/daemon"
@@ -23,11 +25,6 @@ const DefaultSocketPath = adminclient.DefaultSocketPath
 // DefaultDBPath is the default database path used when none is provided.
 const DefaultDBPath = "data/client.db"
 
-// wakeBuffer is the depth of the channel the service uses to tell the
-// runtime that a network changed. Sends are dropped when it is full;
-// the runtime's periodic pass catches up.
-const wakeBuffer = 16
-
 // Options configures the client daemon composition root.
 type Options struct {
 	// SocketPath is the Unix socket path for the daemon control API.
@@ -39,6 +36,9 @@ type Options struct {
 
 	// DBPath is the filesystem path to the SQLite database file.
 	DBPath string
+
+	// ResolverDir is the macOS resolver directory. Empty uses /etc/resolver.
+	ResolverDir string
 
 	// Backend selects the WireGuard implementation: "auto" (default),
 	// "kernel", or "userspace".
@@ -98,22 +98,26 @@ func Serve(
 	}
 	defer db.Close()
 
-	wake := make(chan string, wakeBuffer)
-
 	svc, err := service.New(service.Options{
 		Store:  db,
 		Clock:  time.Now,
 		Logger: log,
-		Wake:   wake,
 	})
 	if err != nil {
 		return fmt.Errorf("client: new service: %w", err)
 	}
 
+	resolver, err := dns.New(dns.Options{
+		ResolverDir: opts.ResolverDir,
+	})
+	if err != nil {
+		return fmt.Errorf("client: new DNS manager: %w", err)
+	}
+
 	rt, err := runtime.New(runtime.Options{
 		Service:   svc,
 		WireGuard: wg,
-		Wake:      wake,
+		DNS:       resolver,
 		Clock:     time.Now,
 		Logger:    log,
 	})
@@ -122,7 +126,6 @@ func Serve(
 	}
 
 	apiServer, err := api.New(api.Options{
-		Service: svc,
 		Runtime: rt,
 		Logger:  log.With("api", "control"),
 		Version: opts.Version,
@@ -131,18 +134,26 @@ func Serve(
 		return fmt.Errorf("client: new api: %w", err)
 	}
 
-	if err := rt.Start(ctx); err != nil {
-		return fmt.Errorf("client: start runtime: %w", err)
-	}
-	defer rt.Stop()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	runtimeDone := make(chan error, 1)
+	go func() {
+		runtimeDone <- rt.Run(ctx)
+		cancel()
+	}()
 
 	log.Info(
 		"daemon listening",
-		"socket",
-		opts.SocketPath,
-		"version",
-		opts.Version,
+		"socket", opts.SocketPath,
+		"version", opts.Version,
 	)
 
-	return daemon.ServeHTTP(ctx, ln, apiServer.Router())
+	serveErr := daemon.ServeHTTP(ctx, ln, apiServer.Router())
+	cancel()
+
+	return errors.Join(
+		serveErr,
+		<-runtimeDone,
+	)
 }

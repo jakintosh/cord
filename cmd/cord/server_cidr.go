@@ -1,10 +1,7 @@
 package main
 
 import (
-	"fmt"
-
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
-	adminserver "git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
 
 var serverCidrCmd = &args.Command{
@@ -55,12 +52,7 @@ var serverCidrAdd = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return nil
-		}
-
-		fmt.Printf("cidr %q added\n", name)
-		return nil
+		return cliApp(i).Message("cidr %q added\n", name)
 	},
 }
 
@@ -100,12 +92,7 @@ var serverCidrRename = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return nil
-		}
-
-		fmt.Printf("cidr %q renamed to %q\n", cidr, newName)
-		return nil
+		return cliApp(i).Message("cidr %q renamed to %q\n", cidr, newName)
 	},
 }
 
@@ -139,12 +126,7 @@ var serverCidrDelete = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return nil
-		}
-
-		fmt.Printf("cidr %q deleted\n", cidr)
-		return nil
+		return cliApp(i).Message("cidr %q deleted\n", cidr)
 	},
 }
 
@@ -170,12 +152,7 @@ var serverCidrList = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(cidrs)
-		}
-
-		printCidrs(cidrs)
-		return nil
+		return cliApp(i).Cidrs(cidrs)
 	},
 }
 
@@ -223,10 +200,7 @@ var serverCidrGroupAdd = &args.Command{
 		); err != nil {
 			return err
 		}
-		if !i.GetFlag("json") {
-			fmt.Printf("group %q assigned to CIDR %q\n", group, cidr)
-		}
-		return nil
+		return cliApp(i).Message("group %q assigned to CIDR %q\n", group, cidr)
 	},
 }
 
@@ -264,10 +238,7 @@ var serverCidrGroupRemove = &args.Command{
 		); err != nil {
 			return err
 		}
-		if !i.GetFlag("json") {
-			fmt.Printf("group %q removed from CIDR %q\n", group, cidr)
-		}
-		return nil
+		return cliApp(i).Message("group %q removed from CIDR %q\n", group, cidr)
 	},
 }
 
@@ -300,21 +271,6 @@ var serverCidrGroupList = &args.Command{
 		if err != nil {
 			return err
 		}
-		if i.GetFlag("json") {
-			return printJSON(groups)
-		}
-		printGroups(groups)
-		return nil
+		return cliApp(i).Groups(groups)
 	},
-}
-
-// printCidrs prints a one-row-per-CIDR summary table.
-func printCidrs(
-	cidrs []adminserver.Cidr,
-) {
-	rows := make([][]string, len(cidrs))
-	for idx, c := range cidrs {
-		rows[idx] = []string{c.Name, c.Cidr}
-	}
-	printTable([]string{"NAME", "CIDR"}, rows)
 }

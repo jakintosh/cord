@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
 	adminserver "git.studiopollinator.com/pollinator/cord/pkg/admin/server"
 )
@@ -40,6 +38,11 @@ var serverNetworkAdd = &args.Command{
 	},
 	Options: []args.Option{
 		{
+			Long: "main-name",
+			Type: args.OptionTypeParameter,
+			Help: "WireGuard interface name for the main device (default: network name)",
+		},
+		{
 			Long: "main-wg-port",
 			Type: args.OptionTypeParameter,
 			Help: "WireGuard listen port for the main interface (default 51820)",
@@ -50,14 +53,14 @@ var serverNetworkAdd = &args.Command{
 			Help: "internal API port on the main tunnel (default 8080)",
 		},
 		{
-			Long: "main-name",
-			Type: args.OptionTypeParameter,
-			Help: "WireGuard interface name for the main device (default: network name)",
-		},
-		{
 			Long: "invite-cidr",
 			Type: args.OptionTypeParameter,
 			Help: "CIDR for the invite interface (default 172.16.10.0/24)",
+		},
+		{
+			Long: "invite-name",
+			Type: args.OptionTypeParameter,
+			Help: "WireGuard interface name for the invite device (default: network name + \"-i\")",
 		},
 		{
 			Long: "invite-wg-port",
@@ -69,22 +72,17 @@ var serverNetworkAdd = &args.Command{
 			Type: args.OptionTypeParameter,
 			Help: "internal API port on the invite tunnel (default 8080)",
 		},
-		{
-			Long: "invite-name",
-			Type: args.OptionTypeParameter,
-			Help: "WireGuard interface name for the invite device (default: network name + \"-i\")",
-		},
 	},
 	Handler: func(i *args.Input) error {
 		req := adminserver.CreateNetworkRequest{
 			Name:          i.GetOperand("name"),
 			ExternalIP:    i.GetOperand("external-ip"),
-			MainName:      i.GetParameter("main-name"),
 			MainCidr:      i.GetOperand("main-cidr"),
+			MainName:      i.GetParameter("main-name"),
 			MainWgPort:    toUint16Ptr(i.GetIntParameter("main-wg-port")),
 			MainApiPort:   toUint16Ptr(i.GetIntParameter("main-api-port")),
-			InviteName:    i.GetParameter("invite-name"),
 			InviteCidr:    i.GetParameter("invite-cidr"),
+			InviteName:    i.GetParameter("invite-name"),
 			InviteApiPort: toUint16Ptr(i.GetIntParameter("invite-api-port")),
 			InviteWgPort:  toUint16Ptr(i.GetIntParameter("invite-wg-port")),
 		}
@@ -99,15 +97,10 @@ var serverNetworkAdd = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(network)
-		}
-
-		fmt.Printf(
+		return cliApp(i).Result(network,
 			"network %q created (disabled); enable with 'cord server network enable %s'\n",
 			req.Name, req.Name,
 		)
-		return nil
 	},
 }
 
@@ -132,12 +125,7 @@ var serverNetworkDelete = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return nil
-		}
-
-		fmt.Printf("network %q deleted\n", name)
-		return nil
+		return cliApp(i).Message("network %q deleted\n", name)
 	},
 }
 
@@ -155,14 +143,7 @@ var serverNetworkList = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(networks)
-		}
-
-		for _, n := range networks {
-			fmt.Println(n)
-		}
-		return nil
+		return cliApp(i).Names(networks)
 	},
 }
 
@@ -188,12 +169,7 @@ var serverNetworkShow = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(network)
-		}
-
-		printServerNetworkDetail(network)
-		return nil
+		return cliApp(i).ServerNetworkDetail(network)
 	},
 }
 
@@ -219,13 +195,11 @@ var serverNetworkEnable = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(status)
+		output := cliApp(i)
+		if err := output.Message("network %q enabled\n", name); err != nil {
+			return err
 		}
-
-		fmt.Printf("network %q enabled\n", name)
-		printNetworkRuntime(status)
-		return nil
+		return output.ServerNetworkRuntime(status)
 	},
 }
 
@@ -251,29 +225,12 @@ var serverNetworkDisable = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(status)
+		output := cliApp(i)
+		if err := output.Message("network %q disabled\n", name); err != nil {
+			return err
 		}
-
-		fmt.Printf("network %q disabled\n", name)
-		printNetworkRuntime(status)
-		return nil
+		return output.ServerNetworkRuntime(status)
 	},
-}
-
-// printNetworkRuntime reports what the daemon is actually doing with a
-// network when that differs from the intent just recorded.
-func printNetworkRuntime(
-	status adminserver.NetworkStatus,
-) {
-	if status.Enabled == status.Running {
-		return
-	}
-	if status.Reason == "" {
-		fmt.Printf("running: %t\n", status.Running)
-		return
-	}
-	fmt.Printf("running: %t (%s)\n", status.Running, status.Reason)
 }
 
 func toUint16Ptr(v *int) *uint16 {
@@ -282,22 +239,4 @@ func toUint16Ptr(v *int) *uint16 {
 	}
 	u := uint16(*v)
 	return &u
-}
-
-// printServerNetworkDetail prints the key: value detail view for a single
-// network, as shown by `server network show`.
-func printServerNetworkDetail(
-	n adminserver.Network,
-) {
-	fmt.Printf("name: %s\n", n.Name)
-	fmt.Printf("external_ip: %s\n", n.ExternalIP)
-	fmt.Printf("main_name: %s\n", n.MainName)
-	fmt.Printf("main_cidr: %s\n", n.MainCidr)
-	fmt.Printf("main_wg_port: %d\n", n.MainWgPort)
-	fmt.Printf("main_api_port: %d\n", n.MainApiPort)
-	fmt.Printf("invite_name: %s\n", n.InviteName)
-	fmt.Printf("invite_cidr: %s\n", n.InviteCidr)
-	fmt.Printf("invite_wg_port: %d\n", n.InviteWgPort)
-	fmt.Printf("invite_api_port: %d\n", n.InviteApiPort)
-	fmt.Printf("enabled: %t\n", n.Enabled)
 }

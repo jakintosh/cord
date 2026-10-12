@@ -20,7 +20,42 @@ func serverCidr() *service.Cidr {
 	}
 }
 
-func serverPeer(pubKey string) *service.Peer {
+func seedDatabaseNetwork(
+	t *testing.T,
+	db *database.DB,
+	name string,
+) {
+	t.Helper()
+	network := &service.Network{
+		Name:       name,
+		PrivateKey: "priv-" + name,
+		PublicKey:  "pub-" + name,
+		ExternalIP: "1.1.1.1",
+		Main: service.Plane{
+			Name:          name,
+			Cidr:          "10.0.0.0/16",
+			WireguardPort: 51820,
+			ApiPort:       8080,
+		},
+		Invite: service.Plane{
+			Name:          name + "-i",
+			Cidr:          "10.1.0.0/24",
+			WireguardPort: 51821,
+			ApiPort:       8080,
+		},
+		CreatedAt: time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC),
+	}
+	if err := db.BootstrapNetwork(network,
+		&service.Cidr{Name: name, Cidr: network.Main.Cidr, Prefix: 16, Bits: 32},
+		serverCidr(), serverPeer(network.PublicKey),
+	); err != nil {
+		t.Fatalf("bootstrap %s: %v", name, err)
+	}
+}
+
+func serverPeer(
+	pubKey string,
+) *service.Peer {
 	return &service.Peer{
 		Name:      "cord-server",
 		CidrName:  "cord-server",
@@ -31,16 +66,20 @@ func serverPeer(pubKey string) *service.Peer {
 	}
 }
 
-func TestGetNetwork_NotFound(t *testing.T) {
+func TestGetNetwork_NotFound(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	_, err := db.GetNetwork("nonexistent")
-	if err == nil {
-		t.Fatal("expected error for nonexistent network")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("get missing network = %v, want ErrNotFound", err)
 	}
 }
 
-func TestInsertAndGetNetwork(t *testing.T) {
+func TestBootstrapNetwork_RoundTrip(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	createdAt := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
@@ -118,7 +157,9 @@ func TestInsertAndGetNetwork(t *testing.T) {
 	}
 }
 
-func TestInsertNetwork_Duplicate(t *testing.T) {
+func TestBootstrapNetwork_Duplicate(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	net := &service.Network{
@@ -166,12 +207,21 @@ func TestInsertNetwork_Duplicate(t *testing.T) {
 		serverCidr(),
 		serverPeer("pub-a"),
 	)
-	if err == nil {
-		t.Fatal("expected error for duplicate network")
+	if !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("duplicate network = %v, want ErrConflict", err)
+	}
+	got, err := db.GetNetwork("homenet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PublicKey != net.PublicKey || got.PrivateKey != net.PrivateKey || !got.CreatedAt.Equal(net.CreatedAt.Truncate(time.Second)) {
+		t.Fatalf("duplicate bootstrap changed network: %+v", got)
 	}
 }
 
-func TestListNetworks(t *testing.T) {
+func TestListNetworks_SortedByName(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	networks, err := db.ListNetworks()
@@ -182,46 +232,9 @@ func TestListNetworks(t *testing.T) {
 		t.Fatalf("expected 0 networks, got %d", len(networks))
 	}
 
-	now := time.Now()
-	mustInsert := func(name string) {
-		t.Helper()
-		err := db.BootstrapNetwork(
-			&service.Network{
-				Name:       name,
-				PrivateKey: "priv-" + name,
-				PublicKey:  "pub-" + name,
-				ExternalIP: "1.1.1.1",
-				Main: service.Plane{
-					Name:          name,
-					Cidr:          "10.0.0.0/16",
-					WireguardPort: 51820,
-					ApiPort:       8080,
-				},
-				Invite: service.Plane{
-					Name:          "homenet-i",
-					Cidr:          "10.1.0.0/24",
-					WireguardPort: 51821,
-					ApiPort:       8080,
-				},
-				CreatedAt: now,
-			},
-			&service.Cidr{
-				Name:   name,
-				Cidr:   "10.0.0.0/16",
-				Prefix: 16,
-				Bits:   32,
-			},
-			serverCidr(),
-			serverPeer("pub-"+name),
-		)
-		if err != nil {
-			t.Fatalf("insert %s: %v", name, err)
-		}
+	for _, name := range []string{"gamma", "alpha", "beta"} {
+		seedDatabaseNetwork(t, db, name)
 	}
-
-	mustInsert("alpha")
-	mustInsert("beta")
-	mustInsert("gamma")
 
 	networks, err = db.ListNetworks()
 	if err != nil {
@@ -235,96 +248,40 @@ func TestListNetworks(t *testing.T) {
 	}
 }
 
-func TestDeleteNetwork(t *testing.T) {
+func TestDeleteNetwork_RemovesNetwork(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
-	now := time.Now()
-	if err := db.BootstrapNetwork(
-		&service.Network{
-			Name:       "deleteme",
-			PrivateKey: "priv",
-			PublicKey:  "pub",
-			ExternalIP: "1.1.1.1",
-			Main: service.Plane{
-				Name:          "deleteme",
-				Cidr:          "10.0.0.0/16",
-				WireguardPort: 51820,
-				ApiPort:       8080,
-			},
-			Invite: service.Plane{
-				Name:          "deleteme-i",
-				Cidr:          "10.1.0.0/24",
-				WireguardPort: 51821,
-				ApiPort:       8080,
-			},
-			CreatedAt: now,
-		},
-		&service.Cidr{
-			Name:   "deleteme",
-			Cidr:   "10.0.0.0/16",
-			Prefix: 16,
-			Bits:   32,
-		},
-		serverCidr(),
-		serverPeer("pub"),
-	); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
+	seedDatabaseNetwork(t, db, "deleteme")
 
 	if err := db.DeleteNetwork("deleteme"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
 	_, err := db.GetNetwork("deleteme")
-	if err == nil {
-		t.Fatal("expected error after delete")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("expected error after delete: %v", err)
 	}
 }
 
-func TestDeleteNetwork_NotFound(t *testing.T) {
+func TestDeleteNetwork_NotFound(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	err := db.DeleteNetwork("ghost")
-	if err == nil {
-		t.Fatal("expected error for nonexistent network")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("expected error for nonexistent network: %v", err)
 	}
 }
 
-func TestDeleteNetwork_RefusesEnabled(t *testing.T) {
+func TestDeleteNetwork_RefusesEnabled(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
-	now := time.Now()
-	if err := db.BootstrapNetwork(
-		&service.Network{
-			Name:       "enablednet",
-			PrivateKey: "priv",
-			PublicKey:  "pub",
-			ExternalIP: "1.1.1.1",
-			Main: service.Plane{
-				Name:          "enablednet",
-				Cidr:          "10.0.0.0/16",
-				WireguardPort: 51820,
-				ApiPort:       8080,
-			},
-			Invite: service.Plane{
-				Name:          "enablednet-i",
-				Cidr:          "10.1.0.0/24",
-				WireguardPort: 51821,
-				ApiPort:       8080,
-			},
-			CreatedAt: now,
-		},
-		&service.Cidr{
-			Name:   "enablednet",
-			Cidr:   "10.0.0.0/16",
-			Prefix: 16,
-			Bits:   32,
-		},
-		serverCidr(),
-		serverPeer("pub"),
-	); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
+	seedDatabaseNetwork(t, db, "enablednet")
 
 	if err := db.SetNetworkEnabled("enablednet", true); err != nil {
 		t.Fatalf("enable: %v", err)
@@ -340,41 +297,12 @@ func TestDeleteNetwork_RefusesEnabled(t *testing.T) {
 	}
 }
 
-func TestDeleteNetwork_Cascade(t *testing.T) {
+func TestDeleteNetwork_Cascade(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
-	now := time.Now()
-	if err := db.BootstrapNetwork(
-		&service.Network{
-			Name:       "cascadenet",
-			PrivateKey: "priv",
-			PublicKey:  "pub",
-			ExternalIP: "1.1.1.1",
-			Main: service.Plane{
-				Name:          "cascadenet",
-				Cidr:          "10.0.0.0/16",
-				WireguardPort: 51820,
-				ApiPort:       8080,
-			},
-			Invite: service.Plane{
-				Name:          "cascadenet-i",
-				Cidr:          "10.1.0.0/24",
-				WireguardPort: 51821,
-				ApiPort:       8080,
-			},
-			CreatedAt: now,
-		},
-		&service.Cidr{
-			Name:   "cascadenet",
-			Cidr:   "10.0.0.0/16",
-			Prefix: 16,
-			Bits:   32,
-		},
-		serverCidr(),
-		serverPeer("pub"),
-	); err != nil {
-		t.Fatalf("insert network: %v", err)
-	}
+	seedDatabaseNetwork(t, db, "cascadenet")
 
 	testutil.SeedPeerDB(t, db, "cascadenet", "peer-1", "10.0.1.5/32", "peer-key-1", false, true, true)
 
@@ -399,53 +327,123 @@ func TestDeleteNetwork_Cascade(t *testing.T) {
 	}
 }
 
-func TestOpenDatabase(t *testing.T) {
-	opts := database.Options{
-		Path: ":memory:",
+func TestBootstrapNetwork_CidrConflictRollsBackAndCanRetry(
+	t *testing.T,
+) {
+	db := testutil.SetupDB(t)
+	network := &service.Network{
+		Name:      "rollback",
+		Main:      service.Plane{Name: "rollback", Cidr: "10.0.0.0/16"},
+		Invite:    service.Plane{Name: "rollback-i", Cidr: "10.1.0.0/24"},
+		CreatedAt: time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC),
 	}
-	db, err := database.Open(opts)
+	root := &service.Cidr{Name: "rollback", Cidr: "10.0.0.0/16"}
+	server := serverCidr()
+	server.Name = root.Name
+	if err := db.BootstrapNetwork(network, root, server, serverPeer("key")); !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("conflicting CIDR = %v, want ErrConflict", err)
+	}
+	if _, err := db.GetNetwork("rollback"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("network after rollback = %v", err)
+	}
+	cidrs, err := db.ListCidrs("rollback")
 	if err != nil {
-		t.Fatalf("open: %v", err)
+		t.Fatal(err)
 	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("close: %v", err)
+	if len(cidrs) != 0 {
+		t.Fatalf("CIDRs after rollback = %+v", cidrs)
 	}
-}
-
-func TestOpenDatabase_UserVersionSet(t *testing.T) {
-	db := testutil.SetupDB(t)
-
-	var version int
-	if err := db.Conn.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
-		t.Fatalf("read user_version: %v", err)
+	if err := db.BootstrapNetwork(network, root, serverCidr(), serverPeer("key")); err != nil {
+		t.Fatalf("retry: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("user_version = %d, want 1", version)
-	}
-}
-
-func TestOpenDatabase_TablesExist(t *testing.T) {
-	db := testutil.SetupDB(t)
-
-	for _, table := range []string{
-		"network",
-		"group",
-		"association",
-		"peer",
-		"cidr",
-		"cidr_assignment",
-		"registration",
-		"registration_assignment",
-		"endpoint",
-	} {
-		var name string
-		err := db.Conn.QueryRow(`
-			SELECT name FROM sqlite_master
-			WHERE type = 'table' AND name = ?1`,
-			table,
-		).Scan(&name)
-		if err != nil {
-			t.Fatalf("table %q should exist: %v", table, err)
+	for _, enabled := range []bool{true, false} {
+		if err := db.SetNetworkEnabled("rollback", enabled); err != nil {
+			t.Fatal(err)
 		}
+		got, err := db.GetNetwork("rollback")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Enabled != enabled {
+			t.Fatalf("enabled = %v, want %v", got.Enabled, enabled)
+		}
+	}
+}
+
+func seedNetwork(
+	t *testing.T,
+	db *database.DB,
+) {
+	t.Helper()
+	seedDatabaseNetwork(t, db, "testnet")
+}
+
+func seedNetworkForCidr(
+	t *testing.T,
+	db *database.DB,
+) {
+	t.Helper()
+	seedDatabaseNetwork(t, db, "cidrnet")
+}
+
+func seedNetworkForRegistration(
+	t *testing.T,
+	db *database.DB,
+) {
+	t.Helper()
+	seedNetworkForRegistrationWithInviteCIDR(t, db, "10.1.0.0/24")
+}
+
+func seedNetworkForRegistrationWithInviteCIDR(
+	t *testing.T,
+	db *database.DB,
+	inviteCIDR string,
+) {
+	t.Helper()
+
+	name := "regnet"
+	if err := db.BootstrapNetwork(
+		&service.Network{
+			Name:       name,
+			PrivateKey: "priv-" + name,
+			PublicKey:  "pub-" + name,
+			ExternalIP: "1.1.1.1",
+			Main: service.Plane{
+				Name:          name,
+				Cidr:          "10.0.0.0/16",
+				WireguardPort: 51820,
+				ApiPort:       8080,
+			},
+			Invite: service.Plane{
+				Name:          name + "-i",
+				Cidr:          inviteCIDR,
+				WireguardPort: 51821,
+				ApiPort:       8080,
+			},
+			CreatedAt: time.Now(),
+		},
+		&service.Cidr{
+			Name:   "regnet",
+			Cidr:   "10.0.0.0/16",
+			Prefix: 16,
+			Bits:   32,
+		},
+		&service.Cidr{
+			Name:     "cord-server",
+			Cidr:     "10.0.0.1/32",
+			Prefix:   32,
+			Bits:     32,
+			Terminal: true,
+		},
+		&service.Peer{
+			Name:      "cord-server",
+			CidrName:  "cord-server",
+			PublicKey: "pub",
+			Admin:     true,
+			Enabled:   true,
+			Confirmed: true,
+		},
+	); err != nil {
+		t.Fatalf("seed network: %v", err)
 	}
 }

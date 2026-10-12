@@ -1,14 +1,17 @@
 package api_test
 
 import (
+	"net"
 	"net/http"
 	"testing"
+	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 func TestAPIListPeers_Empty(
@@ -18,14 +21,52 @@ func TestAPIListPeers_Empty(
 	env := testutil.Setup(t)
 	env.SeedNetwork(t, "mynet")
 
-	// list peers
+	// send request
 	url := "/networks/mynet/peers"
 	result := wire.TestGet[[]api.Peer](env.Router, url)
 
-	// verify result
-	data := result.ExpectOK(t)
+	// verify response
+	data := result.ExpectStatusOK(t, http.StatusOK)
 	if len(data) != 0 {
 		t.Fatalf("expected 0 peers, got %d", len(data))
+	}
+}
+
+func TestAPIListPeers_IncludesLiveHandshake(
+	t *testing.T,
+) {
+	// setup cached identity and live device observation
+	env := testutil.Setup(t)
+	network := env.SeedEnabledNetwork(t, "mynet")
+	key, err := wgtypes.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.SeedPeers(t, env.Database, "mynet", service.Peer{
+		Name: "alice", PublicKey: key.String(), Route: "10.42.0.9/32",
+	})
+	env.Backend.Device(network.InterfaceName).SetPeers(wireguard.PeerStatus{
+		PublicKey:     key,
+		Endpoint:      &net.UDPAddr{IP: net.ParseIP("192.0.2.9"), Port: 51820},
+		LastHandshake: testutil.FixedTime.Add(-time.Minute),
+	})
+
+	// send request
+	url := "/networks/mynet/peers"
+	result := wire.TestGet[[]api.Peer](env.Router, url)
+
+	// verify response
+	data := result.ExpectStatusOK(t, http.StatusOK)
+	if len(data) != 1 {
+		t.Fatalf("peers = %+v, want alice", data)
+	}
+	peer := data[0]
+	if peer.Name != "alice" || peer.Route != "10.42.0.9/32" || peer.Endpoint != "192.0.2.9:51820" || !peer.Connected {
+		t.Fatalf("live peer = %+v", peer)
+	}
+	wantHandshake := testutil.FixedTime.Add(-time.Minute).Format(time.RFC3339)
+	if peer.LastHandshake == nil || *peer.LastHandshake != wantHandshake {
+		t.Fatalf("handshake = %v, want %s", peer.LastHandshake, wantHandshake)
 	}
 }
 
@@ -46,12 +87,12 @@ func TestAPIListPeers_WithCachedData(
 		Route:     "10.42.0.9/32",
 	})
 
-	// list peers
+	// send request
 	url := "/networks/mynet/peers"
 	result := wire.TestGet[[]api.Peer](env.Router, url)
 
-	// verify result
-	data := result.ExpectOK(t)
+	// verify response
+	data := result.ExpectStatusOK(t, http.StatusOK)
 	if len(data) != 1 {
 		t.Fatalf("expected 1 peer, got %d", len(data))
 	}
@@ -75,7 +116,7 @@ func TestAPIListPeers_NetworkNotFound(
 	// setup env
 	env := testutil.Setup(t)
 
-	// list peers for nonexistent network
+	// send request
 	url := "/networks/ghost/peers"
 	result := wire.TestGet[any](env.Router, url)
 

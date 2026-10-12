@@ -1,92 +1,123 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"net"
-	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-// Tunnel is a running WireGuard device with the coordination server
-// pinned as its one fixed peer, plus the address its API answers on.
-// Every call this daemon makes to a server travels through one.
-type Tunnel struct {
-	device  *wireguard.Device
-	apiAddr string // server API host:port derived from server
-
+type tunnelOptions struct {
 	name       string
 	privateKey string
 	route      string
 	listenPort uint16
 	server     service.ServerInfo
-	keepalive  time.Duration
 }
 
-// start creates the device and adds the server peer with EndpointFixed.
-// The caller is responsible for calling stop when done.
-func (t *Tunnel) start(
+// Tunnel owns a configured device and the coordination server's API address.
+// Its parent configures peers, serializes lifecycle calls, and owns cleanup.
+type Tunnel struct {
+	name    string
+	device  *wireguard.Device
+	apiAddr string
+}
+
+// newTunnel constructs a device wrapper without creating an interface.
+func newTunnel(
+	opts tunnelOptions,
 	wg *wireguard.Manager,
-) error {
-	deviceRoute, err := netaddr.ParseRoute(t.route)
+) (
+	*Tunnel,
+	error,
+) {
+	deviceRoute, err := netaddr.ParseRoute(opts.route)
 	if err != nil {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"%w: parse route %q",
 			service.ErrInvalidInput,
-			t.route,
+			opts.route,
 		)
 	}
 
-	_, networkCIDR, err := net.ParseCIDR(t.server.NetworkCidr)
+	_, networkCIDR, err := net.ParseCIDR(opts.server.NetworkCidr)
 	if err != nil {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"%w: parse network cidr %q",
 			service.ErrInvalidInput,
-			t.server.NetworkCidr,
+			opts.server.NetworkCidr,
 		)
 	}
 
-	t.device, err = wg.CreateDevice(wireguard.DeviceConfig{
-		Name:        t.name,
-		PrivateKey:  t.privateKey,
+	apiAddr, err := netaddr.EndpointFromCIDR(opts.server.Route, opts.server.APIPort)
+	if err != nil {
+		return nil, fmt.Errorf("server api addr for %q: %w", opts.name, err)
+	}
+
+	device, err := wg.NewDevice(wireguard.DeviceConfig{
+		Name:        opts.name,
+		PrivateKey:  opts.privateKey,
 		Route:       deviceRoute,
 		NetworkCIDR: *networkCIDR,
-		ListenPort:  t.listenPort,
+		ListenPort:  opts.listenPort,
 	})
 	if err != nil {
-		return fmt.Errorf("create device %q: %w", t.name, err)
+		return nil, fmt.Errorf("create device %q: %w", opts.name, err)
 	}
 
-	if err := t.device.SetPeers(wireguard.PeerConfig{
-		PublicKey:           t.server.PublicKey,
-		AllowedIPs:          []string{t.server.Route},
-		Endpoint:            t.server.Endpoint,
-		EndpointPolicy:      wireguard.EndpointFixed,
-		PersistentKeepalive: int(t.keepalive / time.Second),
-	}); err != nil {
-		_ = t.device.Close()
-		return fmt.Errorf("set server peer on %q: %w", t.name, err)
-	}
-
-	t.apiAddr, err = netaddr.EndpointFromCIDR(t.server.Route, t.server.APIPort)
-	if err != nil {
-		_ = t.device.Close()
-		return fmt.Errorf("server api addr for %q: %w", t.name, err)
-	}
-
-	return nil
+	return &Tunnel{
+		name:    opts.name,
+		device:  device,
+		apiAddr: apiAddr,
+	}, nil
 }
 
-// stop closes the WireGuard device.
-func (t *Tunnel) stop() error {
+// status observes device availability without repairing it.
+func (t *Tunnel) status(
+	target resource.State,
+) resource.Snapshot {
+	device := t.device.Status()
+
+	child := resource.Snapshot{
+		Kind:   "wireguard-device",
+		Name:   t.name,
+		State:  device.State,
+		Target: target,
+	}
+	if device.Error != nil {
+		child.Error = device.Error.Error()
+	}
+	child.UpdateHealth()
+
+	status := resource.Snapshot{
+		Kind:     "tunnel",
+		Name:     t.name,
+		State:    device.State,
+		Target:   target,
+		Children: []resource.Snapshot{child},
+	}
+	status.UpdateHealth()
+
+	return status
+}
+
+// reconcile restores device availability. The device retains and restores
+// the desired peers configured by the tunnel's parent.
+func (t *Tunnel) reconcile(
+	ctx context.Context,
+) error {
+	return t.device.Reconcile(ctx)
+}
+
+// close releases the interface, retaining the wrapper for retries and restarts.
+func (t *Tunnel) close() error {
 	if t.device == nil {
 		return nil
 	}
 
-	err := t.device.Close()
-	t.device = nil
-
-	return err
+	return t.device.Close()
 }

@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sync"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
+	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 )
 
 // defaultEndpointTTL is how long an endpoint sighting is considered current.
@@ -23,11 +25,6 @@ type Options struct {
 	// Logger receives internal diagnostics from the service. Nil
 	// discards everything.
 	Logger *slog.Logger
-
-	// Wake receives the name of a network whose derived state changed,
-	// so the runtime can converge it promptly. Nil means nothing is
-	// listening; sends are dropped when the channel is full.
-	Wake chan<- string
 }
 
 // Service is the domain core for the cord server. All domain operations
@@ -38,7 +35,14 @@ type Service struct {
 	store Store
 	clock func() time.Time
 	log   *slog.Logger
-	wake  chan<- string
+
+	// models caches one compiled network model per network. Published
+	// models are immutable and safe for concurrent readers. Each
+	// network's generation advances on every invalidation so an
+	// in-flight load cannot publish stale state over it.
+	mu          sync.Mutex
+	models      map[string]*networkModel
+	generations map[string]uint64
 }
 
 // New returns a ready-to-use Service.
@@ -63,14 +67,15 @@ func New(
 	}
 
 	return &Service{
-		store: opts.Store,
-		clock: clock,
-		log:   log,
-		wake:  opts.Wake,
+		store:       opts.Store,
+		clock:       clock,
+		log:         log,
+		models:      make(map[string]*networkModel),
+		generations: make(map[string]uint64),
 	}, nil
 }
 
-// ResolveRegistrationIdentity looks up an unredeemed, unexpired
+// ResolveRegistrationIdentity looks up an unconfirmed, unexpired
 // registration by temporary IP within the invite network.
 func (s *Service) ResolveRegistrationIdentity(
 	networkName string,
@@ -95,10 +100,16 @@ func (s *Service) ResolvePeerIdentity(
 	*Peer,
 	error,
 ) {
-	p, err := s.store.GetPeerByIP(network, ip)
+	model, err := s.getNetworkModel(network)
 	if err != nil {
-		return nil, fmt.Errorf("resolve peer identity: %w", mapStoreError(err))
+		return nil, fmt.Errorf("resolve peer identity: %w", err)
 	}
+
+	p, ok := model.activeByIP[peerIPKey(ip)]
+	if !ok {
+		return nil, fmt.Errorf("resolve peer identity: %w", ErrNotFound)
+	}
+
 	return p, nil
 }
 
@@ -118,18 +129,11 @@ func (s *Service) ResolveProvisionalIdentity(
 	return p, nil
 }
 
-// requestReconcile tells the runtime that the named network's desired
-// state changed. The send never blocks: a full channel already holds a
-// wake the runtime has not consumed yet, and its periodic pass catches
-// up.
-func (s *Service) requestReconcile(
-	network string,
-) {
-	if s.wake == nil {
-		return
-	}
-	select {
-	case s.wake <- network:
-	default:
-	}
+// peerIPKey renders a source IP as the active topology's IP index key:
+// the canonical terminal host route string for the address.
+func peerIPKey(
+	ip net.IP,
+) string {
+	route := netaddr.HostRoute(netaddr.Normalize(ip))
+	return route.String()
 }

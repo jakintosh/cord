@@ -10,137 +10,161 @@ import (
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
+	"git.studiopollinator.com/pollinator/cord/internal/server/dns"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-// shutdownTimeout bounds the graceful shutdown of a plane's API server.
-const shutdownTimeout = 5 * time.Second
+const defaultShutdownTimeout = 5 * time.Second
 
-// Plane is a running WireGuard plane: one WG device plus an optional
-// HTTP API server served over the tunnel.
+// Plane groups a device and its servers. Only the runtime loop operates on it.
 type Plane struct {
-	device        *wireguard.Device
-	server        *http.Server
-	config        service.Plane
-	privateKey    string
-	log           *slog.Logger
-	onServeResult func(error)
+	device *wireguard.Device
+	http   *httpServer
+	dns    *dns.Server
+
+	timeout time.Duration
 }
 
-// start creates the WireGuard device, then synchronously starts the HTTP
-// API listener (if handler is non-nil), so a bind failure fails the
-// start instead of surfacing asynchronously. Requests served by the
-// listener inherit ctx.
-func (p *Plane) start(
-	ctx context.Context,
-	wg *wireguard.Manager,
+// newPlane constructs configured wrappers without starting any resources.
+func newPlane(
+	config service.Plane,
+	dnsOptions *dns.Options,
+	privateKey string,
 	handler http.Handler,
-) error {
-	// determine interface address
-	ifaceRoute, err := netaddr.InterfaceRouteFromCidr(p.config.Cidr)
-	if err != nil {
-		return fmt.Errorf("parse cidr: %v", err)
+	wg *wireguard.Manager,
+	timeout time.Duration,
+	log *slog.Logger,
+) (
+	*Plane,
+	error,
+) {
+	if timeout <= 0 {
+		timeout = defaultShutdownTimeout
 	}
 
-	_, networkCIDR, err := net.ParseCIDR(p.config.Cidr)
+	route, err := netaddr.InterfaceRouteFromCidr(config.Cidr)
 	if err != nil {
-		return fmt.Errorf("parse cidr: %v", err)
+		return nil, fmt.Errorf("plane address: %w", err)
 	}
 
-	// create wg device
-	p.device, err = wg.CreateDevice(wireguard.DeviceConfig{
-		Name:        p.config.Name,
-		PrivateKey:  p.privateKey,
-		Route:       ifaceRoute,
+	_, networkCIDR, err := net.ParseCIDR(config.Cidr)
+	if err != nil {
+		return nil, err
+	}
+
+	device, err := wg.NewDevice(wireguard.DeviceConfig{
+		Name:        config.Name,
+		PrivateKey:  privateKey,
+		Route:       route,
 		NetworkCIDR: *networkCIDR,
-		ListenPort:  p.config.WireguardPort,
+		ListenPort:  config.WireguardPort,
 	})
 	if err != nil {
-		return fmt.Errorf("create device %q: %w", p.config.Name, err)
+		return nil, fmt.Errorf("create device %q: %w", config.Name, err)
 	}
 
-	// start API server if handler is provided
+	var httpSrv *httpServer = nil
 	if handler != nil {
-		apiEndpoint := netaddr.Endpoint(ifaceRoute.IP, p.config.ApiPort)
-		p.server = &http.Server{
-			Addr:        apiEndpoint,
-			Handler:     handler,
-			BaseContext: func(net.Listener) context.Context { return ctx },
+		httpSrv = &httpServer{
+			address: netaddr.Endpoint(route.IP, config.ApiPort),
+			handler: handler,
+			log:     log,
+			timeout: timeout,
 		}
-		ln, err := net.Listen("tcp", apiEndpoint)
-		if err != nil {
-			_ = p.device.Close()
-			return fmt.Errorf("listen %q on %s: %w", p.config.Name, apiEndpoint, err)
-		}
-		p.log.Debug("api listening", "addr", apiEndpoint)
-		p.serve(ln, apiEndpoint)
 	}
 
-	return nil
+	var dnsSrv *dns.Server = nil
+	if dnsOptions != nil {
+		dnsSrv, err = dns.New(*dnsOptions)
+		if err != nil {
+			return nil, fmt.Errorf("dns: %w", err)
+		}
+	}
+
+	return &Plane{
+		device:  device,
+		http:    httpSrv,
+		dns:     dnsSrv,
+		timeout: timeout,
+	}, nil
 }
 
-func (p *Plane) serve(
-	listener net.Listener,
-	address string,
-) {
-	if p.onServeResult != nil {
-		p.onServeResult(nil)
-	}
-	go func() {
-		err := p.server.Serve(listener)
+// status collects child status without changing resources.
+func (p *Plane) status(
+	name string,
+	target resource.State,
+) resource.Snapshot {
 
-		if err != nil && err != http.ErrServerClosed {
-			// not fatal — the device is still up
-			p.log.Error(
-				"api server exited",
-				"addr",
-				address,
-				"err",
-				err,
-			)
-			if p.onServeResult != nil {
-				p.onServeResult(err)
+	deviceStatus := resourceSnapshot("wireguard-device", p.device.Status(), target)
+	status := resource.Snapshot{
+		Kind:     "plane",
+		Name:     name,
+		State:    resource.Running,
+		Target:   target,
+		Children: []resource.Snapshot{deviceStatus},
+	}
+
+	if p.http != nil {
+		httpStatus := resourceSnapshot("http", p.http.status(), target)
+		status.Children = append(status.Children, httpStatus)
+	}
+
+	if p.dns != nil {
+		dnsStatus := resourceSnapshot("dns", p.dns.Status(), target)
+		status.Children = append(status.Children, dnsStatus)
+	}
+
+	if target == resource.Stopped {
+		status.State = resource.Stopped
+		for _, child := range status.Children {
+			if child.State != resource.Stopped {
+				status.State = child.State
+				break
 			}
 		}
-	}()
+	}
+
+	status.UpdateHealth()
+
+	return status
 }
 
-// stop shuts down the API server (with a bounded timeout) then closes
-// the WireGuard device. Errors are joined.
-func (p *Plane) stop() error {
+// reconcile is infrastructure maintenance, never a plane-handler operation.
+func (p *Plane) reconcile(
+	ctx context.Context,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	var errs []error
+	errs = append(errs, p.device.Reconcile(ctx))
+	if p.dns != nil {
+		errs = append(errs, p.dns.Reconcile(ctx))
+	}
+	if p.http != nil {
+		errs = append(errs, p.http.reconcile(ctx))
+	}
+	return errors.Join(errs...)
+}
 
-	if p.server != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		err := p.server.Shutdown(ctx)
+// close releases request waiters and drains servers before closing the device.
+func (p *Plane) close() error {
+	var errs []error
+	if p.http != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+		errs = append(errs, p.http.close(ctx))
 		cancel()
-		if err != nil {
-			errs = append(errs, fmt.Errorf(
-				"server shutdown %q: %w",
-				p.config.Name,
-				err,
-			))
-			if err := p.server.Close(); err != nil {
-				errs = append(errs, fmt.Errorf(
-					"server force close %q: %w",
-					p.config.Name,
-					err,
-				))
-			}
-		}
 	}
 
-	if p.device != nil {
-		if err := p.device.Close(); err != nil {
-			errs = append(errs, fmt.Errorf(
-				"device close %q: %w",
-				p.config.Name,
-				err,
-			))
-		}
-		p.device = nil
+	if p.dns != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+		errs = append(errs, p.dns.Close(ctx))
+		cancel()
 	}
 
+	errs = append(errs, p.device.Close())
 	return errors.Join(errs...)
 }

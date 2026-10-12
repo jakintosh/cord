@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
+	"git.studiopollinator.com/pollinator/cord/internal/client/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 )
 
@@ -13,6 +14,8 @@ func writeServiceError(
 	err error,
 ) {
 	switch {
+	case errors.Is(err, runtime.ErrNotRunning):
+		wire.WriteError(w, http.StatusServiceUnavailable, err.Error())
 	case errors.Is(err, service.ErrNotFound):
 		wire.WriteError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, service.ErrConflict),

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
 )
 
@@ -12,23 +13,25 @@ func (a *API) handleGetStatus(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	status, err := a.runtime.GetStatus()
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
+	if status, err := a.runtime.GetStatus(
+		r.Context(),
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		networks := make([]NetworkStatus, len(status.Networks))
+		for i, network := range status.Networks {
+			networks[i] = networkStatusFromRuntime(network)
+		}
 
-	networks := make([]NetworkStatus, len(status.Networks))
-	for i, network := range status.Networks {
-		networks[i] = networkStatusFromRuntime(network)
+		statusDTO := Status{
+			Snapshot: snapshotFromRuntime(status.Snapshot),
+			Status:   "ok",
+			Health:   string(status.Health),
+			Version:  a.version,
+			Networks: networks,
+		}
+		wire.WriteData(w, http.StatusOK, statusDTO)
 	}
-
-	wire.WriteData(w, http.StatusOK, Status{
-		Status:   "ok",
-		Health:   status.Health,
-		Version:  a.version,
-		Networks: networks,
-	})
 }
 
 func networkStatusFromRuntime(
@@ -37,17 +40,14 @@ func networkStatusFromRuntime(
 	return NetworkStatus{
 		Name:      status.Name,
 		Enabled:   status.Enabled,
-		Running:   status.Running,
 		Reason:    status.Reason,
-		Health:    status.Health,
+		Health:    string(status.Health),
 		Reconcile: activityStatusFromRuntime(status.Reconcile),
-		MainAPI:   activityStatusFromRuntime(status.MainAPI),
-		InviteAPI: activityStatusFromRuntime(status.InviteAPI),
 	}
 }
 
 func activityStatusFromRuntime(
-	status runtime.ActivityStatus,
+	status resource.ActivityStatus,
 ) ActivityStatus {
 	result := ActivityStatus{
 		IntervalSeconds: int64(status.Interval / time.Second),
@@ -61,5 +61,31 @@ func activityStatusFromRuntime(
 		formatted := status.LastSuccessAt.Format(time.RFC3339)
 		result.LastSuccessAt = &formatted
 	}
+	return result
+}
+
+func snapshotFromRuntime(
+	status resource.Snapshot,
+) ResourceSnapshot {
+	result := ResourceSnapshot{
+		Kind:   status.Kind,
+		Name:   status.Name,
+		State:  string(status.State),
+		Target: string(status.Target),
+		Health: string(status.Health),
+		Error:  status.Error,
+	}
+
+	if len(status.Activities) > 0 {
+		result.Activities = make(map[string]ActivityStatus, len(status.Activities))
+		for name, activity := range status.Activities {
+			result.Activities[name] = activityStatusFromRuntime(activity)
+		}
+	}
+
+	for _, child := range status.Children {
+		result.Children = append(result.Children, snapshotFromRuntime(child))
+	}
+
 	return result
 }

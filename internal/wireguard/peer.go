@@ -17,7 +17,7 @@ type EndpointPolicy int
 const (
 	EndpointDynamic   EndpointPolicy = iota // cord never touches endpoint; learned from handshakes (default)
 	EndpointBootstrap                       // set only on initial add
-	EndpointFixed                           // always reconciled
+	EndpointFixed                           // enforced on every peer sync
 )
 
 // PeerConfig is an external-facing peer configuration with string-based
@@ -97,7 +97,7 @@ type PeerStatus struct {
 // PersistentKeepalive are always applied, and Endpoint is set only
 // when non-nil.
 //
-// The planner (planPeerReconciliation) is the only place that
+// The planner (planPeerOps) is the only place that
 // understands EndpointPolicy. By the time an op reaches the backend,
 // policy has been resolved: the Target.Endpoint field is either nil
 // ("don't touch") or the concrete address to set.
@@ -106,7 +106,27 @@ type PeerOp struct {
 	Target Peer
 }
 
-// planPeerReconciliation compares desired peers with live peer state
+func (op PeerOp) toWgPeerConfig() wgtypes.PeerConfig {
+	if op.Remove {
+		return wgtypes.PeerConfig{
+			PublicKey: op.Target.PublicKey,
+			Remove:    true,
+		}
+	}
+	cfg := wgtypes.PeerConfig{
+		PublicKey:         op.Target.PublicKey,
+		ReplaceAllowedIPs: true,
+		AllowedIPs:        op.Target.AllowedIPs,
+	}
+	keepalive := op.Target.PersistentKeepalive
+	cfg.PersistentKeepaliveInterval = &keepalive
+	if op.Target.Endpoint != nil {
+		cfg.Endpoint = op.Target.Endpoint
+	}
+	return cfg
+}
+
+// planPeerOps compares desired peers with live peer state
 // and produces a targeted set of PeerOps. Operations are ordered:
 // removes first, then adds, then updates. This ordering prevents
 // temporary conflicts (e.g. replacing a peer's allowed-IPs by
@@ -117,7 +137,7 @@ type PeerOp struct {
 // endpoint; targeted ops leave established tunnels undisturbed, and
 // Dynamic/Bootstrap endpoints are never rewritten on update so
 // WireGuard roaming can do its job.
-func planPeerReconciliation(
+func planPeerOps(
 	desired []Peer,
 	observed []PeerStatus,
 ) []PeerOp {
@@ -197,7 +217,7 @@ func normalizeAllowedIPs(
 		// meaningless. Mask them off so that a desired entry carrying
 		// host bits (e.g. from netaddr.ParseRoute) compares equal
 		// to the network-form value backends report. Without this,
-		// every reconcile cycle would emit a spurious update.
+		// every peer sync would emit a spurious update.
 		normalized[i] = net.IPNet{
 			IP:   ip.IP.Mask(ip.Mask),
 			Mask: append(net.IPMask(nil), ip.Mask...),

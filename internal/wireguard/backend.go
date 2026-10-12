@@ -39,7 +39,9 @@ func ParseBackendType(
 
 // Backend creates per-device handles. Implementations manage the
 // platform-specific WireGuard resource lifecycle (kernel netlink or
-// userspace wireguard-go).
+// userspace wireguard-go). On failure, CreateDevice must release partial
+// resources or, if cleanup fails, return their handle alongside the error
+// so its owner can retry cleanup later.
 type Backend interface {
 	CreateDevice(cfg DeviceConfig) (WgDevice, error)
 }
@@ -48,7 +50,8 @@ type Backend interface {
 // Each WgDevice is owned by exactly one Device, which serializes access.
 type WgDevice interface {
 	Name() string
-	Peers() ([]PeerStatus, error)
-	ApplyPeers(ops []PeerOp) error
+	Check() error
+	GetPeerStatuses() ([]PeerStatus, error)
+	ApplyPeerOps(ops []PeerOp) error
 	Close() error
 }

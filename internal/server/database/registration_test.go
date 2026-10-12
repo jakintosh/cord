@@ -3,6 +3,7 @@ package database_test
 import (
 	"errors"
 	"net"
+	"reflect"
 	"testing"
 	"time"
 
@@ -11,114 +12,123 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
-func seedNetworkForRegistration(t *testing.T, db *database.DB) {
-	t.Helper()
-	seedNetworkForRegistrationWithInviteCIDR(t, db, "10.1.0.0/24")
-}
-
-func seedNetworkForRegistrationWithInviteCIDR(
+func TestRedeemRegistration_DuplicatePeerKeyRollsBackAndCanRetry(
 	t *testing.T,
-	db *database.DB,
-	inviteCIDR string,
 ) {
-	t.Helper()
-
-	name := "regnet"
-	if err := db.BootstrapNetwork(
-		&service.Network{
-			Name:       name,
-			PrivateKey: "priv-" + name,
-			PublicKey:  "pub-" + name,
-			ExternalIP: "1.1.1.1",
-			Main: service.Plane{
-				Name:          name,
-				Cidr:          "10.0.0.0/16",
-				WireguardPort: 51820,
-				ApiPort:       8080,
-			},
-			Invite: service.Plane{
-				Name:          name + "-i",
-				Cidr:          inviteCIDR,
-				WireguardPort: 51821,
-				ApiPort:       8080,
-			},
-			CreatedAt: time.Now(),
-		},
-		&service.Cidr{
-			Name:   "regnet",
-			Cidr:   "10.0.0.0/16",
-			Prefix: 16,
-			Bits:   32,
-		},
-		&service.Cidr{
-			Name:     "cord-server",
-			Cidr:     "10.0.0.1/32",
-			Prefix:   32,
-			Bits:     32,
-			Terminal: true,
-		},
-		&service.Peer{
-			Name:      "cord-server",
-			CidrName:  "cord-server",
-			PublicKey: "pub",
-			Admin:     true,
-			Enabled:   true,
-			Confirmed: true,
-		},
-	); err != nil {
-		t.Fatalf("seed network: %v", err)
-	}
-}
-
-func createRegistration(
-	t *testing.T,
-	db *database.DB,
-	registration *service.Registration,
-) error {
-	t.Helper()
-
-	created, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
-		Name:            registration.Name,
-		InvitePublicKey: registration.InvitePublicKey,
-		MainRoute:       registration.MainRoute,
-		Admin:           registration.Admin,
-		CreatedAt:       registration.CreatedAt,
-		ExpiresAt:       registration.ExpiresAt,
-	}, registration.CreatedAt)
+	db := testutil.SetupDB(t)
+	seedNetworkForRegistration(t, db)
+	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+	registration, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
+		Name:            "alice",
+		InvitePublicKey: "invite-key",
+		MainRoute:       "10.0.5.1/32",
+		CreatedAt:       now,
+		ExpiresAt:       now.Add(time.Hour),
+	}, now)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	registration.InviteRoute = created.InviteRoute
-	if registration.Redeemed {
-		_, err = db.RedeemRegistration(
-			"regnet",
-			registration.InvitePublicKey,
-			registration.RedeemedKey,
-			registration.CreatedAt,
-		)
+	testutil.SeedPeerDB(t, db, "regnet", "existing", "10.0.5.2/32", "taken-key", false, true, true)
+	if _, err := db.RedeemRegistration("regnet", "invite-key", "taken-key", now); !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("duplicate redemption = %v, want ErrConflict", err)
 	}
-	return err
+	got, err := db.GetRegistration("regnet", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != registration.Name || got.InviteRoute != registration.InviteRoute ||
+		got.MainRoute != registration.MainRoute || got.InvitePublicKey != registration.InvitePublicKey ||
+		got.Redeemed || got.RedeemedKey != "" || got.Confirmed || got.Admin != registration.Admin ||
+		!got.CreatedAt.Equal(registration.CreatedAt) || !got.ExpiresAt.Equal(registration.ExpiresAt) {
+		t.Fatalf("rejected redemption changed registration: %+v", got)
+	}
+	if _, err := db.GetCidr("regnet", "alice"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("rolled back CIDR = %v", err)
+	}
+	if _, err := db.GetPeer("regnet", "alice"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("rolled back peer = %v", err)
+	}
+	peer, err := db.RedeemRegistration("regnet", "invite-key", "available-key", now)
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if peer.Name != "alice" || peer.PublicKey != "available-key" || peer.Confirmed {
+		t.Fatalf("retried peer = %+v", peer)
+	}
 }
 
-func TestCreateAndGetRegistration(t *testing.T) {
+func TestPruneExpiredRegistrations_RemovesProvisionalStorageAtCutoff(
+	t *testing.T,
+) {
+	db := testutil.SetupDB(t)
+	seedNetworkForRegistration(t, db)
+	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
+		Name:            "expired",
+		InvitePublicKey: "invite-key",
+		MainRoute:       "10.0.5.1/32",
+		CreatedAt:       now,
+		ExpiresAt:       now.Add(time.Hour),
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.InsertGroup("regnet", "team"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AssignRegistrationGroup("regnet", "expired", "team", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RedeemRegistration("regnet", "invite-key", "peer-key", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PruneExpiredRegistrations("regnet", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.GetRegistration("regnet", "expired"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("registration = %v", err)
+	}
+	if _, err := db.GetPeer("regnet", "expired"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("peer = %v", err)
+	}
+	if _, err := db.GetCidr("regnet", "expired"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("CIDR = %v", err)
+	}
+	// Registration-group joins cannot reveal dangling assignment rows.
+	var count int
+	if err := db.Conn.QueryRow(`SELECT count(*) FROM registration_assignment`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("orphan registration assignments = %d", count)
+	}
+	groups, err := db.ListGroups("regnet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || groups[0].Name != "team" {
+		t.Fatalf("retained groups = %+v", groups)
+	}
+}
+
+func TestCreateRegistration_RoundTrip(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 
 	now := time.Now()
 	expires := now.Add(24 * time.Hour)
-	reg := &service.Registration{
+	params := service.CreateRegistrationParams{
 		Name:            "reg-1",
 		InvitePublicKey: "temp-key-1",
-		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
 		Admin:           true,
-		Redeemed:        false,
-		RedeemedKey:     "",
 		ExpiresAt:       expires,
 		CreatedAt:       now,
 	}
 
-	if err := createRegistration(t, db, reg); err != nil {
+	reg, err := db.CreateRegistration("regnet", params, now)
+	if err != nil {
 		t.Fatalf("create registration: %v", err)
 	}
 	if reg.InviteRoute != "10.1.0.2/32" {
@@ -159,7 +169,9 @@ func TestCreateAndGetRegistration(t *testing.T) {
 	}
 }
 
-func TestCreateRegistration_RejectsMainRouteOutsidePersistedMainCIDR(t *testing.T) {
+func TestCreateRegistration_RejectsMainRouteOutsidePersistedMainCIDR(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 
@@ -179,7 +191,9 @@ func TestCreateRegistration_RejectsMainRouteOutsidePersistedMainCIDR(t *testing.
 	}
 }
 
-func TestCreateRegistration_AddressExhausted(t *testing.T) {
+func TestCreateRegistration_AddressExhausted(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistrationWithInviteCIDR(t, db, "10.1.0.0/30")
 	now := time.Now()
@@ -218,7 +232,9 @@ func TestCreateRegistration_AddressExhausted(t *testing.T) {
 	}
 }
 
-func TestGetRegistration_NotFound(t *testing.T) {
+func TestGetRegistration_NotFound(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 
@@ -228,21 +244,22 @@ func TestGetRegistration_NotFound(t *testing.T) {
 	}
 }
 
-func TestGetRegistrationByIP(t *testing.T) {
+func TestGetRegistrationByIP_ResolvesInviteAddress(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 
 	now := time.Now()
 	expires := now.Add(24 * time.Hour)
-	if err := createRegistration(t, db, &service.Registration{
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 		Name:            "ip-reg",
 		InvitePublicKey: "ip-key",
-		InviteRoute:     "10.1.0.10/32",
 		MainRoute:       "10.0.5.10/32",
 		Admin:           false,
 		ExpiresAt:       expires,
 		CreatedAt:       now,
-	}); err != nil {
+	}, now); err != nil {
 		t.Fatalf("insert registration: %v", err)
 	}
 
@@ -255,7 +272,9 @@ func TestGetRegistrationByIP(t *testing.T) {
 	}
 }
 
-func TestGetRegistrationByIP_NotFound(t *testing.T) {
+func TestGetRegistrationByIP_NotFound(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 	now := time.Now()
@@ -266,30 +285,30 @@ func TestGetRegistrationByIP_NotFound(t *testing.T) {
 	}
 }
 
-func TestListRegistrations(t *testing.T) {
+func TestListRegistrations_NewestFirst(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 
 	now := time.Now()
 	expires := now.Add(24 * time.Hour)
-	if err := createRegistration(t, db, &service.Registration{
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 		Name:            "zzz",
 		InvitePublicKey: "z-key",
-		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
 		ExpiresAt:       expires,
 		CreatedAt:       now,
-	}); err != nil {
+	}, now); err != nil {
 		t.Fatalf("insert zzz: %v", err)
 	}
-	if err := createRegistration(t, db, &service.Registration{
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 		Name:            "aaa",
 		InvitePublicKey: "a-key",
-		InviteRoute:     "10.1.0.2/32",
 		MainRoute:       "10.0.5.2/32",
 		ExpiresAt:       expires,
 		CreatedAt:       now.Add(time.Minute),
-	}); err != nil {
+	}, now.Add(time.Minute)); err != nil {
 		t.Fatalf("insert aaa: %v", err)
 	}
 
@@ -306,29 +325,29 @@ func TestListRegistrations(t *testing.T) {
 	}
 }
 
-func TestListActiveRegistrations(t *testing.T) {
+func TestListActiveRegistrations_ExcludesExpired(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 
 	now := time.Now()
-	if err := createRegistration(t, db, &service.Registration{
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 		Name:            "active",
 		InvitePublicKey: "act-key",
-		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
 		ExpiresAt:       now.Add(24 * time.Hour),
 		CreatedAt:       now,
-	}); err != nil {
+	}, now); err != nil {
 		t.Fatalf("insert active: %v", err)
 	}
-	if err := createRegistration(t, db, &service.Registration{
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 		Name:            "expired",
 		InvitePublicKey: "exp-key",
-		InviteRoute:     "10.1.0.2/32",
 		MainRoute:       "10.0.5.2/32",
 		ExpiresAt:       now.Add(-1 * time.Hour),
 		CreatedAt:       now,
-	}); err != nil {
+	}, now); err != nil {
 		t.Fatalf("insert expired: %v", err)
 	}
 
@@ -344,22 +363,24 @@ func TestListActiveRegistrations(t *testing.T) {
 	}
 }
 
-func TestListActiveRegistrations_IncludesRedeemed(t *testing.T) {
+func TestListActiveRegistrations_IncludesRedeemed(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 
 	now := time.Now()
-	if err := createRegistration(t, db, &service.Registration{
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 		Name:            "redeemed-one",
 		InvitePublicKey: "red-key",
-		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
-		Redeemed:        true,
-		RedeemedKey:     "perm-key",
 		ExpiresAt:       now.Add(24 * time.Hour),
 		CreatedAt:       now,
-	}); err != nil {
-		t.Fatalf("insert redeemed: %v", err)
+	}, now); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if _, err := db.RedeemRegistration("regnet", "red-key", "perm-key", now); err != nil {
+		t.Fatalf("redeem registration: %v", err)
 	}
 
 	active, err := db.ListActiveRegistrations("regnet", now)
@@ -369,24 +390,25 @@ func TestListActiveRegistrations_IncludesRedeemed(t *testing.T) {
 	// Redeemed registrations remain active on the invite device until
 	// ConfirmPeer marks them confirmed, so the temp peer can still
 	// receive retries if the client's redeem response was lost.
-	if len(active) != 1 {
-		t.Fatalf("expected 1 active registration (redeemed still active on invite device), got %d", len(active))
+	if len(active) != 1 || active[0].Name != "redeemed-one" || !active[0].Redeemed || active[0].RedeemedKey != "perm-key" {
+		t.Fatalf("active registrations = %+v, want redeemed-one with perm-key", active)
 	}
 }
 
-func TestDeleteRegistration(t *testing.T) {
+func TestDeleteRegistration_RemovesRegistration(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 
 	now := time.Now()
-	if err := createRegistration(t, db, &service.Registration{
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 		Name:            "delme",
 		InvitePublicKey: "del-key",
-		InviteRoute:     "10.1.0.99/32",
 		MainRoute:       "10.0.5.99/32",
 		ExpiresAt:       now.Add(24 * time.Hour),
 		CreatedAt:       now,
-	}); err != nil {
+	}, now); err != nil {
 		t.Fatalf("insert registration: %v", err)
 	}
 
@@ -400,7 +422,9 @@ func TestDeleteRegistration(t *testing.T) {
 	}
 }
 
-func TestDeleteRegistration_NotFound(t *testing.T) {
+func TestDeleteRegistration_NotFound(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 
@@ -410,30 +434,30 @@ func TestDeleteRegistration_NotFound(t *testing.T) {
 	}
 }
 
-func TestPruneExpiredRegistrations(t *testing.T) {
+func TestPruneExpiredRegistrations_PreservesActive(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 
 	now := time.Now()
 	pruneAt := now.Add(2 * time.Hour)
-	if err := createRegistration(t, db, &service.Registration{
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 		Name:            "old",
 		InvitePublicKey: "old-key",
-		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
 		ExpiresAt:       now.Add(time.Hour),
 		CreatedAt:       now,
-	}); err != nil {
+	}, now); err != nil {
 		t.Fatalf("insert old: %v", err)
 	}
-	if err := createRegistration(t, db, &service.Registration{
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 		Name:            "new",
 		InvitePublicKey: "new-key",
-		InviteRoute:     "10.1.0.2/32",
 		MainRoute:       "10.0.5.2/32",
 		ExpiresAt:       now.Add(3 * time.Hour),
 		CreatedAt:       now,
-	}); err != nil {
+	}, now); err != nil {
 		t.Fatalf("insert new: %v", err)
 	}
 
@@ -453,20 +477,21 @@ func TestPruneExpiredRegistrations(t *testing.T) {
 	}
 }
 
-func TestUpdateRegistrationRedemption(t *testing.T) {
+func TestRedeemRegistration_CreatesProvisionalPeer(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 
 	now := time.Now()
-	if err := createRegistration(t, db, &service.Registration{
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 		Name:            "redeem-me",
 		InvitePublicKey: "temp-reg-key",
-		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
 		Admin:           true,
 		ExpiresAt:       now.Add(24 * time.Hour),
 		CreatedAt:       now,
-	}); err != nil {
+	}, now); err != nil {
 		t.Fatalf("insert registration: %v", err)
 	}
 
@@ -519,7 +544,9 @@ func TestUpdateRegistrationRedemption(t *testing.T) {
 	}
 }
 
-func TestUpdateRegistrationRedemption_NotFound(t *testing.T) {
+func TestRedeemRegistration_NotFound(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 	now := time.Now()
@@ -530,19 +557,20 @@ func TestUpdateRegistrationRedemption_NotFound(t *testing.T) {
 	}
 }
 
-func TestUpdateRegistrationRedemption_DoubleRedeem(t *testing.T) {
+func TestRedeemRegistration_DoubleRedeem(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 
 	now := time.Now()
-	if err := createRegistration(t, db, &service.Registration{
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 		Name:            "redeem-twice",
 		InvitePublicKey: "twice-key",
-		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
 		ExpiresAt:       now.Add(24 * time.Hour),
 		CreatedAt:       now,
-	}); err != nil {
+	}, now); err != nil {
 		t.Fatalf("insert registration: %v", err)
 	}
 
@@ -573,19 +601,20 @@ func TestUpdateRegistrationRedemption_DoubleRedeem(t *testing.T) {
 	}
 }
 
-func TestUpdateRegistrationRedemption_Expired(t *testing.T) {
+func TestRedeemRegistration_Expired(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 	now := time.Date(2026, time.July, 18, 12, 0, 0, 0, time.UTC)
 
-	if err := createRegistration(t, db, &service.Registration{
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 		Name:            "expired",
 		InvitePublicKey: "expired-key",
-		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
 		ExpiresAt:       now,
 		CreatedAt:       now.Add(-time.Hour),
-	}); err != nil {
+	}, now.Add(-time.Hour)); err != nil {
 		t.Fatalf("insert registration: %v", err)
 	}
 
@@ -598,45 +627,96 @@ func TestUpdateRegistrationRedemption_Expired(t *testing.T) {
 	}
 }
 
-func TestCreateRegistration_DuplicateName(t *testing.T) {
+func TestRedeemRegistration_RetryRequiresUnexpiredRegistration(
+	t *testing.T,
+) {
+	db := testutil.SetupDB(t)
+	seedNetworkForRegistration(t, db)
+	now := testutil.FixedTime
+	expires := now.Add(time.Hour)
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
+		Name: "retry", InvitePublicKey: "retry-key", MainRoute: "10.0.5.1/32",
+		CreatedAt: now, ExpiresAt: expires,
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	peer, err := db.RedeemRegistration("regnet", "retry-key", "perm-key", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := db.GetRegistration("regnet", "retry")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		at   time.Time
+		want error
+	}{
+		{"before deadline", expires.Add(-time.Second), nil},
+		{"at deadline", expires, service.ErrRegistrationExpired},
+		{"after deadline before pruning", expires.Add(time.Hour), service.ErrRegistrationExpired},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := db.RedeemRegistration("regnet", "retry-key", "perm-key", tc.at)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("retry = %v, want %v", err, tc.want)
+			}
+			if tc.want == nil && !reflect.DeepEqual(got, peer) {
+				t.Fatalf("retry peer = %+v, want %+v", got, peer)
+			}
+			after, err := db.GetRegistration("regnet", "retry")
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("registration changed: %+v, %v", after, err)
+			}
+			afterPeer, err := db.GetPeer("regnet", "retry")
+			if err != nil || !reflect.DeepEqual(peer, afterPeer) {
+				t.Fatalf("peer changed: %+v, %v", afterPeer, err)
+			}
+		})
+	}
+}
+
+func TestCreateRegistration_DuplicateName(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 
 	now := time.Now()
-	reg := &service.Registration{
+	params := service.CreateRegistrationParams{
 		Name:            "dup",
 		InvitePublicKey: "key-a",
-		InviteRoute:     "10.1.0.1/32",
 		MainRoute:       "10.0.5.1/32",
 		ExpiresAt:       now.Add(24 * time.Hour),
 		CreatedAt:       now,
 	}
-	if err := createRegistration(t, db, reg); err != nil {
+	if _, err := db.CreateRegistration("regnet", params, now); err != nil {
 		t.Fatalf("first insert: %v", err)
 	}
 
-	reg.InvitePublicKey = "key-b"
-	reg.InviteRoute = "10.1.0.2/32"
-	reg.MainRoute = "10.0.5.2/32"
-	err := createRegistration(t, db, reg)
+	params.InvitePublicKey = "key-b"
+	params.MainRoute = "10.0.5.2/32"
+	_, err := db.CreateRegistration("regnet", params, now)
 	if err == nil {
 		t.Fatal("expected error for duplicate registration name")
 	}
 }
 
-func TestRegistrationGroups_AssignListRemove(t *testing.T) {
+func TestRegistrationGroups_AssignListRemove(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 	now := time.Now()
 
-	if err := createRegistration(t, db, &service.Registration{
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 		Name:            "alice",
 		InvitePublicKey: "alice-temp-key",
-		InviteRoute:     "10.1.0.5/32",
 		MainRoute:       "10.0.5.5/32",
 		ExpiresAt:       now.Add(24 * time.Hour),
 		CreatedAt:       now,
-	}); err != nil {
+	}, now); err != nil {
 		t.Fatalf("insert registration: %v", err)
 	}
 	for _, name := range []string{"engineering", "operations"} {
@@ -674,7 +754,9 @@ func TestRegistrationGroups_AssignListRemove(t *testing.T) {
 	}
 }
 
-func TestRegistrationGroups_RejectExpiredRegistration(t *testing.T) {
+func TestRegistrationGroups_RejectExpiredRegistration(
+	t *testing.T,
+) {
 	tests := []struct {
 		name       string
 		seedAssign bool
@@ -703,14 +785,13 @@ func TestRegistrationGroups_RejectExpiredRegistration(t *testing.T) {
 			seedNetworkForRegistration(t, db)
 			now := time.Date(2026, time.July, 18, 12, 0, 0, 0, time.UTC)
 
-			if err := createRegistration(t, db, &service.Registration{
+			if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 				Name:            "alice",
 				InvitePublicKey: "alice-temp-key",
-				InviteRoute:     "10.1.0.5/32",
 				MainRoute:       "10.0.5.5/32",
 				ExpiresAt:       now,
 				CreatedAt:       now.Add(-time.Hour),
-			}); err != nil {
+			}, now.Add(-time.Hour)); err != nil {
 				t.Fatalf("insert registration: %v", err)
 			}
 			if _, err := db.InsertGroup("regnet", "engineering"); err != nil {
@@ -743,19 +824,20 @@ func TestRegistrationGroups_RejectExpiredRegistration(t *testing.T) {
 	}
 }
 
-func TestRegistrationGroups_TransferOnConfirmation(t *testing.T) {
+func TestRegistrationGroups_TransferOnConfirmation(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForRegistration(t, db)
 	now := time.Now()
 
-	if err := createRegistration(t, db, &service.Registration{
+	if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 		Name:            "alice",
 		InvitePublicKey: "alice-temp-key",
-		InviteRoute:     "10.1.0.5/32",
 		MainRoute:       "10.0.5.5/32",
 		ExpiresAt:       now.Add(24 * time.Hour),
 		CreatedAt:       now,
-	}); err != nil {
+	}, now); err != nil {
 		t.Fatalf("insert registration: %v", err)
 	}
 	if _, err := db.InsertGroup("regnet", "engineering"); err != nil {
@@ -769,6 +851,9 @@ func TestRegistrationGroups_TransferOnConfirmation(t *testing.T) {
 	}
 	if err := db.ConfirmPeer("regnet", "alice", now); err != nil {
 		t.Fatalf("confirm peer: %v", err)
+	}
+	if err := db.ConfirmPeer("regnet", "alice", now.Add(48*time.Hour)); err != nil {
+		t.Fatalf("confirmation retry after expiration: %v", err)
 	}
 
 	registrationGroups, err := db.ListRegistrationGroups("regnet", "alice")
@@ -793,7 +878,9 @@ func TestRegistrationGroups_TransferOnConfirmation(t *testing.T) {
 	}
 }
 
-func TestConfirmPeer_EnforcesRegistrationExpiration(t *testing.T) {
+func TestConfirmPeer_EnforcesRegistrationExpiration(
+	t *testing.T,
+) {
 	expiresAt := time.Date(2026, time.July, 18, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name      string
@@ -809,14 +896,13 @@ func TestConfirmPeer_EnforcesRegistrationExpiration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db := testutil.SetupDB(t)
 			seedNetworkForRegistration(t, db)
-			if err := createRegistration(t, db, &service.Registration{
+			if _, err := db.CreateRegistration("regnet", service.CreateRegistrationParams{
 				Name:            "alice",
 				InvitePublicKey: "alice-temp-key",
-				InviteRoute:     "10.1.0.5/32",
 				MainRoute:       "10.0.5.5/32",
 				ExpiresAt:       expiresAt,
 				CreatedAt:       expiresAt.Add(-time.Hour),
-			}); err != nil {
+			}, expiresAt.Add(-time.Hour)); err != nil {
 				t.Fatalf("insert registration: %v", err)
 			}
 			if _, err := db.RedeemRegistration(

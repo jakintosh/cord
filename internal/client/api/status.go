@@ -7,19 +7,14 @@ import (
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/runtime"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 )
 
 func (a *API) handleGetStatus(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	status, err := a.runtime.GetStatus()
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-
-	installs, err := a.service.ListInstalls()
+	status, err := a.runtime.GetStatus(r.Context())
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -30,14 +25,17 @@ func (a *API) handleGetStatus(
 		networkStatuses[i] = networkStatusFromRuntime(network)
 	}
 
-	installStatuses := make([]InstallStatus, len(installs))
-	for i, install := range installs {
+	installStatuses := make([]InstallStatus, len(status.Installs))
+	for i, install := range status.Installs {
 		installStatuses[i] = installStatusFromService(*install)
 	}
 
+	snapshot := resourceSnapshotFromRuntime(status.Snapshot)
+
 	wire.WriteData(w, http.StatusOK, Status{
+		Snapshot: snapshot,
 		Status:   "ok",
-		Health:   status.Health,
+		Health:   string(status.Health),
 		Version:  a.version,
 		Networks: networkStatuses,
 		Installs: installStatuses,
@@ -59,9 +57,8 @@ func networkStatusFromRuntime(
 	return NetworkStatus{
 		Name:      status.Name,
 		Enabled:   status.Enabled,
-		Running:   status.Running,
 		Reason:    status.Reason,
-		Health:    status.Health,
+		Health:    string(status.Health),
 		Reconcile: activityStatusFromRuntime(status.Reconcile),
 		Sync:      activityStatusFromRuntime(status.Sync),
 		Scan:      activityStatusFromRuntime(status.Scan),
@@ -70,7 +67,7 @@ func networkStatusFromRuntime(
 }
 
 func activityStatusFromRuntime(
-	status runtime.ActivityStatus,
+	status resource.ActivityStatus,
 ) ActivityStatus {
 	result := ActivityStatus{
 		IntervalSeconds: int64(status.Interval / time.Second),
@@ -83,6 +80,34 @@ func activityStatusFromRuntime(
 	if !status.LastSuccessAt.IsZero() {
 		formatted := status.LastSuccessAt.Format(time.RFC3339)
 		result.LastSuccessAt = &formatted
+	}
+	if !status.NextAttemptAt.IsZero() {
+		formatted := status.NextAttemptAt.Format(time.RFC3339)
+		result.NextAttemptAt = &formatted
+	}
+	return result
+}
+
+func resourceSnapshotFromRuntime(
+	status resource.Snapshot,
+) ResourceSnapshot {
+	result := ResourceSnapshot{
+		Kind:   status.Kind,
+		Name:   status.Name,
+		State:  string(status.State),
+		Target: string(status.Target),
+		Reason: status.Reason,
+		Health: string(status.Health),
+		Error:  status.Error,
+	}
+	if len(status.Activities) > 0 {
+		result.Activities = make(map[string]ActivityStatus, len(status.Activities))
+		for name, activity := range status.Activities {
+			result.Activities[name] = activityStatusFromRuntime(activity)
+		}
+	}
+	for _, child := range status.Children {
+		result.Children = append(result.Children, resourceSnapshotFromRuntime(child))
 	}
 	return result
 }

@@ -257,22 +257,25 @@ func (db *DB) RedeemRegistration(
 				registration.name,
 			)
 		}
-	} else {
-		if registration.confirmed {
-			return nil, fmt.Errorf(
-				"%w: registration %q is already confirmed",
-				service.ErrRegistrationRedeemed,
-				registration.name,
-			)
-		}
-		if registration.expiresAtUnix <= now.Unix() {
-			return nil, fmt.Errorf(
-				"%w: registration %q",
-				service.ErrRegistrationExpired,
-				registration.name,
-			)
-		}
+	}
 
+	if registration.confirmed {
+		return nil, fmt.Errorf(
+			"%w: registration %q is already confirmed",
+			service.ErrRegistrationRedeemed,
+			registration.name,
+		)
+	}
+
+	if registration.expiresAtUnix <= now.Unix() {
+		return nil, fmt.Errorf(
+			"%w: registration %q",
+			service.ErrRegistrationExpired,
+			registration.name,
+		)
+	}
+
+	if !registration.redeemed {
 		cidrID, err := sqlInsertRedeemedCidrTx(tx, network, registration)
 		if err != nil {
 			return nil, err

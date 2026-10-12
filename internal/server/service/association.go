@@ -50,6 +50,8 @@ func (s *Service) CreateAssociation(
 		return fmt.Errorf("insert association: %w", mapStoreError(err))
 	}
 
+	s.invalidateModel(network)
+
 	return nil
 }
 
@@ -64,5 +66,8 @@ func (s *Service) DeleteAssociation(
 	if err := s.store.DeleteAssociation(network, group1, group2); err != nil {
 		return fmt.Errorf("delete association: %w", mapStoreError(err))
 	}
+
+	s.invalidateModel(network)
+
 	return nil
 }

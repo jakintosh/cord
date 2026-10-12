@@ -49,7 +49,17 @@ func (db *DB) InsertGroup(
 	*service.Group,
 	error,
 ) {
-	result, err := db.Conn.Exec(`
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin insert group tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := sqlRequireNetworkTx(tx, network); err != nil {
+		return nil, err
+	}
+
+	result, err := tx.Exec(`
 		INSERT INTO "group" (network_name, name)
 		VALUES (?1, ?2)`,
 		network,
@@ -62,6 +72,10 @@ func (db *DB) InsertGroup(
 	id, err := result.LastInsertId()
 	if err != nil {
 		return nil, fmt.Errorf("get group id: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit insert group tx: %w", err)
 	}
 
 	return &service.Group{ID: id, Name: name}, nil

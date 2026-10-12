@@ -24,12 +24,15 @@ func (a *API) handleRedeemInvite(
 		// The redeem response IS an Invitation with the PrivateKey omitted;
 		// the service returns it with PrivateKey empty and the field is
 		// omitempty, so it can be written straight to the wire.
-		invitation, err := a.service.RedeemRegistration(network, peer.PublicKey, req.PermPubKey)
-		if err != nil {
-			wire.WriteError(w, http.StatusInternalServerError, err.Error())
-			return
+		if invitation, err := a.runtime.RedeemRegistration(
+			r.Context(),
+			network,
+			peer.PublicKey,
+			req.PermPubKey,
+		); err != nil {
+			a.writeServiceError(w, r, network, "redeem invite", err)
+		} else {
+			wire.WriteData(w, http.StatusOK, invitation)
 		}
-
-		wire.WriteData(w, http.StatusOK, invitation)
 	}
 }

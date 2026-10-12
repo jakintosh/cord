@@ -1,6 +1,7 @@
 package invite
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -8,26 +9,26 @@ import (
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/api/identity"
-	"git.studiopollinator.com/pollinator/cord/internal/server/service"
+	"git.studiopollinator.com/pollinator/cord/internal/server/runtime"
 )
 
 // API serves the invite-facing HTTP surface over a network's invite
 // plane. One API serves every network: the network name is bound per
 // router.
 type API struct {
-	service *service.Service
+	runtime *runtime.Runtime
 	log     *slog.Logger
 }
 
 func New(
-	service *service.Service,
+	runtime *runtime.Runtime,
 	log *slog.Logger,
 ) *API {
 	if log == nil {
 		log = logging.Discard()
 	}
 	return &API{
-		service: service,
+		runtime: runtime,
 		log:     log,
 	}
 }
@@ -42,24 +43,34 @@ func (a *API) Router(
 	mux.HandleFunc(
 		"POST /redeem",
 		identity.Require(
-			log,
 			a.lookupRegistration(network),
 			a.handleRedeemInvite(network),
+			log,
 		),
 	)
 	return logging.Middleware(log, mux)
 }
 
-// lookupRegistration looks up an unredeemed, unexpired registration by
+// lookupRegistration looks up an unconfirmed, unexpired registration by
 // temporary IP within the network.
 func (a *API) lookupRegistration(
 	network string,
 ) identity.LookupFunc {
-	return func(ip net.IP) (*identity.Peer, error) {
-		reg, err := a.service.ResolveRegistrationIdentity(network, ip)
+	return func(
+		ctx context.Context,
+		ip net.IP,
+	) (
+		*identity.Peer,
+		error,
+	) {
+		reg, err := a.runtime.ResolveRegistrationIdentity(ctx, network, ip)
 		if err != nil {
 			return nil, fmt.Errorf("resolve registration identity: %w", err)
 		}
-		return &identity.Peer{PublicKey: reg.InvitePublicKey, Name: reg.Name}, nil
+
+		return &identity.Peer{
+			PublicKey: reg.InvitePublicKey,
+			Name:      reg.Name,
+		}, nil
 	}
 }

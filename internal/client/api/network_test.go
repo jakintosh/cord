@@ -4,8 +4,10 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
 	"git.studiopollinator.com/pollinator/cord/internal/client/api"
@@ -15,75 +17,42 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-//
-// List
-//
-
 func TestAPIListNetworks_Empty(
 	t *testing.T,
 ) {
+	// setup env
 	env := testutil.Setup(t)
 
+	// send request
 	url := "/networks"
 	result := wire.TestGet[[]string](env.Router, url)
 
-	data := result.ExpectOK(t)
+	// verify response
+	data := result.ExpectStatusOK(t, http.StatusOK)
 	if len(data) != 0 {
 		t.Fatalf("expected 0 networks, got %d", len(data))
 	}
 }
 
-func TestAPIListNetworks_WithData(
-	t *testing.T,
-) {
-	env := testutil.Setup(t)
-	env.SeedNetwork(t, "net-a")
-	env.SeedNetwork(t, "net-b")
-
-	url := "/networks"
-	result := wire.TestGet[[]string](env.Router, url)
-
-	data := result.ExpectOK(t)
-	if len(data) != 2 {
-		t.Fatalf("expected 2 networks, got %d", len(data))
-	}
-	names := make(map[string]bool, len(data))
-	for _, n := range data {
-		names[n] = true
-	}
-	if !names["net-a"] {
-		t.Fatal("net-a not found in list")
-	}
-	if !names["net-b"] {
-		t.Fatal("net-b not found in list")
-	}
-}
-
-//
-// Show
-//
-
-func TestAPIShowNetwork_Success(
+func TestAPIListNetworks_SortsNames(
 	t *testing.T,
 ) {
 	// setup env
 	env := testutil.Setup(t)
-	env.SeedNetwork(t, "mynet")
+	env.SeedNetwork(t, "net-b")
+	env.SeedNetwork(t, "net-a")
 
-	// show network
-	url := "/networks/mynet"
-	result := wire.TestGet[api.Network](env.Router, url)
+	// send request
+	url := "/networks"
+	result := wire.TestGet[[]string](env.Router, url)
 
-	// verify result
-	data := result.ExpectOK(t)
-	if data.Name != "mynet" {
-		t.Fatalf("name = %q, want mynet", data.Name)
+	// verify response
+	data := result.ExpectStatusOK(t, http.StatusOK)
+	if len(data) != 2 {
+		t.Fatalf("expected 2 networks, got %d", len(data))
 	}
-	if data.State != "installed" {
-		t.Fatalf("state = %q, want installed", data.State)
-	}
-	if data.Enabled {
-		t.Fatal("expected enabled=false for new network")
+	if !slices.Equal(data, []string{"net-a", "net-b"}) {
+		t.Fatalf("networks = %v, want sorted names", data)
 	}
 }
 
@@ -94,12 +63,15 @@ func TestAPIShowNetwork_IncludesEnrichedFields(
 	env := testutil.Setup(t)
 	nc := env.SeedNetwork(t, "mynet")
 
-	// show network
+	// send request
 	url := "/networks/mynet"
 	result := wire.TestGet[api.Network](env.Router, url)
 
-	// verify result
-	data := result.ExpectOK(t)
+	// verify response
+	data := result.ExpectStatusOK(t, http.StatusOK)
+	if data.Name != "mynet" || data.State != "installed" || data.Enabled {
+		t.Fatalf("network = %+v, want installed disabled mynet", data)
+	}
 	if data.Address != nc.AssignedRoute {
 		t.Fatalf("address = %q, want %q", data.Address, nc.AssignedRoute)
 	}
@@ -117,7 +89,7 @@ func TestAPIShowNetwork_NotFound(
 	// setup env
 	env := testutil.Setup(t)
 
-	// show nonexistent network
+	// send request
 	url := "/networks/ghost"
 	result := wire.TestGet[any](env.Router, url)
 
@@ -139,12 +111,12 @@ func TestAPIShowNetwork_MidInstall(
 		t.Fatalf("redeem: %v", err)
 	}
 
-	// show mid-install network
+	// send request
 	url := "/networks/mid-install"
 	result := wire.TestGet[api.Network](env.Router, url)
 
-	// verify result
-	data := result.ExpectOK(t)
+	// verify response
+	data := result.ExpectStatusOK(t, http.StatusOK)
 	if data.Name != "mid-install" {
 		t.Fatalf("name = %q, want mid-install", data.Name)
 	}
@@ -153,13 +125,10 @@ func TestAPIShowNetwork_MidInstall(
 	}
 }
 
-//
-// Install
-//
-
 func TestAPIInstallNetwork_Success(
 	t *testing.T,
 ) {
+	// setup env
 	tempKey, err := wireguard.GenerateKey()
 	if err != nil {
 		t.Fatalf("generate temp key: %v", err)
@@ -174,6 +143,7 @@ func TestAPIInstallNetwork_Success(
 	apiHost, apiPortStr, _ := net.SplitHostPort(apiAddr)
 	apiPort, _ := strconv.Atoi(apiPortStr)
 
+	// send request
 	url := "/networks"
 	body := `{
 		"invitation": {
@@ -192,8 +162,10 @@ func TestAPIInstallNetwork_Success(
 		},
 		"listen_port": 51820
 	}`
-	result := wire.TestPost[api.Network](env.Router, url, body)
+	headers := []wire.TestHeader{{Key: "Content-Type", Value: "application/json"}}
+	result := wire.TestPost[api.Network](env.Router, url, body, headers...)
 
+	// verify response
 	data := result.ExpectStatusOK(t, http.StatusCreated)
 	if data.Name != "mynet" {
 		t.Fatalf("name = %q, want mynet", data.Name)
@@ -234,12 +206,21 @@ func TestAPIInstallNetwork_Success(
 	}
 }
 
-func TestAPIUpdateNetwork(t *testing.T) {
+func TestAPIUpdateNetwork_PersistsListenPort(
+	t *testing.T,
+) {
+	// setup env
 	env := testutil.Setup(t)
 	env.SeedNetwork(t, "mynet")
 
-	result := wire.TestPatch[api.Network](env.Router, "/networks/mynet", `{"listen_port":51820}`)
-	result.ExpectOK(t)
+	// send request
+	url := "/networks/mynet"
+	body := `{
+  "listen_port": 51820
+ }`
+	headers := []wire.TestHeader{{Key: "Content-Type", Value: "application/json"}}
+	result := wire.TestPatch[api.Network](env.Router, url, body, headers...)
+	result.ExpectStatusOK(t, http.StatusOK)
 	if result.Data.ListenPort != 51820 {
 		t.Errorf("response listen_port = %d, want 51820", result.Data.ListenPort)
 	}
@@ -253,74 +234,86 @@ func TestAPIUpdateNetwork(t *testing.T) {
 	}
 }
 
-func TestAPIUpdateNetwork_Empty(t *testing.T) {
-	env := testutil.Setup(t)
-	env.SeedNetwork(t, "mynet")
-
-	result := wire.TestPatch[api.Network](env.Router, "/networks/mynet", `{}`)
-	result.ExpectStatusError(t, http.StatusBadRequest)
-}
-
-func TestAPIInstallNetwork_InvalidJSON(
+func TestAPIUpdateNetwork_InvalidInputLeavesStateUnchanged(
 	t *testing.T,
 ) {
-	// setup env
-	env := testutil.Setup(t)
+	for _, tc := range []struct{ name, body string }{
+		{"malformed", "{"},
+		{"missing listen port", "{}"},
+		{"out of range", `{"listen_port":65536}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// setup env
+			env := testutil.Setup(t)
+			before := env.SeedNetwork(t, "mynet")
 
-	// post garbage
-	url := "/networks"
-	body := `{`
-	result := wire.TestPost[any](env.Router, url, body)
+			// send request
+			url := "/networks/mynet"
+			body := tc.body
+			headers := []wire.TestHeader{{Key: "Content-Type", Value: "application/json"}}
+			result := wire.TestPatch[any](env.Router, url, body, headers...)
 
-	// verify result
-	result.ExpectStatusError(t, http.StatusBadRequest)
-}
+			// verify response
+			result.ExpectStatusError(t, http.StatusBadRequest)
 
-func TestAPIInstallNetwork_MissingName(
-	t *testing.T,
-) {
-	env := testutil.Setup(t)
-
-	url := "/networks"
-	body := `{
-		"invitation": {
-			"network": {
-				"public_key": "srv-pub",
-				"endpoint": "1.2.3.4:51820",
-				"server_route": "10.42.0.1/32",
-				"api_port": 8443
-			},
-			"peer": {
-				"route": "10.42.0.5/16",
-				"private_key": "test-temp-key"
+			// verify rejected update
+			after, err := env.Service.GetNetwork("mynet")
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-	}`
-	result := wire.TestPost[any](env.Router, url, body)
-
-	result.ExpectStatusError(t, http.StatusBadRequest)
+			if after.ListenPort != before.ListenPort {
+				t.Fatalf("listen port changed: %d", after.ListenPort)
+			}
+		})
+	}
 }
 
-func TestAPIInstallNetwork_MalformedInvitation(
+func TestAPIInstallNetwork_InvalidInputCreatesNothing(
 	t *testing.T,
 ) {
-	env := testutil.Setup(t)
+	for _, tc := range []struct{ name, body string }{
+		{"malformed JSON", "{"},
+		{"wrong shape", `["not", "an", "invitation"]`},
+		{"missing invitation", "{}"},
+		{"incomplete invitation", `{"invitation":{"network":{"name":"mynet"}}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// setup env
+			env := testutil.Setup(t)
 
-	// well-formed JSON but not a valid invitation object: the daemon
-	// parses the payload itself and must reject it with a clean 400.
-	url := "/networks"
-	body := `["not", "an", "invitation"]`
-	result := wire.TestPost[any](env.Router, url, body)
+			// send request
+			url := "/networks"
+			body := tc.body
+			headers := []wire.TestHeader{{Key: "Content-Type", Value: "application/json"}}
+			result := wire.TestPost[any](env.Router, url, body, headers...)
 
-	result.ExpectStatusError(t, http.StatusBadRequest)
+			// verify response
+			result.ExpectStatusError(t, http.StatusBadRequest)
+
+			// verify no durable install or network
+			networks, err := env.Service.ListNetworks()
+			if err != nil {
+				t.Fatal(err)
+			}
+			installs, err := env.Service.ListInstalls()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(networks) != 0 || len(installs) != 0 {
+				t.Fatalf("created networks %v or installs %v", networks, installs)
+			}
+		})
+	}
 }
 
 func TestAPIInstallNetwork_Duplicate(
 	t *testing.T,
 ) {
+	// setup env
 	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
 	env.SeedNetwork(t, "dupnet")
 
+	// send request
 	url := "/networks"
 	body := `{
 		"invitation": {
@@ -338,14 +331,11 @@ func TestAPIInstallNetwork_Duplicate(
 			}
 		}
 	}`
-	result := wire.TestPost[any](env.Router, url, body)
+	headers := []wire.TestHeader{{Key: "Content-Type", Value: "application/json"}}
+	result := wire.TestPost[any](env.Router, url, body, headers...)
 
 	result.ExpectStatusError(t, http.StatusConflict)
 }
-
-//
-// Redeem
-//
 
 func TestAPIRedeemNetwork_IncludesAssignedAddress(
 	t *testing.T,
@@ -358,13 +348,13 @@ func TestAPIRedeemNetwork_IncludesAssignedAddress(
 		t.Fatalf("begin install: %v", err)
 	}
 
-	// redeem via the HTTP handler
+	// send request
 	url := "/networks/" + inst.Name + "/redeem"
-	result := wire.TestPost[api.Network](env.Router, url, "")
+	body := ""
+	result := wire.TestPost[api.Network](env.Router, url, body)
 
-	// verify result — the server-assigned address is real information the
-	// caller didn't already know, so redeem keeps a response body
-	data := result.ExpectOK(t)
+	// verify response
+	data := result.ExpectStatusOK(t, http.StatusOK)
 	if data.Name != "mid-install" {
 		t.Fatalf("name = %q, want mid-install", data.Name)
 	}
@@ -375,10 +365,6 @@ func TestAPIRedeemNetwork_IncludesAssignedAddress(
 		t.Fatalf("address = %q, want 10.42.0.5/32", data.Address)
 	}
 }
-
-//
-// Confirm
-//
 
 func TestAPIConfirmNetwork_Success(
 	t *testing.T,
@@ -398,12 +384,13 @@ func TestAPIConfirmNetwork_Success(
 		t.Fatalf("redeem: %v", err)
 	}
 
-	// confirm via the HTTP handler
+	// send request
 	url := "/networks/" + inst.Name + "/confirm"
-	result := wire.TestPost[any](env.Router, url, "")
+	body := ""
+	result := wire.TestPost[any](env.Router, url, body)
 
-	// verify result — status-only mutation, no response body
-	result.ExpectOK(t)
+	// verify response
+	result.ExpectStatusOK(t, http.StatusOK)
 
 	// verify network is installed in store
 	nw, err := env.Service.GetNetwork("mid-install")
@@ -428,17 +415,14 @@ func TestAPIConfirmNetwork_InvitedReturnsConflict(
 		t.Fatalf("begin install: %v", err)
 	}
 
-	// confirm before redemption
+	// send request
 	url := "/networks/" + inst.Name + "/confirm"
-	result := wire.TestPost[any](env.Router, url, "")
+	body := ""
+	result := wire.TestPost[any](env.Router, url, body)
 
 	// verify persisted-state conflict
 	result.ExpectStatusError(t, http.StatusConflict)
 }
-
-//
-// Uninstall
-//
 
 func TestAPIUninstallNetwork_Success(
 	t *testing.T,
@@ -447,17 +431,17 @@ func TestAPIUninstallNetwork_Success(
 	env := testutil.Setup(t)
 	env.SeedNetwork(t, "to-delete")
 
-	// uninstall network
+	// send request
 	url := "/networks/to-delete"
 	result := wire.TestDelete[any](env.Router, url)
 
-	// verify result — status-only mutation, no response body
-	result.ExpectOK(t)
+	// verify response
+	result.ExpectStatusOK(t, http.StatusOK)
 
 	// verify network is gone
 	_, err := env.Service.GetNetwork("to-delete")
-	if err == nil {
-		t.Fatal("expected not found after uninstall")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("get deleted network = %v, want not found", err)
 	}
 }
 
@@ -467,17 +451,13 @@ func TestAPIUninstallNetwork_NotFound(
 	// setup env
 	env := testutil.Setup(t)
 
-	// uninstall nonexistent network
+	// send request
 	url := "/networks/ghost"
 	result := wire.TestDelete[any](env.Router, url)
 
 	// verify result
 	result.ExpectStatusError(t, http.StatusNotFound)
 }
-
-//
-// Enable
-//
 
 func TestAPIEnableNetwork_Success(
 	t *testing.T,
@@ -486,13 +466,14 @@ func TestAPIEnableNetwork_Success(
 	env := testutil.Setup(t)
 	env.SeedNetwork(t, "enable-me")
 
-	// enable network
+	// send request
 	url := "/networks/enable-me/enable"
-	result := wire.TestPost[api.NetworkStatus](env.Router, url, "")
+	body := ""
+	result := wire.TestPost[api.NetworkStatus](env.Router, url, body)
 
-	// verify result — the recorded intent and what the daemon is doing
-	data := result.ExpectOK(t)
-	if !data.Enabled || !data.Running {
+	// verify response
+	data := result.ExpectStatusOK(t, http.StatusOK)
+	if !data.Enabled || data.Health != "healthy" {
 		t.Fatalf("status = %+v, want enabled and running", data)
 	}
 	if data.Reason != "" {
@@ -515,15 +496,19 @@ func TestAPIEnableNetwork_Success(
 func TestAPIEnableNetwork_ReportsDivergence(
 	t *testing.T,
 ) {
+	// setup env
 	env := testutil.Setup(t)
 	env.SeedNetwork(t, "wont-start")
 	env.Backend.CreateErr = errors.New("no such device")
 
+	// send request
 	url := "/networks/wont-start/enable"
-	result := wire.TestPost[api.NetworkStatus](env.Router, url, "")
+	body := ""
+	result := wire.TestPost[api.NetworkStatus](env.Router, url, body)
 
-	data := result.ExpectOK(t)
-	if !data.Enabled || data.Running {
+	// verify response
+	data := result.ExpectStatusOK(t, http.StatusOK)
+	if !data.Enabled || data.Health != "degraded" {
 		t.Fatalf("status = %+v, want enabled and not running", data)
 	}
 	if data.Reason == "" {
@@ -545,9 +530,10 @@ func TestAPIEnableNetwork_NotFound(
 	// setup env
 	env := testutil.Setup(t)
 
-	// enable nonexistent network
+	// send request
 	url := "/networks/ghost/enable"
-	result := wire.TestPost[any](env.Router, url, "")
+	body := ""
+	result := wire.TestPost[any](env.Router, url, body)
 
 	// verify result
 	result.ExpectStatusError(t, http.StatusNotFound)
@@ -560,12 +546,13 @@ func TestAPIEnableNetwork_AlreadyEnabled(
 	env := testutil.Setup(t)
 	env.SeedEnabledNetwork(t, "already-on")
 
-	// enable again — should be idempotent
+	// send request
 	url := "/networks/already-on/enable"
-	result := wire.TestPost[any](env.Router, url, "")
+	body := ""
+	result := wire.TestPost[any](env.Router, url, body)
 
-	// verify result — status-only mutation, no response body
-	result.ExpectOK(t)
+	// verify response
+	result.ExpectStatusOK(t, http.StatusOK)
 
 	// verify enabled in store
 	nw, err := env.Service.GetNetwork("already-on")
@@ -577,10 +564,6 @@ func TestAPIEnableNetwork_AlreadyEnabled(
 	}
 }
 
-//
-// Disable
-//
-
 func TestAPIDisableNetwork_Success(
 	t *testing.T,
 ) {
@@ -588,13 +571,14 @@ func TestAPIDisableNetwork_Success(
 	env := testutil.Setup(t)
 	env.SeedEnabledNetwork(t, "disable-me")
 
-	// disable network
+	// send request
 	url := "/networks/disable-me/disable"
-	result := wire.TestPost[api.NetworkStatus](env.Router, url, "")
+	body := ""
+	result := wire.TestPost[api.NetworkStatus](env.Router, url, body)
 
-	// verify result — the recorded intent and what the daemon is doing
-	data := result.ExpectOK(t)
-	if data.Enabled || data.Running {
+	// verify response
+	data := result.ExpectStatusOK(t, http.StatusOK)
+	if data.Enabled || data.Health != "inactive" {
 		t.Fatalf("status = %+v, want disabled and stopped", data)
 	}
 
@@ -614,9 +598,10 @@ func TestAPIDisableNetwork_NotFound(
 	// setup env
 	env := testutil.Setup(t)
 
-	// disable nonexistent network
+	// send request
 	url := "/networks/ghost/disable"
-	result := wire.TestPost[any](env.Router, url, "")
+	body := ""
+	result := wire.TestPost[any](env.Router, url, body)
 
 	// verify result
 	result.ExpectStatusError(t, http.StatusNotFound)
@@ -629,17 +614,14 @@ func TestAPIDisableNetwork_AlreadyDisabled(
 	env := testutil.Setup(t)
 	env.SeedNetwork(t, "already-off")
 
-	// disable again — should be idempotent
+	// send request
 	url := "/networks/already-off/disable"
-	result := wire.TestPost[any](env.Router, url, "")
+	body := ""
+	result := wire.TestPost[any](env.Router, url, body)
 
-	// verify result — status-only mutation, no response body
-	result.ExpectOK(t)
+	// verify response
+	result.ExpectStatusOK(t, http.StatusOK)
 }
-
-//
-// helpers
-//
 
 // installInvite builds a valid invite whose invite-server route points at
 // env's httptest server, so the invite tunnel's /redeem call actually
@@ -651,21 +633,88 @@ func installInvite(
 	return testutil.Invitation(networkName, env.Server.Listener.Addr().String())
 }
 
-//
-// Fetch
-//
-
-func TestAPIFetchNetwork_NotEnabled(
+func TestAPISyncNetwork_DisabledReturnsConflict(
 	t *testing.T,
 ) {
 	// setup env
 	env := testutil.Setup(t)
 	env.SeedNetwork(t, "mynet")
 
-	// sync — returns conflict until enabled
+	// send request
 	url := "/networks/mynet/sync"
-	result := wire.TestPost[any](env.Router, url, "")
+	body := ""
+	result := wire.TestPost[any](env.Router, url, body)
 
 	// verify result
 	result.ExpectStatusError(t, http.StatusConflict)
+}
+
+func TestAPINetworkMutation_MissingNetworkReturnsNotFound(
+	t *testing.T,
+) {
+	for _, action := range []string{"redeem", "confirm"} {
+		t.Run(action, func(t *testing.T) {
+			// setup env
+			env := testutil.Setup(t)
+
+			// send request
+			url := "/networks/missing/" + action
+			body := ""
+			result := wire.TestPost[any](env.Router, url, body)
+
+			// verify response
+			result.ExpectStatusError(t, http.StatusNotFound)
+		})
+	}
+}
+
+func TestAPISyncNetwork_RefreshesInstalledNetwork(
+	t *testing.T,
+) {
+	// setup installed network with a reachable snapshot server
+	env := testutil.SetupWithServer(t, testutil.NewInstallServer)
+	network, err := env.Runtime.Install(t.Context(), installInvite(env, "mynet"), service.NetworkOptions{})
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	baseline := testutil.NetworkSnapshot()
+	baseline.GeneratedAt = testutil.FixedTime.Add(-time.Hour)
+	if err := env.Service.ApplyNetworkSnapshot("mynet", baseline); err != nil {
+		t.Fatalf("seed older snapshot: %v", err)
+	}
+
+	// send request
+	url := "/networks/mynet/sync"
+	body := ""
+	result := wire.TestPost[api.Network](env.Router, url, body)
+
+	// verify response
+	data := result.ExpectStatusOK(t, http.StatusOK)
+	if data.Name != network.Name || data.Address != network.AssignedRoute || !data.Enabled {
+		t.Fatalf("synced network = %+v, want installed network %+v", data, network)
+	}
+
+	// verify the downloaded topology is available
+	view, err := env.Runtime.GetNetworkTopology(t.Context(), "mynet")
+	if err != nil {
+		t.Fatalf("get synced topology: %v", err)
+	}
+	if !view.GeneratedAt.Equal(testutil.FixedTime) || !view.SyncedAt.Equal(testutil.FixedTime) {
+		t.Fatalf("snapshot timestamps = %v, %v; want %v", view.GeneratedAt, view.SyncedAt, testutil.FixedTime)
+	}
+}
+
+func TestAPISyncNetwork_MissingNetworkReturnsNotFound(
+	t *testing.T,
+) {
+	// setup env
+	env := testutil.Setup(t)
+
+	// send request
+	url := "/networks/missing/sync"
+	body := ""
+	result := wire.TestPost[any](env.Router, url, body)
+
+	// verify response
+	result.ExpectStatusError(t, http.StatusNotFound)
 }

@@ -1,15 +1,22 @@
 package service_test
 
 import (
+	"net"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/logging"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 	"git.studiopollinator.com/pollinator/cord/internal/topology"
 )
 
-func TestTopologyState_CompilesAllOrActivePeers(t *testing.T) {
+func TestTopologyState_CompilesAllOrActivePeers(
+	t *testing.T,
+) {
 	var cidrs []topology.Cidr
 	for _, name := range []string{"active", "disabled", "pending"} {
 		cidr, err := topology.CidrFromString(name, map[string]string{
@@ -56,7 +63,9 @@ func TestTopologyState_CompilesAllOrActivePeers(t *testing.T) {
 	}
 }
 
-func TestTopologyState_PreservesDistinctPeerAndCIDRNames(t *testing.T) {
+func TestTopologyState_PreservesDistinctPeerAndCIDRNames(
+	t *testing.T,
+) {
 	cidr, err := topology.CidrFromString("cord-server-cidr", "10.0.0.1/32", true)
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +87,9 @@ func TestTopologyState_PreservesDistinctPeerAndCIDRNames(t *testing.T) {
 	}
 }
 
-func TestGetNetworkTopology_IncludesDisabledAndUnconfirmedPeers(t *testing.T) {
+func TestGetNetworkTopology_IncludesDisabledAndUnconfirmedPeers(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 	testutil.SeedPeerDB(t, env.Database, "testnet", "disabled", "10.0.0.40/32", "disabled-key", false, false, true)
@@ -168,4 +179,193 @@ func TestGetNetworkTopology_NotFound(
 	if _, err := env.Service.GetNetworkTopology("missing"); err == nil {
 		t.Fatal("expected missing network error")
 	}
+}
+
+// countingTopologyStore observes topology reads while retaining the real SQLite
+// adapter. The test uses it sequentially through public service operations.
+type countingTopologyStore struct {
+	service.Store
+	loads int
+}
+
+func (s *countingTopologyStore) LoadTopologyState(
+	network string,
+) (
+	*service.TopologyState,
+	error,
+) {
+	s.loads++
+	return s.Store.LoadTopologyState(network)
+}
+
+func TestNetworkModel_ReusesTopologyAcrossDNSAndSynchronization(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+	seedDNSVisibility(t, env)
+
+	store := &countingTopologyStore{
+		Store: env.Database,
+	}
+	svc, err := service.New(service.Options{
+		Store: store,
+		Clock: func() time.Time { return testutil.FixedTime },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sourceIP := net.ParseIP("10.0.32.5")
+	wantHost := service.DNSHost{
+		Name:  "api-1",
+		Route: "10.0.1.1/32",
+	}
+
+	// Repeated identity, DNS, and sync reads share one compiled model.
+	for range 3 {
+		identity, err := svc.ResolvePeerIdentity("testnet", sourceIP)
+		if err != nil || identity.Name != "frank" {
+			t.Fatalf("identity = %+v, %v", identity, err)
+		}
+
+		host, err := svc.ResolveDNSHost("testnet", "frank", "api-1")
+		if err != nil || host != wantHost {
+			t.Fatalf("host = %+v, %v", host, err)
+		}
+
+		snapshot, err := svc.GetVisibleNetworkSnapshot("testnet", "frank")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(snapshot.Peers) != 1 {
+			t.Fatalf("snapshot has %d peers, want one", len(snapshot.Peers))
+		}
+		peer := snapshot.Peers[0]
+		if peer.Name != host.Name || peer.Route != host.Route {
+			t.Fatalf("DNS and sync disagree: %+v, %+v", host, peer)
+		}
+	}
+
+	if store.loads != 1 {
+		t.Fatalf("topology loads = %d, want one shared load", store.loads)
+	}
+}
+
+// blockingStore wraps a real store and holds the first
+// LoadTopologyState result until released, so a test can mutate the
+// network after an old snapshot was read. Later loads pass through.
+type blockingStore struct {
+	service.Store
+
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingStore) LoadTopologyState(
+	network string,
+) (
+	*service.TopologyState,
+	error,
+) {
+	state, err := s.Store.LoadTopologyState(network)
+	s.once.Do(func() {
+		s.entered <- struct{}{}
+		<-s.release
+	})
+	return state, err
+}
+
+func TestNetworkModel_PreventsStalePublicationDuringInvalidation(
+	t *testing.T,
+) {
+	db := testutil.SetupDB(t)
+	setup, err := service.New(service.Options{
+		Store:  db,
+		Clock:  func() time.Time { return testutil.FixedTime },
+		Logger: logging.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("new setup service: %v", err)
+	}
+	testutil.SeedNetwork(t, setup)
+
+	ip := net.ParseIP("10.0.0.5")
+	if _, err := setup.CreateRegistration("testnet", "alice", service.RegistrationOptions{PeerIP: ip}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if _, err := setup.RedeemRegistration("testnet", lastTempKey(t, setup, "testnet"), mustGenKey(t)); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+	if err := setup.ConfirmPeer("testnet", "alice"); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+
+	blocked := &blockingStore{
+		Store:   db,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc, err := service.New(service.Options{
+		Store:  blocked,
+		Clock:  func() time.Time { return testutil.FixedTime },
+		Logger: logging.Discard(),
+	})
+	if err != nil {
+		t.Fatalf("new service under test: %v", err)
+	}
+
+	type snapshotResult struct {
+		err error
+	}
+	results := make(chan snapshotResult, 1)
+	done := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(blocked.release) }) }
+	// This external test controls a public Store operation to exercise a
+	// concurrent publication guarantee. Always release and join the reader,
+	// including when the mutation below fails, before SQLite cleanup.
+	t.Cleanup(func() { release(); <-done })
+	go func() {
+		defer close(done)
+		_, err := svc.GetVisibleNetworkSnapshot("testnet", "alice")
+		results <- snapshotResult{err: err}
+	}()
+	<-blocked.entered
+
+	// Invalidate the model while the load is in flight. A stale
+	// publication would let the disabled peer keep her subject view.
+	disabled := false
+	if _, err := svc.UpdatePeer("testnet", "alice", service.PeerDiff{Enabled: &disabled}); err != nil {
+		t.Fatalf("disable peer mid-load: %v", err)
+	}
+	release()
+
+	res := <-results
+	if res.err == nil {
+		t.Fatal("stale model was published; disabled peer kept her subject view")
+	}
+	if !strings.Contains(res.err.Error(), "not found") {
+		t.Fatalf("snapshot error = %v, want the subject to be missing from the fresh model", res.err)
+	}
+}
+
+// topologyPeerByCidr returns the full topology's CIDR to peer-name mapping.
+func topologyPeerByCidr(
+	t *testing.T,
+	svc *service.Service,
+	network string,
+) map[string]string {
+	t.Helper()
+
+	view, err := svc.GetNetworkTopology(network)
+	if err != nil {
+		t.Fatalf("get topology: %v", err)
+	}
+	peerByCidr := make(map[string]string, len(view.Nodes))
+	for _, node := range view.Nodes {
+		peerByCidr[node.Cidr.Name] = node.PeerName
+	}
+	return peerByCidr
 }

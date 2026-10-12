@@ -2,11 +2,8 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/args"
@@ -86,7 +83,7 @@ var clientDaemonCmd = &args.Command{
 
 var clientStatusCmd = &args.Command{
 	Name: "status",
-	Help: "check if the cord client daemon is running",
+	Help: "show client resources and activity status",
 	Handler: func(i *args.Input) error {
 		client, err := clientClient(i)
 		if err != nil {
@@ -98,11 +95,7 @@ var clientStatusCmd = &args.Command{
 			return err
 		}
 
-		if i.GetFlag("json") {
-			return printJSON(result)
-		}
-		printClientStatus(result)
-		return nil
+		return cliApp(i).ClientStatus(result)
 	},
 }
 
@@ -123,93 +116,4 @@ func clientSocket(
 	i *args.Input,
 ) string {
 	return i.GetParameterOr("socket-path", adminclient.DefaultSocketPath)
-}
-
-// printClientStatus prints daemon and network health followed, when
-// present, by a table of in-progress installs.
-func printClientStatus(
-	s adminclient.Status,
-) {
-	fmt.Printf(
-		"client daemon ok (%s), managed networks %s\n\n",
-		s.Version,
-		s.Health,
-	)
-
-	if len(s.Networks) > 0 {
-		rows := make([][]string, len(s.Networks))
-		for idx, n := range s.Networks {
-			rows[idx] = []string{
-				n.Name,
-				strconv.FormatBool(n.Enabled),
-				strconv.FormatBool(n.Running),
-				n.Health,
-				humanizeOptionalTime(n.Sync.LastSuccessAt),
-				humanizeOptionalTime(n.Scan.LastSuccessAt),
-				humanizeOptionalTime(n.Report.LastSuccessAt),
-				clientStatusDetail(n),
-			}
-		}
-		printTable(
-			[]string{
-				"NETWORK",
-				"ENABLED",
-				"RUNNING",
-				"HEALTH",
-				"LAST SYNC",
-				"LAST SCAN",
-				"LAST REPORT",
-				"DETAIL",
-			},
-			rows,
-		)
-	}
-
-	if len(s.Installs) > 0 {
-		rows := make([][]string, len(s.Installs))
-		for idx, inst := range s.Installs {
-			rows[idx] = []string{
-				inst.Name,
-				inst.State,
-			}
-		}
-		printTable([]string{
-			"INSTALL",
-			"STATE",
-		}, rows)
-	}
-}
-
-func clientStatusDetail(
-	status adminclient.NetworkStatus,
-) string {
-	if status.Reason != "" {
-		return status.Reason
-	}
-	activities := []struct {
-		name   string
-		status adminclient.ActivityStatus
-	}{
-		{name: "reconcile", status: status.Reconcile},
-		{name: "sync", status: status.Sync},
-		{name: "scan", status: status.Scan},
-		{name: "report", status: status.Report},
-	}
-	var details []string
-	for _, activity := range activities {
-		if activity.status.Error != "" {
-			details = append(
-				details,
-				activity.name+": "+strings.ReplaceAll(
-					activity.status.Error,
-					"\n",
-					"; ",
-				),
-			)
-		}
-	}
-	if len(details) == 0 {
-		return "-"
-	}
-	return strings.Join(details, "; ")
 }

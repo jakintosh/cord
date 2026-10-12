@@ -3,65 +3,14 @@ package database_test
 import (
 	"errors"
 	"testing"
-	"time"
 
-	"git.studiopollinator.com/pollinator/cord/internal/server/database"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
-func seedNetworkForCidr(t *testing.T, db *database.DB) {
-	t.Helper()
-
-	name := "cidrnet"
-	if err := db.BootstrapNetwork(
-		&service.Network{
-			Name:       name,
-			PrivateKey: "priv-" + name,
-			PublicKey:  "pub-" + name,
-			ExternalIP: "1.1.1.1",
-			Main: service.Plane{
-				Name:          name,
-				Cidr:          "10.0.0.0/16",
-				WireguardPort: 51820,
-				ApiPort:       8080,
-			},
-			Invite: service.Plane{
-				Name:          name + "-i",
-				Cidr:          "10.1.0.0/24",
-				WireguardPort: 51821,
-				ApiPort:       8080,
-			},
-			CreatedAt: time.Now(),
-		},
-		&service.Cidr{
-			Name:   name,
-			Cidr:   "10.0.0.0/16",
-			Prefix: 16,
-			Bits:   32,
-		},
-		&service.Cidr{
-			Name:     "cord-server",
-			Cidr:     "10.0.0.1/32",
-			Prefix:   32,
-			Bits:     32,
-			Terminal: true,
-		},
-		&service.Peer{
-			Name:      "cord-server",
-			Route:     "10.0.0.1/32",
-			PublicKey: "pub",
-			Admin:     true,
-			Enabled:   true,
-			Confirmed: true,
-			CidrName:  "cord-server",
-		},
-	); err != nil {
-		t.Fatalf("seed network: %v", err)
-	}
-}
-
-func TestInsertAndGetCidr(t *testing.T) {
+func TestCreateCidr_RoundTrip(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
@@ -95,17 +44,21 @@ func TestInsertAndGetCidr(t *testing.T) {
 	}
 }
 
-func TestGetCidr_NotFound(t *testing.T) {
+func TestGetCidr_NotFound(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
 	_, err := db.GetCidr("cidrnet", "nope")
-	if err == nil {
-		t.Fatal("expected error for nonexistent cidr")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("expected error for nonexistent cidr: %v", err)
 	}
 }
 
-func TestListCidrs(t *testing.T) {
+func TestListCidrs_SortedByName(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
@@ -132,7 +85,9 @@ func TestListCidrs(t *testing.T) {
 	}
 }
 
-func TestCreateCidr_DuplicateName(t *testing.T) {
+func TestCreateCidr_DuplicateName(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
@@ -143,12 +98,21 @@ func TestCreateCidr_DuplicateName(t *testing.T) {
 
 	cidr.Cidr = "10.0.2.0/24"
 	err := db.CreateCidr("cidrnet", cidr)
-	if err == nil {
-		t.Fatal("expected error for duplicate cidr name")
+	if !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("expected error for duplicate cidr name: %v", err)
+	}
+	got, err := db.GetCidr("cidrnet", cidr.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Cidr != "10.0.1.0/24" {
+		t.Fatalf("duplicate changed CIDR = %+v", got)
 	}
 }
 
-func TestCreateCidr_DuplicateCidr(t *testing.T) {
+func TestCreateCidr_DuplicateCidr(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
@@ -161,12 +125,14 @@ func TestCreateCidr_DuplicateCidr(t *testing.T) {
 	err := db.CreateCidr("cidrnet", &service.Cidr{
 		Name: "b", Cidr: "10.0.1.0/24", Prefix: 24, Bits: 32,
 	})
-	if err == nil {
-		t.Fatal("expected error for duplicate cidr range")
+	if !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("expected error for duplicate cidr range: %v", err)
 	}
 }
 
-func TestDeleteCidr(t *testing.T) {
+func TestDeleteCidr_RemovesAssignments(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
@@ -187,8 +153,8 @@ func TestDeleteCidr(t *testing.T) {
 	}
 
 	_, err := db.GetCidr("cidrnet", "delme")
-	if err == nil {
-		t.Fatal("expected error after delete")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("expected error after delete: %v", err)
 	}
 	var assignmentCount int
 	if err := db.Conn.QueryRow(`SELECT COUNT(*) FROM cidr_assignment`).Scan(&assignmentCount); err != nil {
@@ -199,17 +165,21 @@ func TestDeleteCidr(t *testing.T) {
 	}
 }
 
-func TestDeleteCidr_NotFound(t *testing.T) {
+func TestDeleteCidr_NotFound(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
 	err := db.DeleteCidr("cidrnet", "ghost")
-	if err == nil {
-		t.Fatal("expected error for nonexistent cidr")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("expected error for nonexistent cidr: %v", err)
 	}
 }
 
-func TestDeleteCidr_RejectsRoot(t *testing.T) {
+func TestDeleteCidr_RejectsRoot(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
@@ -222,7 +192,9 @@ func TestDeleteCidr_RejectsRoot(t *testing.T) {
 	}
 }
 
-func TestUpdateCidr_Rename(t *testing.T) {
+func TestUpdateCidr_Rename(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
@@ -246,7 +218,9 @@ func TestUpdateCidr_Rename(t *testing.T) {
 	}
 }
 
-func TestCreateCidr_RejectsOutsideMainCIDR(t *testing.T) {
+func TestCreateCidr_RejectsOutsideMainCIDR(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
@@ -264,7 +238,9 @@ func TestCreateCidr_RejectsOutsideMainCIDR(t *testing.T) {
 	}
 }
 
-func TestCidrGroups_AssignListRemove(t *testing.T) {
+func TestCidrGroups_AssignListRemove(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
@@ -308,7 +284,9 @@ func TestCidrGroups_AssignListRemove(t *testing.T) {
 	}
 }
 
-func TestCidrGroups_RejectsProvisionalPeer(t *testing.T) {
+func TestCidrGroups_RejectsProvisionalPeer(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 	testutil.SeedPeerDB(
@@ -331,7 +309,9 @@ func TestCidrGroups_RejectsProvisionalPeer(t *testing.T) {
 	}
 }
 
-func TestCidrGroups_MissingResources(t *testing.T) {
+func TestCidrGroups_MissingResources(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedNetworkForCidr(t, db)
 
@@ -349,5 +329,38 @@ func TestCidrGroups_MissingResources(t *testing.T) {
 	}
 	if err := db.RemoveCidrGroup("cidrnet", "cidrnet", "engineering"); err != nil {
 		t.Fatalf("remove absent assignment: %v", err)
+	}
+}
+
+func TestCreateCidr_RejectsDifferentAddressFamily(
+	t *testing.T,
+) {
+	db := testutil.SetupDB(t)
+	seedNetwork(t, db)
+
+	err := db.CreateCidr("testnet", &service.Cidr{
+		Name:     "ipv6-peer",
+		Cidr:     "fd00::1/128",
+		Terminal: true,
+	})
+	if !errors.Is(err, service.ErrInvalidInput) {
+		t.Fatalf("create IPv6 CIDR in IPv4 network: err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestCreateCidr_RejectsExistingPeerRoute(
+	t *testing.T,
+) {
+	db := testutil.SetupDB(t)
+	seedNetwork(t, db)
+
+	testutil.SeedPeerDB(t, db, "testnet", "peer1", "10.0.5.30/32", "key1", false, true, true)
+
+	err := db.CreateCidr("testnet", &service.Cidr{
+		Name: "peer2",
+		Cidr: "10.0.5.30/32",
+	})
+	if !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("expected error for duplicate CIDR: %v", err)
 	}
 }

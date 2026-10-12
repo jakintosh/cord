@@ -15,13 +15,15 @@ func (a *API) handleListRegistrations(
 ) {
 	network := r.PathValue("name")
 
-	regs, err := a.service.ListRegistrations(network)
-	if err != nil {
-		writeServiceError(w, err)
-		return
+	if regs, err := a.runtime.ListRegistrations(
+		r.Context(),
+		network,
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		registrationsDTO := registrationsFromService(regs)
+		wire.WriteData(w, http.StatusOK, registrationsDTO)
 	}
-
-	wire.WriteData(w, http.StatusOK, registrationsFromService(regs))
 }
 
 func (a *API) handlePostRegistration(
@@ -46,13 +48,16 @@ func (a *API) handlePostRegistration(
 		PeerIP: parsed,
 		Admin:  req.Admin,
 	}
-	invitation, err := a.service.CreateRegistration(network, req.Name, opts)
-	if err != nil {
-		writeServiceError(w, err)
-		return
+	if invitation, err := a.runtime.CreateRegistration(
+		r.Context(),
+		network,
+		req.Name,
+		opts,
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		wire.WriteData(w, http.StatusCreated, invitation)
 	}
-
-	wire.WriteData(w, http.StatusCreated, invitation)
 }
 
 func (a *API) handleDeleteRegistration(
@@ -62,12 +67,15 @@ func (a *API) handleDeleteRegistration(
 	network := r.PathValue("name")
 	registration := r.PathValue("registration")
 
-	if err := a.service.RevokeRegistration(network, registration); err != nil {
-		writeServiceError(w, err)
-		return
+	if err := a.runtime.RevokeRegistration(
+		r.Context(),
+		network,
+		registration,
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		wire.WriteData(w, http.StatusOK, nil)
 	}
-
-	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handleListRegistrationGroups(
@@ -77,12 +85,16 @@ func (a *API) handleListRegistrationGroups(
 	network := r.PathValue("name")
 	registration := r.PathValue("registration")
 
-	groups, err := a.service.ListRegistrationGroups(network, registration)
-	if err != nil {
-		writeServiceError(w, err)
-		return
+	if groups, err := a.runtime.ListRegistrationGroups(
+		r.Context(),
+		network,
+		registration,
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		groupsDTO := groupsFromService(groups)
+		wire.WriteData(w, http.StatusOK, groupsDTO)
 	}
-	wire.WriteData(w, http.StatusOK, groupsFromService(groups))
 }
 
 func (a *API) handlePostRegistrationGroup(
@@ -97,11 +109,17 @@ func (a *API) handlePostRegistrationGroup(
 		wire.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := a.service.AssignRegistrationGroup(network, registration, req.Group); err != nil {
-		writeServiceError(w, err)
-		return
+
+	if err := a.runtime.AssignRegistrationGroup(
+		r.Context(),
+		network,
+		registration,
+		req.Group,
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		wire.WriteData(w, http.StatusCreated, nil)
 	}
-	wire.WriteData(w, http.StatusCreated, nil)
 }
 
 func (a *API) handleDeleteRegistrationGroup(
@@ -112,11 +130,16 @@ func (a *API) handleDeleteRegistrationGroup(
 	registration := r.PathValue("registration")
 	group := r.PathValue("group")
 
-	if err := a.service.RemoveRegistrationGroup(network, registration, group); err != nil {
-		writeServiceError(w, err)
-		return
+	if err := a.runtime.RemoveRegistrationGroup(
+		r.Context(),
+		network,
+		registration,
+		group,
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		wire.WriteData(w, http.StatusOK, nil)
 	}
-	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func registrationFromService(

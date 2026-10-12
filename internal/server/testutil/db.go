@@ -7,7 +7,9 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
 )
 
-func SetupDB(t *testing.T) *database.DB {
+func SetupDB(
+	t *testing.T,
+) *database.DB {
 	t.Helper()
 
 	opts := database.Options{
@@ -18,7 +20,9 @@ func SetupDB(t *testing.T) *database.DB {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = db.Close()
+		if err := db.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
 	})
 
 	return db

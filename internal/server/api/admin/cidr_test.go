@@ -1,8 +1,10 @@
 package admin_test
 
 import (
+	"errors"
 	"net"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
@@ -92,28 +94,6 @@ func TestAPIAddCidr_OutsideMainCidr(
 	result.ExpectStatusError(t, http.StatusBadRequest)
 }
 
-func TestAPICreateNetwork_OverlappingCidrs(
-	t *testing.T,
-) {
-	// setup env and seed network
-	env := testutil.Setup(t)
-	env.SeedNetwork(t)
-
-	// add overlapping invite CIDR at network creation time
-	url := "/networks"
-	body := `{
-		"name": "overlap",
-		"cidr": "10.0.0.0/16",
-		"invite_cidr": "10.0.1.0/24",
-		"external_ip": "1.2.3.4",
-		"port": 51820
-	}`
-	result := wire.TestPost[any](env.Router, url, body)
-
-	// verify result
-	result.ExpectStatusError(t, http.StatusBadRequest)
-}
-
 func TestAPIListCidrs_Empty(
 	t *testing.T,
 ) {
@@ -149,15 +129,9 @@ func TestAPIListCidrs_WithData(
 	if len(data) != 3 {
 		t.Fatalf("expected 3 cidrs (root + server + engineering), got %d", len(data))
 	}
-	foundEng := false
-	for _, c := range data {
-		if c.Name == "engineering" {
-			foundEng = true
-			break
-		}
-	}
-	if !foundEng {
-		t.Fatal("engineering cidr not found in list")
+	want := []admin.Cidr{{Name: "cord-server", Cidr: "10.0.0.1/32"}, {Name: "engineering", Cidr: "10.0.1.0/24"}, {Name: "testnet", Cidr: "10.0.0.0/16"}}
+	if !reflect.DeepEqual(data, want) {
+		t.Fatalf("cidrs = %+v, want %+v", data, want)
 	}
 }
 
@@ -176,6 +150,10 @@ func TestAPIRenameCidr_Success(
 
 	// verify result — status-only mutation, no response body
 	result.ExpectOK(t)
+
+	if _, err := env.Service.GetCidr("testnet", "engineering"); !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("old name error = %v, want not found", err)
+	}
 
 	// verify cidr was renamed in store
 	c, err := env.Service.GetCidr("testnet", "eng")
@@ -240,12 +218,16 @@ func TestAPIDeleteCidr_NotFound(
 	result.ExpectStatusError(t, http.StatusNotFound)
 }
 
-func TestAPICidrGroups_AddListRemove(t *testing.T) {
+func TestAPICidrGroups_AddListRemove(
+	t *testing.T,
+) {
+	// setup
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
 	env.SeedCIDR(t, "testnet", "servers", "10.0.1.0/24")
 	seedGroup(t, env, "engineering")
 
+	// request
 	url := "/networks/testnet/cidrs/servers/groups"
 	body := `{"group":"engineering"}`
 	wire.TestPost[any](env.Router, url, body).ExpectStatusOK(t, http.StatusCreated)
@@ -263,21 +245,28 @@ func TestAPICidrGroups_AddListRemove(t *testing.T) {
 	}
 }
 
-func TestAPICidrGroups_RejectsInvalidRequestAndMissingCidr(t *testing.T) {
+func TestAPICidrGroups_MissingCidr(
+	t *testing.T,
+) {
+	// setup
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
 	seedGroup(t, env, "engineering")
 
 	missingURL := "/networks/testnet/cidrs/missing/groups"
+	body := `{
+		"group": "engineering"
+	}`
 	wire.TestGet[[]admin.Group](env.Router, missingURL).ExpectStatusError(t, http.StatusNotFound)
-	wire.TestPost[any](env.Router, missingURL, `{"group":"engineering"}`).ExpectStatusError(t, http.StatusNotFound)
+	wire.TestPost[any](env.Router, missingURL, body).ExpectStatusError(t, http.StatusNotFound)
 	wire.TestDelete[any](env.Router, missingURL+"/engineering").ExpectStatusError(t, http.StatusNotFound)
 
-	env.SeedCIDR(t, "testnet", "servers", "10.0.1.0/24")
-	wire.TestPost[any](env.Router, "/networks/testnet/cidrs/servers/groups", `{`).ExpectStatusError(t, http.StatusBadRequest)
 }
 
-func TestAPICidrGroups_RejectsProvisionalPeerCidr(t *testing.T) {
+func TestAPICidrGroups_RejectsProvisionalPeerCidr(
+	t *testing.T,
+) {
+	// setup
 	env := testutil.Setup(t)
 	env.SeedNetwork(t)
 	seedGroup(t, env, "engineering")
@@ -301,6 +290,36 @@ func TestAPICidrGroups_RejectsProvisionalPeerCidr(t *testing.T) {
 		t.Fatalf("redeem registration: %v", err)
 	}
 
+	// request
 	url := "/networks/testnet/cidrs/alice/groups"
-	wire.TestPost[any](env.Router, url, `{"group":"engineering"}`).ExpectStatusError(t, http.StatusConflict)
+	body := `{
+		"group": "engineering"
+	}`
+	result := wire.TestPost[any](env.Router, url, body)
+
+	// result
+	result.ExpectStatusError(t, http.StatusConflict)
+}
+
+func TestAPIAddCidrGroup_MalformedJSON(
+	t *testing.T,
+) {
+	// setup
+	env := testutil.Setup(t)
+	env.SeedNetwork(t)
+	env.SeedCIDR(t, "testnet", "servers", "10.0.1.0/24")
+
+	// request
+	url := "/networks/testnet/cidrs/servers/groups"
+	body := `{`
+	result := wire.TestPost[any](env.Router, url, body)
+
+	// result
+	result.ExpectStatusError(t, http.StatusBadRequest)
+
+	// state
+	groups, err := env.Service.ListCidrGroups("testnet", "servers")
+	if err != nil || len(groups) != 0 {
+		t.Fatalf("groups = %+v, error = %v, want empty", groups, err)
+	}
 }

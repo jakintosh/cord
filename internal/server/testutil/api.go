@@ -33,7 +33,6 @@ func Setup(
 	env := SetupRuntime(t)
 
 	apiServer, err := admin.New(admin.Options{
-		Service: env.Service,
 		Runtime: env.Runtime,
 		Logger:  logging.Discard(),
 	})

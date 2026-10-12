@@ -14,13 +14,15 @@ func (a *API) handleListAssociations(
 ) {
 	network := r.PathValue("name")
 
-	assocs, err := a.service.ListAssociations(network)
-	if err != nil {
-		writeServiceError(w, err)
-		return
+	if assocs, err := a.runtime.ListAssociations(
+		r.Context(),
+		network,
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		associationsDTO := associationsFromService(assocs)
+		wire.WriteData(w, http.StatusOK, associationsDTO)
 	}
-
-	wire.WriteData(w, http.StatusOK, associationsFromService(assocs))
 }
 
 func (a *API) handlePostAssociation(
@@ -35,16 +37,16 @@ func (a *API) handlePostAssociation(
 		return
 	}
 
-	if err := a.service.CreateAssociation(
+	if err := a.runtime.CreateAssociation(
+		r.Context(),
 		network,
 		req.Group1,
 		req.Group2,
 	); err != nil {
-		writeServiceError(w, err)
-		return
+		a.writeServiceError(w, r, err)
+	} else {
+		wire.WriteData(w, http.StatusCreated, nil)
 	}
-
-	wire.WriteData(w, http.StatusCreated, nil)
 }
 
 func (a *API) handleDeleteAssociation(
@@ -55,16 +57,16 @@ func (a *API) handleDeleteAssociation(
 	group1 := r.PathValue("group1")
 	group2 := r.PathValue("group2")
 
-	if err := a.service.DeleteAssociation(
+	if err := a.runtime.DeleteAssociation(
+		r.Context(),
 		network,
 		group1,
 		group2,
 	); err != nil {
-		writeServiceError(w, err)
-		return
+		a.writeServiceError(w, r, err)
+	} else {
+		wire.WriteData(w, http.StatusOK, nil)
 	}
-
-	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func associationFromService(

@@ -19,11 +19,6 @@ type Options struct {
 	// Logger receives internal diagnostics from the service. Nil
 	// discards everything.
 	Logger *slog.Logger
-
-	// Wake receives the name of a network whose desired state changed,
-	// so the runtime can converge it promptly. Nil means nothing is
-	// listening; sends are dropped when the channel is full.
-	Wake chan<- string
 }
 
 // Service is the domain core for the cord client daemon. All domain
@@ -35,7 +30,6 @@ type Service struct {
 	store Store
 	clock func() time.Time
 	log   *slog.Logger
-	wake  chan<- string
 }
 
 // New returns a ready-to-use Service.
@@ -63,21 +57,5 @@ func New(
 		store: opts.Store,
 		clock: clock,
 		log:   log,
-		wake:  opts.Wake,
 	}, nil
-}
-
-// requestReconcile tells the runtime that the named network's desired state
-// changed. The send never blocks: a full channel already holds a wake
-// the runtime has not consumed yet, and its periodic pass catches up.
-func (s *Service) requestReconcile(
-	network string,
-) {
-	if s.wake == nil {
-		return
-	}
-	select {
-	case s.wake <- network:
-	default:
-	}
 }

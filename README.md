@@ -6,7 +6,7 @@ peers install networks from invites and keep them in sync.
 
 ## Requirements
 
-- Go 1.26 or newer to build from source
+- Go 1.25 or newer to build from source
 - A host with WireGuard interface support (the `wireguard` kernel
   module, or the userspace backend)
 
@@ -51,6 +51,57 @@ cord client network install invite.json
 The client daemon listens on `/var/run/cord/client.sock` and stores its
 state in a SQLite database at `data/client.db`, relative to the
 current working directory.
+
+## Private DNS
+
+Enabled networks automatically configure DNS on Linux and macOS clients. Use
+`<peer>.<network>.internal`, for example `nas.office.internal`; the coordination
+server is `cord-server.office.internal`. Answers follow the requesting peer's
+network visibility. Cord serves forward address records, not recursive Internet
+DNS. Prefer fully qualified names: short-name search depends on the host resolver
+and can be ambiguous with multiple networks. Concurrent networks need distinct
+names and nonconflicting address ranges. Applications using their own DNS provider
+may bypass the system resolver.
+
+Linux clients require `resolvectl` and a running `systemd-resolved` used by the
+host's resolver path. Cord configures DNS on its tunnel link and does not edit
+`/etc/resolv.conf`. macOS clients manage marked files under `/etc/resolver` and
+need permission to write there. The server binds UDP and TCP port 53 on each
+network's main Cord address. The daemon needs permission to bind these ports,
+they must be accessible to the network's peers, and other DNS listeners must not
+conflict with them. Temporary enrollment tunnels do not configure DNS.
+
+On macOS, Cord may overwrite or remove `/etc/resolver/<network>.internal` while
+its ownership marker is intact. Removing or modifying the marker makes Cord
+leave the file alone. Existing unmarked files are preserved and reported as
+conflicts; move a conflicting file aside if you want Cord to manage that domain.
+
+Use `cord client status` or `cord server status` to inspect the resource tree.
+Each resource reports health and lifecycle state; activity rows (`↻`) report
+their last result and last successful attempt. State arrows show observed versus
+intended state, such as `failed → stopped` for unfinished cleanup. Errors and
+reasons appear below the tree. Add `--verbose` (`-v`) for all activities and their
+attempt times and schedules, or `--json` for the complete status response.
+
+Administrative commands with `--json` emit their response without confirmation
+text. Commands with no response write nothing on success; use the exit status
+to check the outcome. Empty lists are `[]`. When registration creation uses
+`--output`, the invitation is written to that file and JSON mode leaves stdout
+empty. Daemon logging remains text on stderr.
+
+Client DNS appears as a `dns-resolver` resource. An `unsupported` reason usually
+means missing `resolvectl` or an unavailable `systemd-resolved`; other failures
+may indicate permissions or resolver-file conflicts.
+
+Client DNS failures leave the tunnel and synchronization running while maintenance
+retries. Disable, uninstall, and shutdown attempt to remove owned DNS configuration
+before closing the tunnel. Failed cleanup stays visible and retryable, even after
+uninstall. On restart, active networks reapply DNS; macOS also removes abandoned
+marked resolver files for inactive networks. A server DNS bind failure during
+initial network startup rolls back that startup and is retried by maintenance.
+
+DNS caches may delay changes after a rename or topology update: positive answers
+have a one-hour TTL and negative answers a five-minute TTL.
 
 ## Running under systemd
 

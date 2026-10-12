@@ -10,7 +10,10 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
-func seedTopologyNetwork(t *testing.T, db *database.DB) {
+func seedTopologyNetwork(
+	t *testing.T,
+	db *database.DB,
+) {
 	t.Helper()
 
 	name := "toponet"
@@ -141,7 +144,9 @@ func seedTopologyNetwork(t *testing.T, db *database.DB) {
 	}
 }
 
-func TestLoadTopologyState_Cidrs(t *testing.T) {
+func TestLoadTopologyState_Cidrs(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedTopologyNetwork(t, db)
 
@@ -190,7 +195,9 @@ func TestLoadTopologyState_Cidrs(t *testing.T) {
 	}
 }
 
-func TestLoadTopologyState_Assignments(t *testing.T) {
+func TestLoadTopologyState_Assignments(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedTopologyNetwork(t, db)
 
@@ -218,7 +225,9 @@ func TestLoadTopologyState_Assignments(t *testing.T) {
 	}
 }
 
-func TestLoadTopologyState_Associations(t *testing.T) {
+func TestLoadTopologyState_Associations(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedTopologyNetwork(t, db)
 
@@ -239,7 +248,9 @@ func TestLoadTopologyState_Associations(t *testing.T) {
 	}
 }
 
-func TestLoadTopologyState_Peers(t *testing.T) {
+func TestLoadTopologyState_Peers(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedTopologyNetwork(t, db)
 
@@ -275,7 +286,9 @@ func TestLoadTopologyState_Peers(t *testing.T) {
 	}
 }
 
-func TestLoadTopologyState_IncludesManagedPeerStates(t *testing.T) {
+func TestLoadTopologyState_IncludesManagedPeerStates(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedTopologyNetwork(t, db)
 	testutil.SeedPeerDB(
@@ -317,7 +330,9 @@ func TestLoadTopologyState_IncludesManagedPeerStates(t *testing.T) {
 	}
 }
 
-func TestLoadTopologyState_EmptyNetwork(t *testing.T) {
+func TestLoadTopologyState_EmptyNetwork(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	name := "emptynet"
@@ -391,7 +406,9 @@ func TestLoadTopologyState_EmptyNetwork(t *testing.T) {
 	}
 }
 
-func TestLoadTopologyState_MultipleAssociations(t *testing.T) {
+func TestLoadTopologyState_MultipleAssociations(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	seedTopologyNetwork(t, db)
 
@@ -433,7 +450,9 @@ func TestLoadTopologyState_MultipleAssociations(t *testing.T) {
 	}
 }
 
-func TestLoadTopologyState_NoAssignments(t *testing.T) {
+func TestLoadTopologyState_NoAssignments(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	name := "noassign"
@@ -506,7 +525,9 @@ func TestLoadTopologyState_NoAssignments(t *testing.T) {
 	}
 }
 
-func TestLoadTopologyState_NonexistentNetwork(t *testing.T) {
+func TestLoadTopologyState_NonexistentNetwork(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	if _, err := db.LoadTopologyState("doesnotexist"); !errors.Is(err, service.ErrNotFound) {

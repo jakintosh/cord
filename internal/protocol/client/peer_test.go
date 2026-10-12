@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -171,6 +173,39 @@ func TestConfirmPeer_CancellationStopsRetry(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("ConfirmPeer did not stop when its context was cancelled")
+	}
+}
+
+func TestPeerClient_RetryStatusPolicy(
+	t *testing.T,
+) {
+	for _, operation := range []string{"confirm", "endpoints"} {
+		for _, status := range []int{http.StatusNotFound, http.StatusConflict, http.StatusGone, http.StatusServiceUnavailable} {
+			t.Run(operation+"/"+strconv.Itoa(status), func(t *testing.T) {
+				var attempts atomic.Int32
+				c, teardown := newTestPeerClient(t, func(w http.ResponseWriter, r *http.Request) {
+					attempts.Add(1)
+					wire.WriteError(w, status, "request failed")
+				})
+				defer teardown()
+				var err error
+				if operation == "confirm" {
+					err = c.ConfirmPeer(t.Context())
+				} else {
+					err = c.ReportEndpoints(t.Context(), nil)
+				}
+				if !wire.IsStatus(err, status) {
+					t.Fatalf("error = %v, want HTTP %d", err, status)
+				}
+				want := int32(1)
+				if status == http.StatusServiceUnavailable {
+					want = 3
+				}
+				if attempts.Load() != want {
+					t.Fatalf("attempts = %d, want %d", attempts.Load(), want)
+				}
+			})
+		}
 	}
 }
 

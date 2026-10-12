@@ -2,6 +2,7 @@ package wireguard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -36,43 +37,55 @@ func (b *UserspaceBackend) CreateDevice(
 		return nil, fmt.Errorf("wireguard: create tun: %w", err)
 	}
 
-	realName, err := tunDev.Name()
-	if err != nil {
-		tunDev.Close()
-		return nil, fmt.Errorf("wireguard: get tun name: %w", err)
+	handle := &userspaceDeviceHandle{
+		name: cfg.Name,
+		tun:  tunDev,
 	}
+	if err := b.initializeDevice(handle, cfg, mtu); err != nil {
+		if closeErr := handle.Close(); closeErr != nil {
+			return handle, errors.Join(err, closeErr)
+		}
+		return nil, err
+	}
+
+	return handle, nil
+}
+
+// initializeDevice configures the allocated interface and starts its engine.
+// CreateDevice owns cleanup if any initialization step fails.
+func (b *UserspaceBackend) initializeDevice(
+	handle *userspaceDeviceHandle,
+	cfg DeviceConfig,
+	mtu int,
+) error {
+	realName, err := handle.tun.Name()
+	if err != nil {
+		return fmt.Errorf("wireguard: get tun name: %w", err)
+	}
+
+	handle.name = realName
 
 	if err := configureTunOS(realName, cfg.Route, cfg.NetworkCIDR, mtu); err != nil {
-		tunDev.Close()
-		return nil, fmt.Errorf("wireguard: configure tun: %w", err)
+		return fmt.Errorf("wireguard: configure tun: %w", err)
 	}
 
-	dev := device.NewDevice(tunDev, conn.NewDefaultBind(), b.deviceLogger(realName))
+	dev := device.NewDevice(handle.tun, conn.NewDefaultBind(), b.deviceLogger(realName))
+	handle.wg = dev
 
 	privKey, err := parseKey(cfg.PrivateKey)
 	if err != nil {
-		dev.Close()
-		tunDev.Close()
-		return nil, fmt.Errorf("wireguard: parse key: %w", err)
+		return fmt.Errorf("wireguard: parse key: %w", err)
 	}
 
 	if err := applyDeviceConfig(dev, privKey, int(cfg.ListenPort)); err != nil {
-		dev.Close()
-		tunDev.Close()
-		return nil, fmt.Errorf("wireguard: apply device config: %w", err)
+		return fmt.Errorf("wireguard: apply device config: %w", err)
 	}
 
 	if err := dev.Up(); err != nil {
-		dev.Close()
-		tunDev.Close()
-		return nil, fmt.Errorf("wireguard: bring device up: %w", err)
+		return fmt.Errorf("wireguard: bring device up: %w", err)
 	}
 
-	return &userspaceDeviceHandle{
-		name: realName,
-		wg:   dev,
-		tun:  tunDev,
-	}, nil
+	return nil
 }
 
 // deviceLogger bridges wireguard-go's printf-style logger to slog.
@@ -114,7 +127,31 @@ func (d *userspaceDeviceHandle) Name() string {
 	return d.name
 }
 
-func (d *userspaceDeviceHandle) Peers() (
+func (d *userspaceDeviceHandle) Check() error {
+	if d.wg == nil {
+		return fmt.Errorf("wireguard: %s did not finish starting", d.name)
+	}
+
+	select {
+	case <-d.wg.Wait():
+		return fmt.Errorf("wireguard: %s is closed", d.name)
+	default:
+		break // not closed, continue
+	}
+
+	iface, err := net.InterfaceByName(d.name)
+	if err != nil {
+		return fmt.Errorf("wireguard: get interface %s: %w", d.name, err)
+	}
+
+	if iface.Flags&net.FlagUp == 0 {
+		return fmt.Errorf("wireguard: %s is not up", d.name)
+	}
+
+	return nil
+}
+
+func (d *userspaceDeviceHandle) GetPeerStatuses() (
 	[]PeerStatus,
 	error,
 ) {
@@ -126,16 +163,20 @@ func (d *userspaceDeviceHandle) Peers() (
 	return parsePeersUAPI(raw)
 }
 
-func (d *userspaceDeviceHandle) ApplyPeers(
+func (d *userspaceDeviceHandle) ApplyPeerOps(
 	ops []PeerOp,
 ) error {
 	return d.wg.IpcSet(buildOpsUAPI(ops))
 }
 
 func (d *userspaceDeviceHandle) Close() error {
-	d.wg.Close()
-	d.tun.Close()
-	return nil
+	// Close the TUN directly so its error is not swallowed by wireguard-go.
+	err := d.tun.Close()
+	if d.wg != nil {
+		d.wg.Close()
+	}
+
+	return err
 }
 
 func applyDeviceConfig(

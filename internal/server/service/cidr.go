@@ -80,6 +80,8 @@ func (s *Service) CreateCidr(
 		return fmt.Errorf("create cidr: %w", mapStoreError(err))
 	}
 
+	s.invalidateModel(networkName)
+
 	return nil
 }
 
@@ -101,6 +103,8 @@ func (s *Service) UpdateCidr(
 		return fmt.Errorf("update cidr %q: %w", cidrName, mapStoreError(err))
 	}
 
+	s.invalidateModel(networkName)
+
 	return nil
 }
 
@@ -119,6 +123,8 @@ func (s *Service) DeleteCidr(
 	if err := s.store.DeleteCidr(networkName, cidrName); err != nil {
 		return fmt.Errorf("delete cidr %q: %w", cidrName, mapStoreError(err))
 	}
+
+	s.invalidateModel(networkName)
 
 	return nil
 }
@@ -161,6 +167,8 @@ func (s *Service) AssignCidrGroup(
 		return fmt.Errorf("assign group: %w", mapStoreError(err))
 	}
 
+	s.invalidateModel(network)
+
 	return nil
 }
 
@@ -184,5 +192,8 @@ func (s *Service) RemoveCidrGroup(
 	); err != nil {
 		return fmt.Errorf("remove group: %w", mapStoreError(err))
 	}
+
+	s.invalidateModel(network)
+
 	return nil
 }

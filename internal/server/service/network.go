@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -135,6 +136,7 @@ func (s *Service) GetNetwork(
 	if err != nil {
 		return nil, fmt.Errorf("get network %q: %w", name, mapStoreError(err))
 	}
+
 	return nc, nil
 }
 
@@ -147,6 +149,7 @@ func (s *Service) ListNetworks() (
 	if err != nil {
 		return nil, fmt.Errorf("list networks: %w", err)
 	}
+
 	return networks, nil
 }
 
@@ -162,6 +165,10 @@ func (s *Service) CreateNetwork(
 	*Network,
 	error,
 ) {
+	if err := validateNetworkName(name); err != nil {
+		return nil, err
+	}
+
 	privKey, err := wireguard.GenerateKey()
 	if err != nil {
 		return nil, fmt.Errorf("generate key: %w", err)
@@ -225,8 +232,13 @@ func (s *Service) CreateNetwork(
 		serverCidr,
 		serverPeer,
 	); err != nil {
+		if errors.Is(err, ErrConflict) {
+			return nil, fmt.Errorf("bootstrap network: %w", ErrNetworkExists)
+		}
 		return nil, fmt.Errorf("bootstrap network: %w", mapStoreError(err))
 	}
+
+	s.invalidateModel(name)
 
 	return network, nil
 }
@@ -240,6 +252,8 @@ func (s *Service) DeleteNetwork(
 	if err := s.store.DeleteNetwork(name); err != nil {
 		return fmt.Errorf("delete network %q: %w", name, mapStoreError(err))
 	}
+
+	s.invalidateModel(name)
 
 	return nil
 }
@@ -260,14 +274,10 @@ func (s *Service) SetNetworkEnabled(
 		return fmt.Errorf("set network %q enabled: %w", name, mapStoreError(err))
 	}
 
-	s.requestReconcile(name)
-
 	s.log.Info(
 		"network intent recorded",
-		"network",
-		name,
-		"enabled",
-		enabled,
+		"network", name,
+		"enabled", enabled,
 	)
 
 	return nil
@@ -290,11 +300,30 @@ func (s *Service) PruneNetwork(
 		return fmt.Errorf("prune expired registrations: %w", mapStoreError(err))
 	}
 
+	s.invalidateModel(network)
+
 	if err := s.store.DeleteEndpointsBefore(
 		network,
 		now.Add(-defaultEndpointTTL),
 	); err != nil {
 		return fmt.Errorf("prune endpoints: %w", mapStoreError(err))
+	}
+
+	return nil
+}
+
+// validateNetworkName checks that a network name is a valid DNS label
+// that also satisfies the WireGuard interface-name limit, because the
+// name doubles as the main plane's interface name.
+func validateNetworkName(
+	name string,
+) error {
+	if err := validateDNSName(name); err != nil {
+		return fmt.Errorf("%w: invalid network name: %v", ErrInvalidInput, err)
+	}
+
+	if err := wireguard.ValidateDeviceName(name); err != nil {
+		return fmt.Errorf("%w: invalid network name: %v", ErrInvalidInput, err)
 	}
 
 	return nil

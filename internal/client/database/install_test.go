@@ -2,6 +2,7 @@ package database_test
 
 import (
 	"errors"
+	"git.studiopollinator.com/pollinator/cord/internal/client/database"
 	"testing"
 	"time"
 
@@ -46,9 +47,7 @@ func defaultNetworkAssignment() service.NetworkAssignment {
 
 func beginInstall(
 	t *testing.T,
-	db interface {
-		BeginInstall(service.BeginInstallParams) (*service.Install, error)
-	},
+	db *database.DB,
 	name string,
 ) *service.Install {
 	t.Helper()
@@ -62,9 +61,7 @@ func beginInstall(
 
 func redeemInstall(
 	t *testing.T,
-	db interface {
-		RedeemInstall(string, service.NetworkAssignment) (*service.Install, error)
-	},
+	db *database.DB,
 	name string,
 ) *service.Install {
 	t.Helper()
@@ -76,7 +73,9 @@ func redeemInstall(
 	return install
 }
 
-func TestGetInstall_NotFound(t *testing.T) {
+func TestGetInstall_NotFound(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	_, err := db.GetInstall("nonexistent")
@@ -85,7 +84,9 @@ func TestGetInstall_NotFound(t *testing.T) {
 	}
 }
 
-func TestBeginInstall_CreatesInvitedInstall(t *testing.T) {
+func TestBeginInstall_CreatesInvitedInstall(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	params := defaultBeginInstall("testnet")
 
@@ -116,7 +117,9 @@ func TestBeginInstall_CreatesInvitedInstall(t *testing.T) {
 	}
 }
 
-func TestBeginInstall_CompatibleRetryReturnsExistingInstall(t *testing.T) {
+func TestBeginInstall_CompatibleRetryReturnsExistingInstall(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	params := defaultBeginInstall("testnet")
 
@@ -141,7 +144,9 @@ func TestBeginInstall_CompatibleRetryReturnsExistingInstall(t *testing.T) {
 	}
 }
 
-func TestBeginInstall_IncompatibleRetryLeavesExistingInstallUnchanged(t *testing.T) {
+func TestBeginInstall_IncompatibleRetryLeavesExistingInstallUnchanged(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	params := defaultBeginInstall("testnet")
 	first, err := db.BeginInstall(params)
@@ -169,7 +174,9 @@ func TestBeginInstall_IncompatibleRetryLeavesExistingInstallUnchanged(t *testing
 	}
 }
 
-func TestBeginInstall_CompletedNetworkReturnsNetworkExists(t *testing.T) {
+func TestBeginInstall_CompletedNetworkReturnsNetworkExists(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	beginInstall(t, db, "testnet")
 	redeemInstall(t, db, "testnet")
@@ -183,7 +190,9 @@ func TestBeginInstall_CompletedNetworkReturnsNetworkExists(t *testing.T) {
 	}
 }
 
-func TestListInstalls_Ordered(t *testing.T) {
+func TestListInstalls_Ordered(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	beginInstall(t, db, "beta")
 	beginInstall(t, db, "alpha")
@@ -200,7 +209,9 @@ func TestListInstalls_Ordered(t *testing.T) {
 	}
 }
 
-func TestRedeemInstall_TransitionsAndPreservesInviteIdentity(t *testing.T) {
+func TestRedeemInstall_TransitionsAndPreservesInviteIdentity(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	invited := beginInstall(t, db, "testnet")
 	assignment := defaultNetworkAssignment()
@@ -227,7 +238,9 @@ func TestRedeemInstall_TransitionsAndPreservesInviteIdentity(t *testing.T) {
 	}
 }
 
-func TestRedeemInstall_ExactRetrySucceedsUnchanged(t *testing.T) {
+func TestRedeemInstall_ExactRetrySucceedsUnchanged(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	beginInstall(t, db, "testnet")
 	first := redeemInstall(t, db, "testnet")
@@ -241,7 +254,9 @@ func TestRedeemInstall_ExactRetrySucceedsUnchanged(t *testing.T) {
 	}
 }
 
-func TestRedeemInstall_IncompatibleRetryLeavesRedemptionUnchanged(t *testing.T) {
+func TestRedeemInstall_IncompatibleRetryLeavesRedemptionUnchanged(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	beginInstall(t, db, "testnet")
 	first := redeemInstall(t, db, "testnet")
@@ -262,7 +277,9 @@ func TestRedeemInstall_IncompatibleRetryLeavesRedemptionUnchanged(t *testing.T) 
 	}
 }
 
-func TestRedeemInstall_NotFound(t *testing.T) {
+func TestRedeemInstall_NotFound(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	_, err := db.RedeemInstall("missing", defaultNetworkAssignment())
@@ -271,7 +288,9 @@ func TestRedeemInstall_NotFound(t *testing.T) {
 	}
 }
 
-func TestRedeemInstall_CompletedNetworkReturnsInstallState(t *testing.T) {
+func TestRedeemInstall_CompletedNetworkReturnsInstallState(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	beginInstall(t, db, "testnet")
 	redeemInstall(t, db, "testnet")
@@ -285,7 +304,9 @@ func TestRedeemInstall_CompletedNetworkReturnsInstallState(t *testing.T) {
 	}
 }
 
-func TestConfirmInstall_PromotesAuthoritativeInstallState(t *testing.T) {
+func TestConfirmInstall_PromotesAuthoritativeInstallState(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	invited := beginInstall(t, db, "testnet")
 	redeemed := redeemInstall(t, db, "testnet")
@@ -319,7 +340,9 @@ func TestConfirmInstall_PromotesAuthoritativeInstallState(t *testing.T) {
 	}
 }
 
-func TestConfirmInstall_InvitedRejectedWithoutChange(t *testing.T) {
+func TestConfirmInstall_InvitedRejectedWithoutChange(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	beginInstall(t, db, "testnet")
 
@@ -340,7 +363,9 @@ func TestConfirmInstall_InvitedRejectedWithoutChange(t *testing.T) {
 	}
 }
 
-func TestConfirmInstall_ExactRetryReturnsExistingNetwork(t *testing.T) {
+func TestConfirmInstall_ExactRetryReturnsExistingNetwork(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	beginInstall(t, db, "testnet")
 	redeemInstall(t, db, "testnet")
@@ -358,7 +383,9 @@ func TestConfirmInstall_ExactRetryReturnsExistingNetwork(t *testing.T) {
 	}
 }
 
-func TestConfirmInstall_IncompatibleRetryConflicts(t *testing.T) {
+func TestConfirmInstall_IncompatibleRetryConflicts(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	beginInstall(t, db, "testnet")
 	redeemInstall(t, db, "testnet")
@@ -390,47 +417,12 @@ func TestConfirmInstall_IncompatibleRetryConflicts(t *testing.T) {
 	}
 }
 
-func TestConfirmInstall_NotFound(t *testing.T) {
+func TestConfirmInstall_NotFound(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	_, err := db.ConfirmInstall("missing", "main-priv-key", testutil.FixedTime)
-	if !errors.Is(err, service.ErrNotFound) {
-		t.Fatalf("err = %v, want ErrNotFound", err)
-	}
-}
-
-func TestDeleteNetworkState_Install(t *testing.T) {
-	db := testutil.SetupDB(t)
-	beginInstall(t, db, "testnet")
-
-	if err := db.DeleteNetworkState("testnet"); err != nil {
-		t.Fatalf("delete install state: %v", err)
-	}
-	if _, err := db.GetInstall("testnet"); !errors.Is(err, service.ErrNotFound) {
-		t.Errorf("install after delete: err = %v, want ErrNotFound", err)
-	}
-}
-
-func TestDeleteNetworkState_Network(t *testing.T) {
-	db := testutil.SetupDB(t)
-	beginInstall(t, db, "testnet")
-	redeemInstall(t, db, "testnet")
-	if _, err := db.ConfirmInstall("testnet", "main-priv-key", testutil.FixedTime); err != nil {
-		t.Fatalf("confirm install: %v", err)
-	}
-
-	if err := db.DeleteNetworkState("testnet"); err != nil {
-		t.Fatalf("delete network state: %v", err)
-	}
-	if _, err := db.GetNetwork("testnet"); !errors.Is(err, service.ErrNotFound) {
-		t.Errorf("network after delete: err = %v, want ErrNotFound", err)
-	}
-}
-
-func TestDeleteNetworkState_NotFound(t *testing.T) {
-	db := testutil.SetupDB(t)
-
-	err := db.DeleteNetworkState("missing")
 	if !errors.Is(err, service.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}

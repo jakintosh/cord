@@ -42,11 +42,6 @@ type Store interface {
 	// GetPeer returns a peer by name within the given network.
 	GetPeer(network, name string) (*Peer, error)
 
-	// GetPeerByIP returns the confirmed, enabled peer at the given IP
-	// address within the network. Used for authenticating ordinary
-	// peer API calls (peers, endpoints).
-	GetPeerByIP(network string, ip net.IP) (*Peer, error)
-
 	// GetProvisionalPeerByIP returns the unconfirmed, enabled peer at
 	// the given IP address within the network. Used for authenticating
 	// the /confirm endpoint, which is called by peers that have
@@ -107,7 +102,16 @@ type Store interface {
 	ListGroups(network string) ([]*Group, error)
 
 	// InsertGroup creates a new group with the given name.
-	// Returns ErrConflict when a group with this name already exists.
+	//
+	// Persisted preconditions:
+	//   - The network exists and has no group with this name.
+	// Atomic effects:
+	//   - The group is created in the network.
+	// Retry:
+	//   - Repeating the insert returns ErrConflict without changing the group.
+	// Errors:
+	//   - ErrNotFound when the network does not exist.
+	//   - ErrConflict when a group with this name already exists.
 	InsertGroup(network, name string) (*Group, error)
 
 	// DeleteGroup removes a group by name from the network.
@@ -162,12 +166,23 @@ type Store interface {
 		now time.Time,
 	) (*Registration, error)
 
-	// RedeemRegistration atomically redeems an unexpired registration and
-	// returns its provisional peer. Repeating redemption with the same keys is
-	// idempotent while the peer remains unconfirmed. It returns
-	// ErrRegistrationRedeemed when the registration was redeemed with another
-	// key or its peer is already confirmed, and ErrRegistrationExpired when an
-	// unredeemed registration has expired.
+	// RedeemRegistration redeems an invitation and returns its provisional peer.
+	//
+	// Persisted preconditions:
+	//   - The registration exists, is unconfirmed, and expires after now.
+	//   - Any existing redemption uses the same permanent key.
+	// Atomic effects:
+	//   - The permanent CIDR and provisional peer are created and the
+	//     registration records the permanent key on first redemption.
+	// Retry:
+	//   - Same-key retries return the existing peer unchanged while the
+	//     registration remains unconfirmed and unexpired, including before pruning.
+	// Errors:
+	//   - ErrNotFound when the registration or required resource is absent.
+	//   - ErrRegistrationRedeemed for a different key or confirmed registration.
+	//   - ErrRegistrationExpired when an otherwise redeemable registration has
+	//     expired, including a same-key retry.
+	//   - ErrConflict when creating the provisional state violates uniqueness.
 	RedeemRegistration(
 		network string,
 		tempPubKey string,

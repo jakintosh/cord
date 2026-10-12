@@ -8,7 +8,9 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/client/testutil"
 )
 
-func TestGetNetwork_NotFound(t *testing.T) {
+func TestGetNetwork_NotFound(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	_, err := db.GetNetwork("nonexistent")
@@ -17,7 +19,9 @@ func TestGetNetwork_NotFound(t *testing.T) {
 	}
 }
 
-func TestGetNetwork_RoundTripsConfirmedNetwork(t *testing.T) {
+func TestGetNetwork_RoundTripsConfirmedNetwork(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	want := testutil.SeedNetworkDirect(t, db, "homenet")
 
@@ -49,7 +53,9 @@ func TestGetNetwork_RoundTripsConfirmedNetwork(t *testing.T) {
 	}
 }
 
-func TestListNetworks_Empty(t *testing.T) {
+func TestListNetworks_Empty(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	networks, err := db.ListNetworks()
@@ -61,7 +67,9 @@ func TestListNetworks_Empty(t *testing.T) {
 	}
 }
 
-func TestListNetworks_OrderedWithFields(t *testing.T) {
+func TestListNetworks_OrderedWithFields(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "beta")
 	testutil.SeedNetworkDirect(t, db, "alpha")
@@ -87,7 +95,9 @@ func TestListNetworks_OrderedWithFields(t *testing.T) {
 	}
 }
 
-func TestDeleteNetworkState_CascadesPeersAndEndpoints(t *testing.T) {
+func TestDeleteNetworkState_CascadesPeersAndEndpoints(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "cascadenet")
 	reconciliation := testutil.NetworkReconciliation(service.PeerObservation{
@@ -110,23 +120,39 @@ func TestDeleteNetworkState_CascadesPeersAndEndpoints(t *testing.T) {
 		t.Fatalf("delete network state: %v", err)
 	}
 
-	var peers int
-	if err := db.Conn.QueryRow(`SELECT COUNT(*) FROM peer`).Scan(&peers); err != nil {
-		t.Fatalf("count peers: %v", err)
+	// Endpoint reads join through peers, so public reads cannot reveal an
+	// orphaned endpoint row. Inspect that storage invariant directly.
+	var endpointsRemaining int
+	if err := db.Conn.QueryRow(`SELECT COUNT(*) FROM endpoint`).Scan(&endpointsRemaining); err != nil {
+		t.Fatalf("count endpoint rows after delete: %v", err)
 	}
-	if peers != 0 {
-		t.Errorf("peers after delete = %d, want 0", peers)
+	if endpointsRemaining != 0 {
+		t.Fatalf("endpoint rows after delete = %d, want 0", endpointsRemaining)
 	}
-	var endpoints int
-	if err := db.Conn.QueryRow(`SELECT COUNT(*) FROM endpoint`).Scan(&endpoints); err != nil {
-		t.Fatalf("count endpoints: %v", err)
+
+	testutil.SeedNetworkDirect(t, db, "cascadenet")
+	peers, err := db.ListPeers("cascadenet")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if endpoints != 0 {
-		t.Errorf("endpoints after delete = %d, want 0", endpoints)
+	if len(peers) != 0 {
+		t.Fatalf("peers after reinstall = %#v, want empty", peers)
+	}
+	endpoints, err := db.ListPeerEndpoints("cascadenet", "peer-key-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(endpoints) != 0 {
+		t.Fatalf("endpoints after reinstall = %#v, want empty", endpoints)
+	}
+	if _, err := db.GetNetworkTopology("cascadenet"); !errors.Is(err, service.ErrTopologyUnavailable) {
+		t.Fatalf("topology after reinstall = %v, want ErrTopologyUnavailable", err)
 	}
 }
 
-func TestSetNetworkEnabled(t *testing.T) {
+func TestSetNetworkEnabled_PersistsIntent(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "toggle")
 
@@ -153,7 +179,9 @@ func TestSetNetworkEnabled(t *testing.T) {
 	}
 }
 
-func TestSetNetworkEnabled_NotFound(t *testing.T) {
+func TestSetNetworkEnabled_NotFound(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 
 	err := db.SetNetworkEnabled("nonexistent", true)
@@ -162,7 +190,9 @@ func TestSetNetworkEnabled_NotFound(t *testing.T) {
 	}
 }
 
-func TestUpdateNetwork(t *testing.T) {
+func TestUpdateNetwork_ChangesListenPort(
+	t *testing.T,
+) {
 	db := testutil.SetupDB(t)
 	testutil.SeedNetworkDirect(t, db, "portnet")
 
@@ -180,5 +210,77 @@ func TestUpdateNetwork(t *testing.T) {
 	}
 	if got.ListenPort != listenPort {
 		t.Errorf("listen port = %d, want %d", got.ListenPort, listenPort)
+	}
+}
+
+func TestUpdateNetwork_RejectsMissingPortWithoutChanges(
+	t *testing.T,
+) {
+	db := testutil.SetupDB(t)
+	want := testutil.SeedNetworkDirect(t, db, "testnet")
+	err := db.UpdateNetwork("testnet", service.NetworkOptions{})
+	if !errors.Is(err, service.ErrInvalidInput) {
+		t.Fatalf("error = %v, want ErrInvalidInput", err)
+	}
+	got, err := db.GetNetwork("testnet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ListenPort != want.ListenPort || got.PrivateKey != want.PrivateKey ||
+		got.Enabled != want.Enabled || got.Server != want.Server {
+		t.Fatalf("network changed after rejection: %#v", got)
+	}
+}
+
+func TestUpdateNetwork_MissingNetwork(
+	t *testing.T,
+) {
+	db := testutil.SetupDB(t)
+	port := uint16(51820)
+	err := db.UpdateNetwork("missing", service.NetworkOptions{ListenPort: &port})
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
+	}
+}
+func TestDeleteNetworkState_Install(
+	t *testing.T,
+) {
+	db := testutil.SetupDB(t)
+	beginInstall(t, db, "testnet")
+
+	if err := db.DeleteNetworkState("testnet"); err != nil {
+		t.Fatalf("delete install state: %v", err)
+	}
+	if _, err := db.GetInstall("testnet"); !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("install after delete: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestDeleteNetworkState_Network(
+	t *testing.T,
+) {
+	db := testutil.SetupDB(t)
+	beginInstall(t, db, "testnet")
+	redeemInstall(t, db, "testnet")
+	if _, err := db.ConfirmInstall("testnet", "main-priv-key", testutil.FixedTime); err != nil {
+		t.Fatalf("confirm install: %v", err)
+	}
+
+	if err := db.DeleteNetworkState("testnet"); err != nil {
+		t.Fatalf("delete network state: %v", err)
+	}
+	if _, err := db.GetNetwork("testnet"); !errors.Is(err, service.ErrNotFound) {
+		t.Errorf("network after delete: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestDeleteNetworkState_NotFound(
+	t *testing.T,
+) {
+	db := testutil.SetupDB(t)
+
+	err := db.DeleteNetworkState("missing")
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }

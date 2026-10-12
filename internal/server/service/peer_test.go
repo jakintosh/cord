@@ -3,6 +3,8 @@ package service_test
 import (
 	"errors"
 	"net"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,7 +12,73 @@ import (
 	"git.studiopollinator.com/pollinator/cord/internal/server/testutil"
 )
 
-func TestGetPeer_ViaRedeem(t *testing.T) {
+func TestUpdatePeer_PreservesOmittedFieldsAndRejectsConflicts(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+	testutil.SeedPeerDB(t, env.Database, "testnet", "alice", "10.0.0.5/32", "alice-key", true, true, true)
+	testutil.SeedPeerDB(t, env.Database, "testnet", "bob", "10.0.0.6/32", "bob-key", false, true, true)
+	before, err := env.Service.GetPeer("testnet", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled := false
+	changed, err := env.Service.UpdatePeer("testnet", "alice", service.PeerDiff{Enabled: &disabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := *before
+	want.Enabled = false
+	if *changed != want {
+		t.Fatalf("partial update = %+v, want %+v", changed, want)
+	}
+	stored, err := env.Service.GetPeer("testnet", "alice")
+	if err != nil || *stored != want {
+		t.Fatalf("stored partial update = %+v, %v", stored, err)
+	}
+	name := "bob"
+	if _, err := env.Service.UpdatePeer("testnet", "alice", service.PeerDiff{Name: &name, Admin: &disabled}); !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("conflicting rename: %v", err)
+	}
+	stored, err = env.Service.GetPeer("testnet", "alice")
+	if err != nil || !reflect.DeepEqual(stored, changed) {
+		t.Fatalf("rejected update changed peer = %+v, %v", stored, err)
+	}
+	if _, err := env.Service.UpdatePeer("testnet", "alice", service.PeerDiff{}); !errors.Is(err, service.ErrInvalidInput) {
+		t.Fatalf("empty update: %v", err)
+	}
+}
+
+func TestListMainPeers_IncludesEnabledProvisionalPeersOnHostRoutes(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	network := testutil.SeedNetwork(t, env.Service)
+	testutil.SeedPeerDB(t, env.Database, "testnet", "active", "10.0.0.5/32", "active-key", false, true, true)
+	testutil.SeedPeerDB(t, env.Database, "testnet", "pending", "10.0.0.6/32", "pending-key", false, true, false)
+	testutil.SeedPeerDB(t, env.Database, "testnet", "disabled", "10.0.0.7/32", "disabled-key", false, false, true)
+	peers, err := env.Service.ListMainPeers("testnet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string][]string)
+	for _, peer := range peers {
+		got[peer.PublicKey] = peer.AllowedIPs
+	}
+	want := map[string][]string{
+		network.PublicKey: {"10.0.0.1/32"},
+		"active-key":      {"10.0.0.5/32"},
+		"pending-key":     {"10.0.0.6/32"},
+	}
+	if len(peers) != len(want) || !reflect.DeepEqual(got, want) {
+		t.Fatalf("main peers = %v, want %v", got, want)
+	}
+}
+
+func TestGetPeer_ViaRedeem(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -44,7 +112,9 @@ func TestGetPeer_ViaRedeem(t *testing.T) {
 	}
 }
 
-func TestGetPeer_NotFound(t *testing.T) {
+func TestGetPeer_NotFound(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -54,7 +124,9 @@ func TestGetPeer_NotFound(t *testing.T) {
 	}
 }
 
-func TestListPeers_Empty(t *testing.T) {
+func TestListPeers_Empty(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -67,7 +139,9 @@ func TestListPeers_Empty(t *testing.T) {
 	}
 }
 
-func TestListPeers_AfterRedeem(t *testing.T) {
+func TestListPeers_AfterRedeem(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -107,7 +181,9 @@ func TestListPeers_AfterRedeem(t *testing.T) {
 	_ = tempKey2
 }
 
-func TestRemovePeer_Success(t *testing.T) {
+func TestRemovePeer_RemovesProvisionalPeer(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -133,7 +209,9 @@ func TestRemovePeer_Success(t *testing.T) {
 	}
 }
 
-func TestRemovePeer_ReleasesRegistrationAndCIDR(t *testing.T) {
+func TestRemovePeer_ReleasesRegistrationAndCIDR(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -171,7 +249,9 @@ func TestRemovePeer_ReleasesRegistrationAndCIDR(t *testing.T) {
 	}
 }
 
-func TestRemovePeer_NotFound(t *testing.T) {
+func TestRemovePeer_NotFound(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -181,7 +261,9 @@ func TestRemovePeer_NotFound(t *testing.T) {
 	}
 }
 
-func TestUpdatePeer_Rename(t *testing.T) {
+func TestUpdatePeer_Rename(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -206,7 +288,106 @@ func TestUpdatePeer_Rename(t *testing.T) {
 	}
 }
 
-func TestUpdatePeer_ToggleAdmin(t *testing.T) {
+func TestUpdatePeer_RenameValidation(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.CreateRegistration("testnet", "renamable", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.5")}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	tempKey := lastTempKey(t, env.Service, "testnet")
+	if _, err := env.Service.RedeemRegistration("testnet", tempKey, "rename-key"); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	invalid := []struct {
+		name    string
+		wantErr string
+	}{
+		{"", "peer name is empty"},
+		{"cord-server", "reserved"},
+		{"Bad-Name", "only lowercase"},
+		{"peer.name", "only lowercase"},
+		{"-peer", "start with a hyphen"},
+		{"peer-", "end with a hyphen"},
+		{strings.Repeat("a", 64), "DNS label"},
+	}
+	for _, tc := range invalid {
+		if _, err := env.Service.UpdatePeer("testnet", "renamable", service.PeerDiff{Name: &tc.name}); err != nil {
+			wantInvalidInput(t, err, tc.wantErr)
+		} else {
+			t.Errorf("rename to %q: err = nil, want ErrInvalidInput", tc.name)
+		}
+	}
+
+	peer, err := env.Service.GetPeer("testnet", "renamable")
+	if err != nil {
+		t.Fatalf("get peer after rejected renames: %v", err)
+	}
+	if peer.Name != "renamable" {
+		t.Errorf("peer name = %q, want renamable", peer.Name)
+	}
+}
+
+func TestUpdatePeer_RenameReflectsInCompiledModel(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.CreateRegistration("testnet", "old-name", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.30")}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if _, err := env.Service.RedeemRegistration("testnet", lastTempKey(t, env.Service, "testnet"), mustGenKey(t)); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	peerByCidr := topologyPeerByCidr(t, env.Service, "testnet")
+	if peerByCidr["old-name"] != "old-name" {
+		t.Fatalf("peer for CIDR before rename = %q, want old-name", peerByCidr["old-name"])
+	}
+
+	newName := "new-name"
+	if _, err := env.Service.UpdatePeer("testnet", "old-name", service.PeerDiff{Name: &newName}); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+
+	peerByCidr = topologyPeerByCidr(t, env.Service, "testnet")
+	if peerByCidr["old-name"] != "new-name" {
+		t.Fatalf("peer for CIDR after rename = %q, want new-name", peerByCidr["old-name"])
+	}
+}
+
+func TestRemovePeer_InvalidatesCompiledModel(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	testutil.SeedNetwork(t, env.Service)
+
+	if _, err := env.Service.CreateRegistration("testnet", "bob", service.RegistrationOptions{PeerIP: net.ParseIP("10.0.0.31")}); err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	if _, err := env.Service.RedeemRegistration("testnet", lastTempKey(t, env.Service, "testnet"), mustGenKey(t)); err != nil {
+		t.Fatalf("redeem: %v", err)
+	}
+
+	if peerByCidr := topologyPeerByCidr(t, env.Service, "testnet"); peerByCidr["bob"] != "bob" {
+		t.Fatalf("peer for CIDR before removal = %q, want bob", peerByCidr["bob"])
+	}
+	if err := env.Service.RemovePeer("testnet", "bob"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	if peerByCidr := topologyPeerByCidr(t, env.Service, "testnet"); peerByCidr["bob"] != "" {
+		t.Fatalf("peer for CIDR after removal = %q, want none", peerByCidr["bob"])
+	}
+}
+
+func TestUpdatePeer_ToggleAdmin(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -231,7 +412,9 @@ func TestUpdatePeer_ToggleAdmin(t *testing.T) {
 	}
 }
 
-func TestUpdatePeer_NotFound(t *testing.T) {
+func TestUpdatePeer_NotFound(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -242,7 +425,9 @@ func TestUpdatePeer_NotFound(t *testing.T) {
 	}
 }
 
-func TestEnablePeer_Success(t *testing.T) {
+func TestUpdatePeer_EnableSuccess(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -277,7 +462,9 @@ func TestEnablePeer_Success(t *testing.T) {
 	}
 }
 
-func TestDisablePeer_Success(t *testing.T) {
+func TestUpdatePeer_DisableSuccess(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -306,7 +493,9 @@ func TestDisablePeer_Success(t *testing.T) {
 	}
 }
 
-func TestConfirmPeer_Success(t *testing.T) {
+func TestConfirmPeer_Success(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -347,7 +536,9 @@ func TestConfirmPeer_Success(t *testing.T) {
 	}
 }
 
-func TestConfirmPeer_PreservesDisabledState(t *testing.T) {
+func TestConfirmPeer_PreservesDisabledState(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -377,7 +568,9 @@ func TestConfirmPeer_PreservesDisabledState(t *testing.T) {
 	}
 }
 
-func TestConfirmPeer_FollowsPermanentKeyAfterProvisionalRename(t *testing.T) {
+func TestConfirmPeer_FollowsPermanentKeyAfterProvisionalRename(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -417,7 +610,9 @@ func TestConfirmPeer_FollowsPermanentKeyAfterProvisionalRename(t *testing.T) {
 	}
 }
 
-func TestConfirmPeer_UnknownPeer(t *testing.T) {
+func TestConfirmPeer_UnknownPeer(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -427,7 +622,9 @@ func TestConfirmPeer_UnknownPeer(t *testing.T) {
 	}
 }
 
-func TestConfirmPeer_UsesInjectedTimeForExpiration(t *testing.T) {
+func TestConfirmPeer_UsesInjectedTimeForExpiration(
+	t *testing.T,
+) {
 	clock := &mutableClock{t: testutil.FixedTime}
 	env := testutil.SetupServiceWithClock(t, clock.now)
 	testutil.SeedNetwork(t, env.Service)
@@ -464,7 +661,9 @@ func TestConfirmPeer_UsesInjectedTimeForExpiration(t *testing.T) {
 	}
 }
 
-func TestListVisiblePeers_ExcludesSelf(t *testing.T) {
+func TestListVisiblePeers_ExcludesSelf(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	testutil.SeedNetwork(t, env.Service)
 
@@ -522,14 +721,17 @@ func TestListVisiblePeers_ExcludesSelf(t *testing.T) {
 	}
 }
 
-func TestReportEndpoints_Success(t *testing.T) {
+func TestReportEndpoints_Success(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	network := testutil.SeedNetwork(t, env.Service)
+	seedDNSVisibility(t, env)
 
 	sightings := []service.EndpointSighting{
 		{
 			WitnessKey: network.PublicKey,
-			PeerKey:    network.PublicKey,
+			PeerKey:    "api-key",
 			Endpoint:   "1.2.3.4:51820",
 			Timestamp:  testutil.FixedTime,
 		},
@@ -539,9 +741,57 @@ func TestReportEndpoints_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("report: %v", err)
 	}
+	visible, err := env.Service.ListVisiblePeers("testnet", "frank")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(visible) != 1 || visible[0].Name != "api-1" || len(visible[0].Endpoints) != 1 {
+		t.Fatalf("visible endpoints = %+v", visible)
+	}
+	got := visible[0].Endpoints[0]
+	if got.Witness != network.PublicKey || got.Endpoint != "1.2.3.4:51820" || !got.Timestamp.Equal(testutil.FixedTime) {
+		t.Fatalf("endpoint = %+v", got)
+	}
+	stored, err := env.Database.GetRecentEndpoints("testnet", testutil.FixedTime.Add(-time.Second))
+	if err != nil || len(stored["api-key"]) != 1 {
+		t.Fatalf("durable endpoints = %+v, %v", stored, err)
+	}
 }
 
-func TestReportEndpoints_NonexistentNetwork(t *testing.T) {
+func TestObserveEndpoints_RecordsOnlyConfirmedEnabledOtherPeers(
+	t *testing.T,
+) {
+	env := testutil.SetupService(t)
+	network := testutil.SeedNetwork(t, env.Service)
+	seedDNSVisibility(t, env)
+	var sightings []service.EndpointSighting
+	for _, key := range []string{"api-key", network.PublicKey, "missing-key", "down-key", "pending-key"} {
+		sightings = append(sightings, service.EndpointSighting{
+			WitnessKey: network.PublicKey,
+			PeerKey:    key,
+			Endpoint:   "192.0.2.1:51820",
+			Timestamp:  testutil.FixedTime,
+		})
+	}
+	if err := env.Service.ObserveEndpoints("testnet", sightings); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := env.Database.GetRecentEndpoints("testnet", testutil.FixedTime.Add(-time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 1 || len(stored["api-key"]) != 1 {
+		t.Fatalf("observed endpoints = %+v", stored)
+	}
+	got := stored["api-key"][0]
+	if got.Witness != network.PublicKey || got.Endpoint != "192.0.2.1:51820" || !got.Timestamp.Equal(testutil.FixedTime) {
+		t.Fatalf("observation = %+v", got)
+	}
+}
+
+func TestReportEndpoints_NonexistentNetwork(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 
 	err := env.Service.ReportEndpoints("nonexistent", nil)
@@ -550,7 +800,9 @@ func TestReportEndpoints_NonexistentNetwork(t *testing.T) {
 	}
 }
 
-func TestReportEndpoints_NonexistentPeer(t *testing.T) {
+func TestReportEndpoints_NonexistentPeer(
+	t *testing.T,
+) {
 	env := testutil.SetupService(t)
 	network := testutil.SeedNetwork(t, env.Service)
 

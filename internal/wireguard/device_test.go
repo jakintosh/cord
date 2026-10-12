@@ -1,16 +1,87 @@
 package wireguard_test
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard/wireguardtest"
 )
 
-func TestDevice_ApplyPeers_AddsNewPeers(t *testing.T) {
+func TestDevice_NameFollowsBackendLifetime(
+	t *testing.T,
+) {
+	backend := &namedBackend{
+		Backend: wireguardtest.NewMockBackend(),
+	}
+	manager := wireguard.NewManagerWithBackend(backend)
+	device, err := manager.NewDevice(wireguard.DeviceConfig{
+		Name:       "logical",
+		PrivateKey: mustGeneratePrivateKey(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = device.Close() })
+
+	if name, err := device.Name(); err == nil || name != "" {
+		t.Fatalf("unstarted name = %q, %v; want no live name", name, err)
+	}
+	for _, expected := range []string{"utun1", "utun2"} {
+		if err := device.Reconcile(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		name, err := device.Name()
+		if err != nil || name != expected {
+			t.Fatalf("live name = %q, %v; want %q", name, err, expected)
+		}
+		if err := device.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if name, err := device.Name(); err == nil || name != "" {
+			t.Fatalf("closed name = %q, %v; want no live name", name, err)
+		}
+	}
+}
+
+// namedBackend models an OS allocating a different actual name on each start.
+type namedBackend struct {
+	wireguard.Backend
+	starts int
+}
+
+func (b *namedBackend) CreateDevice(
+	config wireguard.DeviceConfig,
+) (
+	wireguard.WgDevice,
+	error,
+) {
+	device, err := b.Backend.CreateDevice(config)
+	if err != nil {
+		return nil, err
+	}
+	b.starts++
+	return &namedDevice{
+		WgDevice: device,
+		name:     fmt.Sprintf("utun%d", b.starts),
+	}, nil
+}
+
+type namedDevice struct {
+	wireguard.WgDevice
+	name string
+}
+
+func (d *namedDevice) Name() string {
+	return d.name
+}
+
+func TestDevice_SetPeers_AddsNewPeers(t *testing.T) {
 	backend := wireguardtest.NewMockBackend()
 	d := createTestDevice(t, "test", backend)
 
@@ -32,7 +103,7 @@ func TestDevice_ApplyPeers_AddsNewPeers(t *testing.T) {
 	}
 }
 
-func TestDevice_ApplyPeers_NoChangeOnMatch(t *testing.T) {
+func TestDevice_SetPeers_NoChangeOnMatch(t *testing.T) {
 	backend := wireguardtest.NewMockBackend()
 	d := createTestDevice(t, "test", backend)
 
@@ -51,7 +122,7 @@ func TestDevice_ApplyPeers_NoChangeOnMatch(t *testing.T) {
 	}
 }
 
-func TestDevice_ApplyPeers_RemovesStalePeer(t *testing.T) {
+func TestDevice_SetPeers_RemovesStalePeer(t *testing.T) {
 	backend := wireguardtest.NewMockBackend()
 	d := createTestDevice(t, "test", backend)
 
@@ -72,7 +143,7 @@ func TestDevice_ApplyPeers_RemovesStalePeer(t *testing.T) {
 	}
 }
 
-func TestDevice_ApplyPeers_ObserveError(t *testing.T) {
+func TestDevice_SetPeers_ObserveError(t *testing.T) {
 	backend := wireguardtest.NewMockBackend()
 	d := createTestDevice(t, "test", backend)
 	mdev := backend.Device("test")
@@ -84,11 +155,11 @@ func TestDevice_ApplyPeers_ObserveError(t *testing.T) {
 	}
 }
 
-func TestDevice_ApplyPeers_ApplyError(t *testing.T) {
+func TestDevice_SetPeers_ApplyError(t *testing.T) {
 	backend := wireguardtest.NewMockBackend()
 	d := createTestDevice(t, "test", backend)
 	mdev := backend.Device("test")
-	mdev.ApplyPeersErr = errors.New("apply failed")
+	mdev.ApplyPeerOpsErr = errors.New("apply failed")
 
 	k := mustGenerateKey(t)
 	err := d.SetPeers(peerConfig(k, []string{"10.0.0.1/32"}, "", wireguard.EndpointDynamic, 0))
@@ -217,7 +288,7 @@ func TestDevice_TwoDeviceIndependence(t *testing.T) {
 		peerConfig(peer2, []string{"10.0.1.1/32"}, "", wireguard.EndpointDynamic, 0),
 		peerConfig(mustGenerateKey(t), []string{"10.0.1.2/32"}, "", wireguard.EndpointDynamic, 0),
 	); err != nil {
-		t.Fatalf("d2.SetPeers after d1 close: %v", err)
+		t.Fatalf("d2.SetPeers after d1 stop: %v", err)
 	}
 
 	if len(mdev2.AppliedOps()) != 2 {
@@ -228,7 +299,7 @@ func TestDevice_TwoDeviceIndependence(t *testing.T) {
 	}
 }
 
-func TestDevice_ConcurrentReconcile(t *testing.T) {
+func TestDevice_ConcurrentSetPeers(t *testing.T) {
 	backend := wireguardtest.NewMockBackend()
 	d := createTestDevice(t, "test", backend)
 
@@ -271,7 +342,7 @@ func TestDevice_Peers_ReturnsLiveState(t *testing.T) {
 	k := mustGenerateKey(t)
 	mdev.SetPeers(peerStatus(k, []string{"10.0.0.1/32"}, "1.2.3.4:51820", 0))
 
-	got, err := d.Peers()
+	got, err := d.GetPeerStatuses()
 	if err != nil {
 		t.Fatalf("Peers: %v", err)
 	}
@@ -295,7 +366,7 @@ func TestDevice_Peers_BackendError(t *testing.T) {
 	mdev := backend.Device("test")
 	mdev.PeersErr = errors.New("status failed")
 
-	if _, err := d.Peers(); err == nil {
+	if _, err := d.GetPeerStatuses(); err == nil {
 		t.Fatal("expected error from observe failure")
 	}
 }
@@ -318,4 +389,292 @@ func TestDevice_UpdateEndpoint_InvalidEndpoint(t *testing.T) {
 	if err := d.SetPeerEndpoint(key, "not an endpoint"); err == nil {
 		t.Fatal("expected error for invalid endpoint")
 	}
+}
+
+func TestDevice_ReconcileRetainsPeersAcrossRecovery(
+	t *testing.T,
+) {
+	backend := wireguardtest.NewMockBackend()
+	manager := wireguard.NewManagerWithBackend(backend)
+	d, err := manager.NewDevice(wireguard.DeviceConfig{
+		Name:       "test",
+		PrivateKey: mustGeneratePrivateKey(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+
+	if status := d.Status(); status.State != resource.Stopped || status.Error != nil {
+		t.Fatalf("initial status = %+v", status)
+	}
+	if backend.Device("test") != nil {
+		t.Fatal("construction created an interface")
+	}
+	if _, err := d.GetPeerStatuses(); err == nil {
+		t.Fatal("stopped device should not report live peers")
+	}
+	if err := d.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	key := mustGenerateKey(t)
+	if err := d.SetPeers(peerConfig(key, []string{"10.0.0.1/32"}, "1.2.3.4:51820", wireguard.EndpointBootstrap, 25*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetPeerEndpoint(key.String(), "5.6.7.8:51820"); err != nil {
+		t.Fatal(err)
+	}
+	original := backend.Device("test")
+	if err := d.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if backend.Device("test") != original || len(original.ApplyCalls) != 2 {
+		t.Fatal("healthy reconciliation replaced or reconfigured the interface")
+	}
+
+	// A backend fault is observable without repairing or consuming it.
+	if err := original.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if status := d.Status(); status.State != resource.Failed || status.Error == nil {
+			t.Fatalf("failed status = %+v", status)
+		}
+	}
+	if backend.Device("test") != original {
+		t.Fatal("status repaired the interface")
+	}
+	if err := d.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if backend.Device("test") == original {
+		t.Fatal("failed interface was not replaced")
+	}
+	if status := d.Status(); status.State != resource.Running || status.Error != nil {
+		t.Fatalf("recovered status = %+v", status)
+	}
+	peers, err := d.GetPeerStatuses()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(peers) != 1 || peers[0].PublicKey != key ||
+		peers[0].Endpoint.String() != "5.6.7.8:51820" ||
+		len(peers[0].AllowedIPs) != 1 || peers[0].AllowedIPs[0].String() != "10.0.0.1/32" ||
+		peers[0].PersistentKeepalive != 25*time.Second {
+		t.Fatalf("restored peers = %+v", peers)
+	}
+
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if status := d.Status(); status.State != resource.Stopped || status.Error != nil {
+		t.Fatalf("stopped status = %+v", status)
+	}
+	if err := d.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if peers, err := d.GetPeerStatuses(); err != nil || len(peers) != 1 {
+		t.Fatalf("peers after intentional restart = %+v, %v", peers, err)
+	}
+}
+
+func TestDevice_ReconcileRetriesCreationAndCleanup(
+	t *testing.T,
+) {
+	backend := wireguardtest.NewMockBackend()
+	d := createTestDevice(t, "test", backend)
+	t.Cleanup(func() { _ = d.Close() })
+	original := backend.Device("test")
+	failed := errors.New("interface failed")
+	closeErr := errors.New("close failed")
+	createErr := errors.New("create failed")
+	original.CheckErr = failed
+	original.CloseErr = closeErr
+
+	if err := d.Reconcile(t.Context()); !errors.Is(err, closeErr) {
+		t.Fatalf("cleanup error = %v", err)
+	}
+	if backend.Device("test") != original || len(backend.CreateCalls) != 1 {
+		t.Fatal("created a replacement before cleanup succeeded")
+	}
+
+	original.CloseErr = nil
+	backend.CreateErr = createErr
+	if err := d.Reconcile(t.Context()); !errors.Is(err, createErr) {
+		t.Fatalf("creation error = %v", err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if status := d.Status(); status.State != resource.Failed || !errors.Is(status.Error, createErr) {
+		t.Fatalf("cleanup discarded startup failure: %+v", status)
+	}
+
+	backend.CreateErr = nil
+	if err := d.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if status := d.Status(); status.State != resource.Running || status.Error != nil {
+		t.Fatalf("recovered status = %+v", status)
+	}
+	if original.CloseCalls != 2 {
+		t.Fatalf("close attempts = %d, want 2", original.CloseCalls)
+	}
+}
+
+func TestDevice_ReconcileCancellationDoesNotCreate(
+	t *testing.T,
+) {
+	backend := wireguardtest.NewMockBackend()
+	manager := wireguard.NewManagerWithBackend(backend)
+	d, err := manager.NewDevice(wireguard.DeviceConfig{
+		Name:       "test",
+		PrivateKey: mustGeneratePrivateKey(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := d.Reconcile(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("reconcile = %v", err)
+	}
+	if backend.Device("test") != nil {
+		t.Fatal("canceled reconciliation created an interface")
+	}
+}
+
+func TestDevice_ReconcileRetainsPartialHandle(
+	t *testing.T,
+) {
+	backend := &partialBackend{
+		MockBackend: wireguardtest.NewMockBackend(),
+		createErr:   errors.New("partial creation"),
+		closeErr:    errors.New("cleanup failed"),
+	}
+	d, err := wireguard.NewManagerWithBackend(backend).NewDevice(wireguard.DeviceConfig{
+		Name:       "test",
+		PrivateKey: mustGeneratePrivateKey(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+
+	if err := d.Reconcile(t.Context()); !errors.Is(err, backend.createErr) || !errors.Is(err, backend.closeErr) {
+		t.Fatalf("partial creation = %v", err)
+	}
+	partial := backend.Device("test")
+	if partial.CloseCalls != 1 {
+		t.Fatalf("cleanup attempts = %d, want only the backend's attempt", partial.CloseCalls)
+	}
+	if err := d.Reconcile(t.Context()); !errors.Is(err, backend.closeErr) {
+		t.Fatalf("retry cleanup = %v", err)
+	}
+	if len(backend.CreateCalls) != 1 {
+		t.Fatal("lost partial handle and created another interface")
+	}
+
+	partial.CloseErr = nil
+	backend.createErr, backend.closeErr = nil, nil
+	if err := d.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if backend.Device("test") == partial || d.Status().State != resource.Running {
+		t.Fatal("did not recover after partial cleanup succeeded")
+	}
+}
+
+func TestDevice_ReconcileRetriesPeerRestoration(
+	t *testing.T,
+) {
+	backend := &partialBackend{MockBackend: wireguardtest.NewMockBackend()}
+	d, err := wireguard.NewManagerWithBackend(backend).CreateDevice(wireguard.DeviceConfig{
+		Name:       "test",
+		PrivateKey: mustGeneratePrivateKey(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	key := mustGenerateKey(t)
+	if err := d.SetPeers(peerConfig(key, []string{"10.0.0.1/32"}, "", wireguard.EndpointDynamic, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	backend.applyErr = errors.New("restore failed")
+	if err := d.Reconcile(t.Context()); !errors.Is(err, backend.applyErr) {
+		t.Fatalf("restore = %v", err)
+	}
+	if d.Status().State != resource.Failed || backend.Device("test").CloseCalls != 1 {
+		t.Fatal("failed restoration was not reported and cleaned up")
+	}
+
+	backend.applyErr = nil
+	if err := d.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	peers, err := d.GetPeerStatuses()
+	if err != nil || len(peers) != 1 || peers[0].PublicKey != key {
+		t.Fatalf("restored peers = %+v, %v", peers, err)
+	}
+}
+
+func TestCreateDevice_ReturnsHandleWhenCleanupFails(
+	t *testing.T,
+) {
+	backend := &partialBackend{
+		MockBackend: wireguardtest.NewMockBackend(),
+		createErr:   errors.New("partial creation"),
+		closeErr:    errors.New("cleanup failed"),
+	}
+	d, err := wireguard.NewManagerWithBackend(backend).CreateDevice(wireguard.DeviceConfig{
+		Name:       "test",
+		PrivateKey: mustGeneratePrivateKey(t),
+	})
+	if d == nil || !errors.Is(err, backend.closeErr) {
+		t.Fatalf("create = %v, %v; want retained cleanup handle", d, err)
+	}
+
+	backend.Device("test").CloseErr = nil
+	if err := d.Close(); err != nil {
+		t.Fatalf("retry cleanup: %v", err)
+	}
+}
+
+// partialBackend models real backend failures after allocating an interface.
+type partialBackend struct {
+	*wireguardtest.MockBackend
+	createErr error
+	closeErr  error
+	applyErr  error
+}
+
+func (b *partialBackend) CreateDevice(
+	cfg wireguard.DeviceConfig,
+) (
+	wireguard.WgDevice,
+	error,
+) {
+	handle, err := b.MockBackend.CreateDevice(cfg)
+	if err != nil {
+		return nil, err
+	}
+	device := b.Device(cfg.Name)
+	device.CloseErr = b.closeErr
+	device.ApplyPeerOpsErr = b.applyErr
+	if b.createErr != nil {
+		if closeErr := handle.Close(); closeErr != nil {
+			return handle, errors.Join(b.createErr, closeErr)
+		}
+		return nil, b.createErr
+	}
+	return handle, nil
 }

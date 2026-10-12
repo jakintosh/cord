@@ -1,37 +1,42 @@
 // Package runtime supervises the server networks a cord daemon is
 // running. It is the only place a network is brought up: it reads the
 // desired state the service persists, compares it against the networks
-// actually running in this process, and converges the difference.
+// actually running in this process, and reconciles the difference.
 // Failures never change the desired state: startup failures are recorded
 // as a reason, and failures of running work are recorded as health.
 package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"git.studiopollinator.com/pollinator/cord/internal/logging"
-	inviteapi "git.studiopollinator.com/pollinator/cord/internal/server/api/invite"
-	peerapi "git.studiopollinator.com/pollinator/cord/internal/server/api/peer"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
 	"git.studiopollinator.com/pollinator/cord/internal/server/service"
-	"git.studiopollinator.com/pollinator/cord/internal/topology"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
-// DefaultInterval is how often the runtime runs a full converge pass
-// when nothing wakes it earlier. It is also the retry interval for a
-// network that failed to start.
+// DefaultInterval is the interval between full maintenance passes, including
+// retries for networks that failed to start.
 const DefaultInterval = 30 * time.Second
 
-const (
-	HealthInactive = "inactive"
-	HealthHealthy  = "healthy"
-	HealthDegraded = "degraded"
+var (
+	// ErrNotRunning is returned once Run has stopped accepting commands.
+	ErrNotRunning = errors.New("runtime is not running")
+	// ErrAlreadyRun rejects concurrent runs and reuse of a finished runtime.
+	ErrAlreadyRun = errors.New("runtime has already run")
 )
+
+// Handlers builds each plane's HTTP routes without starting resources.
+type Handlers struct {
+	Peer   func(string) http.Handler
+	Invite func(string) http.Handler
+}
 
 // Options configures the runtime.
 type Options struct {
@@ -41,19 +46,21 @@ type Options struct {
 	// WireGuard is the manager used to create network devices.
 	WireGuard *wireguard.Manager
 
-	// Peer serves each running network's main plane.
-	Peer *peerapi.API
+	// DNSPort is the port each network's authoritative DNS server
+	// binds alongside its main plane. Zero requests an OS-assigned port.
+	DNSPort uint16
 
-	// Invite serves each running network's invite plane.
-	Invite *inviteapi.API
+	// DNSDisabled turns DNS serving off for every network. Zero value
+	// keeps DNS on, which is production behavior.
+	DNSDisabled bool
 
-	// Wake carries the names of networks whose state changed, so the
-	// runtime can converge them without waiting for the next tick.
-	Wake <-chan string
-
-	// Interval is the period between full converge passes. Defaults to
+	// Interval is the period between full reconciliation passes. Defaults to
 	// DefaultInterval when zero.
 	Interval time.Duration
+
+	// ShutdownTimeout bounds each HTTP or DNS server's graceful shutdown.
+	// Non-positive values use the default of five seconds.
+	ShutdownTimeout time.Duration
 
 	// Clock returns the current time. Defaults to time.Now when nil.
 	Clock func() time.Time
@@ -62,85 +69,32 @@ type Options struct {
 	Logger *slog.Logger
 }
 
-// Runtime reconciles the running networks toward the persisted desired
-// state. It is safe for concurrent use.
+// Runtime owns its mutable state in one goroutine, executing submitted closures
+// and maintenance sequentially. Public methods are safe for concurrent use;
+// operations submitted before Run wait for it to start.
 type Runtime struct {
-	service   *service.Service
-	wireguard *wireguard.Manager
-	peer      *peerapi.API
-	invite    *inviteapi.API
-	wake      <-chan string
-	interval  time.Duration
-	clock     func() time.Time
-	log       *slog.Logger
+	service         *service.Service
+	wireguard       *wireguard.Manager
+	handlers        Handlers
+	dnsPort         uint16
+	dnsDisabled     bool
+	interval        time.Duration
+	shutdownTimeout time.Duration
+	clock           func() time.Time
+	log             *slog.Logger
 
-	mu      sync.Mutex
-	running map[string]*Network
-	reasons map[string]string
-	ctx     context.Context
-	cancel  context.CancelFunc
+	operations chan operation
+	done       chan struct{}
+	started    atomic.Bool
 
-	loop sync.WaitGroup
+	// Only Run accesses the fields below and the resources they reference.
+	ctx             context.Context
+	running         map[string]*Network
+	reasons         map[string]string
+	reconcileStatus resource.ActivityStatus
 }
 
-// Status is a snapshot of every network known to the server daemon.
-type Status struct {
-	Health   string
-	Networks []NetworkStatus
-}
-
-// NetworkStatus is the operator-facing state of a server network:
-// persisted intent, actual process state, and the health of running work.
-type NetworkStatus struct {
-	Name      string
-	Enabled   bool
-	Running   bool
-	Reason    string
-	Health    string
-	Reconcile ActivityStatus
-	MainAPI   ActivityStatus
-	InviteAPI ActivityStatus
-}
-
-// PeerStatus is a server network peer joined with live WireGuard state.
-// The server's own peer is considered connected while its network is running.
-type PeerStatus struct {
-	Name      string
-	Route     string
-	Connected bool
-}
-
-// NetworkTopology is the network's full topology joined with live peer
-// connectivity for display.
-type NetworkTopology struct {
-	View      topology.View
-	Connected map[string]bool
-}
-
-// ActivityStatus describes the latest result of one runtime activity.
-// Interval is zero for work without a periodic schedule.
-type ActivityStatus struct {
-	Interval      time.Duration
-	LastAttemptAt time.Time
-	LastSuccessAt time.Time
-	Error         string
-}
-
-func (s *ActivityStatus) record(
-	at time.Time,
-	err error,
-) {
-	s.LastAttemptAt = at
-	if err != nil {
-		s.Error = err.Error()
-		return
-	}
-	s.LastSuccessAt = at
-	s.Error = ""
-}
-
-// New returns a runtime that is not yet running. Call Start to converge
-// the persisted state and begin the periodic pass.
+// New constructs a runtime without starting work. Call Run exactly once.
 func New(
 	opts Options,
 ) (
@@ -148,11 +102,17 @@ func New(
 	error,
 ) {
 	if opts.Service == nil {
-		return nil, fmt.Errorf("server: service required")
+		return nil, &resource.Error{
+			Recovery: resource.Fatal,
+			Cause:    fmt.Errorf("server: service required"),
+		}
 	}
 
 	if opts.WireGuard == nil {
-		return nil, fmt.Errorf("server: wireguard manager required")
+		return nil, &resource.Error{
+			Recovery: resource.Fatal,
+			Cause:    fmt.Errorf("server: wireguard manager required"),
+		}
 	}
 
 	interval := opts.Interval
@@ -170,448 +130,230 @@ func New(
 		log = logging.Discard()
 	}
 
-	return &Runtime{
-		service:   opts.Service,
-		wireguard: opts.WireGuard,
-		peer:      opts.Peer,
-		invite:    opts.Invite,
-		wake:      opts.Wake,
-		interval:  interval,
-		clock:     clock,
-		log:       log,
-		running:   make(map[string]*Network),
-		reasons:   make(map[string]string),
-	}, nil
+	r := &Runtime{
+		service:         opts.Service,
+		wireguard:       opts.WireGuard,
+		dnsPort:         opts.DNSPort,
+		dnsDisabled:     opts.DNSDisabled,
+		interval:        interval,
+		shutdownTimeout: opts.ShutdownTimeout,
+		clock:           clock,
+		log:             log,
+		running:         make(map[string]*Network),
+		operations:      make(chan operation),
+		done:            make(chan struct{}),
+		reasons:         make(map[string]string),
+		reconcileStatus: resource.ActivityStatus{
+			Interval: interval,
+		},
+	}
+
+	return r, nil
 }
 
-// Start converges every persisted network once, then keeps converging:
-// on a wake from the service, and on every tick of the interval. It
-// returns an error only when the desired state cannot be read at all;
-// a network that fails to start is recorded and retried.
-func (r *Runtime) Start(
+// Run applies saved intent, executes operations, and maintains resources until
+// cancellation. It closes resources before returning. A Runtime is single-use;
+// construct another instance to restart it. Handlers must pass request contexts
+// to runtime calls so closing a plane can release handlers waiting on this loop.
+func (r *Runtime) Run(
 	ctx context.Context,
+	handlers Handlers,
 ) error {
-	r.mu.Lock()
-	if r.cancel != nil {
-		r.mu.Unlock()
-		return fmt.Errorf("server: runtime already started")
-	}
-	r.ctx, r.cancel = context.WithCancel(ctx)
-	r.mu.Unlock()
-
-	if err := r.ConvergeAll(); err != nil {
-		r.cancel()
-		return err
+	if !r.started.CompareAndSwap(false, true) {
+		return ErrAlreadyRun
 	}
 
-	r.loop.Add(1)
-	go r.run()
-
-	return nil
-}
-
-// Stop ends the periodic pass, waits for work in flight, and stops every
-// running network. The runtime cannot be started again.
-func (r *Runtime) Stop() {
-	r.mu.Lock()
-	cancel := r.cancel
-	r.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-	r.loop.Wait()
-
-	r.mu.Lock()
-	networks := r.running
-	r.running = make(map[string]*Network)
-	r.mu.Unlock()
-
-	for name, network := range networks {
-		if err := network.stop(); err != nil {
-			r.log.Warn(
-				"stop network failed",
-				"network",
-				name,
-				"err",
-				err,
-			)
-		}
-	}
-}
-
-// Converge brings one network in line with its persisted intent: an
-// enabled network that is not running is started, a running network that
-// is no longer enabled is stopped, and a network already where it should
-// be has its peer sets reconciled. A start failure is recorded as the
-// network's reason and returned; the persisted intent is never touched.
-func (r *Runtime) Converge(
-	name string,
-) error {
-	network, err := r.service.GetNetwork(name)
-	if err != nil {
-		return err
-	}
-	return r.converge(network)
-}
-
-// ConvergeAll converges every persisted network. Per-network failures
-// are recorded and logged; only a failure to read the desired state is
-// returned.
-func (r *Runtime) ConvergeAll() error {
-	networks, err := r.service.ListNetworks()
-	if err != nil {
-		return err
-	}
-
-	for _, network := range networks {
-		if err := r.converge(network); err != nil {
-			r.log.Error(
-				"converge failed",
-				"network",
-				network.Name,
-				"err",
-				err,
-			)
+	r.ctx = ctx
+	r.handlers = handlers
+	if ctx.Err() == nil {
+		if err := r.reconcile(); err != nil {
+			r.log.Error("runtime maintenance failed", "err", err)
 		}
 	}
 
-	return nil
-}
+	timer := time.NewTimer(r.interval)
+	defer timer.Stop()
 
-// SetNetworkEnabled records whether the network should be running and
-// converges it, returning the resulting status. The intent is persisted
-// unconditionally, so a network that cannot start stays enabled and its
-// status explains why, rather than the operation failing and reverting
-// the operator's intent.
-func (r *Runtime) SetNetworkEnabled(
-	name string,
-	enabled bool,
-) (
-	NetworkStatus,
-	error,
-) {
-	if err := r.service.SetNetworkEnabled(name, enabled); err != nil {
-		return NetworkStatus{}, err
-	}
-
-	if err := r.Converge(name); err != nil {
-		r.log.Error(
-			"converge network failed",
-			"network",
-			name,
-			"err",
-			err,
-		)
-	}
-
-	return r.getNetworkStatus(name)
-}
-
-// GetStatus joins the persisted intent with what this process is actually
-// doing. It is the single source of operator-facing state.
-func (r *Runtime) GetStatus() (
-	Status,
-	error,
-) {
-	networks, err := r.service.ListNetworks()
-	if err != nil {
-		return Status{}, err
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	statuses := make([]NetworkStatus, len(networks))
-	for i, network := range networks {
-		statuses[i] = r.parseStatusOf(network)
-	}
-
-	return Status{
-		Health:   statusHealth(statuses),
-		Networks: statuses,
-	}, nil
-}
-
-// GetPeerStatus returns configured peers joined with live WireGuard state. A
-// network that is not running reports its peers as disconnected.
-func (r *Runtime) GetPeerStatus(
-	name string,
-) (
-	[]PeerStatus,
-	error,
-) {
-	record, err := r.service.GetNetwork(name)
-	if err != nil {
-		return nil, err
-	}
-	peers, err := r.service.ListPeers(name)
-	if err != nil {
-		return nil, err
-	}
-
-	r.mu.Lock()
-	running := r.running[name]
-	r.mu.Unlock()
-
-	live := make(map[string]wireguard.PeerStatus)
-	if running != nil {
-		statuses, err := running.main.device.Peers()
-		if err != nil {
-			return nil, err
-		}
-		for _, status := range statuses {
-			live[status.PublicKey.String()] = status
-		}
-	}
-
-	now := r.clock()
-	result := make([]PeerStatus, len(peers))
-	for index, peer := range peers {
-		connected := running != nil && peer.PublicKey == record.PublicKey
-		if status, ok := live[peer.PublicKey]; ok {
-			connected = peerHealthy(status, now)
-		}
-		result[index] = PeerStatus{
-			Name:      peer.Name,
-			Route:     peer.Route,
-			Connected: connected,
-		}
-	}
-	return result, nil
-}
-
-// GetNetworkTopology returns the complete topology joined with live peer
-// connectivity. A network that is not running reports its peers as
-// disconnected.
-func (r *Runtime) GetNetworkTopology(
-	name string,
-) (
-	NetworkTopology,
-	error,
-) {
-	view, err := r.service.GetNetworkTopology(name)
-	if err != nil {
-		return NetworkTopology{}, err
-	}
-
-	statuses, err := r.GetPeerStatus(name)
-	if err != nil {
-		return NetworkTopology{}, err
-	}
-
-	connected := make(map[string]bool, len(statuses))
-	for _, status := range statuses {
-		connected[status.Name] = status.Connected
-	}
-
-	return NetworkTopology{View: view, Connected: connected}, nil
-}
-
-// run is the periodic pass: it converges on every wake and every tick
-// until the run context is cancelled.
-func (r *Runtime) run() {
-	defer r.loop.Done()
-
-	ticker := time.NewTicker(r.interval)
-	defer ticker.Stop()
-
+running:
 	for {
 		select {
-		case <-r.ctx.Done():
-			return
 
-		case name := <-r.wake:
-			if err := r.Converge(name); err != nil {
-				r.log.Error(
-					"converge failed",
-					"network",
-					name,
-					"err",
-					err,
-				)
+		// This runtime has been cancelled, exit.
+		case <-ctx.Done():
+			break running
+
+		// Process an incoming operation.
+		case op := <-r.operations:
+			if ctx.Err() != nil {
+				// This runtime has been cancelled, exit.
+				break running
 			}
 
-		case <-ticker.C:
-			if err := r.ConvergeAll(); err != nil {
-				r.log.Error(
-					"converge pass failed",
-					"err",
-					err,
-				)
+			if op.ctx.Err() != nil {
+				// Operation caller canceled before execution.
+				break
 			}
+
+			op.run()
+
+		// Process a reconciliation timer.
+		case <-timer.C:
+			if ctx.Err() != nil {
+				// this runtime has been cancelled, exit.
+				break running
+			}
+
+			if err := r.reconcile(); err != nil {
+				r.log.Error("runtime maintenance failed", "err", err)
+			}
+
+			// Re-arm the timer.
+			timer.Reset(r.interval)
 		}
 	}
+
+	// Release callers before draining HTTP: handlers may be waiting on us.
+	// Plane closure also cancels its request contexts, including during a
+	// network-disable command while the rest of the runtime stays active.
+	close(r.done)
+
+	var errs []error
+	for name, network := range r.running {
+		errs = append(errs, r.closeNetwork(name, network))
+	}
+
+	return errors.Join(errs...)
 }
 
-// converge applies one network record to the running set. It holds the
-// runtime lock for the whole transition, so concurrent callers see a
-// consistent running set and never race to start the same network.
-func (r *Runtime) converge(
-	record *service.Network,
-) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// reconcile gives every network a turn, and the full pass gets
+// one activity result. Child failures are contained while this loop can retry.
+func (r *Runtime) reconcile() (err error) {
 
-	if r.ctx != nil && r.ctx.Err() != nil {
-		return nil
+	// Record one outcome for the entire pass, including early failures.
+	defer func() {
+		err = errors.Join(err, r.ctx.Err())
+		r.reconcileStatus.Record(r.clock(), err)
+	}()
+
+	// First get all the networks tracked by the service.
+	networks, err := r.service.ListNetworks()
+	if err != nil {
+		return fmt.Errorf("list networks: %w", err)
 	}
 
-	network, isRunning := r.running[record.Name]
-
-	switch {
-	case !record.Enabled && isRunning:
-		// Disabled but still up; bring it down.
-		delete(r.reasons, record.Name)
-		return r.stopNetwork(record.Name, network)
-
-	case !record.Enabled && !isRunning:
-		// Disabled and already down; forget any stale reason.
-		delete(r.reasons, record.Name)
-
-	case record.Enabled && isRunning:
-		// Enabled and already up; converge its peer sets instead.
-		network.reconcile()
-
-	case record.Enabled && !isRunning:
-		// Enabled and down; bring it up.
-		return r.startNetwork(record)
+	// Then build a map of those known networks.
+	known := make(map[string]bool, len(networks))
+	for _, network := range networks {
+		known[network.Name] = true
 	}
 
-	return nil
+	// Then close any running networks that are not known.
+	var errs []error
+	for name, network := range r.running {
+		if known[name] {
+			continue
+		}
+
+		if err := r.closeNetwork(name, network); err != nil {
+			// Deleted records can still have resources after failed cleanup.
+			errs = append(errs, err)
+		}
+	}
+
+	// Attempt a reconcile of every saved network even if another network fails.
+	for _, network := range networks {
+		if r.ctx.Err() != nil {
+			break // The pass outcome includes cancellation.
+		}
+
+		if err := r.reconcileNetwork(network); err != nil {
+			errs = append(errs, fmt.Errorf("network %q: %w", network.Name, err))
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
-// startNetwork brings a network up under its record and into the
-// running set, or records the failure as its reason to be retried on
-// the next pass. Callers hold r.mu.
-func (r *Runtime) startNetwork(
-	record *service.Network,
-) error {
-	ctx := r.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	network := &Network{
-		record:          record,
-		service:         r.service,
-		clock:           r.clock,
-		log:             r.log.With("network", record.Name),
-		reconcileStatus: ActivityStatus{Interval: reconcileCap},
-	}
-
-	var mainHandler, inviteHandler http.Handler
-	if r.peer != nil {
-		mainHandler = r.peer.Router(record.Name)
-	}
-	if r.invite != nil {
-		inviteHandler = r.invite.Router(record.Name)
-	}
-
-	if err := network.start(ctx, r.wireguard, mainHandler, inviteHandler); err != nil {
-		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)
-		return err
-	}
-
-	r.running[record.Name] = network
-	delete(r.reasons, record.Name)
-
-	r.log.Info(
-		"network started",
-		"network",
-		record.Name,
-	)
-
-	return nil
+// operation carries a closure to the sole owner of runtime state.
+type operation struct {
+	ctx context.Context
+	run func()
 }
 
-// stopNetwork takes a running network down and forgets it. Callers hold
-// r.mu.
-func (r *Runtime) stopNetwork(
-	name string,
-	network *Network,
-) error {
-	delete(r.running, name)
-	delete(r.reasons, name)
-	if err := network.stop(); err != nil {
-		return fmt.Errorf("stop network %q: %w", name, err)
-	}
-
-	r.log.Info(
-		"network stopped",
-		"network",
-		name,
-	)
-
-	return nil
-}
-
-// getNetworkStatus reports the status of one network by name.
-func (r *Runtime) getNetworkStatus(
-	name string,
+// executeValue submits an operation and returns its value through a buffered
+// reply. execute uses the same submission path for error-only operations.
+//
+// Public methods submit closures; code already executing in the runtime goroutine
+// must call service or private resource methods directly. Submitting another
+// operation and waiting for it would deadlock.
+//
+// Operations called by plane handlers may update peers, but must not stop or
+// replace their serving plane: draining HTTP would wait for the calling handler.
+//
+// Cancellation can release a waiting caller while its operation finishes.
+// It does not undo an operation that has already begun.
+func executeValue[T any](
+	r *Runtime,
+	ctx context.Context,
+	fn func() (T, error),
 ) (
-	NetworkStatus,
+	T,
 	error,
 ) {
-	network, err := r.service.GetNetwork(name)
-	if err != nil {
-		return NetworkStatus{}, err
+	type result struct {
+		value T
+		err   error
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	var zero T
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
 
-	return r.parseStatusOf(network), nil
+	// Buffer the result so the runtime can finish if the caller stops waiting.
+	reply := make(chan result, 1)
+
+	// Build the operation that the runtime will execute.
+	op := operation{
+		ctx: ctx,
+		run: func() {
+			value, err := fn()
+			reply <- result{
+				value: value,
+				err:   err,
+			}
+		},
+	}
+
+	// Wait for the runtime to accept the operation.
+	select {
+	case <-ctx.Done():
+		return zero, ctx.Err()
+	case <-r.done:
+		return zero, ErrNotRunning
+	case r.operations <- op:
+		break // Accepted; now wait for its result.
+	}
+
+	// Wait for the result, caller cancellation, or runtime shutdown.
+	select {
+	case result := <-reply:
+		return result.value, result.err
+	case <-ctx.Done():
+		return zero, ctx.Err()
+	case <-r.done:
+		return zero, ErrNotRunning
+	}
 }
 
-// parseStatusOf joins one persisted record with the running set. Callers
-// hold r.mu.
-func (r *Runtime) parseStatusOf(
-	network *service.Network,
-) NetworkStatus {
-	running, isRunning := r.running[network.Name]
-	status := NetworkStatus{
-		Name:      network.Name,
-		Enabled:   network.Enabled,
-		Running:   isRunning,
-		Reason:    r.reasons[network.Name],
-		Reconcile: ActivityStatus{Interval: reconcileCap},
-	}
-	if isRunning {
-		status.Reconcile, status.MainAPI, status.InviteAPI = running.getActivityStatuses()
-	}
-	status.Health = networkHealth(status)
-	return status
-}
-
-func networkHealth(
-	status NetworkStatus,
-) string {
-	if !status.Enabled && !status.Running {
-		return HealthInactive
-	}
-	if status.Enabled != status.Running {
-		return HealthDegraded
-	}
-	activities := []ActivityStatus{
-		status.Reconcile,
-		status.MainAPI,
-		status.InviteAPI,
-	}
-	for _, activity := range activities {
-		if activity.Error != "" {
-			return HealthDegraded
-		}
-	}
-	return HealthHealthy
-}
-
-func statusHealth(
-	statuses []NetworkStatus,
-) string {
-	for _, status := range statuses {
-		if status.Health == HealthDegraded {
-			return HealthDegraded
-		}
-	}
-	return HealthHealthy
+// execute submits an error-only operation through executeValue.
+func execute(
+	r *Runtime,
+	ctx context.Context,
+	fn func() error,
+) error {
+	_, err := executeValue(r, ctx, func() (struct{}, error) {
+		return struct{}{}, fn()
+	})
+	return err
 }

@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
+	"git.studiopollinator.com/pollinator/cord/internal/client/dns"
 	"git.studiopollinator.com/pollinator/cord/internal/client/service"
 	"git.studiopollinator.com/pollinator/cord/internal/netaddr"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol"
 	"git.studiopollinator.com/pollinator/cord/internal/protocol/client"
+	"git.studiopollinator.com/pollinator/cord/internal/resource"
+	"git.studiopollinator.com/pollinator/cord/internal/topology"
 	"git.studiopollinator.com/pollinator/cord/internal/wireguard"
 )
 
@@ -40,226 +42,357 @@ const (
 	StaleThreshold = wireguard.ActiveHandshakeThreshold
 )
 
-// Network is a client network running in this process: one Tunnel plus
-// three self-rearming activity timers. It holds no durable state of its
-// own — every read and write goes through the service, and the
-// activities (sync, scan, report) are projections between the store, the
-// device, and the server.
+const serverPeerName = "cord-server"
+
+// NetworkLookup contains exactly one record on a successful lookup.
+type NetworkLookup struct {
+	Network *service.Network
+	Install *service.Install
+}
+
+// NetworkTopology is the network's cached topology joined with live peer
+// connectivity for display. Connected maps a peer name to its live
+// state; peers absent from the map have no known connectivity. The
+// subject peer is always present: its connectivity is whether the
+// network is running. The pinned server peer is evaluated from its
+// live WireGuard handshake.
+type NetworkTopology struct {
+	View        topology.View
+	GeneratedAt time.Time
+	SyncedAt    time.Time
+	Connected   map[string]bool
+}
+
+type networkOptions struct {
+	record     *service.Network
+	service    *service.Service
+	wireguard  *wireguard.Manager
+	dns        DNSManager
+	httpClient *http.Client
+	clock      func() time.Time
+	log        *slog.Logger
+
+	syncInterval   time.Duration
+	scanInterval   time.Duration
+	reportInterval time.Duration
+}
+
+// Network is a configured client network owned by the runtime loop.
+// It owns a tunnel, a DNS resolver, and activity due times. Durable state is read and
+// written through the service. Its activities (sync, scan, report) project
+// between the store, the device, and the server.
 type Network struct {
 	record  *service.Network
 	tunnel  *Tunnel
 	service *service.Service
+	dns     *dnsResolver
 	client  *client.PeerClient
 	clock   func() time.Time
 	log     *slog.Logger
 
-	// ctx is the network's slice of the runtime context. Its
-	// cancellation is what retires the activity timers, so none of them
-	// can outlive the device it configures.
+	// ctx follows the runtime lifetime and is canceled when this network stops.
 	ctx    context.Context
 	cancel context.CancelFunc
+	//
+	// Only the runtime loop accesses closing. Once cleanup
+	// begins, this instance must be retired before a replacement can start.
+	closing bool
 
 	syncInterval   time.Duration
 	scanInterval   time.Duration
 	reportInterval time.Duration
 
-	// mu is held for the whole of an activity, so stop() waits for one
-	// in flight and no activity survives the stop.
-	mu              sync.Mutex
-	syncTimer       *time.Timer
-	scanTimer       *time.Timer
-	reportTimer     *time.Timer
-	reconcileStatus ActivityStatus
-	syncStatus      ActivityStatus
-	scanStatus      ActivityStatus
-	reportStatus    ActivityStatus
+	reconcileStatus resource.ActivityStatus
+	cleanupStatus   resource.ActivityStatus
+	syncStatus      resource.ActivityStatus
+	scanStatus      resource.ActivityStatus
+	reportStatus    resource.ActivityStatus
 }
 
-// start brings up the tunnel under ctx, reconciles the device from the
-// local peer cache, then arms the activity timers. Applying the cached
-// peer set is local-only: it works offline, and its failure aborts the
-// start synchronously — the first server sync, firing immediately on its
-// own timer, is a freshness upgrade that can only be logged. The lock is
-// held so that sync cannot run against a partially armed timer set.
-//
-// The timers report to no caller, so errors are captured in logging
-// closures here.
+// newNetwork constructs the tunnel, DNS resolver, and API client without starting resources
+// or scheduling activities. Runtime supplies resolved dependencies and intervals.
+func newNetwork(
+	opts networkOptions,
+) (
+	*Network,
+	error,
+) {
+	tunnel, err := newTunnel(tunnelOptions{
+		name:       opts.record.InterfaceName,
+		privateKey: opts.record.PrivateKey,
+		route:      opts.record.AssignedRoute,
+		listenPort: opts.record.ListenPort,
+		server:     opts.record.Server,
+	}, opts.wireguard)
+	if err != nil {
+		return nil, err
+	}
+
+	peerNetClient, err := client.NewPeerClient(tunnel.apiAddr, opts.httpClient)
+	if err != nil {
+		return nil, fmt.Errorf("create peer client: %w", err)
+	}
+
+	serverRoute, err := netaddr.ParseRoute(opts.record.Server.Route)
+	if err != nil {
+		return nil, fmt.Errorf("DNS server route: %w", err)
+	}
+
+	return &Network{
+		record: opts.record,
+		tunnel: tunnel,
+		dns: &dnsResolver{
+			manager: opts.dns,
+			device:  tunnel.device,
+			config: dns.Config{
+				Network:    opts.record.Name,
+				Domain:     opts.record.Name + ".internal",
+				Nameserver: serverRoute.IP,
+			},
+			clock: opts.clock,
+		},
+		service:        opts.service,
+		client:         peerNetClient,
+		clock:          opts.clock,
+		log:            opts.log,
+		syncInterval:   opts.syncInterval,
+		scanInterval:   opts.scanInterval,
+		reportInterval: opts.reportInterval,
+		syncStatus:     resource.ActivityStatus{Interval: opts.syncInterval},
+		scanStatus:     resource.ActivityStatus{Interval: opts.scanInterval},
+		reportStatus:   resource.ActivityStatus{Interval: opts.reportInterval},
+	}, nil
+}
+
+// status collects resource health and activity without changing the network.
+func (n *Network) status() resource.Snapshot {
+	target := resource.Running
+	if n.closing {
+		target = resource.Stopped
+	}
+
+	state := resource.Running
+	if n.isStopped() {
+		state = resource.Stopped
+	}
+	if n.cleanupStatus.Error != "" {
+		state = resource.Failed
+	}
+
+	status := resource.Snapshot{
+		Kind:   "network",
+		Name:   n.record.Name,
+		State:  state,
+		Target: target,
+		Activities: map[string]resource.ActivityStatus{
+			"reconcile": n.reconcileStatus,
+			"sync":      n.syncStatus,
+			"scan":      n.scanStatus,
+			"report":    n.reportStatus,
+			"close":     n.cleanupStatus,
+		},
+		Children: []resource.Snapshot{
+			n.tunnel.status(target),
+			n.dns.status(target),
+		},
+	}
+	status.UpdateHealth()
+	return status
+}
+
+// start reconciles the tunnel and cached peers before scheduling activities.
+// Startup works offline; the immediate server sync only freshens the cache.
+// The runtime owns cleanup if startup fails.
 func (n *Network) start(
 	ctx context.Context,
-	wg *wireguard.Manager,
-	httpClient *http.Client,
 ) error {
 	n.ctx, n.cancel = context.WithCancel(ctx)
 
-	n.tunnel = &Tunnel{
-		name:       n.record.InterfaceName,
-		privateKey: n.record.PrivateKey,
-		route:      n.record.AssignedRoute,
-		listenPort: n.record.ListenPort,
-		server:     n.record.Server,
-		keepalive:  PersistentKeepaliveInterval,
-	}
-	if err := n.tunnel.start(wg); err != nil {
+	if err := n.reconcile(); err != nil {
 		n.cancel()
 		return err
 	}
 
-	peerNetClient, err := client.NewPeerClient(n.tunnel.apiAddr, httpClient)
-	if err != nil {
-		n.cancel()
-		if stopErr := n.tunnel.stop(); stopErr != nil {
-			n.log.Debug("stop tunnel after failed start", "err", stopErr)
-		}
-		return fmt.Errorf("create peer client: %w", err)
-	}
-	n.client = peerNetClient
+	now := n.clock()
+	n.syncStatus.NextAttemptAt = now
 
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	if err := n.applyPeers(); err != nil {
-		n.cancel()
-		if stopErr := n.tunnel.stop(); stopErr != nil {
-			n.log.Debug("stop tunnel after failed start", "err", stopErr)
-		}
-		return err
-	}
-
-	n.reconcileStatus.record(n.clock(), nil)
-
-	// Sync now: the cached peer set may be stale, so freshen it first.
-	n.syncTimer = time.AfterFunc(0, func() {
-		if err := n.sync(); err != nil {
-			n.log.Warn("sync failed", "err", err)
-		}
-	})
-
-	// No immediate scan: no handshakes have accumulated yet, so peers
-	// would all look stale and get needlessly rotated.
-	n.scanTimer = time.AfterFunc(n.scanInterval, func() {
-		if err := n.scan(); err != nil {
-			n.log.Warn("scan failed", "err", err)
-		}
-	})
-
-	// No immediate report: nothing has been observed locally yet.
-	n.reportTimer = time.AfterFunc(n.reportInterval, func() {
-		if err := n.report(); err != nil {
-			n.log.Warn("report failed", "err", err)
-		}
-	})
+	// Give handshakes and local observations time to accumulate.
+	n.scanStatus.NextAttemptAt = now.Add(n.scanInterval)
+	n.reportStatus.NextAttemptAt = now.Add(n.reportInterval)
 
 	return nil
 }
 
-// stop cancels the network context, retires the activity timers, waits
-// for any activity in flight, and closes the tunnel. An activity already
-// waiting on the lock sees the cancelled context and returns without
-// touching the device.
-func (n *Network) stop() error {
-	n.cancel()
-
-	n.mu.Lock()
-	n.syncTimer.Stop()
-	n.scanTimer.Stop()
-	n.reportTimer.Stop()
-	n.mu.Unlock()
-
-	return n.tunnel.stop()
-}
-
-// reconcile applies the current peer cache to the device. It is the
-// converge entry point for a network that is already where it should be.
-func (n *Network) reconcile() error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
+// reconcile repairs the tunnel before applying the current peer cache.
+func (n *Network) reconcile() (err error) {
 	if n.isStopped() {
 		return nil
 	}
 
-	err := n.applyPeers()
-	n.reconcileStatus.record(n.clock(), err)
-	return err
+	var dnsErr error
+	defer func() {
+		n.reconcileStatus.Record(n.clock(), errors.Join(err, dnsErr))
+	}()
+
+	if err := n.tunnel.reconcile(n.ctx); err != nil {
+		return err
+	}
+
+	if err := n.applyPeers(); err != nil {
+		return err
+	}
+
+	dnsErr = n.dns.reconcile(n.ctx)
+	if dnsErr != nil {
+		// DNS failure degrades the network without rolling back its tunnel or
+		// preventing sync, scan, and report from being scheduled at startup.
+		n.log.Warn(
+			"DNS reconciliation failed",
+			"err", dnsErr,
+		)
+	}
+
+	return nil
+}
+
+// stop cancels the network lifetime and closes its tunnel.
+func (n *Network) stop() (
+	err error,
+) {
+	defer func() {
+		n.cleanupStatus.Record(n.clock(), err)
+	}()
+
+	if n.cancel != nil {
+		n.cancel()
+	}
+
+	n.syncStatus.NextAttemptAt = time.Time{}
+	n.scanStatus.NextAttemptAt = time.Time{}
+	n.reportStatus.NextAttemptAt = time.Time{}
+
+	// Cleanup must remain usable after network or daemon cancellation.
+	ctx, cancel := context.WithTimeout(context.Background(), dnsCleanupTimeout)
+	defer cancel()
+
+	dnsErr := n.dns.close(ctx)
+	tunnelErr := n.tunnel.close()
+
+	return errors.Join(dnsErr, tunnelErr)
+}
+
+// nextActivity returns the earliest due time, or zero for a retired network.
+func (n *Network) nextActivity() time.Time {
+	if n.closing || n.isStopped() {
+		return time.Time{}
+	}
+
+	var next time.Time
+	for _, due := range []time.Time{
+		n.syncStatus.NextAttemptAt,
+		n.scanStatus.NextAttemptAt,
+		n.reportStatus.NextAttemptAt,
+	} {
+		if due.IsZero() {
+			continue
+		}
+		if next.IsZero() || due.Before(next) {
+			next = due
+		}
+	}
+	return next
+}
+
+// runDueActivities runs on the runtime goroutine. Each activity schedules its
+// next attempt from completion, so overdue work runs once without catching up.
+func (n *Network) runDueActivities() {
+	if n.closing || n.isStopped() {
+		return
+	}
+	if !n.clock().Before(n.syncStatus.NextAttemptAt) {
+		if err := n.sync(n.ctx); err != nil {
+			n.log.Warn("sync failed", "err", err)
+		}
+	}
+
+	if n.isStopped() {
+		return
+	}
+	if !n.clock().Before(n.scanStatus.NextAttemptAt) {
+		if err := n.scan(); err != nil {
+			n.log.Warn("scan failed", "err", err)
+		}
+	}
+
+	if n.isStopped() {
+		return
+	}
+	if !n.clock().Before(n.reportStatus.NextAttemptAt) {
+		if err := n.report(); err != nil {
+			n.log.Warn("report failed", "err", err)
+		}
+	}
 }
 
 // sync fetches the visible network snapshot from the server, hands it to
 // the service to validate and persist, projects the resulting peers onto
-// the device, and schedules the next sync. Called by both the sync timer
+// the device, and schedules the next sync. Called by both scheduled work
 // and on-demand Runtime.Sync, so an on-demand sync defers the next
 // scheduled one.
-func (n *Network) sync() error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
+func (n *Network) sync(
+	ctx context.Context,
+) (err error) {
 	if n.isStopped() {
 		return service.ErrNetworkNotEnabled
 	}
 
-	refreshSync := func(err error) error {
-		n.completeRefresh(
-			n.syncTimer,
-			n.syncInterval,
-			&n.syncStatus,
-			err,
-		)
-		return err
-	}
+	defer func() {
+		n.completeRefresh(n.syncInterval, &n.syncStatus, err)
+	}()
 
-	snapshot, err := n.client.GetSnapshot(n.ctx)
+	snapshot, err := n.client.GetSnapshot(ctx)
 	if err != nil {
-		return refreshSync(fmt.Errorf("fetch network snapshot: %w", err))
+		return fmt.Errorf("fetch network snapshot: %w", err)
 	}
 
 	n.log.Debug(
 		"sync",
-		"peers",
-		len(snapshot.Peers),
-		"topology_nodes",
-		len(snapshot.Topology.Nodes),
+		"peers", len(snapshot.Peers),
+		"topology_nodes", len(snapshot.Topology.Nodes),
 	)
 
 	if err := n.service.ApplyNetworkSnapshot(
 		n.record.Name,
 		snapshot,
 	); err != nil {
-		return refreshSync(err)
+		return err
 	}
 
 	if err := n.applyPeers(); err != nil {
-		return refreshSync(err)
+		return err
 	}
 
-	return refreshSync(nil)
+	return nil
 }
 
 // scan reads live handshake state from the device and schedules the
 // next scan. Healthy peers get their current endpoint recorded as
 // locally observed; stale peers get their next candidate endpoint
 // applied.
-func (n *Network) scan() error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
+func (n *Network) scan() (err error) {
 	if n.isStopped() {
 		return nil
 	}
 
-	refreshScan := func(err error) error {
-		n.completeRefresh(
-			n.scanTimer,
-			n.scanInterval,
-			&n.scanStatus,
-			err,
-		)
-		return err
-	}
+	defer func() {
+		n.completeRefresh(n.scanInterval, &n.scanStatus, err)
+	}()
 
 	now := n.clock()
 
-	devicePeerStatuses, err := n.tunnel.device.Peers()
+	devicePeerStatuses, err := n.tunnel.device.GetPeerStatuses()
 	if err != nil {
-		return refreshScan(fmt.Errorf("peers: %w", err))
+		return fmt.Errorf("peers: %w", err)
 	}
 
 	var errs []error
@@ -298,55 +431,41 @@ func (n *Network) scan() error {
 		}
 	}
 
-	return refreshScan(errors.Join(errs...))
+	return errors.Join(errs...)
 }
 
 // report sends endpoints observed locally within the last report
 // window to the server for gossip distribution, and schedules the
 // next report.
-func (n *Network) report() error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
+func (n *Network) report() (err error) {
 	if n.isStopped() {
 		return nil
 	}
 
-	refreshReport := func(err error) error {
-		n.completeRefresh(
-			n.reportTimer,
-			n.reportInterval,
-			&n.reportStatus,
-			err,
-		)
-		return err
-	}
+	defer func() {
+		n.completeRefresh(n.reportInterval, &n.reportStatus, err)
+	}()
 
 	since := n.clock().Add(-n.reportInterval)
 	sightings, err := n.service.ListLocalEndpoints(n.record.Name, since)
 	if err != nil {
-		return refreshReport(fmt.Errorf("list local endpoints: %w", err))
+		return fmt.Errorf("list local endpoints: %w", err)
 	}
 	if len(sightings) == 0 {
-		return refreshReport(nil)
+		return nil
 	}
 
-	n.log.Debug(
-		"report",
-		"sightings",
-		len(sightings),
-	)
+	n.log.Debug("report", "sightings", len(sightings))
 
 	sightingsDTO := sightingsToProtocol(sightings)
 	if err := n.client.ReportEndpoints(n.ctx, sightingsDTO); err != nil {
-		return refreshReport(fmt.Errorf("report endpoints: %w", err))
+		return fmt.Errorf("report endpoints: %w", err)
 	}
 
-	return refreshReport(nil)
+	return nil
 }
 
 // applyPeers projects the cached peer set onto the WireGuard device.
-// Callers hold n.mu.
 func (n *Network) applyPeers() error {
 	peers, err := n.service.ListPeers(n.record.Name)
 	if err != nil {
@@ -381,25 +500,24 @@ func (n *Network) applyPeers() error {
 	return n.tunnel.device.SetPeers(wgPeers...)
 }
 
-// completeRefresh records the completion of an activity attempt and
-// rearms its timer. It is called with n.mu held, including on error
-// paths. A stopped network rearms nothing.
+// completeRefresh records an attempt and schedules the next one after completion.
+// Failed attempts use the same cadence. A stopped network schedules nothing.
 func (n *Network) completeRefresh(
-	timer *time.Timer,
 	cadence time.Duration,
-	status *ActivityStatus,
+	status *resource.ActivityStatus,
 	err error,
 ) {
-	status.record(n.clock(), err)
+	now := n.clock()
+	status.Record(now, err)
 	if n.isStopped() {
 		return
 	}
-	timer.Reset(cadence)
+	status.NextAttemptAt = now.Add(cadence)
 }
 
-// isStopped reports whether this network has been isStopped.
+// isStopped reports whether activities have no active network lifetime.
 func (n *Network) isStopped() bool {
-	return n.ctx.Err() != nil
+	return n.ctx == nil || n.ctx.Err() != nil
 }
 
 // isDiverged reports whether the stored record describes a different
@@ -415,41 +533,430 @@ func (n *Network) isDiverged(
 		n.record.Server != record.Server
 }
 
-// getActivityStatuses returns a consistent snapshot of this network's work.
-func (n *Network) getActivityStatuses() (
-	ActivityStatus,
-	ActivityStatus,
-	ActivityStatus,
-	ActivityStatus,
-) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	return n.reconcileStatus, n.syncStatus, n.scanStatus, n.reportStatus
-}
-
 // getPeerStatuses reports the live device state for this network's getPeerStatuses.
 func (n *Network) getPeerStatuses() (
 	[]wireguard.PeerStatus,
 	error,
 ) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	if n.isStopped() {
 		return nil, nil
 	}
-	return n.tunnel.device.Peers()
+
+	return n.tunnel.device.GetPeerStatuses()
 }
 
-// peerHealthy reports whether a peer's last handshake is recent enough
-// to consider it connected. Peers that have never handshaken are not
-// healthy.
-func peerHealthy(
-	peerStatus wireguard.PeerStatus,
-	now time.Time,
-) bool {
-	return !peerStatus.LastHandshake.IsZero() &&
-		now.Sub(peerStatus.LastHandshake) < StaleThreshold
+// ListNetworks returns installed network records, ordered by name.
+func (r *Runtime) ListNetworks(
+	ctx context.Context,
+) (
+	[]*service.Network,
+	error,
+) {
+	return executeValue(r, ctx, func() ([]*service.Network, error) {
+		return r.service.ListNetworks()
+	})
+}
+
+// LookupNetwork resolves an installed network or a pending installation in one
+// command, so confirmation cannot occur between the two reads.
+func (r *Runtime) LookupNetwork(
+	ctx context.Context,
+	name string,
+) (
+	NetworkLookup,
+	error,
+) {
+	return executeValue(r, ctx, func() (NetworkLookup, error) {
+		network, err := r.service.GetNetwork(name)
+		if err == nil {
+			return NetworkLookup{Network: network}, nil
+		}
+		if !errors.Is(err, service.ErrNotFound) {
+			return NetworkLookup{}, err
+		}
+
+		install, err := r.service.GetInstall(name)
+		if err != nil {
+			return NetworkLookup{}, err
+		}
+		return NetworkLookup{Install: install}, nil
+	})
+}
+
+// UpdateNetwork persists local network configuration and converges the
+// network under it: a running network whose stored configuration changed
+// is restarted. It returns the updated record. The record is already
+// stored when convergence runs, so a converge failure is logged and
+// retried on the next pass rather than failing the operation.
+func (r *Runtime) UpdateNetwork(
+	ctx context.Context,
+	name string,
+	opts service.NetworkOptions,
+) (
+	*service.Network,
+	error,
+) {
+	return executeValue(r, ctx, func() (*service.Network, error) {
+		if err := r.service.UpdateNetwork(name, opts); err != nil {
+			return nil, err
+		}
+
+		if err := r.convergeName(name); err != nil {
+			r.log.Error(
+				"converge network failed",
+				"network", name,
+				"err", err,
+			)
+		}
+
+		return r.service.GetNetwork(name)
+	})
+}
+
+// SetNetworkEnabled records whether the network should be running and
+// converges it, returning the resulting status. The intent is persisted
+// unconditionally, so a network that cannot start stays enabled and its
+// status explains why, rather than the operation failing and reverting
+// the operator's intent.
+func (r *Runtime) SetNetworkEnabled(
+	ctx context.Context,
+	name string,
+	enabled bool,
+) (
+	NetworkStatus,
+	error,
+) {
+	return executeValue(r, ctx, func() (NetworkStatus, error) {
+		if err := r.service.SetNetworkEnabled(name, enabled); err != nil {
+			return NetworkStatus{}, err
+		}
+
+		if err := r.convergeName(name); err != nil {
+			r.log.Error(
+				"converge network failed",
+				"network", name,
+				"err", err,
+			)
+		}
+
+		return r.getNetworkStatus(name)
+	})
+}
+
+// UninstallNetwork removes the network's record and converges: the
+// record is gone, so a network still running is taken down with it.
+func (r *Runtime) UninstallNetwork(
+	ctx context.Context,
+	name string,
+) error {
+	return execute(r, ctx, func() error {
+		if err := r.service.UninstallNetwork(name); err != nil {
+			return err
+		}
+
+		if err := r.convergeName(name); err != nil {
+			r.log.Error(
+				"converge network failed",
+				"network", name,
+				"err", err,
+			)
+		}
+
+		return nil
+	})
+}
+
+// Sync fetches the network snapshot from the server on demand, outside
+// the network's own sync cadence, and returns the updated record. It
+// returns ErrNotFound when neither a network nor an install exists, and
+// ErrNetworkNotEnabled when it exists but is not running, since there is
+// no tunnel to fetch over.
+func (r *Runtime) Sync(
+	ctx context.Context,
+	name string,
+) (
+	*service.Network,
+	error,
+) {
+	return executeValue(r, ctx, func() (*service.Network, error) {
+		_, err := r.service.GetNetwork(name)
+		if errors.Is(err, service.ErrNotFound) {
+			_, err = r.service.GetInstall(name)
+			if err == nil {
+				return nil, service.ErrNetworkNotEnabled
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		network, isRunning := r.running[name]
+
+		if !isRunning {
+			return nil, service.ErrNetworkNotEnabled
+		}
+
+		// Stop outbound requests on caller or runtime cancellation.
+		requestCtx, cancel := context.WithCancel(ctx)
+		removeShutdownHook := context.AfterFunc(r.ctx, cancel)
+		defer removeShutdownHook()
+		defer cancel()
+
+		if err := network.sync(requestCtx); err != nil {
+			return nil, err
+		}
+
+		return r.service.GetNetwork(name)
+	})
+}
+
+// Converge applies a network's saved intent through the runtime owner.
+func (r *Runtime) Converge(
+	ctx context.Context,
+	name string,
+) error {
+	return execute(r, ctx, func() error {
+		return r.convergeName(name)
+	})
+}
+
+// GetNetworkTopology returns the last synchronized topology joined with
+// live peer connectivity. It remains available while the network is
+// disabled or offline.
+func (r *Runtime) GetNetworkTopology(
+	ctx context.Context,
+	name string,
+) (
+	NetworkTopology,
+	error,
+) {
+	return executeValue(r, ctx, func() (NetworkTopology, error) {
+		cached, err := r.service.GetNetworkTopology(name)
+		if err != nil {
+			return NetworkTopology{}, err
+		}
+
+		record, err := r.service.GetNetwork(name)
+		if err != nil {
+			return NetworkTopology{}, err
+		}
+
+		peers, err := r.service.ListPeers(name)
+		if err != nil {
+			return NetworkTopology{}, err
+		}
+
+		livePeerStatuses, err := r.getLivePeerStatuses(name)
+		if err != nil {
+			return NetworkTopology{}, err
+		}
+
+		now := r.clock()
+		statuses := joinPeerStatuses(peers, livePeerStatuses, now)
+
+		_, running := r.running[name]
+
+		connected := make(map[string]bool, len(statuses)+2)
+		for _, status := range statuses {
+			connected[status.Name] = status.Connected
+		}
+		serverConnected := false
+		if devicePeerStatus, ok := livePeerStatuses[record.Server.PublicKey]; ok {
+			serverConnected = peerHealthy(devicePeerStatus, now)
+		}
+		connected[serverPeerName] = serverConnected
+
+		if cached.View.SubjectPeer != "" {
+			if _, ok := connected[cached.View.SubjectPeer]; !ok {
+				connected[cached.View.SubjectPeer] = running
+			}
+		}
+
+		return NetworkTopology{
+			View:        cached.View,
+			GeneratedAt: cached.GeneratedAt,
+			SyncedAt:    cached.SyncedAt,
+			Connected:   connected,
+		}, nil
+	})
+}
+
+// convergeName brings one network in line with its persisted intent: an
+// enabled network that is not running is started, a running network that
+// is no longer enabled — or no longer installed — is stopped, and a
+// running network whose stored configuration has changed is restarted. A
+// start failure is recorded as the network's reason and returned; the
+// persisted intent is never touched.
+func (r *Runtime) convergeName(
+	name string,
+) error {
+	record, err := r.service.GetNetwork(name)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			return r.removeNetwork(name)
+		default:
+			return err
+		}
+	}
+	return r.converge(record)
+}
+
+// converge applies one network record under the runtime owner.
+func (r *Runtime) converge(
+	record *service.Network,
+) error {
+	if r.ctx.Err() != nil {
+		return nil
+	}
+
+	network, isRunning := r.running[record.Name]
+
+	switch {
+	case !record.Enabled:
+		// Stopped by intent; a network still running comes down with it.
+		delete(r.reasons, record.Name)
+		if isRunning {
+			return r.stopNetwork(record.Name, network)
+		}
+
+	case isRunning && network.closing:
+		// Finish a previous cleanup attempt before starting again, even if
+		// the desired configuration has returned to its original value.
+		return r.restartNetwork(record, network)
+
+	case isRunning && network.isDiverged(record):
+		// The stored configuration no longer describes the running
+		// tunnel, so the network restarts under the new one.
+		return r.restartNetwork(record, network)
+
+	case isRunning:
+		// Already where it should be; reapply the cached peer set.
+		if err := network.reconcile(); err != nil {
+			r.log.Warn(
+				"reconcile failed",
+				"network", record.Name,
+				"err", err,
+			)
+		}
+		break // everything is good
+
+	default:
+		return r.startNetwork(record)
+	}
+
+	return nil
+}
+
+// startNetwork brings a network up under its record and into the
+// running set, or records the failure as its reason to be retried on
+// the next pass.
+func (r *Runtime) startNetwork(
+	record *service.Network,
+) error {
+	if err := r.releaseEnrollmentsUsing(record.InterfaceName); err != nil {
+		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)
+		return err
+	}
+
+	network, err := newNetwork(networkOptions{
+		record:         record,
+		service:        r.service,
+		wireguard:      r.wireguard,
+		dns:            r.dns,
+		httpClient:     r.httpClient,
+		clock:          r.clock,
+		log:            r.log.With("network", record.Name),
+		syncInterval:   r.syncInterval,
+		scanInterval:   r.scanInterval,
+		reportInterval: r.reportInterval,
+	})
+	if err != nil {
+		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)
+		return err
+	}
+
+	// Own the instance before startup; cleanup decides when to forget it.
+	r.running[record.Name] = network
+
+	if err := network.start(r.ctx); err != nil {
+		cleanupErr := r.stopNetwork(record.Name, network)
+		err = errors.Join(err, cleanupErr)
+
+		r.reasons[record.Name] = fmt.Sprintf("start failed: %v", err)
+		return err
+	}
+
+	delete(r.reasons, record.Name)
+
+	r.log.Info(
+		"network started",
+		"network", record.Name,
+		"interface", record.InterfaceName,
+	)
+
+	return nil
+}
+
+// restartNetwork stops a diverged network and brings it back up under
+// the new record.
+func (r *Runtime) restartNetwork(
+	record *service.Network,
+	network *Network,
+) error {
+	if err := r.stopNetwork(record.Name, network); err != nil {
+		return err
+	}
+
+	return r.startNetwork(record)
+}
+
+// stopNetwork forgets a network only after cleanup succeeds.
+func (r *Runtime) stopNetwork(
+	name string,
+	network *Network,
+) error {
+	network.closing = true
+	if err := network.stop(); err != nil {
+		err = fmt.Errorf("stop network %q: %w", name, err)
+		r.reasons[name] = err.Error()
+		return err
+	}
+
+	delete(r.running, name)
+	delete(r.reasons, name)
+
+	r.log.Info(
+		"network stopped",
+		"network", name,
+	)
+
+	return nil
+}
+
+// removeNetwork stops a network that is no longer installed and forgets it.
+func (r *Runtime) removeNetwork(
+	name string,
+) error {
+
+	network, isRunning := r.running[name]
+	if !isRunning {
+		delete(r.reasons, name)
+		return nil
+	}
+
+	return r.stopNetwork(name, network)
+}
+
+// closeNetworks retains failed cleanup and reports it to the Run caller.
+func (r *Runtime) closeNetworks() error {
+	var errs []error
+	for name, network := range r.running {
+		if err := r.stopNetwork(name, network); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // sightingsToProtocol converts stored domain sightings into the protocol

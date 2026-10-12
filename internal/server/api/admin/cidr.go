@@ -14,13 +14,12 @@ func (a *API) handleListCidrs(
 ) {
 	network := r.PathValue("name")
 
-	cidrs, err := a.service.ListCidrs(network)
-	if err != nil {
-		writeServiceError(w, err)
-		return
+	if cidrs, err := a.runtime.ListCidrs(r.Context(), network); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		cidrsDTO := cidrsFromService(cidrs)
+		wire.WriteData(w, http.StatusOK, cidrsDTO)
 	}
-
-	wire.WriteData(w, http.StatusOK, cidrsFromService(cidrs))
 }
 
 func (a *API) handlePostCidr(
@@ -35,12 +34,16 @@ func (a *API) handlePostCidr(
 		return
 	}
 
-	if err := a.service.CreateCidr(network, req.Name, req.Cidr); err != nil {
-		writeServiceError(w, err)
-		return
+	if err := a.runtime.CreateCidr(
+		r.Context(),
+		network,
+		req.Name,
+		req.Cidr,
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		wire.WriteData(w, http.StatusCreated, nil)
 	}
-
-	wire.WriteData(w, http.StatusCreated, nil)
 }
 
 func (a *API) handlePatchCidr(
@@ -56,12 +59,16 @@ func (a *API) handlePatchCidr(
 		return
 	}
 
-	if err := a.service.UpdateCidr(network, cidr, req.Name); err != nil {
-		writeServiceError(w, err)
-		return
+	if err := a.runtime.UpdateCidr(
+		r.Context(),
+		network,
+		cidr,
+		req.Name,
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		wire.WriteData(w, http.StatusOK, nil)
 	}
-
-	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handleDeleteCidr(
@@ -71,12 +78,15 @@ func (a *API) handleDeleteCidr(
 	network := r.PathValue("name")
 	cidr := r.PathValue("cidr")
 
-	if err := a.service.DeleteCidr(network, cidr); err != nil {
-		writeServiceError(w, err)
-		return
+	if err := a.runtime.DeleteCidr(
+		r.Context(),
+		network,
+		cidr,
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		wire.WriteData(w, http.StatusOK, nil)
 	}
-
-	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func (a *API) handleListCidrGroups(
@@ -86,12 +96,16 @@ func (a *API) handleListCidrGroups(
 	network := r.PathValue("name")
 	cidr := r.PathValue("cidr")
 
-	groups, err := a.service.ListCidrGroups(network, cidr)
-	if err != nil {
-		writeServiceError(w, err)
-		return
+	if groups, err := a.runtime.ListCidrGroups(
+		r.Context(),
+		network,
+		cidr,
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		groupsDTO := groupsFromService(groups)
+		wire.WriteData(w, http.StatusOK, groupsDTO)
 	}
-	wire.WriteData(w, http.StatusOK, groupsFromService(groups))
 }
 
 func (a *API) handlePostCidrGroup(
@@ -106,11 +120,17 @@ func (a *API) handlePostCidrGroup(
 		wire.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := a.service.AssignCidrGroup(network, cidr, req.Group); err != nil {
-		writeServiceError(w, err)
-		return
+
+	if err := a.runtime.AssignCidrGroup(
+		r.Context(),
+		network,
+		cidr,
+		req.Group,
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		wire.WriteData(w, http.StatusCreated, nil)
 	}
-	wire.WriteData(w, http.StatusCreated, nil)
 }
 
 func (a *API) handleDeleteCidrGroup(
@@ -121,11 +141,16 @@ func (a *API) handleDeleteCidrGroup(
 	cidr := r.PathValue("cidr")
 	group := r.PathValue("group")
 
-	if err := a.service.RemoveCidrGroup(network, cidr, group); err != nil {
-		writeServiceError(w, err)
-		return
+	if err := a.runtime.RemoveCidrGroup(
+		r.Context(),
+		network,
+		cidr,
+		group,
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		wire.WriteData(w, http.StatusOK, nil)
 	}
-	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func cidrFromService(

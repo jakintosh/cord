@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"git.sr.ht/~jakintosh/command-go/pkg/wire"
@@ -14,13 +15,15 @@ func (a *API) handleListGroups(
 ) {
 	network := r.PathValue("name")
 
-	groups, err := a.service.ListGroups(network)
-	if err != nil {
-		writeServiceError(w, err)
-		return
+	if groups, err := a.runtime.ListGroups(
+		r.Context(),
+		network,
+	); err != nil {
+		a.writeServiceError(w, r, err)
+	} else {
+		groupsDTO := groupsFromService(groups)
+		wire.WriteData(w, http.StatusOK, groupsDTO)
 	}
-
-	wire.WriteData(w, http.StatusOK, groupsFromService(groups))
 }
 
 func (a *API) handlePostGroup(
@@ -35,15 +38,19 @@ func (a *API) handlePostGroup(
 		return
 	}
 
-	if _, err := a.service.CreateGroup(
+	if _, err := a.runtime.CreateGroup(
+		r.Context(),
 		network,
 		req.Name,
 	); err != nil {
-		writeServiceError(w, err)
-		return
+		if errors.Is(err, service.ErrNotFound) {
+			// This mutation's missing parent has a stable public message.
+			err = service.ErrNotFound
+		}
+		a.writeServiceError(w, r, err)
+	} else {
+		wire.WriteData(w, http.StatusCreated, nil)
 	}
-
-	wire.WriteData(w, http.StatusCreated, nil)
 }
 
 func (a *API) handleDeleteGroup(
@@ -53,15 +60,15 @@ func (a *API) handleDeleteGroup(
 	network := r.PathValue("name")
 	group := r.PathValue("group")
 
-	if err := a.service.DeleteGroup(
+	if err := a.runtime.DeleteGroup(
+		r.Context(),
 		network,
 		group,
 	); err != nil {
-		writeServiceError(w, err)
-		return
+		a.writeServiceError(w, r, err)
+	} else {
+		wire.WriteData(w, http.StatusOK, nil)
 	}
-
-	wire.WriteData(w, http.StatusOK, nil)
 }
 
 func groupFromService(
