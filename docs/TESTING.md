@@ -23,8 +23,9 @@ expected result, and any important durable effect.
 
 ## Shared foundations
 
-Use the package group's existing `testutil` package as the composition root,
-such as `internal/client/testutil` or `internal/server/testutil`. Prefer a small
+Use the package group's existing `testutil` package as the composition root:
+[`internal/client/testutil`](../internal/client/testutil) or
+[`internal/server/testutil`](../internal/server/testutil). Prefer a small
 number of shared environments and baseline fixtures over bespoke setup in each
 test. Choose the smallest environment that exercises the behavior:
 
@@ -35,6 +36,26 @@ test. Choose the smallest environment that exercises the behavior:
 | Runtime behavior | Service and runtime with the existing backend fixtures |
 | HTTP contracts | In-process router over the shared environment |
 | Remote interactions | Existing server-backed variants when needed |
+
+Both packages provide `SetupDB(t)`, `SetupService(t)`, `SetupRuntime(t)`, and
+`Setup(t)` for the database, service, runtime, and in-process API boundaries,
+respectively. The baseline database is real, isolated, in-memory SQLite. Runtime
+fixtures use the mock WireGuard backend; they do not create host interfaces.
+The baseline server runtime disables DNS and does not wire plane HTTP listeners;
+DNS and listener tests need their dedicated fixtures. Client runtime fixtures use
+a test DNS manager, and `SetupRuntimeWithServer` / `SetupWithServer` provide an
+HTTP test server when needed.
+
+For example, a service test starts with:
+
+```go
+env := testutil.SetupService(t)
+svc := env.Service
+db := env.Database // inspect durable effects through public adapter operations
+```
+
+Use a file-backed database for reopen or on-disk behavior; the in-memory baseline
+does not exercise those guarantees.
 
 Each environment owns isolated state and cleanup through `t.Cleanup()`. Share
 fixture definitions, not mutable database state between tests. Use shared seed
@@ -80,7 +101,11 @@ visibility alone is not a reason to add a test.
 
 ## Validation
 
-Run `make test-full` for the repository suite with the race detector. Use the
+Run commands from the repository root. `make test` runs generation and the test
+suite; `make test-full` runs the suite with the race detector. Use `make help`
+to discover repository workflows.
+
+Run `make test-full` when validating test changes. Use the
 normal Go cache, keep temporary artifacts under `.opencode-tmp`, and never add
 Makefile targets merely for the tests. Verify that existing non-test Go files are
 unchanged before completing a test-only refactor.
